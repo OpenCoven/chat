@@ -21,6 +21,9 @@ use crate::coven::{CovenHealth, NativeCovenHealth};
 #[path = "chat_attachments.rs"]
 mod attachments;
 
+#[path = "familiar_projects.rs"]
+mod familiar_projects;
+
 const OUTPUT_LIMIT: usize = 4 * 1024 * 1024;
 pub(crate) const TRANSCRIPT_LIMIT: usize = OUTPUT_LIMIT + 256 * 1024;
 const LEDGER_METADATA_LIMIT: usize = 16 * 1024 * 1024;
@@ -746,9 +749,25 @@ pub(crate) async fn coven_runtime_familiars() -> Result<Value, String> {
         let familiars = value
             .as_array()
             .ok_or("Coven returned invalid familiars.")?;
+        // Project access is optional metadata read from Cave's files. A store
+        // that is unreadable, malformed, or newer than this build must cost
+        // the suggestions, never the familiar list itself.
+        let projects = match familiar_projects::ProjectAccess::load() {
+            Ok(projects) => projects,
+            Err(error) => {
+                eprintln!("Coven Chat: project access unavailable ({error}).");
+                familiar_projects::ProjectAccess::default()
+            }
+        };
         familiars
             .iter()
-            .map(|f| normalize_familiar(f, crate::familiar_avatar::read_avatar))
+            .map(|f| {
+                let mut familiar = normalize_familiar(f, crate::familiar_avatar::read_avatar)?;
+                familiar["projectAccess"] = projects
+                    .for_familiar(string(f, "id")?)
+                    .unwrap_or_else(|_| Value::Array(Vec::new()));
+                Ok(familiar)
+            })
             .collect::<Result<Vec<_>, String>>()
             .map(Value::Array)
     })

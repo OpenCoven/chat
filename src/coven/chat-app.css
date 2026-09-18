@@ -1,9 +1,11 @@
 .coven-chat {
+  --coven-rail-tab-w: 28px;
   --fr-sidebar-w: var(--coven-sidebar-w);
   --fr-inspector-w: var(--coven-inspector-w);
   min-width: 0;
   height: 100%;
   overflow: clip;
+  transition: none;
 }
 
 .coven-chat :is(.fr-thread, .fr-sidebar, .fr-inspector) {
@@ -16,8 +18,165 @@
   grid-row: 1;
 }
 
+.coven-chat .fr-sidebar {
+  grid-column: 1;
+  grid-row: 1;
+}
+
+.coven-chat .fr-inspector {
+  grid-column: 3;
+  grid-row: 1;
+}
+
+/* Tabs own grid tracks, never the transcript's or composer's scrollable edges. */
+.coven-chat .coven-rail-tab {
+  grid-row: 1;
+  z-index: 51;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  min-width: 0;
+  min-height: 0;
+  width: 100%;
+  height: 100%;
+  padding: 12px 0;
+  overflow: hidden;
+  border: 0;
+  border-radius: 0;
+  background:
+    linear-gradient(90deg, rgba(255, 255, 255, 0.045), transparent 55%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.035), transparent 45%), rgba(27, 27, 30, 0.97);
+  box-shadow:
+    inset 1px 0 rgba(255, 255, 255, 0.07),
+    inset -1px 0 rgba(0, 0, 0, 0.5);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition:
+    background-color 120ms var(--ease-standard),
+    color 120ms var(--ease-standard),
+    box-shadow 120ms var(--ease-standard);
+}
+
+.coven-chat .coven-rail-tab--left {
+  grid-column: 1;
+  border-right: 1px solid var(--border-strong);
+}
+
+.coven-chat .coven-rail-tab--right {
+  grid-column: 3;
+  border-left: 1px solid var(--border-strong);
+}
+
+.coven-chat .coven-rail-tab[hidden] {
+  display: none;
+}
+
+.coven-rail-tab-label {
+  min-height: 0;
+  overflow: hidden;
+  writing-mode: vertical-rl;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.08em;
+}
+
+.coven-rail-tab-cue {
+  flex: none;
+  color: var(--accent-presence);
+  font-size: 18px;
+  line-height: 1;
+}
+
+.coven-chat .coven-rail-tab:hover {
+  background-color: #303035;
+  color: var(--text-primary);
+}
+
+.coven-chat .coven-rail-tab:active {
+  transform: none;
+  background-color: #38383e;
+}
+
+.coven-chat .coven-rail-tab:focus-visible {
+  outline: 2px solid var(--ring-focus);
+  outline-offset: -3px;
+  color: var(--text-primary);
+}
+
+.coven-chat .fr-column,
+.coven-chat .fr-composer-inner {
+  max-width: 1200px;
+  width: 100%;
+  margin-inline: auto;
+  box-sizing: border-box;
+}
+
+.coven-chat .fr-column {
+  gap: 20px;
+  padding-block: 16px 28px;
+  padding-inline: 0;
+}
+
+.coven-chat .fr-transcript {
+  padding-inline: 12px;
+}
+
+.coven-chat .fr-familiar {
+  width: 100%;
+  max-width: none;
+  min-width: 0;
+}
+
+.coven-chat .fr-bubble {
+  line-height: 1.65;
+}
+
+.coven-connection {
+  color: var(--text-secondary);
+  font-size: 11px;
+}
+
+.coven-connection summary {
+  cursor: pointer;
+  width: fit-content;
+  padding: 4px 0;
+}
+
+.coven-composer-context {
+  margin: 0 8px 6px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+
+.coven-run-status {
+  display: block;
+  margin: 4px 8px 8px;
+  color: var(--accent-presence);
+  font-size: 12px;
+}
+
+.coven-jump-latest {
+  display: block;
+  margin: 0 auto 8px;
+  padding: 6px 12px;
+  border: 1px solid var(--border-hairline);
+  border-radius: 16px;
+  background: var(--bg-elevated);
+  color: var(--text-primary);
+  cursor: pointer;
+}
+
 .coven-chat :is(.fr-sidebar, .fr-inspector)[aria-hidden="true"] {
-  border-width: 0;
+  visibility: hidden;
 }
 
 .coven-chat .fr-composer-wrap {
@@ -50,8 +209,10 @@
   display: none;
 }
 
-.coven-message {
+.coven-chat .coven-message {
   min-width: 0;
+  font-size: 14px;
+  line-height: 1.7;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
@@ -96,14 +257,13 @@
 }
 
 .coven-status {
-  align-self: center;
-  max-width: 64ch;
+  max-width: 100%;
   padding: 2px 0;
   color: var(--text-muted);
   font-family: var(--font-jetbrains-mono);
   font-size: 11px;
   letter-spacing: 0.01em;
-  text-align: center;
+  text-align: left;
   text-wrap: balance;
 }
 
@@ -187,6 +347,7 @@
 
 .coven-agent-row[aria-current="true"] {
   background: var(--bg-elevated);
+  box-shadow: inset 2px 0 0 var(--accent-presence);
 }
 
 .coven-agent-copy {
@@ -195,24 +356,42 @@
   min-width: 0;
 }
 
-.coven-chat .coven-user-settings {
+.coven-chat .fr-thread-header-lead {
+  flex: 1 1 140px;
+}
+
+.coven-chat .fr-thread-header-actions,
+.coven-chat .fr-thread-header-lead > .fr-avatar {
+  flex-shrink: 0;
+}
+
+.coven-chat .fr-thread-title {
   display: block;
-  height: auto;
-  min-height: 44px;
-  padding: 10px 14px;
+  min-width: 0;
+  text-align: left;
 }
 
-.coven-user-settings summary {
-  cursor: pointer;
-  color: var(--text-secondary);
+.coven-chat .coven-agent-search:focus-within {
+  border-color: var(--ring-focus);
+  box-shadow: 0 0 0 2px color-mix(in oklch, var(--ring-focus) 15%, transparent);
 }
 
-.coven-user-settings label {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-top: 10px;
-  color: var(--text-secondary);
+.coven-chat .coven-agent-search input:focus-visible {
+  outline: none;
+}
+
+.coven-chat .coven-familiar-card-trigger {
+  transition:
+    background-color 120ms,
+    color 120ms;
+}
+
+.coven-chat .coven-familiar-card-trigger:active {
+  transform: scale(0.96);
+}
+
+.coven-chat .fr-msg {
+  animation: none;
 }
 
 .coven-agent-row .coven-avatar-image {
@@ -223,11 +402,12 @@
  * Responsive tiers. The layout hook (viewport.ts) names the tier on the shell
  * root; these rules only decide where each rail lives. `wide` keeps three
  * columns. `medium` folds the inspector into a drawer. `compact` folds both
- * rails away so the transcript and composer own the viewport.
+ * rails into drawers; closed tabs always retain their own narrow tracks.
  */
 .coven-chat {
   min-width: 0;
-  height: 100dvh;
+  height: 100%;
+  max-height: 100dvh;
 }
 
 .coven-chat[data-tier="medium"] {
@@ -241,20 +421,18 @@
 .coven-chat[data-tier="medium"] .fr-inspector,
 .coven-chat[data-tier="compact"] :is(.fr-sidebar, .fr-inspector) {
   position: absolute;
+  grid-column: 1 / -1;
   top: 0;
   bottom: 0;
   z-index: 50;
-  width: min(340px, 84vw);
+  width: min(340px, calc(100% - 2 * var(--coven-rail-tab-w)));
   border: 0;
   border-radius: 0;
   background: var(--bg-panel);
   box-shadow:
     0 24px 64px -24px rgba(0, 0, 0, 0.9),
     0 0 0 1px var(--border-hairline);
-  transition:
-    transform 200ms var(--ease-standard),
-    visibility 200ms;
-  will-change: transform;
+  transition: transform 120ms var(--ease-standard);
 }
 
 .coven-chat[data-tier="compact"] .fr-sidebar {
@@ -299,7 +477,7 @@
   backdrop-filter: blur(6px);
   -webkit-backdrop-filter: blur(6px);
   cursor: pointer;
-  animation: fr-fade 160ms var(--ease-standard);
+  animation: fr-fade 120ms var(--ease-standard);
 }
 
 .coven-scrim:focus-visible {
@@ -308,10 +486,14 @@
 }
 
 .coven-chat[data-tier="compact"] .fr-column {
-  padding: 14px 14px 18px;
+  padding-block: 14px 18px;
 }
 
-.coven-chat[data-tier="compact"] :is(.fr-user-body, .fr-familiar) {
+.coven-chat[data-tier="compact"] .fr-transcript {
+  padding-inline: 10px;
+}
+
+.coven-chat[data-tier="compact"] .fr-user-body {
   max-width: 92%;
 }
 
@@ -328,9 +510,12 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .coven-chat :is(.fr-sidebar, .fr-inspector, .coven-scrim) {
+  .coven-chat :is(.fr-sidebar, .fr-inspector, .coven-scrim, .coven-rail-tab) {
     transition: none;
     animation: none;
+  }
+  .coven-chat .coven-familiar-card-trigger:active {
+    transform: none;
   }
 }
 

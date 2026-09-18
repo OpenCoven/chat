@@ -53,11 +53,21 @@ function ToolActivity({ rows }: { rows: readonly ToolRow[] }) {
     <ul className="coven-tools" aria-label="Tool activity">
       {rows.map((row, index) => (
         <li className="coven-tool" key={`${index}-${row.name}`}>
-          <span className="coven-tool-glyph" aria-hidden="true" />
-          <code className="coven-tool-name">{row.name}</code>
-          <span className="coven-tool-args" title={row.args}>
-            {row.args}
-          </span>
+          <details className="coven-tool-details">
+            <summary className="coven-tool-summary" aria-label={`${row.name} tool arguments`}>
+              <span className="coven-tool-glyph" aria-hidden="true" />
+              <code className="coven-tool-name">{row.name}</code>
+              <span className="coven-tool-args">{row.args}</span>
+              <span className="coven-tool-chevron" aria-hidden="true">
+                &#8250;
+              </span>
+            </summary>
+            <section aria-label={`${row.name} raw arguments`}>
+              <pre className="coven-tool-raw">
+                <code>{row.args}</code>
+              </pre>
+            </section>
+          </details>
         </li>
       ))}
     </ul>

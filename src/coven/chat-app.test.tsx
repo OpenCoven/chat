@@ -11,6 +11,7 @@ import { ChatApp } from './chat-app';
 import type { ChatLayoutProps } from './chat-layout';
 
 const counters = vi.hoisted(() => ({ layoutRenders: 0 }));
+let currentLayout: ChatLayoutProps;
 
 // Exercise the controller contract independently of the parent's evolving visual layout.
 vi.mock('./chat-layout', () => ({
@@ -21,14 +22,13 @@ vi.mock('./chat-layout', () => ({
 }));
 
 function MockLayout(props: ChatLayoutProps) {
+  currentLayout = props;
   return (
     <div>
       {props.familiars
         .filter(
           (familiar) =>
-            Boolean(
-              props.sessions.find((session) => session.familiarId === familiar.id)?.archived,
-            ) === Boolean(props.archivedFilter),
+            !props.sessions.find((session) => session.familiarId === familiar.id)?.archived,
         )
         .map((familiar) => (
           <button type="button" key={familiar.id} onClick={() => props.onFamiliar(familiar.id)}>
@@ -60,12 +60,6 @@ function MockLayout(props: ChatLayoutProps) {
       )}
       <button type="button" onClick={props.onRefresh} disabled={props.busy || props.lifecycleBusy}>
         Refresh
-      </button>
-      <button type="button" onClick={() => props.onArchivedFilter?.(false)}>
-        Active
-      </button>
-      <button type="button" onClick={() => props.onArchivedFilter?.(true)}>
-        Archived
       </button>
       <button
         type="button"
@@ -171,8 +165,111 @@ function click(name: string) {
   fireEvent.click(screen.getByRole('button', { name }));
 }
 
+async function attachNote() {
+  const file = new File([], 'note.txt');
+  Object.defineProperties(file, {
+    size: { value: 3 },
+    arrayBuffer: { value: async () => new Uint8Array([97, 98, 99]).buffer },
+  });
+  fireEvent.change(screen.getByLabelText('Attach'), { target: { files: [file] } });
+  await screen.findByRole('button', { name: 'note.txt' });
+}
+
 describe('canonical familiar controller', () => {
   beforeEach(() => localStorage.clear());
+
+  it('routes voice through the canonical chat without sending or clearing the typed draft', async () => {
+    const api = runtime();
+    vi.mocked(api.send).mockResolvedValue({
+      runId: 'voice',
+      events: [{ type: 'text_delta', text: 'Verified familiar reply.' }],
+    });
+    await ready(api);
+    draft('Unsent typed idea');
+    await attachNote();
+    act(() => currentLayout.onVoiceActiveChange?.(true));
+    click('Other familiar');
+    expect(screen.getByTestId('familiar')).toHaveTextContent('f');
+    expect(screen.getByRole('button', { name: 'Archive' })).toBeDisabled();
+    let answer: string | undefined;
+    await act(async () => {
+      answer = await currentLayout.onVoiceRequest?.(
+        'Spoken question',
+        new AbortController().signal,
+      );
+    });
+    expect(answer).toBe('Verified familiar reply.');
+    expect(api.send).toHaveBeenCalledWith(
+      expect.objectContaining({
+        familiarId: 'f',
+        sessionId: 'one',
+        prompt: 'Spoken question',
+      }),
+      expect.any(Function),
+    );
+    expect(vi.mocked(api.send).mock.calls[0]?.[0]).not.toHaveProperty('attachments');
+    expect(screen.getByRole('textbox')).toHaveValue('Unsent typed idea');
+    expect(screen.getByRole('button', { name: 'note.txt' })).toBeInTheDocument();
+  });
+
+  it('aborts the voice-owned run', async () => {
+    const api = runtime();
+    const run = deferred<CovenRunResult>();
+    vi.mocked(api.send).mockReturnValueOnce(run.promise);
+    await ready(api);
+    const controller = new AbortController();
+    let result: Promise<string | undefined> | undefined;
+    act(() => {
+      result = currentLayout.onVoiceRequest?.('Voice work', controller.signal);
+    });
+    const rejected = expect(result).rejects.toThrow('cancelled');
+    act(() => controller.abort());
+    expect(api.cancel).toHaveBeenCalledOnce();
+    await act(async () => {
+      run.reject(new Error('cancelled'));
+      await rejected;
+    });
+    draft('Typed next');
+    click('Send');
+    act(() => controller.abort());
+    expect(api.cancel).toHaveBeenCalledOnce();
+  });
+
+  it('does not cancel newer typed work when a completed voice request is aborted', async () => {
+    const api = runtime();
+    vi.mocked(api.send).mockResolvedValueOnce({
+      runId: 'voice',
+      events: [{ type: 'text_delta', text: 'Done.' }],
+    });
+    await ready(api);
+    const controller = new AbortController();
+    await act(async () => {
+      await currentLayout.onVoiceRequest?.('Voice work', controller.signal);
+    });
+    const typed = deferred<CovenRunResult>();
+    vi.mocked(api.send).mockReturnValueOnce(typed.promise);
+    draft('Next typed request');
+    click('Send');
+    act(() => controller.abort());
+    expect(api.cancel).not.toHaveBeenCalled();
+    await act(async () => typed.resolve({ runId: 'typed', events: [] }));
+  });
+
+  it('rejects voice results if the canonical head cannot be refreshed', async () => {
+    const api = runtime();
+    await ready(api);
+    vi.mocked(api.send).mockResolvedValueOnce({
+      runId: 'voice',
+      events: [{ type: 'text_delta', text: 'Answer.' }],
+    });
+    vi.mocked(api.listSessions).mockRejectedValueOnce(new Error('Metadata unavailable'));
+    await act(async () => {
+      await expect(
+        currentLayout.onVoiceRequest?.('Voice work', new AbortController().signal),
+      ).rejects.toThrow('Refresh the canonical chat');
+    });
+    expect(screen.getByRole('textbox')).toBeDisabled();
+  });
 
   it('opens only the canonical head, replacing stale navigation without reading the older thread', async () => {
     localStorage.setItem(STORAGE, JSON.stringify({ familiarId: 'f', sessionId: 'older' }));
@@ -242,6 +339,7 @@ describe('canonical familiar controller', () => {
     await ready(api);
     draft('submitted');
     click('Send');
+    expect(screen.getByRole('textbox')).toHaveValue('');
     draft('newer unsent');
     await act(async () =>
       run.resolve({
@@ -259,6 +357,34 @@ describe('canonical familiar controller', () => {
       sessionId: 'one-next',
       prompt: 'newer unsent',
     });
+  });
+
+  it('does not clear a newly retyped identical message when the previous send finishes', async () => {
+    const api = runtime();
+    const run = deferred<CovenRunResult>();
+    vi.mocked(api.send).mockReturnValueOnce(run.promise);
+    await ready(api);
+    draft('same message');
+    click('Send');
+    expect(screen.getByRole('textbox')).toHaveValue('');
+    draft('same message');
+    await act(async () => run.resolve({ runId: 'run', events: [] }));
+    await waitFor(() => expect(screen.queryByText('Stop')).not.toBeInTheDocument());
+    expect(screen.getByRole('textbox')).toHaveValue('same message');
+  });
+
+  it('does not restore a failed message over a draft the user deliberately cleared', async () => {
+    const api = runtime();
+    const run = deferred<CovenRunResult>();
+    vi.mocked(api.send).mockReturnValueOnce(run.promise);
+    await ready(api);
+    draft('submitted');
+    click('Send');
+    draft('replacement');
+    draft('');
+    await act(async () => run.reject(new Error('Provider failed')));
+    await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent('Provider failed'));
+    expect(screen.getByRole('textbox')).toHaveValue('');
   });
 
   it('creates a fresh thread for an empty familiar with no standalone or session override', async () => {
@@ -340,7 +466,7 @@ describe('canonical familiar controller', () => {
     expect(screen.getByRole('textbox')).toHaveValue('');
   });
 
-  it('archives a familiar, restores it from the archive view, and preserves the draft', async () => {
+  it('archives a familiar and keeps it hidden after refresh without changing its history', async () => {
     const api = runtime();
     let stored = [first, second];
     vi.mocked(api.listSessions).mockImplementation(async () => stored);
@@ -357,15 +483,9 @@ describe('canonical familiar controller', () => {
     );
     click('Refresh');
     await waitFor(() => expect(api.listSessions).toHaveBeenCalledTimes(2));
-    click('Archived');
-    await waitFor(() => expect(screen.getByRole('button', { name: 'Restore' })).toBeEnabled());
-    expect(screen.getByRole('textbox')).toBeDisabled();
-    expect(screen.getByRole('textbox')).toHaveValue('archived draft');
-    click('Restore');
-    await waitFor(() => expect(api.changeChatLifecycle).toHaveBeenLastCalledWith('one', 'active'));
-    click('Active');
-    await waitFor(() => expect(screen.getByRole('textbox')).toBeEnabled());
-    expect(screen.getByRole('textbox')).toHaveValue('archived draft');
+    expect(screen.queryByRole('button', { name: 'First familiar' })).not.toBeInTheDocument();
+    expect(api.changeChatLifecycle).toHaveBeenCalledExactlyOnceWith('one', 'archived');
+    expect(stored.find((session) => session.id === 'one')).toEqual({ ...first, archived: true });
   });
 
   it('deletes the app thread but retains the familiar and starts fresh after reload', async () => {
@@ -469,13 +589,7 @@ describe('canonical familiar controller', () => {
       .mockRejectedValueOnce(new Error('Failed'))
       .mockResolvedValue({ runId: 'run', events: [] });
     await ready(api);
-    const file = new File([], 'note.txt');
-    Object.defineProperties(file, {
-      size: { value: 3 },
-      arrayBuffer: { value: async () => new Uint8Array([97, 98, 99]).buffer },
-    });
-    fireEvent.change(screen.getByLabelText('Attach'), { target: { files: [file] } });
-    await screen.findByRole('button', { name: 'note.txt' });
+    await attachNote();
     click('Send');
     await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent('Failed'));
     expect(screen.getByRole('button', { name: 'note.txt' })).toBeInTheDocument();

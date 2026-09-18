@@ -36,6 +36,8 @@ test('keeps the familiar rail collapsible in the standalone layout', async ({ pa
   await expect(sidebar).toBeVisible();
   await page.getByRole('button', { name: 'Hide familiars', exact: true }).click();
   await expect(sidebar).toBeHidden();
-  await page.getByRole('button', { name: 'Show familiars rail', exact: true }).click();
+  // One reserved rail tab now replaces the separate rail handle and header
+  // button, so it carries the same name at every tier.
+  await page.getByRole('button', { name: 'Show familiars', exact: true }).click();
   await expect(sidebar).toBeVisible();
 });
