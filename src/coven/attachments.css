@@ -55,6 +55,8 @@
   grid-column: 1;
   grid-row: 1;
   padding: 0;
+  min-height: 32px;
+  align-items: center;
 }
 
 .coven-compact-composer :is(.oc-composer-label, .oc-composer-spacer, .oc-composer-hint) {
@@ -66,12 +68,16 @@
   grid-row: 1;
   min-width: 0;
   padding: 6px 4px;
+  min-height: 32px;
+  line-height: 20px;
 }
 
 .coven-compact-composer .oc-composer-footer {
   grid-column: 3;
   grid-row: 1;
   padding: 0;
+  min-height: 32px;
+  align-items: center;
 }
 
 .coven-compact-composer .oc-composer-attachments {

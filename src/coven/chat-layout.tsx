@@ -1,6 +1,5 @@
 import { type CSSProperties, type RefObject, useEffect, useRef, useState } from 'react';
 import {
-  cx,
   FamButton,
   FamIconButton,
   INSPECTOR_TABS,
@@ -10,14 +9,23 @@ import {
   titleCase,
 } from '../design/familiars-ui';
 import { Icon } from '../design/minimal-icons';
-import type { ChatLifecycle } from '../lib/coven-runtime';
+import type { ChatLifecycle, CovenProjectAccess } from '../lib/coven-runtime';
 import { AttachmentChip } from '../ui/attachment-chip';
 import { Composer } from '../ui/composer';
 import { ATTACHMENT_ACCEPT, type ChatAttachment } from './attachments';
 import { ChatLifecycleControls } from './chat-lifecycle';
+import { ContextPicker } from './context-picker';
 import type { ChatMessage } from './events';
 import { FamiliarAvatar } from './familiar-avatar';
 import { FormattedMessage } from './formatted-message';
+import { useMentionCompletion } from './mention-completion';
+import {
+  LEFT_RAIL_HINT,
+  LEFT_RAIL_SHORTCUT,
+  RIGHT_RAIL_HINT,
+  RIGHT_RAIL_SHORTCUT,
+  useRailShortcuts,
+} from './rail-shortcuts';
 import { useViewportTier } from './viewport';
 import '../design/familiars-shell.css';
 import './chat-app.css';
@@ -29,6 +37,7 @@ export type ChatLayoutProps = Readonly<{
     name: string;
     description?: string | undefined;
     workspace?: string | undefined;
+    projectAccess?: readonly CovenProjectAccess[] | undefined;
     avatarUrl?: string | undefined;
   }[];
   sessions: readonly {
@@ -38,6 +47,7 @@ export type ChatLayoutProps = Readonly<{
     updatedAt?: string;
     archived?: boolean;
     preview?: string;
+    projectRoot?: string;
   }[];
   messages: readonly ChatMessage[];
   attachments?: readonly ChatAttachment[];
@@ -52,12 +62,15 @@ export type ChatLayoutProps = Readonly<{
   /** Real runtime availability. `ready` also demands a live, non-archived selection. */
   connected: boolean;
   readOnly?: boolean;
-  archivedFilter?: boolean;
   selectedArchived?: boolean;
+  archivedFilter?: boolean;
+  onArchivedFilter?: (archived: boolean) => void;
   lifecycleBusy?: boolean;
   /** Runtime unavailable: archive/restore/delete must not mutate stale state. */
   lifecycleLocked?: boolean;
-  onArchivedFilter?: (archived: boolean) => void;
+  voiceActive?: boolean;
+  onVoiceActiveChange?: (active: boolean) => void;
+  onVoiceRequest?: (message: string, signal: AbortSignal) => Promise<string>;
   onLifecycle?: (next: ChatLifecycle) => void;
   busy: boolean;
   loading: boolean;
@@ -115,10 +128,23 @@ export function emptyThreadText(connected: boolean, familiarName?: string) {
   return `This is the start of your conversation with ${familiarName}. Send the first message below.`;
 }
 
-export function composerCopy(familiarName?: string) {
+/**
+ * Composer copy, decided the same way as `emptyThreadText` so the two cannot
+ * disagree: a missing CLI is not fixed by choosing a familiar, and choosing one
+ * is not fixed by reconnecting.
+ *
+ * `connected`, never `ready` -- `ready` is false for an archived chat that
+ * still has a familiar to address, which would drop the name from the field.
+ */
+export function composerCopy(connected: boolean, familiarName?: string) {
+  if (!connected)
+    return { label: 'Message', placeholder: 'Connect to your local Coven CLI to send a message.' };
   if (!familiarName)
     return { label: 'Message', placeholder: 'Select a familiar to send a message.' };
-  return { label: `Message ${familiarName}`, placeholder: `Message ${familiarName}` };
+  return {
+    label: `Message ${familiarName}`,
+    placeholder: `Message ${familiarName} · @ familiar · # project`,
+  };
 }
 
 function activeControl(): HTMLElement | null {
@@ -177,20 +203,37 @@ export function ChatLayout(props: ChatLayoutProps) {
     setTab('overview');
     openInspector();
   }
+  useRailShortcuts(
+    () => (sidebar ? setSidebar(false) : openSidebar()),
+    () => (inspector ? setInspector(false) : openInspector()),
+  );
   const familiar = props.familiars.find((item) => item.id === props.familiarId);
   const session = props.sessions.find((item) => item.id === props.sessionId);
   const name = familiar?.name ?? 'Coven';
-  const composer = composerCopy(familiar?.name);
+  const composer = composerCopy(props.connected, familiar?.name);
+  const workspace = session?.projectRoot || familiar?.workspace;
+  const workspaceLabel = session?.projectRoot ? 'Chat project' : 'Familiar workspace';
   const composerDisabled =
     !props.ready || props.loading || props.cancelling || props.attaching || props.readOnly;
   const transcriptRef = useRef<HTMLDivElement>(null);
   const fileInput = useRef<HTMLInputElement>(null);
+  const composerRef = useRef<HTMLTextAreaElement>(null);
+  const mentionCompletion = useMentionCompletion({
+    familiars: props.familiars,
+    familiarId: props.familiarId,
+    value: props.draft,
+    onValueChange: props.onDraft,
+    textareaRef: composerRef,
+    disabled: Boolean(composerDisabled || props.busy),
+  });
   const nearBottom = useRef(true);
+  const [showLatest, setShowLatest] = useState(false);
   const previousSession = useRef(props.sessionId);
   // biome-ignore lint/correctness/useExhaustiveDependencies: new messages change the transcript's scroll height.
   useEffect(() => {
     if (previousSession.current !== props.sessionId) {
       nearBottom.current = true;
+      setShowLatest(false);
       previousSession.current = props.sessionId;
     }
     const transcript = transcriptRef.current;
@@ -211,8 +254,9 @@ export function ChatLayout(props: ChatLayoutProps) {
       data-inspector={inspector ? 'open' : 'closed'}
       style={
         {
-          '--coven-sidebar-w': sidebar && !drawers ? '300px' : '0px',
-          '--coven-inspector-w': inspector && !inspectorOverlay ? '360px' : '0px',
+          '--coven-sidebar-w': sidebar && !drawers ? '300px' : 'var(--coven-rail-tab-w)',
+          '--coven-inspector-w':
+            inspector && !inspectorOverlay ? '360px' : 'var(--coven-rail-tab-w)',
         } as CSSProperties
       }
     >
@@ -225,8 +269,45 @@ export function ChatLayout(props: ChatLayoutProps) {
           onClick={closeDrawers}
         />
       ) : null}
+      <button
+        type="button"
+        className="coven-rail-tab coven-rail-tab--left"
+        // While the scrim is up it owns the surface; a reserved tab sitting
+        // over it would swallow the dismiss click.
+        hidden={sidebar || scrim}
+        aria-label="Show familiars"
+        aria-controls="coven-familiars-sidebar"
+        aria-expanded={false}
+        aria-keyshortcuts={LEFT_RAIL_SHORTCUT}
+        title={LEFT_RAIL_HINT}
+        data-opens="sidebar"
+        onClick={openSidebar}
+      >
+        <span className="coven-rail-tab-label">Familiars</span>
+        <span className="coven-rail-tab-cue" aria-hidden="true">
+          ›
+        </span>
+      </button>
+      <button
+        type="button"
+        className="coven-rail-tab coven-rail-tab--right"
+        hidden={inspector || scrim}
+        aria-label="Show inspector"
+        aria-controls="coven-familiar-inspector"
+        aria-expanded={false}
+        aria-keyshortcuts={RIGHT_RAIL_SHORTCUT}
+        title={RIGHT_RAIL_HINT}
+        data-opens="inspector"
+        onClick={openInspector}
+      >
+        <span className="coven-rail-tab-label">{familiar?.name || 'Details'}</span>
+        <span className="coven-rail-tab-cue" aria-hidden="true">
+          ‹
+        </span>
+      </button>
       <aside
         ref={sidebarRef}
+        id="coven-familiars-sidebar"
         className="fr-sidebar"
         aria-label="Familiars sidebar"
         aria-hidden={!sidebar || undefined}
@@ -237,6 +318,8 @@ export function ChatLayout(props: ChatLayoutProps) {
             type="button"
             className="fr-rail-toggle"
             aria-label="Hide familiars"
+            aria-keyshortcuts={LEFT_RAIL_SHORTCUT}
+            title={LEFT_RAIL_HINT}
             onClick={() => setSidebar(false)}
           >
             <span className="fr-rail-toggle-label">Familiars</span>
@@ -263,8 +346,11 @@ export function ChatLayout(props: ChatLayoutProps) {
                     className="fr-conv coven-agent-row"
                     aria-label={item.name}
                     aria-current={item.id === props.familiarId || undefined}
-                    disabled={props.lifecycleBusy}
-                    onClick={() => props.onFamiliar(item.id)}
+                    disabled={props.lifecycleBusy || props.voiceActive}
+                    onClick={() => {
+                      props.onFamiliar(item.id);
+                      if (drawers) setSidebar(false);
+                    }}
                   >
                     <FamiliarAvatar name={item.name} avatarUrl={item.avatarUrl} size={36} />
                     <span className="coven-agent-copy">
@@ -288,7 +374,7 @@ export function ChatLayout(props: ChatLayoutProps) {
                     ? 'No matching familiars.'
                     : props.archivedFilter
                       ? 'No archived familiars.'
-                      : 'No familiars available. Configure a familiar in Coven, then refresh.'}
+                      : 'No active familiars available. Configure a familiar in Coven, then refresh.'}
                 </span>
               </div>
             ) : null}
@@ -314,40 +400,8 @@ export function ChatLayout(props: ChatLayoutProps) {
         </div>
       </aside>
       <main className="fr-thread">
-        {drawers ? null : (
-          <>
-            <button
-              type="button"
-              className={cx(
-                'fr-rail-handle fr-rail-handle--left',
-                !sidebar && 'fr-rail-handle--closed',
-              )}
-              aria-label={sidebar ? 'Hide familiars rail' : 'Show familiars rail'}
-              data-opens="sidebar"
-              onClick={() => (sidebar ? setSidebar(false) : openSidebar())}
-            />
-            <button
-              type="button"
-              className={cx(
-                'fr-rail-handle fr-rail-handle--right',
-                !inspector && 'fr-rail-handle--closed',
-              )}
-              aria-label={inspector ? 'Hide inspector' : 'Show inspector'}
-              data-opens="inspector"
-              onClick={() => (inspector ? setInspector(false) : openInspector())}
-            />
-          </>
-        )}
         <header className="fr-thread-header">
           <div className="fr-thread-header-lead">
-            {!sidebar ? (
-              <FamIconButton
-                icon="sidebar-simple"
-                label="Show familiars"
-                data-opens="sidebar"
-                onClick={openSidebar}
-              />
-            ) : null}
             {familiar ? (
               <FamiliarAvatar name={name} avatarUrl={familiar.avatarUrl} size={24} />
             ) : null}
@@ -383,19 +437,9 @@ export function ChatLayout(props: ChatLayoutProps) {
             <FamIconButton
               icon="arrow-clockwise"
               label="Refresh Coven"
-              disabled={props.busy || props.loading || props.lifecycleBusy}
+              disabled={props.busy || props.loading || props.lifecycleBusy || props.voiceActive}
               onClick={props.onRefresh}
             />
-            {!inspector ? (
-              <FamIconButton
-                icon="sidebar-simple"
-                flip
-                label="Show inspector"
-                aria-controls="coven-familiar-inspector"
-                data-opens="inspector"
-                onClick={openInspector}
-              />
-            ) : null}
           </div>
         </header>
         <div
@@ -408,10 +452,16 @@ export function ChatLayout(props: ChatLayoutProps) {
             const transcript = event.currentTarget;
             nearBottom.current =
               transcript.scrollHeight - transcript.clientHeight - transcript.scrollTop <= 80;
+            setShowLatest(!nearBottom.current);
           }}
         >
           <div className="fr-column">
-            {props.status ? <output className="coven-status">{props.status}</output> : null}
+            {props.status ? (
+              <details className="coven-connection" open={!props.ready}>
+                <summary>{props.ready ? 'Connection details' : 'Coven setup required'}</summary>
+                <output className="coven-status">{props.status}</output>
+              </details>
+            ) : null}
             {props.error ? (
               <div className="coven-error" role="alert">
                 {props.error}
@@ -493,19 +543,32 @@ export function ChatLayout(props: ChatLayoutProps) {
                 </span>
               </div>
             ) : null}
-            {props.busy ? (
-              <ThinkingIndicator
-                label={
-                  props.cancelling
-                    ? 'Cancellation requested; waiting for the process to stop.'
-                    : 'Coven is running. Live output appears here as it arrives.'
-                }
-              />
-            ) : null}
           </div>
         </div>
         <div className="fr-composer-wrap">
           <div className="fr-composer-inner">
+            {showLatest && (
+              <button
+                type="button"
+                className="coven-jump-latest"
+                onClick={() => {
+                  const transcript = transcriptRef.current;
+                  if (transcript) transcript.scrollTop = transcript.scrollHeight;
+                  nearBottom.current = true;
+                  setShowLatest(false);
+                }}
+              >
+                Jump to latest
+              </button>
+            )}
+            <div className="coven-composer-context" title={workspace}>
+              {workspace ? `${workspaceLabel}: ${workspace}` : 'No workspace reported'}
+            </div>
+            {props.busy && (
+              <output className="coven-run-status">
+                {props.cancelling ? 'Stopping; waiting for Coven…' : `${name} is responding…`}
+              </output>
+            )}
             {props.readOnly && (
               <p className="coven-composer-note">
                 This familiar chat is archived. Restore it to continue the conversation.
@@ -520,6 +583,9 @@ export function ChatLayout(props: ChatLayoutProps) {
             )}
             <fieldset className="coven-composer-fieldset" disabled={composerDisabled}>
               <Composer
+                textareaRef={composerRef}
+                textareaProps={mentionCompletion.textareaProps}
+                onKeyDown={mentionCompletion.onKeyDown}
                 className="coven-compact-composer"
                 minRows={1}
                 attachmentIcon="plus"
@@ -542,7 +608,18 @@ export function ChatLayout(props: ChatLayoutProps) {
                 {...(!props.busy && props.onRemoveAttachment
                   ? { onRemoveAttachment: props.onRemoveAttachment }
                   : {})}
-              />
+              >
+                {mentionCompletion.suggestions}
+                <ContextPicker
+                  key={`${props.familiarId}:${props.sessionId}`}
+                  familiars={props.familiars}
+                  familiarId={props.familiarId}
+                  value={props.draft}
+                  onValueChange={props.onDraft}
+                  textareaRef={composerRef}
+                  disabled={composerDisabled || props.busy}
+                />
+              </Composer>
               {props.onAttach ? (
                 <>
                   <input
@@ -561,7 +638,7 @@ export function ChatLayout(props: ChatLayoutProps) {
                   <p className="coven-attachment-note">
                     {props.attaching
                       ? 'Reading files…'
-                      : 'Text or code files · up to 4, 64 KiB each. Unsent files stay here until removed or sent.'}
+                      : 'Text/code · 4 files max · 64 KiB each · Shift+Enter for a new line'}
                   </p>
                 </>
               ) : null}
@@ -583,6 +660,8 @@ export function ChatLayout(props: ChatLayoutProps) {
             className="fr-inspector-head"
             onClick={() => setInspector(false)}
             aria-label="Close inspector"
+            aria-keyshortcuts={RIGHT_RAIL_SHORTCUT}
+            title={RIGHT_RAIL_HINT}
           >
             {familiar ? (
               <FamiliarAvatar name={name} avatarUrl={familiar.avatarUrl} size={22} ring />
@@ -651,7 +730,7 @@ export function ChatLayout(props: ChatLayoutProps) {
                 <FamButton
                   size="sm"
                   onClick={props.onRefresh}
-                  disabled={props.busy || props.loading}
+                  disabled={props.busy || props.loading || props.voiceActive}
                 >
                   Refresh local data
                 </FamButton>
@@ -665,7 +744,10 @@ export function ChatLayout(props: ChatLayoutProps) {
                   Configure your familiar in Coven. This app does not define or enforce an
                   additional permission boundary.
                 </p>
-                <p>Attachments, screen sharing and tool approval controls are unavailable here.</p>
+                <p>
+                  Text and code attachments are sent with your message. Screen sharing and tool
+                  approval controls are unavailable here.
+                </p>
               </div>
             ) : null}
             {tab === 'activity' ? (
@@ -675,7 +757,7 @@ export function ChatLayout(props: ChatLayoutProps) {
                   {props.busy ? 'A run is active in this app.' : 'No run is active in this app.'}
                 </p>
                 <p>{props.messages.length} messages loaded in this conversation.</p>
-                <p>Run metrics and tool activity are not exposed by this CLI integration.</p>
+                <p>Tool activity appears in the conversation. Run metrics are unavailable here.</p>
               </div>
             ) : null}
           </section>

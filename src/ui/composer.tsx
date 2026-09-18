@@ -5,7 +5,7 @@ import { AttachmentChip, type AttachmentState } from './attachment-chip';
 import { Button } from './button';
 import type { CompletionCommand } from './completion-palette';
 import { SendControl } from './send-control';
-import { Textarea } from './textarea';
+import { Textarea, type TextareaProps } from './textarea';
 import { cn, type Density } from './utils';
 
 /**
@@ -40,6 +40,19 @@ export type ComposerWarning = Readonly<{
   onClick?: () => void;
 }>;
 
+export type ComposerTextareaProps = Pick<
+  TextareaProps,
+  | 'onSelect'
+  | 'onFocus'
+  | 'onBlur'
+  | 'onCompositionStart'
+  | 'onCompositionEnd'
+  | 'aria-controls'
+  | 'aria-expanded'
+  | 'aria-autocomplete'
+  | 'aria-activedescendant'
+>;
+
 export type ComposerProps = Readonly<{
   value: string;
   onValueChange: (value: string) => void;
@@ -55,6 +68,7 @@ export type ComposerProps = Readonly<{
   label?: string;
   placeholder?: string;
   textareaRef?: Ref<HTMLTextAreaElement>;
+  textareaProps?: ComposerTextareaProps;
   /** Runs before the composer's own key handling; call `preventDefault` to claim a key. */
   onKeyDown?: (event: ReactKeyboardEvent<HTMLTextAreaElement>) => void;
   onAttach?: () => void;
@@ -83,6 +97,7 @@ export function Composer({
   label = 'Message',
   placeholder = 'Type a message, or / for commands.',
   textareaRef,
+  textareaProps,
   onKeyDown,
   onAttach,
   attachmentIcon = 'paperclip',
@@ -100,7 +115,7 @@ export function Composer({
 
   function handleKeyDown(event: ReactKeyboardEvent<HTMLTextAreaElement>) {
     onKeyDown?.(event);
-    if (event.defaultPrevented) {
+    if (event.defaultPrevented || event.nativeEvent.isComposing || event.keyCode === 229) {
       return;
     }
     if (event.key === 'Enter' && !event.shiftKey) {
@@ -168,6 +183,7 @@ export function Composer({
         ) : null}
       </div>
       <Textarea
+        {...textareaProps}
         id={fieldId}
         ref={textareaRef}
         value={value}
