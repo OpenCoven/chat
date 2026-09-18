@@ -24,6 +24,9 @@ tauri-build = { version = "=2.6.2", features = [] }
 
 [dependencies]
 async-trait = "=0.1.89"
+# Direct so the Windows build does not depend on rustls happening to enable
+# prebuilt-nasm: aws-lc-sys refuses to build on Windows without NASM otherwise.
+aws-lc-rs = { version = "=1.18.1", features = ["prebuilt-nasm"] }
 base64 = "=0.22.1"
 coven-client = { git = "https://github.com/OpenCoven/coven.git", rev = "721437b84026c042e431b0882dcd14fdb29ac07d" }
 fs2 = "=0.4.3"
@@ -31,11 +34,12 @@ getrandom = "=0.4.3"
 hmac = "=0.12.1"
 hpke = { version = "=0.14.0", default-features = false, features = ["aes", "alloc", "x25519"] }
 image = { version = "=0.25.9", default-features = false, features = ["jpeg", "png"] }
+jsonwebtoken = { version = "=11.1.0", default-features = false, features = ["use_pem", "aws_lc_rs"] }
 keyring-core = "=1.0.0"
 libc = "=0.2.189"
 rand_chacha = { version = "=0.10.0", default-features = false }
 rand_core = "=0.10.1"
-reqwest = { version = "=0.13.4", default-features = false, features = ["json"] }
+reqwest = { version = "=0.13.4", default-features = false, features = ["json", "rustls"] }
 serde = { version = "=1.0.228", features = ["derive"] }
 serde_jcs = "=0.2.0"
 serde_json = "=1.0.145"

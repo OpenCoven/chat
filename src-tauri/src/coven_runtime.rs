@@ -25,6 +25,7 @@ const OUTPUT_LIMIT: usize = 4 * 1024 * 1024;
 pub(crate) const TRANSCRIPT_LIMIT: usize = OUTPUT_LIMIT + 256 * 1024;
 const LEDGER_METADATA_LIMIT: usize = 16 * 1024 * 1024;
 const ERROR_LIMIT: usize = 8192;
+pub(crate) const RUN_CANCELLED: &str = "Coven run cancelled.";
 const READ_TIMEOUT: Duration = Duration::from_secs(20);
 const RUN_TIMEOUT: Duration = Duration::from_secs(600);
 const SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(25);
@@ -51,7 +52,10 @@ pub(crate) struct CovenRuntimeState {
 }
 
 impl CovenRuntimeState {
-    fn register_run(&self, id: &str) -> Result<(Arc<AtomicBool>, RunRegistration), String> {
+    pub(crate) fn register_run(
+        &self,
+        id: &str,
+    ) -> Result<(Arc<AtomicBool>, RunRegistration), String> {
         validate_id(id)?;
         let mut runs = self
             .runs
@@ -175,7 +179,7 @@ pub(crate) fn validate_id(id: &str) -> Result<(), String> {
     Ok(())
 }
 
-fn home() -> Result<PathBuf, String> {
+pub(crate) fn home() -> Result<PathBuf, String> {
     let home = std::env::var_os(if cfg!(windows) { "USERPROFILE" } else { "HOME" })
         .map(PathBuf::from)
         .filter(|path| path.is_absolute() && path.parent().is_some())
@@ -209,7 +213,7 @@ fn platform_package() -> &'static str {
     }
 }
 
-fn resolve_cli() -> Result<PathBuf, String> {
+pub(crate) fn resolve_cli() -> Result<PathBuf, String> {
     let name = if cfg!(windows) { "coven.exe" } else { "coven" };
     let mut candidates = Vec::new();
     if let Ok(home) = home() {
@@ -299,7 +303,7 @@ fn pipe_reader(
         })
 }
 
-fn run_process(
+pub(crate) fn run_process(
     args: &[String],
     cwd: Option<&Path>,
     cancel: &AtomicBool,
@@ -368,7 +372,7 @@ fn execute_command_bounded(
     output_limit: usize,
 ) -> Result<Vec<u8>, String> {
     if cancel.load(Ordering::SeqCst) {
-        return Err("Coven run cancelled.".into());
+        return Err(RUN_CANCELLED.into());
     }
     command.stdout(Stdio::piped()).stderr(Stdio::piped());
     #[cfg(unix)]
@@ -405,7 +409,7 @@ fn execute_command_bounded(
     let mut status = None;
     while ended < 2 || status.is_none() {
         if cancel.load(Ordering::SeqCst) {
-            return Err("Coven run cancelled.".into());
+            return Err(RUN_CANCELLED.into());
         }
         if Instant::now() >= deadline {
             return Err("Coven operation timed out.".into());
@@ -467,7 +471,119 @@ fn execute_command_bounded(
     Ok(output)
 }
 
-fn cli_json(args: &[&str]) -> Result<Value, String> {
+/// Like `execute_command_bounded`, but for tools whose output is plain text
+/// rather than stream JSON: every complete line (and a trailing partial line)
+/// reaches `on_line(is_stderr, text)`. Returns the exit code; a non-zero code
+/// is not an error here because the caller shows it to the person.
+/// Sets `NO_COLOR=1` so tools do not emit ANSI colour sequences; the
+/// control-character filter would otherwise leave their CSI bodies in the
+/// text.
+/// Lines are ordered within each stream, but interleaving between stdout and
+/// stderr is per read chunk: a stderr line may land between two stdout lines
+/// that were written contiguously. Both streams draw on one shared
+/// `OUTPUT_LIMIT` budget; exceeding it aborts the run.
+#[allow(dead_code)] // wired in Task 12
+pub(crate) fn execute_command_lines(
+    mut command: Command,
+    cancel: &AtomicBool,
+    timeout: Duration,
+    on_line: &mut dyn FnMut(bool, &str) -> Result<(), String>,
+) -> Result<i32, String> {
+    if cancel.load(Ordering::SeqCst) {
+        return Err(RUN_CANCELLED.into());
+    }
+    command.stdout(Stdio::piped()).stderr(Stdio::piped());
+    command.env("NO_COLOR", "1");
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        command.process_group(0);
+    }
+    let mut child = OwnedChild(
+        command
+            .spawn()
+            .map_err(|_| "Could not start the installer.")?,
+        false,
+    );
+    let (sender, receiver) = mpsc::sync_channel(16);
+    let stdout = child
+        .0
+        .stdout
+        .take()
+        .ok_or("Command stdout is unavailable.")?;
+    let stderr = child
+        .0
+        .stderr
+        .take()
+        .ok_or("Command stderr is unavailable.")?;
+    let _stdout =
+        pipe_reader(stdout, false, sender.clone()).map_err(|_| "Cannot read command output.")?;
+    let _stderr =
+        pipe_reader(stderr, true, sender).map_err(|_| "Cannot read command diagnostics.")?;
+    let deadline = Instant::now() + timeout;
+    let mut pending: [Vec<u8>; 2] = [Vec::new(), Vec::new()];
+    let mut total = 0usize;
+    let mut ended = 0;
+    let mut status = None;
+    let flush = |is_stderr: bool,
+                 buffer: &mut Vec<u8>,
+                 on_line: &mut dyn FnMut(bool, &str) -> Result<(), String>|
+     -> Result<(), String> {
+        while let Some(end) = buffer.iter().position(|b| *b == b'\n') {
+            let line: Vec<u8> = buffer.drain(..=end).collect();
+            let text = String::from_utf8_lossy(&line[..line.len() - 1]);
+            let text: String = text
+                .chars()
+                .filter(|c| !c.is_control() || *c == '\t')
+                .take(2048)
+                .collect();
+            on_line(is_stderr, &text)?;
+        }
+        Ok(())
+    };
+    while ended < 2 || status.is_none() {
+        if cancel.load(Ordering::SeqCst) {
+            return Err(RUN_CANCELLED.into());
+        }
+        if Instant::now() >= deadline {
+            return Err("The command timed out.".into());
+        }
+        status = child
+            .0
+            .try_wait()
+            .map_err(|_| "Could not inspect the command process.")?;
+        child.1 = status.is_some();
+        match receiver.recv_timeout(Duration::from_millis(20)) {
+            Ok(PipeData::End) => ended += 1,
+            Ok(PipeData::Error) => return Err("Could not read command output.".into()),
+            Ok(PipeData::Bytes(is_stderr, bytes)) => {
+                total += bytes.len();
+                if total > OUTPUT_LIMIT {
+                    return Err("Command output exceeded the local safety limit.".into());
+                }
+                let buffer = &mut pending[usize::from(is_stderr)];
+                buffer.extend_from_slice(&bytes);
+                flush(is_stderr, buffer, on_line)?;
+            }
+            Err(mpsc::RecvTimeoutError::Timeout) => {}
+            Err(mpsc::RecvTimeoutError::Disconnected) if ended == 2 => {
+                thread::sleep(Duration::from_millis(20));
+            }
+            Err(mpsc::RecvTimeoutError::Disconnected) => {
+                return Err("Command output closed unexpectedly.".into())
+            }
+        }
+    }
+    for (index, buffer) in pending.iter_mut().enumerate() {
+        if buffer.iter().any(|b| !b.is_ascii_control()) {
+            buffer.push(b'\n');
+            flush(index == 1, buffer, on_line)?;
+        }
+    }
+    Ok(status.and_then(|s| s.code()).unwrap_or(-1))
+}
+
+pub(crate) fn cli_json(args: &[&str]) -> Result<Value, String> {
     let args: Vec<String> = args.iter().map(|s| (*s).to_owned()).collect();
     let bytes = run_process(&args, None, &AtomicBool::new(false), READ_TIMEOUT, None)?;
     serde_json::from_slice(&bytes).map_err(|_| "Coven returned invalid JSON.".into())
@@ -1281,7 +1397,7 @@ fn read_cli_history(
     Ok((events, true))
 }
 
-struct RunRegistration {
+pub(crate) struct RunRegistration {
     runs: Runs,
     id: String,
 }
@@ -1667,7 +1783,7 @@ mod tests {
         assert!(state.begin_shutdown().unwrap());
         assert!(state.register_run("too-late").is_err());
         assert!(wait_for_runs(&state.runs, Duration::from_secs(3)).unwrap());
-        assert_eq!(worker.join().unwrap().unwrap_err(), "Coven run cancelled.");
+        assert_eq!(worker.join().unwrap().unwrap_err(), RUN_CANCELLED);
         assert!(!state.begin_shutdown().unwrap());
         assert!(include_str!("lib.rs").contains("handle_exit_requested"));
     }
@@ -2095,7 +2211,7 @@ mod tests {
         let mut command = Command::new("/bin/sleep");
         command.arg("10");
         let result = execute_command(command, &AtomicBool::new(true), READ_TIMEOUT, None);
-        assert_eq!(result.unwrap_err(), "Coven run cancelled.");
+        assert_eq!(result.unwrap_err(), RUN_CANCELLED);
     }
 
     #[cfg(unix)]
@@ -2570,5 +2686,89 @@ mod tests {
             "Verified retained real model turns, ordered without duplicates: {}",
             ids.join(", ")
         );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn execute_command_lines_streams_stdout_and_stderr_then_exit_code() {
+        let mut command = Command::new("sh");
+        command.args(["-c", "echo one; echo two >&2; printf 'no-newline'; exit 3"]);
+        let cancel = AtomicBool::new(false);
+        let mut seen: Vec<(bool, String)> = Vec::new();
+        let code = execute_command_lines(
+            command,
+            &cancel,
+            Duration::from_secs(5),
+            &mut |stderr, line| {
+                seen.push((stderr, line.to_owned()));
+                Ok(())
+            },
+        )
+        .unwrap();
+        assert_eq!(code, 3);
+        assert!(seen.contains(&(false, "one".to_owned())));
+        assert!(seen.contains(&(true, "two".to_owned())));
+        assert!(
+            seen.contains(&(false, "no-newline".to_owned())),
+            "trailing partial line must flush"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn execute_command_lines_honours_cancel() {
+        let mut command = Command::new("sh");
+        command.args(["-c", "sleep 30"]);
+        let cancel = AtomicBool::new(true);
+        let error =
+            execute_command_lines(command, &cancel, Duration::from_secs(5), &mut |_, _| Ok(()))
+                .unwrap_err();
+        assert_eq!(error, RUN_CANCELLED);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn execute_command_lines_cancel_mid_run_reaps_the_child_promptly() {
+        let mut command = Command::new("sh");
+        command.args(["-c", "sleep 30"]);
+        let cancel = Arc::new(AtomicBool::new(false));
+        let flipper = {
+            let cancel = Arc::clone(&cancel);
+            thread::spawn(move || {
+                thread::sleep(Duration::from_millis(150));
+                cancel.store(true, Ordering::SeqCst);
+            })
+        };
+        let start = Instant::now();
+        let error = execute_command_lines(
+            command,
+            &cancel,
+            Duration::from_secs(30),
+            &mut |_, _| Ok(()),
+        )
+        .unwrap_err();
+        flipper.join().unwrap();
+        assert_eq!(error, RUN_CANCELLED);
+        assert!(
+            start.elapsed() < Duration::from_secs(10),
+            "cancellation must return promptly, not wait for the child's own exit"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn execute_command_lines_returns_zero_for_success_and_keeps_tabs() {
+        let mut command = Command::new("sh");
+        command.args(["-c", "printf 'a\\tb\\n'"]);
+        let cancel = AtomicBool::new(false);
+        let mut seen = Vec::new();
+        let code =
+            execute_command_lines(command, &cancel, Duration::from_secs(5), &mut |_, line| {
+                seen.push(line.to_owned());
+                Ok(())
+            })
+            .unwrap();
+        assert_eq!(code, 0);
+        assert_eq!(seen, vec!["a\tb".to_owned()]);
     }
 }
