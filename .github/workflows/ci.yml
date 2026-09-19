@@ -103,6 +103,16 @@ jobs:
       - run: pnpm lint
       - run: pnpm typecheck
       - run: pnpm test:unit
+      # The lock test verifies digests against a detached checkout of the
+      # authority, which is self-consistent however far main moves on, so it
+      # cannot see a content merge whose repin was never made. That is how
+      # three governed files drifted for four merges without a red build.
+      #
+      # A pull request is allowed to drift: the repin follows the merge, and
+      # cannot name a merge commit that does not exist yet. Main is not.
+      - name: Phase 1 authority is current
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: node scripts/phase1-authority-freshness.mjs HEAD
 
   e2e:
     name: E2E

@@ -2068,24 +2068,56 @@ not appear here. Editing ordinary CI config still dirties that entry and
 requires the same file-hash repin as touching the harness itself — this is
 not discoverable until a test fails on it.
 
-A PR that repins `harnessAuthority.revision`/`.tree` to a commit within its
-own branch (rather than to something already merged) must be merged with an
-actual merge commit, never squash or rebase. Squashing silently breaks the
-invariant: the pinned revision stops being an ancestor of `main`, and the
-authority checkout keeps resolving only for as long as the now-orphaned
-source branch survives. A follow-up repin to the real merge commit is the
-only fix once that happens.
+### Authority is pinned to merge commits on `main`
 
-The two-step converges in exactly two commits only when every digest update —
-the harness digest, both workflow pin tables, every affected row in the table
-above, and every affected `harnessAuthority.files` entry (the workflow's own
-self-referential one included) — lands in the code commit itself. The repin
-commit that follows must touch nothing but `harness.revision`,
-`harnessAuthority.revision`/`.tree`, and the test's literal copy of them. Move
-any digest into the repin commit instead and it invalidates the digests
-recorded against the commit `harness.revision` still names, forcing a third
-commit to advance the pin again — the exact shape of #102's first attempt and
-#110's first attempt.
+`harnessAuthority.revision` names a merge commit that is already part of
+`main`. It is never a commit on the branch that introduces the change, and a
+pull request never advances it.
+
+That ordering is forced rather than chosen. A merge commit's SHA does not
+exist until the merge happens, so the lock inside the merged tree cannot name
+it. Pinning a branch commit instead is what made every pair of conformance
+branches collide: each wrote a different `harnessAuthority.revision` into the
+same file, so whichever merged second had to be rebuilt, and whichever merged
+last left a pin describing a tree that no longer matched what shipped.
+
+Landing a change to a governed file therefore takes two pull requests:
+
+1. **The content PR** changes governed files and leaves
+   `phase1-conformance.lock.json` alone. It may be squashed or rebased
+   freely, because it pins nothing. `main` stays green across it: the lock
+   still describes the previous authority, whose tree is immutable, and the
+   lock test verifies digests against a detached checkout of exactly that
+   revision.
+2. **The repin PR** follows, and is the only PR that touches the lock. It
+   points `harness.revision` and `harnessAuthority.revision`/`.tree` at the
+   content PR's merge commit on `main`, refreshes every digest to that
+   commit's tree — the harness digest, both workflow pin tables, every
+   affected row in the table above, and every affected
+   `harnessAuthority.files` and `harnessAuthority.productionDeltas` entry,
+   the workflow's own self-referential one included — and updates the test's
+   literal copy. Digests and the revision move together, against a commit
+   that already exists, so there is no ordering to get wrong.
+
+Because only the repin PR writes the lock, and it runs serially on `main`,
+two content branches can no longer conflict over it.
+
+### The repin is not optional
+
+Between the two merges the authority legitimately lags, and nothing in the
+lock notices. The lock test compares digests against the authority's own
+checkout, which stays self-consistent no matter how far `main` moves on.
+#322 changed `src-tauri/Cargo.toml`, `Cargo.lock` and `keyring.rs` without a
+repin and stayed green through three further merges; the drift only surfaced
+when a later change advanced the authority and had to reconcile all three at
+once.
+
+`scripts/phase1-authority-freshness.mjs` closes that gap. It asserts the pin
+is reachable from the ref under test, that it is a merge commit rather than a
+branch tip, and that no governed file or production delta has moved since it
+was pinned. CI runs it on `main` pushes only, since a pull request is allowed
+to lag by construction. A forgotten repin now turns `main` red instead of
+staying silent.
 
 Before parsing or executing SDK authority, the harness queries the verified
 checkout with `git rev-parse --show-object-format`, accepts only `sha1` or
