@@ -11,6 +11,23 @@ describe('genuine Coven event projection', () => {
       ]).messages,
     ).toEqual([{ id: '0', role: 'system', text: 'Cave system notice' }]);
   });
+  it('shows the replay disclosure as a notice and hides other runtime system frames', () => {
+    const message = {
+      role: 'system',
+      content: [{ type: 'text', text: 'Chat replayed the last 2 turns into this message.' }],
+    };
+    expect(
+      projectEvents([
+        { type: 'system', subtype: 'init', session_id: 'run' },
+        { type: 'system', subtype: 'notice', source: 'chat-replay', session_id: 'run', message },
+        { type: 'system', subtype: 'notice', session_id: 'run', message },
+        { type: 'text_delta', session_id: 'run', text: 'Reply' },
+      ]).messages,
+    ).toEqual([
+      { id: '1', role: 'notice', text: 'Chat replayed the last 2 turns into this message.' },
+      { id: '3', role: 'assistant', text: 'Reply' },
+    ]);
+  });
   it('restores attachment-only history metadata without exposing bytes or trusting invalid entries', () => {
     expect(
       projectEvents([

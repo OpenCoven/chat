@@ -133,7 +133,7 @@ Owns the WorkOS lifecycle: PKCE, the loopback callback listener, opening the
 browser, the code-for-token exchange, refresh, verification and storage. The
 webview receives only a non-secret status.
 
-Dependencies added: `reqwest` gains the `rustls-tls` feature (the crate is
+Dependencies added: `reqwest` gains the `rustls` feature (the crate is
 built with `default-features = false` and has never spoken TLS — the app only
 ever reached loopback HTTP); `jsonwebtoken = "=11.1.0"` (MSRV 1.88, below the
 pinned 1.95) for JWT and JWKS verification. No Tauri plugin is added; the

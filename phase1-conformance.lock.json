@@ -81,8 +81,8 @@
       },
       {
         "path": "scripts/phase1-schema-v2-producer.mjs",
-        "blob": "942917311fbb26d60fa1d38d8becbd6193b6799d",
-        "sha256": "1d0c28f526c3e71256693da6ef26be6fe2327cb30e820960a4cf3761c4b8c4f6"
+        "blob": "720445dfaf8ceb071f966bccbc8111a350c31ed0",
+        "sha256": "ea32a0b7d43f0558521de091666d66960bc033afafd5e619a728da1ec5d45929"
       },
       {
         "path": "scripts/phase1-linux-secret-service.mjs",
@@ -116,8 +116,8 @@
       },
       {
         "path": "scripts/windows-job-supervisor.cs",
-        "blob": "8e4098edace18b95813e7cd6610f3338fe5292b4",
-        "sha256": "6f7d0712e8f0b04d5c3fdff77a3cb975cc96a2f5c2bd5e565b43277b7085c030"
+        "blob": "c6ddcb12a3b439b04e1272b8b26d110a8372c973",
+        "sha256": "ec56ad9daf9cfd2e92de4420cfc5ce328e09a76b627a8253ef35f2e9ef151669"
       },
       {
         "path": "scripts/contract-canary.mjs",
@@ -141,25 +141,25 @@
       },
       {
         "path": ".github/workflows/ci.yml",
-        "blob": "a18a00fc1e8dda0c427cd1a4864d896044d7b3df",
-        "sha256": "b28f4700104c70690b0068edfdd435f4b4810043cdd7ba23e868b5e782cf500a"
+        "blob": "10ecf6020d9d118086b00d4c682cf8bd2562b68c",
+        "sha256": "8ab115f50c13ae6e9213737612334cc1c73e23362fc3dd60be9258c97081b9d5"
       },
       {
         "path": ".github/workflows/client-v1-conformance.yml",
-        "blob": "7d8a92fcaf07f57cff2a0dd12a4a0b04d787225c",
-        "sha256": "a22c99529f760247a6590c3ca4f9b205a9ac003a0536bf7a711b5a99df9c6574"
+        "blob": "2204f8f5f4e9bc9b787e23e624038c376d518f7f",
+        "sha256": "be7f36a7ce1b3dd6834b565e33825c5af410c49ed0e193ffaffda91ef79125b3"
       }
     ],
     "productionDeltas": [
       {
         "path": "src-tauri/Cargo.toml",
-        "blob": "cfec1ed6006c9bad8dd929f1abcc0d8cec315381",
-        "sha256": "f3032d54b1ef4f1556faa8cf17fde271d38d1e7d54e42d9550800f4a8c837433"
+        "blob": "6c0f118ad21595067c91d1965994be95fae9dbf1",
+        "sha256": "3f53d4710dd4bf17d3be30b3d219d61fb5d85c66ecb2472ecd7206f186666f68"
       },
       {
         "path": "src-tauri/Cargo.lock",
-        "blob": "a60251859246794cd62d37b60b97fb6b6a3bfcae",
-        "sha256": "e3a40166cffeda91dd6dbd0116a2642c71ce8f9c8eef2c48ddef9321fcd89ea2"
+        "blob": "5bb14effed69756d32fa1f3d7f75ab173733547c",
+        "sha256": "3f3d7ecd87fd6f96678dab9fe484081e49161fcc413cd20a2a7af045f588a71d"
       },
       {
         "path": "src-tauri/src/bin/phase1-native-rpc.rs",
@@ -193,8 +193,8 @@
       },
       {
         "path": "src-tauri/src/keyring.rs",
-        "blob": "b235ab40e02265ea3e9fbaedf0a842e7fc627f4f",
-        "sha256": "ba9be1f65792ae988ff64ca1348fc9ec4438925e4f4822f3c2d3057eee5d0568"
+        "blob": "39309e546d975349df16acbca9b47dee5beab6ce",
+        "sha256": "8b143925f1796c79ad67d2dfe4b05a6396b7278875a67e7885ca7e7ae9605c54"
       },
       {
         "path": "src-tauri/src/lib.rs",

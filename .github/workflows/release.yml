@@ -343,6 +343,14 @@ jobs:
     environment: release-signing
     permissions:
       contents: read
+    env:
+      # Installers are staged here, NOT in `dist/`. `dist/` is Vite's build
+      # output (tauri.conf.json: beforeBuildCommand `pnpm build`, frontendDist
+      # `../dist`), so by the time bundling finishes it already holds
+      # index.html and assets/. Staging on top of that made the artifact
+      # validation below reject the frontend's 399-byte index.html against the
+      # 1 MiB floor, and would have uploaded the web assets as release assets.
+      STAGE_DIR: release-staging
     strategy:
       # One platform failing should not cancel the others; a partial matrix is
       # still useful diagnostic output, and the publish job depends on all of
@@ -429,24 +437,42 @@ jobs:
         shell: bash
         env:
           APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
           WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}
+          WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
         run: |
           set -euo pipefail
           macos_signed=false
           windows_signed=false
           updater_signed=false
-          [ -n "${APPLE_CERTIFICATE:-}" ] && macos_signed=true
-          [ -n "${WINDOWS_CERTIFICATE:-}" ] && windows_signed=true
+          # "Signed" must mean every credential the signing path consumes, not
+          # just the certificate. The verify-tag gate demands all eight on the
+          # production path, but allow_unsigned bypasses that gate -- and a
+          # partial set there used to report signed=true, skip the unsets in
+          # `Build installers`, and fail the bundle with the very error the
+          # unsigned rehearsal exists to avoid.
+          if [ -n "${APPLE_CERTIFICATE:-}" ] && [ -n "${APPLE_CERTIFICATE_PASSWORD:-}" ] &&
+             [ -n "${APPLE_SIGNING_IDENTITY:-}" ] && [ -n "${APPLE_ID:-}" ] &&
+             [ -n "${APPLE_PASSWORD:-}" ] && [ -n "${APPLE_TEAM_ID:-}" ]; then
+            macos_signed=true
+          fi
+          if [ -n "${WINDOWS_CERTIFICATE:-}" ] && [ -n "${WINDOWS_CERTIFICATE_PASSWORD:-}" ]; then
+            windows_signed=true
+          fi
           [ -n "${TAURI_SIGNING_PRIVATE_KEY:-}" ] && updater_signed=true
           echo "macos_signed=${macos_signed}"     >> "$GITHUB_OUTPUT"
           echo "windows_signed=${windows_signed}" >> "$GITHUB_OUTPUT"
           echo "updater_signed=${updater_signed}" >> "$GITHUB_OUTPUT"
           if [ "${{ runner.os }}" = "macOS" ] && [ "${macos_signed}" = "false" ]; then
-            echo "::warning::APPLE_CERTIFICATE is not set; producing an UNSIGNED, un-notarized macOS build. This is only reachable via allow_unsigned; do not publish these artifacts."
+            echo "::warning::Apple signing material is absent or incomplete; producing an UNSIGNED, un-notarized macOS build. This is only reachable via allow_unsigned; do not publish these artifacts."
           fi
           if [ "${{ runner.os }}" = "Windows" ] && [ "${windows_signed}" = "false" ]; then
-            echo "::warning::WINDOWS_CERTIFICATE is not set; producing an UNSIGNED Windows build. This is only reachable via allow_unsigned; do not publish these artifacts."
+            echo "::warning::Windows signing material is absent or incomplete; producing an UNSIGNED Windows build. This is only reachable via allow_unsigned; do not publish these artifacts."
           fi
           if [ "${updater_signed}" = "false" ]; then
             echo "::notice::TAURI_SIGNING_PRIVATE_KEY is not set; updater artifacts and latest.json are not produced. Auto-update is opt-in and disabled for v0.0.1 (no plugins.updater / createUpdaterArtifacts:false). See docs/releasing.md."
@@ -512,6 +538,7 @@ jobs:
       - name: Build installers
         shell: bash
         env:
+          MACOS_SIGNED: ${{ steps.signing.outputs.macos_signed }}
           APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
           APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
           APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
@@ -522,6 +549,18 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: |
           set -euo pipefail
+
+          # A missing secret arrives as the empty string, not as an unset
+          # variable, and Tauri reads a *defined* APPLE_CERTIFICATE as "sign
+          # this". It then runs `security import` with an empty -P password and
+          # dies with SecKeychainItemImport. Unset them so an allow_unsigned
+          # run produces the unsigned macOS build it advertises instead of
+          # failing the bundle outright.
+          if [ "${RUNNER_OS}" = "macOS" ] && [ "${MACOS_SIGNED}" != "true" ]; then
+            unset APPLE_CERTIFICATE APPLE_CERTIFICATE_PASSWORD APPLE_SIGNING_IDENTITY \
+                  APPLE_ID APPLE_PASSWORD APPLE_TEAM_ID
+          fi
+
           args=(
             --target "${{ matrix.target }}"
             --bundles "${{ matrix.bundles }}"
@@ -544,8 +583,11 @@ jobs:
         run: |
           set -euo pipefail
           bundle_root="src-tauri/target/${{ matrix.target }}/release/bundle"
-          mkdir -p dist
-          shopt -s nullglob globstar
+          mkdir -p "${STAGE_DIR}"
+          # macOS runners ship bash 3.2, which has no `globstar` -- enabling it
+          # aborts the step under `set -e`. Nothing here globs with `**`, so
+          # `nullglob` alone is what these single-level patterns actually need.
+          shopt -s nullglob
           copied=0
           for f in \
             "${bundle_root}"/dmg/*.dmg \
@@ -562,7 +604,7 @@ jobs:
             "${bundle_root}"/appimage/*.AppImage.tar.gz.sig \
             "${bundle_root}"/deb/*.deb ; do
             [ -e "${f}" ] || continue
-            cp -v "${f}" dist/
+            cp -v "${f}" "${STAGE_DIR}/"
             copied=$((copied + 1))
           done
           if [ "${copied}" -eq 0 ]; then
@@ -575,9 +617,9 @@ jobs:
           # artifacts are merged for publishing. Prefix them with the target so
           # they stay distinct and so latest.json can tell the two apart.
           if [[ "${{ matrix.platform }}" == macos-* ]]; then
-            for g in dist/*.app.tar.gz dist/*.app.tar.gz.sig; do
+            for g in "${STAGE_DIR}"/*.app.tar.gz "${STAGE_DIR}"/*.app.tar.gz.sig; do
               [ -e "${g}" ] || continue
-              mv "${g}" "dist/${{ matrix.target }}-$(basename "${g}")"
+              mv "${g}" "${STAGE_DIR}/${{ matrix.target }}-$(basename "${g}")"
             done
           fi
           # The .app itself is a directory; tar it so it survives artifact upload
@@ -585,13 +627,13 @@ jobs:
           for app in "${bundle_root}"/macos/*.app; do
             [ -e "${app}" ] || continue
             base=$(basename "${app}")
-            tar -czf "dist/${base%.app}-${{ matrix.target }}.app.tar" -C "$(dirname "${app}")" "${base}"
+            tar -czf "${STAGE_DIR}/${base%.app}-${{ matrix.target }}.app.tar" -C "$(dirname "${app}")" "${base}"
           done
 
           # Signatures are intentionally small; every actual bundle or updater
           # archive must clear a floor that catches truncated bundler output.
           minimum_size=$((1024 * 1024))
-          for artifact in dist/*; do
+          for artifact in "${STAGE_DIR}"/*; do
             [ -f "${artifact}" ] || continue
             case "${artifact}" in
               *.sig) continue ;;
@@ -603,8 +645,8 @@ jobs:
             fi
           done
 
-          echo "Staged $(ls -1 dist | wc -l | tr -d ' ') files:"
-          ls -la dist
+          echo "Staged $(ls -1 "${STAGE_DIR}" | wc -l | tr -d ' ') files:"
+          ls -la "${STAGE_DIR}"
 
       # Native-OS smoke test. This runs on the platform that produced the
       # artifacts because the checks it performs (the .app structure, codesign,
@@ -618,7 +660,7 @@ jobs:
           TARGET: ${{ matrix.target }}
         run: |
           set -euo pipefail
-          cd dist
+          cd "${STAGE_DIR}"
 
           assert_nonempty() {
             if [ ! -s "$1" ]; then
@@ -701,9 +743,28 @@ jobs:
                   echo "::error::${deb} reports version ${package_version}, expected ${EXPECTED_VERSION}."
                   exit 1
                 }
-                if ! dpkg-deb --contents "${deb}" |
-                  awk '/\.\/usr\/bin\/[^/[:space:]]+/ { found = 1 } END { exit(found ? 0 : 1) }'; then
+                # The previous awk form could never pass: inside an awk regex
+                # literal the unescaped `/` in `[^/[:space:]]` terminates the
+                # literal early, so awk aborted on a syntax error and the `!`
+                # turned that into "no payload" for every .deb ever built.
+                # Nothing reached this assertion until staging was fixed, so it
+                # went unnoticed. grep needs no such escaping. Requiring a
+                # character after `usr/bin/` keeps the bare directory entry from
+                # satisfying it, and the product name may contain a space, so
+                # only the first path component is matched on. The `./` prefix
+                # is optional: dpkg-deb on the ubuntu-22.04 runner lists
+                # `usr/bin/opencoven-chat` with no leading `./`, and assuming
+                # the dotted form is what made the previous two versions of
+                # this check reject a perfectly good package. The leading
+                # `^-...x` requires a regular file with the owner execute bit,
+                # so the assertion proves what its message claims: a
+                # non-executable file or a symlink under usr/bin no longer
+                # satisfies it.
+                deb_contents=$(dpkg-deb --contents "${deb}")
+                if ! printf '%s\n' "${deb_contents}" |
+                  grep -qE '^-[rwxsStT-]{2}x.*[[:space:]](\./)?usr/bin/[^[:space:]]'; then
                   echo "::error::${deb} contains no executable payload under /usr/bin."
+                  printf '%s\n' "${deb_contents}"
                   exit 1
                 fi
                 echo "  ok: ${deb} version and /usr/bin payload"
@@ -718,7 +779,7 @@ jobs:
         run: |
           Set-StrictMode -Version Latest
           $ErrorActionPreference = 'Stop'
-          $installers = @(Get-ChildItem -Path 'dist/*' -File -Include *.msi,*.exe)
+          $installers = @(Get-ChildItem -Path "$env:STAGE_DIR/*" -File -Include *.msi,*.exe)
           if ($installers.Count -eq 0) {
             throw 'No Windows installers were staged for signature verification.'
           }
@@ -732,7 +793,7 @@ jobs:
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: installers-${{ matrix.platform }}
-          path: dist/**
+          path: ${{ env.STAGE_DIR }}/**
           if-no-files-found: error
           retention-days: 7
 

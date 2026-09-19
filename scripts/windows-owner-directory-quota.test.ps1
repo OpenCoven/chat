@@ -247,7 +247,7 @@ try {
     $readBoundedSnapshot,
     $directory
   )
-  if ($persistentOutcome -cne 'access-denied|directory-enumeration-depth-3-plus|persistent') {
+  if ($persistentOutcome -cne 'access-denied|directory-enumeration-depth-3-plus|persistent-access-denied') {
     throw 'Persistent native directory denial did not remain fail-closed.'
   }
   [OpenCoven.Tests.QuotaSnapshotReadFixture]::BeforeReadableRepeat = [Action]{

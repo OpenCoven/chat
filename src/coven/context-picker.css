@@ -1,0 +1,107 @@
+.chat-context {
+  grid-column: 1 / -1;
+  grid-row: 2;
+  min-width: 0;
+  padding: 0 6px 4px;
+  font-size: 12px;
+}
+.chat-context-trigger,
+.chat-context-heading button {
+  background: transparent;
+  color: inherit;
+  border: 1px solid var(--border-hairline);
+  border-radius: 8px;
+  padding: 6px 10px;
+  cursor: pointer;
+}
+.chat-context-panel {
+  position: fixed;
+  inset: auto 0 16px;
+  margin-inline: auto;
+  width: min(520px, calc(100vw - 24px));
+  max-height: calc(100dvh - 32px);
+  box-sizing: border-box;
+  overflow-y: auto;
+  padding: 12px;
+  border: 1px solid var(--border-hairline);
+  border-radius: 14px;
+  background: var(--bg-panel);
+  color: var(--text-primary);
+  box-shadow: 0 16px 48px rgb(0 0 0 / 40%);
+}
+.chat-context-panel::backdrop {
+  background: rgb(0 0 0 / 15%);
+}
+/* Older desktop webviews retain the bounded inline picker. */
+.chat-context-panel:not([popover]) {
+  position: static;
+  width: auto;
+  margin: 8px 0 0;
+}
+.chat-context-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.chat-context-panel p {
+  font-size: 12px;
+  opacity: 0.75;
+  margin: 8px 0;
+}
+.chat-context-panel input {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 10px;
+  background: transparent;
+  border: 1px solid var(--border-hairline);
+  border-radius: 8px;
+  color: inherit;
+}
+.chat-context-options {
+  max-height: min(280px, 40dvh);
+  overflow-y: auto;
+  margin-top: 8px;
+}
+.chat-context-options fieldset {
+  min-width: 0;
+  padding: 0;
+  margin: 0;
+  border: 0;
+}
+.chat-context-group {
+  font-size: 11px;
+  font-weight: 600;
+  opacity: 0.65;
+  padding: 8px;
+}
+.chat-context-option {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  width: 100%;
+  text-align: left;
+  background: transparent;
+  color: inherit;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  padding: 8px;
+  cursor: pointer;
+  overflow-wrap: anywhere;
+}
+.chat-context-option small {
+  opacity: 0.65;
+}
+.chat-context-option[aria-selected="true"] {
+  background: rgb(127 127 127 / 12%);
+  border-color: var(--border-hairline);
+}
+.chat-context-trigger:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+.chat-context button:focus-visible,
+.chat-context-panel input:focus-visible {
+  outline: 2px solid currentColor;
+  outline-offset: 2px;
+}

@@ -21,15 +21,30 @@ use crate::coven::{CovenHealth, NativeCovenHealth};
 #[path = "chat_attachments.rs"]
 mod attachments;
 
+#[path = "familiar_projects.rs"]
+mod familiar_projects;
+
 const OUTPUT_LIMIT: usize = 4 * 1024 * 1024;
 pub(crate) const TRANSCRIPT_LIMIT: usize = OUTPUT_LIMIT + 256 * 1024;
 const LEDGER_METADATA_LIMIT: usize = 16 * 1024 * 1024;
 const ERROR_LIMIT: usize = 8192;
+pub(crate) const RUN_CANCELLED: &str = "Coven run cancelled.";
 const READ_TIMEOUT: Duration = Duration::from_secs(20);
 const RUN_TIMEOUT: Duration = Duration::from_secs(600);
 const SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(25);
 const HISTORY_SESSION_LIMIT: usize = 64;
 const HISTORY_PAGE_LIMIT: usize = 16;
+/// Harnesses whose own session store cannot reopen a Chat thread. The bundled
+/// engine treats `--session-id` as a tracking tag and never saves print-mode
+/// turns, so `coven run coven-code --continue <id>` launches a context-free
+/// run (the CLI declares the same in `spec_supports_chat_resume`; verified
+/// against engines 0.7.0 and 0.8.0). Chat replays its own captured history
+/// into those turns instead and says so in the thread.
+const REPLAY_HARNESSES: [&str; 1] = ["coven-code"];
+/// Upper bound on replayed history bytes per turn, newest turns first.
+const REPLAY_LIMIT: usize = 24 * 1024;
+/// Upper bound on one replayed message before it is truncated.
+const REPLAY_MESSAGE_LIMIT: usize = 4 * 1024;
 type Runs = Arc<Mutex<HashMap<String, Arc<AtomicBool>>>>;
 
 #[derive(Default)]
@@ -40,7 +55,10 @@ pub(crate) struct CovenRuntimeState {
 }
 
 impl CovenRuntimeState {
-    fn register_run(&self, id: &str) -> Result<(Arc<AtomicBool>, RunRegistration), String> {
+    pub(crate) fn register_run(
+        &self,
+        id: &str,
+    ) -> Result<(Arc<AtomicBool>, RunRegistration), String> {
         validate_id(id)?;
         let mut runs = self
             .runs
@@ -164,7 +182,7 @@ pub(crate) fn validate_id(id: &str) -> Result<(), String> {
     Ok(())
 }
 
-fn home() -> Result<PathBuf, String> {
+pub(crate) fn home() -> Result<PathBuf, String> {
     let home = std::env::var_os(if cfg!(windows) { "USERPROFILE" } else { "HOME" })
         .map(PathBuf::from)
         .filter(|path| path.is_absolute() && path.parent().is_some())
@@ -198,7 +216,7 @@ fn platform_package() -> &'static str {
     }
 }
 
-fn resolve_cli() -> Result<PathBuf, String> {
+pub(crate) fn resolve_cli() -> Result<PathBuf, String> {
     let name = if cfg!(windows) { "coven.exe" } else { "coven" };
     let mut candidates = Vec::new();
     if let Ok(home) = home() {
@@ -288,7 +306,7 @@ fn pipe_reader(
         })
 }
 
-fn run_process(
+pub(crate) fn run_process(
     args: &[String],
     cwd: Option<&Path>,
     cancel: &AtomicBool,
@@ -357,7 +375,7 @@ fn execute_command_bounded(
     output_limit: usize,
 ) -> Result<Vec<u8>, String> {
     if cancel.load(Ordering::SeqCst) {
-        return Err("Coven run cancelled.".into());
+        return Err(RUN_CANCELLED.into());
     }
     command.stdout(Stdio::piped()).stderr(Stdio::piped());
     #[cfg(unix)]
@@ -394,7 +412,7 @@ fn execute_command_bounded(
     let mut status = None;
     while ended < 2 || status.is_none() {
         if cancel.load(Ordering::SeqCst) {
-            return Err("Coven run cancelled.".into());
+            return Err(RUN_CANCELLED.into());
         }
         if Instant::now() >= deadline {
             return Err("Coven operation timed out.".into());
@@ -456,7 +474,119 @@ fn execute_command_bounded(
     Ok(output)
 }
 
-fn cli_json(args: &[&str]) -> Result<Value, String> {
+/// Like `execute_command_bounded`, but for tools whose output is plain text
+/// rather than stream JSON: every complete line (and a trailing partial line)
+/// reaches `on_line(is_stderr, text)`. Returns the exit code; a non-zero code
+/// is not an error here because the caller shows it to the person.
+/// Sets `NO_COLOR=1` so tools do not emit ANSI colour sequences; the
+/// control-character filter would otherwise leave their CSI bodies in the
+/// text.
+/// Lines are ordered within each stream, but interleaving between stdout and
+/// stderr is per read chunk: a stderr line may land between two stdout lines
+/// that were written contiguously. Both streams draw on one shared
+/// `OUTPUT_LIMIT` budget; exceeding it aborts the run.
+#[allow(dead_code)] // wired in Task 12
+pub(crate) fn execute_command_lines(
+    mut command: Command,
+    cancel: &AtomicBool,
+    timeout: Duration,
+    on_line: &mut dyn FnMut(bool, &str) -> Result<(), String>,
+) -> Result<i32, String> {
+    if cancel.load(Ordering::SeqCst) {
+        return Err(RUN_CANCELLED.into());
+    }
+    command.stdout(Stdio::piped()).stderr(Stdio::piped());
+    command.env("NO_COLOR", "1");
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        command.process_group(0);
+    }
+    let mut child = OwnedChild(
+        command
+            .spawn()
+            .map_err(|_| "Could not start the installer.")?,
+        false,
+    );
+    let (sender, receiver) = mpsc::sync_channel(16);
+    let stdout = child
+        .0
+        .stdout
+        .take()
+        .ok_or("Command stdout is unavailable.")?;
+    let stderr = child
+        .0
+        .stderr
+        .take()
+        .ok_or("Command stderr is unavailable.")?;
+    let _stdout =
+        pipe_reader(stdout, false, sender.clone()).map_err(|_| "Cannot read command output.")?;
+    let _stderr =
+        pipe_reader(stderr, true, sender).map_err(|_| "Cannot read command diagnostics.")?;
+    let deadline = Instant::now() + timeout;
+    let mut pending: [Vec<u8>; 2] = [Vec::new(), Vec::new()];
+    let mut total = 0usize;
+    let mut ended = 0;
+    let mut status = None;
+    let flush = |is_stderr: bool,
+                 buffer: &mut Vec<u8>,
+                 on_line: &mut dyn FnMut(bool, &str) -> Result<(), String>|
+     -> Result<(), String> {
+        while let Some(end) = buffer.iter().position(|b| *b == b'\n') {
+            let line: Vec<u8> = buffer.drain(..=end).collect();
+            let text = String::from_utf8_lossy(&line[..line.len() - 1]);
+            let text: String = text
+                .chars()
+                .filter(|c| !c.is_control() || *c == '\t')
+                .take(2048)
+                .collect();
+            on_line(is_stderr, &text)?;
+        }
+        Ok(())
+    };
+    while ended < 2 || status.is_none() {
+        if cancel.load(Ordering::SeqCst) {
+            return Err(RUN_CANCELLED.into());
+        }
+        if Instant::now() >= deadline {
+            return Err("The command timed out.".into());
+        }
+        status = child
+            .0
+            .try_wait()
+            .map_err(|_| "Could not inspect the command process.")?;
+        child.1 = status.is_some();
+        match receiver.recv_timeout(Duration::from_millis(20)) {
+            Ok(PipeData::End) => ended += 1,
+            Ok(PipeData::Error) => return Err("Could not read command output.".into()),
+            Ok(PipeData::Bytes(is_stderr, bytes)) => {
+                total += bytes.len();
+                if total > OUTPUT_LIMIT {
+                    return Err("Command output exceeded the local safety limit.".into());
+                }
+                let buffer = &mut pending[usize::from(is_stderr)];
+                buffer.extend_from_slice(&bytes);
+                flush(is_stderr, buffer, on_line)?;
+            }
+            Err(mpsc::RecvTimeoutError::Timeout) => {}
+            Err(mpsc::RecvTimeoutError::Disconnected) if ended == 2 => {
+                thread::sleep(Duration::from_millis(20));
+            }
+            Err(mpsc::RecvTimeoutError::Disconnected) => {
+                return Err("Command output closed unexpectedly.".into())
+            }
+        }
+    }
+    for (index, buffer) in pending.iter_mut().enumerate() {
+        if buffer.iter().any(|b| !b.is_ascii_control()) {
+            buffer.push(b'\n');
+            flush(index == 1, buffer, on_line)?;
+        }
+    }
+    Ok(status.and_then(|s| s.code()).unwrap_or(-1))
+}
+
+pub(crate) fn cli_json(args: &[&str]) -> Result<Value, String> {
     let args: Vec<String> = args.iter().map(|s| (*s).to_owned()).collect();
     let bytes = run_process(&args, None, &AtomicBool::new(false), READ_TIMEOUT, None)?;
     serde_json::from_slice(&bytes).map_err(|_| "Coven returned invalid JSON.".into())
@@ -516,7 +646,14 @@ fn validate_input(input: &SendInput) -> Result<(), String> {
     Ok(())
 }
 
-fn run_arguments(input: &SendInput, harness: &str, cwd: &Path) -> Result<Vec<String>, String> {
+/// `prompt` is the text handed to the harness. It may carry replayed history,
+/// so it is passed separately from the validated, user-submitted `input`.
+fn run_arguments(
+    input: &SendInput,
+    harness: &str,
+    cwd: &Path,
+    prompt: &str,
+) -> Result<Vec<String>, String> {
     validate_input(input)?;
     if !matches!(harness, "coven-code" | "codex" | "claude") {
         return Err(
@@ -542,7 +679,7 @@ fn run_arguments(input: &SendInput, harness: &str, cwd: &Path) -> Result<Vec<Str
         args.extend(["--familiar".into(), id.clone()]);
     }
     if input.attachments.is_empty() {
-        args.extend(["--".into(), input.prompt.clone()]);
+        args.extend(["--".into(), prompt.to_owned()]);
     } else {
         if harness != "coven-code" {
             return Err("Attachments are currently supported only with Coven Code.".into());
@@ -612,9 +749,25 @@ pub(crate) async fn coven_runtime_familiars() -> Result<Value, String> {
         let familiars = value
             .as_array()
             .ok_or("Coven returned invalid familiars.")?;
+        // Project access is optional metadata read from Cave's files. A store
+        // that is unreadable, malformed, or newer than this build must cost
+        // the suggestions, never the familiar list itself.
+        let projects = match familiar_projects::ProjectAccess::load() {
+            Ok(projects) => projects,
+            Err(error) => {
+                eprintln!("Coven Chat: project access unavailable ({error}).");
+                familiar_projects::ProjectAccess::default()
+            }
+        };
         familiars
             .iter()
-            .map(|f| normalize_familiar(f, crate::familiar_avatar::read_avatar))
+            .map(|f| {
+                let mut familiar = normalize_familiar(f, crate::familiar_avatar::read_avatar)?;
+                familiar["projectAccess"] = projects
+                    .for_familiar(string(f, "id")?)
+                    .unwrap_or_else(|_| Value::Array(Vec::new()));
+                Ok(familiar)
+            })
             .collect::<Result<Vec<_>, String>>()
             .map(Value::Array)
     })
@@ -961,6 +1114,166 @@ fn read_captured_history(
     Ok(Some((result, partial)))
 }
 
+/// History replayed into a harness turn because the harness cannot reopen
+/// the thread from its own session store.
+struct Replay {
+    prompt: String,
+    replayed: usize,
+    omitted: bool,
+}
+
+fn text_blocks(event: &Value, separator: &str) -> String {
+    event
+        .pointer("/message/content")
+        .and_then(Value::as_array)
+        .map(|content| {
+            content
+                .iter()
+                .filter(|block| block["type"] == "text")
+                .filter_map(|block| block["text"].as_str())
+                .collect::<Vec<_>>()
+                .join(separator)
+        })
+        .unwrap_or_default()
+}
+
+/// Collapse a captured Chat history into ordered `(role, text)` turns: the
+/// submitted user prompts (plus attachment names) and the assistant text of
+/// each run. Tool traffic, raw output and runtime frames are not replayed.
+fn replay_turns(events: &[Value]) -> Vec<(&'static str, String)> {
+    let mut turns: Vec<(&'static str, String)> = Vec::new();
+    let mut delta_session: Option<String> = None;
+    for event in events {
+        let kind = event.get("type").and_then(Value::as_str);
+        if kind == Some("text_delta") {
+            let Some(text) = event.get("text").and_then(Value::as_str) else {
+                continue;
+            };
+            let session = event
+                .get("session_id")
+                .and_then(Value::as_str)
+                .map(str::to_owned);
+            match turns.last_mut() {
+                Some((role, existing)) if *role == "assistant" && delta_session == session => {
+                    existing.push_str(text);
+                }
+                _ => turns.push(("assistant", text.to_owned())),
+            }
+            delta_session = session;
+            continue;
+        }
+        delta_session = None;
+        if is_captured_input(event) {
+            let mut text = text_blocks(event, "\n");
+            let names = event
+                .get("attachments")
+                .and_then(Value::as_array)
+                .map(|files| {
+                    files
+                        .iter()
+                        .filter_map(|file| file.get("name").and_then(Value::as_str))
+                        .collect::<Vec<_>>()
+                })
+                .unwrap_or_default();
+            if !names.is_empty() {
+                if !text.is_empty() {
+                    text.push('\n');
+                }
+                text.push_str(&format!("[Attached: {}]", names.join(", ")));
+            }
+            if !text.trim().is_empty() {
+                turns.push(("user", text));
+            }
+        } else if kind == Some("assistant") {
+            let text = text_blocks(event, "\n\n");
+            if !text.trim().is_empty() {
+                turns.push(("assistant", text));
+            }
+        }
+    }
+    turns
+}
+
+const TRUNCATION_MARKER: &str = " …[truncated by Coven Chat]";
+
+/// Truncate to `limit` bytes *including* the marker, so a truncated message
+/// never exceeds the cap it is being held to and never borrows replay budget
+/// from the turns that follow it.
+fn truncate_utf8(text: &str, limit: usize) -> String {
+    if text.len() <= limit {
+        return text.to_owned();
+    }
+    let mut end = limit.saturating_sub(TRUNCATION_MARKER.len());
+    while end > 0 && !text.is_char_boundary(end) {
+        end -= 1;
+    }
+    format!("{}{TRUNCATION_MARKER}", &text[..end])
+}
+
+/// Build the prompt for a replayed turn: the newest turns that fit in
+/// `REPLAY_LIMIT`, oldest first, followed by the user's latest message.
+///
+/// `history_truncated` is the capped/missing/deleted-lineage flag from
+/// `read_captured_history`. Turns can be dropped before they ever reach the
+/// byte budget here, so the notice must report those too.
+fn build_replay(prompt: &str, turns: &[(&str, String)], history_truncated: bool) -> Option<Replay> {
+    let mut selected = Vec::new();
+    let mut used = 0;
+    let mut omitted = history_truncated;
+    for (role, text) in turns.iter().rev() {
+        let label = if *role == "user" { "User" } else { "Assistant" };
+        let line = format!(
+            "{label}: {}",
+            truncate_utf8(text.trim(), REPLAY_MESSAGE_LIMIT)
+        );
+        if used + line.len() + 2 > REPLAY_LIMIT {
+            omitted = true;
+            break;
+        }
+        used += line.len() + 2;
+        selected.push(line);
+    }
+    if selected.is_empty() {
+        return None;
+    }
+    selected.reverse();
+    let mut out = String::from(
+        "[Coven Chat replay]\nThe Coven Code engine cannot reopen this chat's earlier turns from \
+         its own session store, so Coven Chat is replaying the most recent turns below. Treat \
+         them as the conversation so far; only the latest message is new. Reply to the latest \
+         message.\n\n",
+    );
+    if omitted {
+        out.push_str("(Earlier turns are omitted.)\n\n");
+    }
+    out.push_str("Earlier turns:\n");
+    for line in &selected {
+        out.push_str(line);
+        out.push_str("\n\n");
+    }
+    out.push_str("Latest message:\n");
+    out.push_str(if prompt.trim().is_empty() {
+        "Read the attached text files."
+    } else {
+        prompt
+    });
+    Some(Replay {
+        prompt: out,
+        replayed: selected.len(),
+        omitted,
+    })
+}
+
+/// The thread-visible disclosure that a turn carried replayed history.
+fn replay_notice(replay: &Replay) -> String {
+    format!(
+        "Coven Code can't reopen this chat's earlier turns on its own, so Chat replayed the last {} {} into this message.{}",
+        replay.replayed,
+        if replay.replayed == 1 { "turn" } else { "turns" },
+        if replay.omitted { " Older turns were left out." } else { "" },
+    )
+}
+
 fn is_captured_input(event: &Value) -> bool {
     event["type"] == "user"
         && matches!(
@@ -1099,7 +1412,7 @@ fn read_cli_history(
     Ok((events, true))
 }
 
-struct RunRegistration {
+pub(crate) struct RunRegistration {
     runs: Runs,
     id: String,
 }
@@ -1169,7 +1482,7 @@ fn send_local(
             );
         }
     }
-    let (harness, workspace) = if let Some(id) = &input.session_id {
+    let (harness, workspace, resumed) = if let Some(id) = &input.session_id {
         crate::chat_lifecycle::require_active(data, id)?;
         crate::chat_origin::require_chat_origin(data, id)?;
         let session = get_session(id)?;
@@ -1189,6 +1502,7 @@ fn send_local(
         (
             string(&session, "harness")?.to_owned(),
             PathBuf::from(string(&session, "project_root")?),
+            Some(session),
         )
     } else if let Some(id) = &input.familiar_id {
         validate_id(id)?;
@@ -1202,6 +1516,7 @@ fn send_local(
         (
             input.harness.clone().unwrap_or_else(|| "coven-code".into()),
             PathBuf::from(string(familiar, "workspace")?),
+            None,
         )
     } else {
         return Err("Select a familiar before sending a message.".into());
@@ -1217,14 +1532,28 @@ fn send_local(
             "Coven requires a dedicated project workspace, not a filesystem or home root.".into(),
         );
     }
-    let mut args = run_arguments(&input, &harness, &workspace)?;
+    // A harness that cannot reopen the thread natively gets the captured
+    // history replayed into this turn; the saved input stays the user's text.
+    let replay = match &resumed {
+        Some(session) if REPLAY_HARNESSES.contains(&harness.as_str()) => {
+            read_captured_history(data, session, get_session)?.and_then(|(events, partial)| {
+                build_replay(&input.prompt, &replay_turns(&events), partial)
+            })
+        }
+        _ => None,
+    };
+    let sent_prompt = replay
+        .as_ref()
+        .map_or(input.prompt.as_str(), |replay| replay.prompt.as_str())
+        .to_owned();
+    let mut args = run_arguments(&input, &harness, &workspace, &sent_prompt)?;
     let staged = if input.attachments.is_empty() {
         None
     } else {
         Some(attachments::stage(
             data,
             &input.run_id,
-            &input.prompt,
+            &sent_prompt,
             &input.attachments,
         )?)
     };
@@ -1261,11 +1590,14 @@ fn send_local(
         if input_session
             .as_deref()
             .is_some_and(|id| event.get("session_id").and_then(Value::as_str) == Some(id))
-            && (is_cli_input_echo(&event, echo_prompt) || is_cli_input_echo(&event, &input.prompt))
+            && (is_cli_input_echo(&event, echo_prompt)
+                || is_cli_input_echo(&event, &input.prompt)
+                || is_cli_input_echo(&event, &sent_prompt))
         {
             return Ok(());
         }
         let mut captured_input = None;
+        let mut replay_notice_event = None;
         if transcript.is_none()
             && event.get("type").and_then(Value::as_str) == Some("system")
             && event.get("subtype").and_then(Value::as_str) == Some("init")
@@ -1292,6 +1624,12 @@ fn send_local(
                 "attachments": attachments::metadata(&input.attachments),
                 "message": {"role": "user", "content": [{"type": "text", "text": input.prompt}]},
             }));
+            replay_notice_event = replay.as_ref().map(|replay| {
+                json!({
+                    "type": "system", "subtype": "notice", "source": "chat-replay", "session_id": id,
+                    "message": {"role": "system", "content": [{"type": "text", "text": replay_notice(replay)}]},
+                })
+            });
             input_session = Some(id.to_owned());
         }
         let file = transcript
@@ -1299,7 +1637,10 @@ fn send_local(
             .ok_or("Coven stream did not begin with session identity.")?;
         let initialized = captured_input.is_some();
         let mut published = Vec::new();
-        for event in std::iter::once(event).chain(captured_input) {
+        for event in std::iter::once(event)
+            .chain(captured_input)
+            .chain(replay_notice_event)
+        {
             serde_json::to_writer(&mut *file, &event)
                 .map_err(|_| "Cannot save Coven transcript.")?;
             file.write_all(b"\n")
@@ -1456,7 +1797,7 @@ mod tests {
         assert!(state.begin_shutdown().unwrap());
         assert!(state.register_run("too-late").is_err());
         assert!(wait_for_runs(&state.runs, Duration::from_secs(3)).unwrap());
-        assert_eq!(worker.join().unwrap().unwrap_err(), "Coven run cancelled.");
+        assert_eq!(worker.join().unwrap().unwrap_err(), RUN_CANCELLED);
         assert!(!state.begin_shutdown().unwrap());
         assert!(include_str!("lib.rs").contains("handle_exit_requested"));
     }
@@ -1798,7 +2139,13 @@ mod tests {
             harness: Some("codex".into()),
             attachments: vec![],
         };
-        let args = run_arguments(&input, "codex", std::path::Path::new("/safe/work")).unwrap();
+        let args = run_arguments(
+            &input,
+            "codex",
+            std::path::Path::new("/safe/work"),
+            &input.prompt,
+        )
+        .unwrap();
         assert!(args
             .windows(2)
             .any(|pair| pair == ["--permission", "read-only"]));
@@ -1819,7 +2166,13 @@ mod tests {
             harness: Some("copilot".into()),
             attachments: vec![],
         };
-        assert!(run_arguments(&input, "copilot", std::path::Path::new("/safe")).is_err());
+        assert!(run_arguments(
+            &input,
+            "copilot",
+            std::path::Path::new("/safe"),
+            &input.prompt
+        )
+        .is_err());
     }
 
     #[test]
@@ -1830,13 +2183,13 @@ mod tests {
             "attachments": [{"name": "note.txt", "bytes": [65, 66]}]
         }))
         .unwrap();
-        let args = run_arguments(&input, "coven-code", Path::new("/safe")).unwrap();
+        let args = run_arguments(&input, "coven-code", Path::new("/safe"), &input.prompt).unwrap();
         assert!(args.iter().any(|arg| arg == "--stream-json-input"));
         assert!(args
             .windows(2)
             .any(|pair| pair == ["--permission", "read-only"]));
-        assert!(run_arguments(&input, "codex", Path::new("/safe")).is_err());
-        assert!(run_arguments(&input, "claude", Path::new("/safe")).is_err());
+        assert!(run_arguments(&input, "codex", Path::new("/safe"), &input.prompt).is_err());
+        assert!(run_arguments(&input, "claude", Path::new("/safe"), &input.prompt).is_err());
     }
 
     #[cfg(unix)]
@@ -1872,7 +2225,7 @@ mod tests {
         let mut command = Command::new("/bin/sleep");
         command.arg("10");
         let result = execute_command(command, &AtomicBool::new(true), READ_TIMEOUT, None);
-        assert_eq!(result.unwrap_err(), "Coven run cancelled.");
+        assert_eq!(result.unwrap_err(), RUN_CANCELLED);
     }
 
     #[cfg(unix)]
@@ -1899,6 +2252,120 @@ mod tests {
     }
 
     #[test]
+    fn engine_turns_replay_captured_history_in_order_and_skip_tool_traffic() {
+        let events = vec![
+            json!({"type":"system","subtype":"init","session_id":"first"}),
+            json!({"type":"user","source":"chat-input","session_id":"first","parent_session_id":null,
+                "attachments":[{"name":"notes.txt","size":3}],
+                "message":{"role":"user","content":[{"type":"text","text":"First question"}]}}),
+            json!({"type":"text_delta","session_id":"first","text":"First "}),
+            json!({"type":"text_delta","session_id":"first","text":"answer"}),
+            json!({"type":"output","session_id":"first","text":"⚒ Bash(ls)"}),
+            json!({"type":"result","session_id":"first","subtype":"success"}),
+            json!({"type":"system","subtype":"init","session_id":"second"}),
+            json!({"type":"user","source":"chat-input","session_id":"second","parent_session_id":"first",
+                "message":{"role":"user","content":[{"type":"text","text":"Second question"}]}}),
+            json!({"type":"assistant","session_id":"second","message":{"role":"assistant","content":[
+                {"type":"tool_use","name":"shell"},{"type":"text","text":"Second answer"}]}}),
+        ];
+        let turns = replay_turns(&events);
+        assert_eq!(
+            turns,
+            vec![
+                ("user", "First question\n[Attached: notes.txt]".to_string()),
+                ("assistant", "First answer".to_string()),
+                ("user", "Second question".to_string()),
+                ("assistant", "Second answer".to_string()),
+            ]
+        );
+        let replay = build_replay("Latest question", &turns, false).unwrap();
+        assert_eq!(replay.replayed, 4);
+        assert!(!replay.omitted);
+        assert!(replay.prompt.ends_with("Latest message:\nLatest question"));
+        let first = replay.prompt.find("User: First question").unwrap();
+        let second = replay.prompt.find("User: Second question").unwrap();
+        assert!(first < second);
+        assert!(!replay.prompt.contains("Bash(ls)"));
+        assert!(!replay.prompt.contains("omitted"));
+        assert!(build_replay("Latest question", &[], false).is_none());
+        assert!(build_replay("", &turns, false)
+            .unwrap()
+            .prompt
+            .ends_with("Latest message:\nRead the attached text files."));
+        assert_eq!(
+            replay_notice(&replay),
+            "Coven Code can't reopen this chat's earlier turns on its own, so Chat replayed the last 4 turns into this message."
+        );
+    }
+
+    #[test]
+    fn engine_replay_truncation_stays_inside_the_message_cap() {
+        for text in [
+            "x".repeat(REPLAY_MESSAGE_LIMIT * 2),
+            "é".repeat(REPLAY_MESSAGE_LIMIT),
+            "🜲".repeat(REPLAY_MESSAGE_LIMIT),
+        ] {
+            let truncated = truncate_utf8(&text, REPLAY_MESSAGE_LIMIT);
+            assert!(
+                truncated.len() <= REPLAY_MESSAGE_LIMIT,
+                "{} exceeded the cap",
+                truncated.len()
+            );
+            assert!(truncated.ends_with(TRUNCATION_MARKER));
+        }
+    }
+
+    #[test]
+    fn engine_replay_reports_history_dropped_before_the_byte_budget() {
+        let turns: Vec<(&str, String)> = vec![
+            ("user", "only surviving question".to_owned()),
+            ("assistant", "only surviving answer".to_owned()),
+        ];
+        // Everything left fits, so the budget alone would report nothing missing.
+        let complete = build_replay("now", &turns, false).unwrap();
+        assert!(!complete.omitted);
+        assert!(!complete.prompt.contains("(Earlier turns are omitted.)"));
+        assert!(!replay_notice(&complete).ends_with("Older turns were left out."));
+
+        // Capped, missing or deleted lineage must still be disclosed.
+        let partial = build_replay("now", &turns, true).unwrap();
+        assert!(partial.omitted);
+        assert_eq!(partial.replayed, complete.replayed);
+        assert!(partial.prompt.contains("(Earlier turns are omitted.)"));
+        assert!(replay_notice(&partial).ends_with("Older turns were left out."));
+    }
+
+    #[test]
+    fn engine_replay_keeps_the_newest_turns_within_the_budget() {
+        let long = "x".repeat(REPLAY_MESSAGE_LIMIT * 2);
+        let turns: Vec<(&str, String)> = (0..40)
+            .map(|index| {
+                (
+                    if index % 2 == 0 { "user" } else { "assistant" },
+                    format!("turn {index} {long}"),
+                )
+            })
+            .collect();
+        let replay = build_replay("now", &turns, false).unwrap();
+        assert!(replay.omitted);
+        assert!(replay.replayed >= 1 && replay.replayed < turns.len());
+        assert!(
+            replay.prompt.len() <= REPLAY_LIMIT + 1024,
+            "{}",
+            replay.prompt.len()
+        );
+        assert!(replay.prompt.contains("Assistant: turn 39 "));
+        assert!(!replay.prompt.contains("turn 0 "));
+        assert!(replay.prompt.contains("(Earlier turns are omitted.)"));
+        assert!(replay.prompt.contains("…[truncated by Coven Chat]"));
+        assert!(replay_notice(&replay).ends_with("Older turns were left out."));
+        let multibyte = "é".repeat(REPLAY_MESSAGE_LIMIT);
+        let truncated = truncate_utf8(&multibyte, REPLAY_MESSAGE_LIMIT);
+        assert!(truncated.starts_with("éé") && truncated.ends_with("…[truncated by Coven Chat]"));
+        assert_eq!(truncate_utf8("short", REPLAY_MESSAGE_LIMIT), "short");
+    }
+
+    #[test]
     fn bundled_engine_is_read_only_and_preserves_session_identity() {
         let input = SendInput {
             run_id: "run-1".into(),
@@ -1908,8 +2375,10 @@ mod tests {
             harness: None,
             attachments: vec![],
         };
-        let args = run_arguments(&input, "coven-code", Path::new("/workspace")).unwrap();
+        let args =
+            run_arguments(&input, "coven-code", Path::new("/workspace"), "replayed").unwrap();
         assert_eq!(&args[..2], ["run", "coven-code"]);
+        assert_eq!(&args[args.len() - 2..], ["--", "replayed"]);
         assert!(args
             .windows(2)
             .any(|pair| pair == ["--continue", "session-1"]));
@@ -2020,7 +2489,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "opt-in configured-model probe: creates and retains two real Coven ledger sessions"]
+    #[ignore = "opt-in configured-model probe: creates and retains three real Coven ledger sessions"]
     fn installed_native_chat_send_read_resume() {
         assert_eq!(
             std::env::var("COVEN_CHAT_MODEL_SMOKE").as_deref(),
@@ -2037,15 +2506,37 @@ mod tests {
         let mut previous = None;
         let mut ids = Vec::new();
         let mut complete_transcript = Vec::new();
-        for prompt in [
+        // Chat sends as a familiar; the familiar's own workspace is the cwd.
+        let familiar = std::env::var("COVEN_CHAT_SMOKE_FAMILIAR")
+            .expect("Set COVEN_CHAT_SMOKE_FAMILIAR to an installed Coven familiar id.");
+        let workspace = cli_json(&["familiars", "--json"])
+            .unwrap()
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|entry| entry["id"] == familiar.as_str())
+            .expect("The smoke familiar is not installed in Coven.")["workspace"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        let workspace = PathBuf::from(workspace).canonicalize().unwrap();
+        // The third turn only passes when the engine actually receives the
+        // earlier turns: the bundled engine cannot reopen them itself, so
+        // this exercises the replayed-history path end to end.
+        let markers = ["COVEN_CHAT_READY", "COVEN_CHAT_RESUMED", "COVEN_CHAT_READY"];
+        for (turn, prompt) in [
             "Reply exactly COVEN_CHAT_READY. Do not use tools or access files.",
             "Reply exactly COVEN_CHAT_RESUMED. Do not use tools or access files.",
-        ] {
+            "Reply with exactly the marker you replied with in your first reply of this chat, nothing else. Do not use tools or access files.",
+        ]
+        .into_iter()
+        .enumerate()
+        {
             let input = SendInput {
                 run_id: uuid::Uuid::new_v4().to_string(),
                 prompt: prompt.into(),
                 session_id: previous.clone(),
-                familiar_id: None,
+                familiar_id: Some(familiar.clone()),
                 harness: Some("coven-code".into()),
                 attachments: vec![],
             };
@@ -2075,11 +2566,21 @@ mod tests {
                 .unwrap();
             let id = string(init, "session_id").unwrap().to_owned();
             assert_eq!(init["permission"], "read-only");
-            let expected = if previous.is_none() {
-                "COVEN_CHAT_READY"
-            } else {
-                "COVEN_CHAT_RESUMED"
-            };
+            let expected = markers[turn];
+            let replay_notices = observed
+                .iter()
+                .filter(|event| event["type"] == "system"
+                    && event["subtype"] == "notice"
+                    && event["source"] == "chat-replay")
+                .count();
+            assert_eq!(replay_notices, usize::from(turn > 0));
+            assert!(
+                observed
+                    .iter()
+                    .filter(|event| event["type"] == "user")
+                    .all(is_captured_input),
+                "The replayed prompt must never be stored as a user message"
+            );
             let delta_text: String = observed
                 .iter()
                 .filter(|event| event["type"] == "text_delta")
@@ -2116,11 +2617,7 @@ mod tests {
             assert_eq!(saved["session"]["status"], "completed");
             assert_eq!(
                 saved["session"]["projectRoot"],
-                data.join("coven-workspace")
-                    .canonicalize()
-                    .unwrap()
-                    .to_string_lossy()
-                    .as_ref()
+                workspace.to_string_lossy().as_ref()
             );
             if let Some(old) = &previous {
                 assert_ne!(
@@ -2146,7 +2643,7 @@ mod tests {
                 .iter()
                 .filter(|event| is_captured_input(event))
                 .count(),
-            2
+            3
         );
         println!("Retained Coven native smoke ledger IDs: {}", ids.join(", "));
         println!("Retained isolated app smoke storage: {}", data.display());
@@ -2203,5 +2700,89 @@ mod tests {
             "Verified retained real model turns, ordered without duplicates: {}",
             ids.join(", ")
         );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn execute_command_lines_streams_stdout_and_stderr_then_exit_code() {
+        let mut command = Command::new("sh");
+        command.args(["-c", "echo one; echo two >&2; printf 'no-newline'; exit 3"]);
+        let cancel = AtomicBool::new(false);
+        let mut seen: Vec<(bool, String)> = Vec::new();
+        let code = execute_command_lines(
+            command,
+            &cancel,
+            Duration::from_secs(5),
+            &mut |stderr, line| {
+                seen.push((stderr, line.to_owned()));
+                Ok(())
+            },
+        )
+        .unwrap();
+        assert_eq!(code, 3);
+        assert!(seen.contains(&(false, "one".to_owned())));
+        assert!(seen.contains(&(true, "two".to_owned())));
+        assert!(
+            seen.contains(&(false, "no-newline".to_owned())),
+            "trailing partial line must flush"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn execute_command_lines_honours_cancel() {
+        let mut command = Command::new("sh");
+        command.args(["-c", "sleep 30"]);
+        let cancel = AtomicBool::new(true);
+        let error =
+            execute_command_lines(command, &cancel, Duration::from_secs(5), &mut |_, _| Ok(()))
+                .unwrap_err();
+        assert_eq!(error, RUN_CANCELLED);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn execute_command_lines_cancel_mid_run_reaps_the_child_promptly() {
+        let mut command = Command::new("sh");
+        command.args(["-c", "sleep 30"]);
+        let cancel = Arc::new(AtomicBool::new(false));
+        let flipper = {
+            let cancel = Arc::clone(&cancel);
+            thread::spawn(move || {
+                thread::sleep(Duration::from_millis(150));
+                cancel.store(true, Ordering::SeqCst);
+            })
+        };
+        let start = Instant::now();
+        let error = execute_command_lines(
+            command,
+            &cancel,
+            Duration::from_secs(30),
+            &mut |_, _| Ok(()),
+        )
+        .unwrap_err();
+        flipper.join().unwrap();
+        assert_eq!(error, RUN_CANCELLED);
+        assert!(
+            start.elapsed() < Duration::from_secs(10),
+            "cancellation must return promptly, not wait for the child's own exit"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn execute_command_lines_returns_zero_for_success_and_keeps_tabs() {
+        let mut command = Command::new("sh");
+        command.args(["-c", "printf 'a\\tb\\n'"]);
+        let cancel = AtomicBool::new(false);
+        let mut seen = Vec::new();
+        let code =
+            execute_command_lines(command, &cancel, Duration::from_secs(5), &mut |_, line| {
+                seen.push(line.to_owned());
+                Ok(())
+            })
+            .unwrap();
+        assert_eq!(code, 0);
+        assert_eq!(seen, vec!["a\tb".to_owned()]);
     }
 }

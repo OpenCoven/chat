@@ -16,6 +16,12 @@ export type CovenFamiliar = {
   emoji?: string;
   workspace?: string;
   avatarUrl?: string;
+  projectAccess?: readonly CovenProjectAccess[];
+};
+export type CovenProjectAccess = {
+  name: string;
+  path: string;
+  access: 'read' | 'write';
 };
 export type CovenSession = {
   archived?: boolean;
@@ -97,6 +103,20 @@ function familiar(value: unknown): value is CovenFamiliar {
     optionalText(value.description) &&
     optionalText(value.emoji, 32) &&
     optionalText(value.workspace) &&
+    (value.projectAccess === undefined ||
+      (Array.isArray(value.projectAccess) &&
+        value.projectAccess.length <= 1024 &&
+        value.projectAccess.every(
+          (project: unknown) =>
+            record(project) &&
+            typeof project.name === 'string' &&
+            project.name.length > 0 &&
+            project.name.length <= 4096 &&
+            typeof project.path === 'string' &&
+            project.path.length > 0 &&
+            project.path.length <= 4096 &&
+            (project.access === 'read' || project.access === 'write'),
+        ))) &&
     (value.avatarUrl === undefined ||
       (typeof value.avatarUrl === 'string' &&
         value.avatarUrl.length <= 256 * 1024 &&

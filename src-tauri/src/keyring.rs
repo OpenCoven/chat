@@ -33,6 +33,12 @@ const CONFORMANCE_SERVICE_ENV: &str = "OPENCOVEN_PHASE1_CONFORMANCE_KEYRING_SERV
 pub(crate) const CONFORMANCE_SERVICE_PREFIX: &str = "ai.opencoven.chat.phase1.";
 pub(crate) const CREDENTIAL_ACCOUNT_PREFIX: &str = "cave-client-v1";
 pub(crate) const INSTALLATION_ID_ACCOUNT: &str = "installation-id-v1";
+// allow(dead_code): read by the session accessors below, which are wired
+// to a caller in a later task.
+#[allow(dead_code)]
+pub(crate) const SESSION_ACCOUNT: &str = "workos-session-v1";
+#[allow(dead_code)]
+const MAX_SESSION_RECORD_BYTES: usize = 4 * 1024;
 #[cfg(unix)]
 const CREDENTIAL_LOCK_TIMEOUT: Duration = Duration::from_secs(5);
 const MAX_CREDENTIAL_RECORD_BYTES: usize = 4 * 1024;
@@ -82,6 +88,8 @@ pub(crate) enum KeyringError {
     Unavailable,
     #[cfg(feature = "phase1-conformance")]
     InstallationUnavailable(InstallationStage),
+    #[cfg(feature = "phase1-conformance")]
+    CustodyInstallationUnsupported,
     Failure,
     #[cfg(feature = "phase1-conformance")]
     CleanupGrantRejected,
@@ -162,6 +170,10 @@ impl KeyringError {
                 },
                 true,
             ),
+            #[cfg(feature = "phase1-conformance")]
+            Self::CustodyInstallationUnsupported => {
+                NativeDiagnostic::new("installation_custody_unsupported", true)
+            }
             Self::Failure => NativeDiagnostic::new("keychain_failure", true),
             #[cfg(feature = "phase1-conformance")]
             Self::CleanupGrantRejected => NativeDiagnostic::new("cleanup_grant_rejected", false),
@@ -266,6 +278,71 @@ impl Drop for Credential {
     }
 }
 
+/// The WorkOS session the app holds for the signed-in person. Tokens never
+/// leave native code; the webview only ever receives a derived status.
+///
+/// `allow(dead_code)`: consumed by the identity commands added in a later
+/// task; nothing in this crate calls the session accessors yet.
+///
+/// `deny_unknown_fields` makes the shape a one-way door: adding a field
+/// means bumping the account name to `workos-session-v2`, not extending
+/// `v1`.
+#[derive(Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[allow(dead_code)]
+pub(crate) struct StoredSession {
+    pub(crate) access_token: String,
+    pub(crate) refresh_token: String,
+    /// Unix seconds; copied from the access token's `exp`.
+    pub(crate) expires_at: u64,
+    /// Unix seconds of the last successful exchange or refresh.
+    pub(crate) checked_at: u64,
+    pub(crate) subject: String,
+    pub(crate) email: String,
+}
+
+impl Drop for StoredSession {
+    fn drop(&mut self) {
+        self.access_token.zeroize();
+        self.refresh_token.zeroize();
+        self.subject.zeroize();
+        self.email.zeroize();
+    }
+}
+
+#[allow(dead_code)]
+/// The one field invariant for a stored session. Reads and writes share it so
+/// a write cannot persist a record that every later read rejects.
+fn session_fields_are_complete(session: &StoredSession) -> bool {
+    !session.access_token.is_empty()
+        && !session.refresh_token.is_empty()
+        && !session.subject.is_empty()
+        && !session.email.is_empty()
+}
+
+fn serialize_session(session: &StoredSession) -> Result<Zeroizing<Vec<u8>>, KeyringError> {
+    if !session_fields_are_complete(session) {
+        return Err(KeyringError::Failure);
+    }
+    let bytes = Zeroizing::new(serde_json::to_vec(session).map_err(|_| KeyringError::Failure)?);
+    if bytes.len() > MAX_SESSION_RECORD_BYTES {
+        return Err(KeyringError::Failure);
+    }
+    Ok(bytes)
+}
+
+#[allow(dead_code)]
+fn parse_stored_session(raw: &[u8]) -> Result<StoredSession, KeyringError> {
+    if raw.len() > MAX_SESSION_RECORD_BYTES {
+        return Err(KeyringError::Failure);
+    }
+    let session: StoredSession = serde_json::from_slice(raw).map_err(|_| KeyringError::Failure)?;
+    if !session_fields_are_complete(&session) {
+        return Err(KeyringError::Failure);
+    }
+    Ok(session)
+}
+
 #[derive(Serialize, Deserialize)]
 struct StoredCredential {
     bearer: String,
@@ -287,7 +364,47 @@ pub(crate) enum CredentialSlot {
 }
 
 pub(crate) trait CredentialCustody: Send + Sync {
+    // A custody implementation that does not override this is a distinct
+    // condition from an unavailable secure store; keep them separable.
     fn installation_id(&self) -> Result<String, KeyringError> {
+        #[cfg(feature = "phase1-conformance")]
+        return Err(KeyringError::CustodyInstallationUnsupported);
+        #[cfg(not(feature = "phase1-conformance"))]
+        return Err(KeyringError::Unavailable);
+    }
+
+    /// `Ok(None)` when no session is stored. An unreadable record is an
+    /// error and is left in place so the person can decide what to do.
+    #[allow(dead_code)]
+    fn read_session(&self) -> Result<Option<StoredSession>, KeyringError> {
+        Err(KeyringError::Unavailable)
+    }
+
+    /// Compare-and-swap. `expected` is the session the caller read. `Ok(false)`
+    /// means another writer won and nothing was written; the caller re-reads.
+    /// `Err` is reserved for real faults (backend, corrupt record, oversize).
+    #[allow(dead_code)]
+    fn write_session(
+        &self,
+        expected: Option<&StoredSession>,
+        next: &StoredSession,
+    ) -> Result<bool, KeyringError> {
+        let _ = (expected, next);
+        Err(KeyringError::Unavailable)
+    }
+
+    /// Compare-and-delete. `Ok(false)` means the stored record is not the one
+    /// the caller read, so a stale sign-out cannot remove a newer session.
+    #[allow(dead_code)]
+    fn delete_session_if_matches(&self, expected: &StoredSession) -> Result<bool, KeyringError> {
+        let _ = expected;
+        Err(KeyringError::Unavailable)
+    }
+
+    /// Unconditional removal, for explicit force-cleanup paths only. Prefer
+    /// `delete_session_if_matches` wherever the caller has read the record.
+    #[allow(dead_code)]
+    fn delete_session(&self) -> Result<(), KeyringError> {
         Err(KeyringError::Unavailable)
     }
 
@@ -2051,6 +2168,89 @@ impl CredentialCustody for NativeKeyring {
             Err(error) => Err(map_keyring_error(error)),
         }
     }
+
+    /// `Ok(None)` when no session is stored. An unreadable record is an
+    /// error and is left in place so the person can decide what to do.
+    fn read_session(&self) -> Result<Option<StoredSession>, KeyringError> {
+        #[cfg(feature = "phase1-conformance")]
+        self.reject_provider_if_configured()?;
+        let _guard = acquire_mutation_lock()?;
+        let entry = self.session_entry()?;
+        match entry.get_secret() {
+            Ok(bytes) => {
+                let bytes = Zeroizing::new(bytes);
+                // Parse first. Migrating persistence rewrites the entry, and an
+                // unreadable record must surface as an error with its bytes
+                // left alone rather than being migrated on the way out.
+                let session = parse_stored_session(bytes.as_slice())?;
+                ensure_windows_local_persistence(&entry, bytes.as_slice())?;
+                Ok(Some(session))
+            }
+            Err(KeyringBackendError::NoEntry) => Ok(None),
+            Err(error) => Err(map_keyring_error(error)),
+        }
+    }
+
+    /// Compare-and-swap. `expected` is the session the caller read. `Ok(false)`
+    /// means another writer won and nothing was written; the caller re-reads.
+    /// `Err` is reserved for real faults (backend, corrupt record, oversize).
+    fn write_session(
+        &self,
+        expected: Option<&StoredSession>,
+        next: &StoredSession,
+    ) -> Result<bool, KeyringError> {
+        #[cfg(feature = "phase1-conformance")]
+        self.reject_provider_if_configured()?;
+        let _guard = acquire_mutation_lock()?;
+        let entry = self.session_entry()?;
+        let current = match entry.get_secret() {
+            Ok(bytes) => Some(Zeroizing::new(bytes)),
+            Err(KeyringBackendError::NoEntry) => None,
+            Err(error) => return Err(map_keyring_error(error)),
+        };
+        let expected_bytes = expected.map(serialize_session).transpose()?;
+        if current.as_deref().map(Vec::as_slice) != expected_bytes.as_deref().map(Vec::as_slice) {
+            return Ok(false);
+        }
+        let bytes = serialize_session(next)?;
+        entry.set_secret(&bytes).map_err(map_keyring_error)?;
+        ensure_windows_local_persistence(&entry, &bytes)?;
+        Ok(true)
+    }
+
+    /// Compare-and-delete. `Ok(false)` means the stored record changed after
+    /// the caller read it, so a stale sign-out or cleanup cannot remove the
+    /// session a concurrent refresh just wrote.
+    fn delete_session_if_matches(&self, expected: &StoredSession) -> Result<bool, KeyringError> {
+        #[cfg(feature = "phase1-conformance")]
+        self.reject_provider_if_configured()?;
+        let _guard = acquire_mutation_lock()?;
+        let entry = self.session_entry()?;
+        let current = match entry.get_secret() {
+            Ok(bytes) => Zeroizing::new(bytes),
+            Err(KeyringBackendError::NoEntry) => return Ok(false),
+            Err(error) => return Err(map_keyring_error(error)),
+        };
+        let expected_bytes = serialize_session(expected)?;
+        if current.as_slice() != expected_bytes.as_slice() {
+            return Ok(false);
+        }
+        match entry.delete_credential() {
+            Ok(()) | Err(KeyringBackendError::NoEntry) => Ok(true),
+            Err(error) => Err(map_keyring_error(error)),
+        }
+    }
+
+    fn delete_session(&self) -> Result<(), KeyringError> {
+        #[cfg(feature = "phase1-conformance")]
+        self.reject_provider_if_configured()?;
+        let _guard = acquire_mutation_lock()?;
+        let entry = self.session_entry()?;
+        match entry.delete_credential() {
+            Ok(()) | Err(KeyringBackendError::NoEntry) => Ok(()),
+            Err(error) => Err(map_keyring_error(error)),
+        }
+    }
 }
 
 pub(crate) fn validate_installation_id(installation_id: &str) -> Result<(), KeyringError> {
@@ -2145,6 +2345,17 @@ impl NativeKeyring {
             service,
             &format!("{CREDENTIAL_ACCOUNT_PREFIX}:{instance_id}"),
         )
+    }
+
+    // allow(dead_code): the session accessors below are wired to a caller
+    // (the identity commands) in a later task.
+    #[allow(dead_code)]
+    fn session_entry(&self) -> Result<Entry, KeyringError> {
+        #[cfg(feature = "phase1-conformance")]
+        let service = self.service_name();
+        #[cfg(not(feature = "phase1-conformance"))]
+        let service = SERVICE;
+        Self::entry_for(service, SESSION_ACCOUNT)
     }
 
     #[cfg(feature = "phase1-conformance")]
@@ -2349,6 +2560,63 @@ mod tests {
             ));
         }
     }
+    #[cfg(feature = "phase1-conformance")]
+    #[test]
+    fn unsupported_custody_installation_is_distinct_from_an_unavailable_store() {
+        // A custody type that does not override installation_id must not be
+        // reported as an unavailable secure store; the two are separate causes.
+        struct BareCustody;
+        impl super::CredentialCustody for BareCustody {
+            fn read(&self, _: &str, _: &str) -> Result<super::Credential, KeyringError> {
+                Err(KeyringError::Failure)
+            }
+            fn read_for_pairing_update(
+                &self,
+                _: &str,
+                _: &str,
+            ) -> Result<super::CredentialSlot, KeyringError> {
+                Err(KeyringError::Failure)
+            }
+            fn store_if_current(
+                &self,
+                _: &str,
+                _: &str,
+                _: Option<&super::Credential>,
+                _: &str,
+                _: &str,
+            ) -> Result<bool, KeyringError> {
+                Err(KeyringError::Failure)
+            }
+            fn replace_stale_if_current(
+                &self,
+                _: &str,
+                _: &str,
+                _: &super::Credential,
+                _: &str,
+                _: &str,
+            ) -> Result<bool, KeyringError> {
+                Err(KeyringError::Failure)
+            }
+            fn delete_if_matches(
+                &self,
+                _: &str,
+                _: &str,
+                _: &super::Credential,
+            ) -> Result<bool, KeyringError> {
+                Err(KeyringError::Failure)
+            }
+        }
+        let error = super::CredentialCustody::installation_id(&BareCustody)
+            .expect_err("the default custody implementation must fail");
+        assert!(matches!(
+            error,
+            KeyringError::CustodyInstallationUnsupported
+        ));
+        let diagnostic = error.diagnostic();
+        assert_eq!(diagnostic.code, "installation_custody_unsupported");
+        assert_ne!(diagnostic.code, KeyringError::Unavailable.diagnostic().code);
+        assert!(diagnostic.retryable);
+    }
     #[cfg(unix)]
     use super::{
         acquire_mutation_lock_detailed_with_timeout_at, acquire_mutation_lock_with_timeout_at,
@@ -2356,9 +2624,10 @@ mod tests {
     };
     use super::{
         acquire_windows_mutex, decode_legacy_windows_password, legacy_windows_mutex_name,
-        parse_stored_credential, validate_installation_id, windows_mutex_name,
-        windows_persistence_action, KeyringError, WindowsMutexApi, WindowsMutexWait,
-        WindowsPersistenceAction, MAX_CREDENTIAL_RECORD_BYTES,
+        parse_stored_credential, parse_stored_session, serialize_session, validate_installation_id,
+        windows_mutex_name, windows_persistence_action, KeyringError, StoredSession,
+        WindowsMutexApi, WindowsMutexWait, WindowsPersistenceAction, MAX_CREDENTIAL_RECORD_BYTES,
+        MAX_SESSION_RECORD_BYTES,
     };
     #[cfg(all(feature = "phase1-conformance", target_os = "macos"))]
     use super::{
@@ -3279,6 +3548,107 @@ mod tests {
                 decode_legacy_windows_password(&value),
                 Err(KeyringError::Failure)
             ));
+        }
+    }
+
+    #[test]
+    fn session_record_round_trips_and_is_bounded() {
+        let record = StoredSession {
+            access_token: "a".repeat(100),
+            refresh_token: "r".repeat(100),
+            expires_at: 1_800_000_000,
+            checked_at: 1_799_990_000,
+            subject: "user_01H".to_owned(),
+            email: "val@example.com".to_owned(),
+        };
+        let bytes = serialize_session(&record).unwrap();
+        assert!(bytes.len() <= MAX_SESSION_RECORD_BYTES);
+        let parsed = parse_stored_session(&bytes).unwrap();
+        assert_eq!(parsed.subject, "user_01H");
+        assert_eq!(parsed.expires_at, 1_800_000_000);
+
+        let mut huge = record.clone();
+        huge.access_token = "a".repeat(5000);
+        assert!(matches!(
+            serialize_session(&huge),
+            Err(KeyringError::Failure)
+        ));
+        assert!(matches!(
+            parse_stored_session(b"{not json"),
+            Err(KeyringError::Failure)
+        ));
+    }
+
+    #[test]
+    fn session_record_enforces_the_exact_size_boundary_and_non_empty_fields() {
+        let mut record = StoredSession {
+            access_token: String::new(),
+            refresh_token: "r".repeat(100),
+            expires_at: 1_800_000_000,
+            checked_at: 1_799_990_000,
+            subject: "user_01H".to_owned(),
+            email: "val@example.com".to_owned(),
+        };
+        // Pad the access token so the serialized record is exactly the cap.
+        let overhead = {
+            record.access_token = "a".to_owned();
+            serialize_session(&record).unwrap().len() - 1
+        };
+        record.access_token = "a".repeat(MAX_SESSION_RECORD_BYTES - overhead);
+        assert_eq!(
+            serialize_session(&record).unwrap().len(),
+            MAX_SESSION_RECORD_BYTES
+        );
+        record.access_token.push('a');
+        assert!(matches!(
+            serialize_session(&record),
+            Err(KeyringError::Failure)
+        ));
+
+        assert!(matches!(
+            parse_stored_session(&vec![b'x'; MAX_SESSION_RECORD_BYTES + 1]),
+            Err(KeyringError::Failure)
+        ));
+        let empty = br#"{"accessToken":"","refreshToken":"r","expiresAt":1,"checkedAt":1,"subject":"s","email":"e"}"#;
+        assert!(matches!(
+            parse_stored_session(empty),
+            Err(KeyringError::Failure)
+        ));
+    }
+
+    #[test]
+    fn a_write_cannot_persist_a_record_that_every_read_would_reject() {
+        let complete = StoredSession {
+            access_token: "a".repeat(10),
+            refresh_token: "r".repeat(10),
+            expires_at: 1_800_000_000,
+            checked_at: 1_799_990_000,
+            subject: "user_01H".to_owned(),
+            email: "val@example.com".to_owned(),
+        };
+        assert!(serialize_session(&complete).is_ok());
+
+        // Each field the read path requires must also stop the write path,
+        // otherwise a record can be stored that can never be read back.
+        for blank in [
+            |s: &mut StoredSession| s.access_token.clear(),
+            |s: &mut StoredSession| s.refresh_token.clear(),
+            |s: &mut StoredSession| s.subject.clear(),
+            |s: &mut StoredSession| s.email.clear(),
+        ] {
+            let mut record = StoredSession {
+                access_token: complete.access_token.clone(),
+                refresh_token: complete.refresh_token.clone(),
+                expires_at: complete.expires_at,
+                checked_at: complete.checked_at,
+                subject: complete.subject.clone(),
+                email: complete.email.clone(),
+            };
+            blank(&mut record);
+            assert!(
+                matches!(serialize_session(&record), Err(KeyringError::Failure)),
+                "an incomplete record was accepted for writing"
+            );
         }
     }
 

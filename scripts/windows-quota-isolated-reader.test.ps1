@@ -294,7 +294,7 @@ try {
         -not $enumerationResult.ResourceQuotaExceeded -or $enumerationResult.ExitCode -eq 0 -or
         $enumerationResult.ResourceQuotaMonitorCategory -cne 'access-denied' -or
         $enumerationResult.ResourceQuotaMonitorOperation -cne 'directory-enumeration-root' -or
-        $enumerationResult.ResourceQuotaMonitorRepeat -cne 'persistent') {
+        $enumerationResult.ResourceQuotaMonitorRepeat -cne 'persistent-access-denied') {
       throw 'Isolated enumeration did not retain the original failure and bounded repeat.'
     }
     $snapshot = [OpenCoven.Tests.QuotaReadableRepeatProbe]::Run(

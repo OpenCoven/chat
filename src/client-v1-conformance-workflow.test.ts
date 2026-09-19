@@ -3364,6 +3364,20 @@ ${pathAssignment}
         'Supervised Windows resource quota monitor failed closed: access-denied; root=status-staging; scope=workspace; operation=directory-enumeration; repeat=persistent.',
     },
     {
+      name: 'quota monitor repeat changed to I/O failure',
+      overrides: {
+        ResourceQuotaExceeded: true,
+        ResourceQuotaMonitorError: true,
+        ResourceQuotaMonitorCategory: 'access-denied',
+        ResourceQuotaMonitorRoot: 'harness-execution-aggregate',
+        ResourceQuotaMonitorScope: 'checkouts',
+        ResourceQuotaMonitorOperation: 'directory-enumeration-depth-3-plus',
+        ResourceQuotaMonitorRepeat: 'persistent-io',
+      },
+      diagnostic:
+        'Supervised Windows resource quota monitor failed closed: access-denied; root=harness-execution-aggregate; scope=checkouts; operation=directory-enumeration-depth-3-plus; repeat=persistent-io.',
+    },
+    {
       name: 'unidentified quota',
       overrides: { ResourceQuotaExceeded: true },
       diagnostic: 'Supervised Windows production exceeded an unidentified resource quota.',

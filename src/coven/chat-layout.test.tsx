@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import { ChatLayout, type ChatLayoutProps, composerCopy, emptyThreadText } from './chat-layout';
 
@@ -68,7 +68,9 @@ describe('empty transcript copy', () => {
       />,
     );
     expect(screen.queryByText('Chat with Astra')).not.toBeInTheDocument();
-    expect(screen.getByText(/Coven is running/)).toBeInTheDocument();
+    // Run status now sits beside the composer and names the addressee, rather
+    // than filling the transcript. The empty state must still yield to it.
+    expect(screen.getByText(/Astra is responding/)).toBeInTheDocument();
   });
 });
 
@@ -94,21 +96,54 @@ describe('top bar identity', () => {
 
 describe('composer copy', () => {
   it('names the addressee only when there is one', () => {
-    expect(composerCopy('Astra')).toEqual({
+    expect(composerCopy(true, 'Astra')).toEqual({
       label: 'Message Astra',
-      placeholder: 'Message Astra',
+      // The placeholder also advertises the reference affordances, which only
+      // exist once there is a connected CLI and a familiar to address.
+      placeholder: 'Message Astra · @ familiar · # project',
     });
-    expect(composerCopy().placeholder).toBe('Select a familiar to send a message.');
-    expect(composerCopy().label).toBe('Message');
+    expect(composerCopy(true).placeholder).toBe('Select a familiar to send a message.');
+    expect(composerCopy(true).label).toBe('Message');
+    // A missing CLI is not fixed by choosing a familiar.
+    expect(composerCopy(false).placeholder).toBe(
+      'Connect to your local Coven CLI to send a message.',
+    );
+    expect(composerCopy(false, 'Astra').placeholder).toBe(
+      'Connect to your local Coven CLI to send a message.',
+    );
     // An archived chat still addresses its familiar, and `ready` is false
     // there, so selection -- not `ready` -- decides the addressee.
-    expect(composerCopy('Lifecycle familiar').label).toBe('Message Lifecycle familiar');
+    expect(composerCopy(true, 'Lifecycle familiar').label).toBe('Message Lifecycle familiar');
   });
 
   it('does not offer to message the fallback name when nothing is selected', () => {
-    render(<ChatLayout {...layoutProps()} familiars={[{ id: 'f', name: 'Astra' }]} ready />);
+    render(
+      <ChatLayout {...layoutProps()} familiars={[{ id: 'f', name: 'Astra' }]} connected ready />,
+    );
     expect(screen.queryByPlaceholderText('Message Coven')).not.toBeInTheDocument();
     expect(screen.getByPlaceholderText('Select a familiar to send a message.')).toBeInTheDocument();
+  });
+
+  it('names the missing runtime rather than a selection when the CLI is down', () => {
+    render(<ChatLayout {...layoutProps()} familiars={[{ id: 'f', name: 'Astra' }]} />);
+    expect(
+      screen.getByPlaceholderText('Connect to your local Coven CLI to send a message.'),
+    ).toBeInTheDocument();
+  });
+
+  it('agrees with the transcript in every empty state', () => {
+    // The two helpers decide on the same inputs, so the field and the
+    // transcript can no longer name different obstacles.
+    for (const connected of [true, false]) {
+      for (const name of [undefined, 'Astra']) {
+        const transcript = emptyThreadText(connected, name);
+        const field = composerCopy(connected, name).placeholder;
+        const blamesRuntime = (text: string) => text.includes('Coven CLI');
+        const blamesSelection = (text: string) => text.includes('Select a familiar');
+        expect(blamesRuntime(field)).toBe(blamesRuntime(transcript));
+        expect(blamesSelection(field)).toBe(blamesSelection(transcript));
+      }
+    }
   });
 
   it('addresses the selected familiar', () => {
@@ -117,15 +152,109 @@ describe('composer copy', () => {
         {...layoutProps()}
         familiars={[{ id: 'f', name: 'Astra' }]}
         familiarId="f"
+        connected
         ready
       />,
     );
-    expect(screen.getByPlaceholderText('Message Astra')).toBeInTheDocument();
+    expect(
+      screen.getByPlaceholderText('Message Astra · @ familiar · # project'),
+    ).toBeInTheDocument();
   });
 });
 
 describe('production Familiars layout', () => {
-  it('hides archived familiar rows until the settings filter is enabled', () => {
+  it('uses independent reserved tabs with stable accessible names and live familiar labels', () => {
+    const props = {
+      ...layoutProps(),
+      familiarId: 'nova',
+      familiars: [{ id: 'nova', name: 'Nova' }],
+    };
+    const { container, rerender } = render(<ChatLayout {...props} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Hide familiars' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Close inspector' }));
+    const left = screen.getByRole('button', { name: 'Show familiars' });
+    const right = screen.getByRole('button', { name: 'Show inspector' });
+    const shell = container.querySelector<HTMLElement>('.coven-chat');
+    expect(left).toHaveTextContent('Familiars');
+    expect(right).toHaveTextContent('Nova');
+    for (const [button, variable] of [
+      [left, '--coven-sidebar-w'],
+      [right, '--coven-inspector-w'],
+    ] as const) {
+      expect(button.parentElement).toBe(shell);
+      expect(button.closest('[inert], [aria-hidden="true"]')).toBeNull();
+      expect(button).toHaveAttribute('aria-expanded', 'false');
+      expect(document.getElementById(button.getAttribute('aria-controls') ?? '')).toHaveAttribute(
+        'inert',
+      );
+      expect(shell?.style.getPropertyValue(variable)).toBe('var(--coven-rail-tab-w)');
+    }
+    expect(container.querySelector('.fr-thread .fr-rail-handle')).not.toBeInTheDocument();
+    rerender(<ChatLayout {...props} familiars={[{ id: 'nova', name: 'Renamed familiar' }]} />);
+    expect(right).toHaveTextContent('Renamed familiar');
+    rerender(<ChatLayout {...props} familiars={[]} />);
+    expect(right).toHaveTextContent('Details');
+    fireEvent.click(left);
+    expect(screen.getByRole('complementary', { name: 'Familiars sidebar' })).not.toHaveAttribute(
+      'inert',
+    );
+    expect(left).not.toBeVisible();
+  });
+
+  it('shows the observed workspace and keeps connection diagnostics collapsed', () => {
+    render(
+      <ChatLayout
+        {...layoutProps()}
+        ready
+        familiarId="nova"
+        sessionId="chat"
+        familiars={[{ id: 'nova', name: 'Nova', workspace: '/familiars/nova' }]}
+        sessions={[{ id: 'chat', title: 'Chat', projectRoot: '/projects/chat' }]}
+        status="Coven runtime version details"
+        busy
+      />,
+    );
+    expect(screen.getByText('Chat project: /projects/chat')).toBeVisible();
+    expect(screen.getByText('Coven runtime version details')).not.toBeVisible();
+    expect(screen.getByText('Connection details').closest('details')).not.toHaveAttribute('open');
+    expect(screen.getByText('Nova is responding…')).toBeVisible();
+    expect(screen.getByRole('button', { name: 'Stop run' })).toBeEnabled();
+  });
+
+  it('toggles both rails with keyboard shortcuts without changing the draft', () => {
+    const props = { ...layoutProps(), ready: true, draft: 'Keep this draft' };
+    const { container } = render(<ChatLayout {...props} />);
+    const shell = container.querySelector('.coven-chat');
+    const field = screen.getByRole('textbox');
+    act(() => field.focus());
+    fireEvent.keyDown(field, { key: '\\', code: 'Backslash', metaKey: true });
+    expect(shell).toHaveAttribute('data-sidebar', 'closed');
+    fireEvent.keyDown(field, { key: '\\', code: 'Backslash', ctrlKey: true });
+    expect(shell).toHaveAttribute('data-sidebar', 'open');
+    fireEvent.keyDown(field, { key: '|', code: 'Backslash', metaKey: true, shiftKey: true });
+    expect(shell).toHaveAttribute('data-inspector', 'closed');
+    fireEvent.keyDown(field, { key: '\\', code: 'Backslash', ctrlKey: true, shiftKey: true });
+    expect(shell).toHaveAttribute('data-inspector', 'open');
+    expect(field).toHaveValue('Keep this draft');
+    expect(props.onDraft).not.toHaveBeenCalled();
+    expect(props.onSend).not.toHaveBeenCalled();
+  });
+
+  it('ignores plain typing, composition, repeats, and modal dialogs for rail shortcuts', () => {
+    const { container } = render(<ChatLayout {...layoutProps()} />);
+    const shell = container.querySelector('.coven-chat');
+    fireEvent.keyDown(window, { key: '\\', code: 'Backslash' });
+    fireEvent.keyDown(window, { key: '\\', code: 'Backslash', metaKey: true, isComposing: true });
+    fireEvent.keyDown(window, { key: '\\', code: 'Backslash', ctrlKey: true, repeat: true });
+    const dialog = document.createElement('dialog');
+    dialog.open = true;
+    document.body.append(dialog);
+    fireEvent.keyDown(window, { key: '\\', code: 'Backslash', metaKey: true });
+    dialog.remove();
+    expect(shell).toHaveAttribute('data-sidebar', 'open');
+  });
+
+  it('keeps archived familiar rows out of the agent list', () => {
     const props = {
       ...layoutProps(),
       familiars: [
@@ -134,25 +263,45 @@ describe('production Familiars layout', () => {
       ],
       sessions: [{ id: 'old', title: 'Old', familiarId: 'b', archived: true }],
     };
-    const view = render(<ChatLayout {...props} />);
+    render(<ChatLayout {...props} />);
     expect(screen.getByRole('button', { name: 'Active familiar' })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Archived familiar' })).not.toBeInTheDocument();
-    view.rerender(<ChatLayout {...props} archivedFilter />);
-    expect(screen.getByRole('button', { name: 'Archived familiar' })).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'Active familiar' })).not.toBeInTheDocument();
   });
 
-  it('keeps the archive filter inside collapsed user settings', () => {
+  it('offers the archived-chat view only when the host can change it', () => {
+    const { unmount } = render(<ChatLayout {...layoutProps()} />);
+    expect(screen.queryByText('User settings')).not.toBeInTheDocument();
+    expect(screen.queryByRole('checkbox', { name: 'Show archived chats' })).not.toBeInTheDocument();
+    unmount();
+
     const onArchivedFilter = vi.fn();
     render(<ChatLayout {...layoutProps()} onArchivedFilter={onArchivedFilter} />);
-    const settings = screen.getByText('User settings').closest('details');
-    expect(settings).not.toHaveAttribute('open');
-    expect(screen.getByRole('checkbox', { name: 'Show archived chats' })).not.toBeVisible();
-    expect(screen.queryByRole('button', { name: 'Archived chats' })).not.toBeInTheDocument();
-    if (!settings) throw new Error('User settings are missing.');
-    settings.open = true;
-    fireEvent.click(screen.getByRole('checkbox', { name: 'Show archived chats' }));
+    const toggle = screen.getByRole('checkbox', { name: 'Show archived chats' });
+    expect(toggle).not.toBeChecked();
+    fireEvent.click(toggle);
     expect(onArchivedFilter).toHaveBeenCalledWith(true);
+  });
+
+  it('reaches archived chats so they can be restored', () => {
+    const props = {
+      ...layoutProps(),
+      familiars: [
+        { id: 'live', name: 'Active familiar' },
+        { id: 'gone', name: 'Archived familiar' },
+      ],
+      sessions: [
+        { id: 's1', familiarId: 'live', title: 'Active familiar' },
+        { id: 's2', familiarId: 'gone', title: 'Archived familiar', archived: true },
+      ],
+    };
+    const { unmount } = render(<ChatLayout {...props} />);
+    expect(screen.queryByRole('button', { name: 'Archived familiar' })).not.toBeInTheDocument();
+    unmount();
+
+    // Archiving must not strand a chat: the archived view is the route back.
+    render(<ChatLayout {...props} archivedFilter onArchivedFilter={() => {}} />);
+    expect(screen.getByRole('button', { name: 'Archived familiar' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Active familiar' })).not.toBeInTheDocument();
   });
 
   it('shows one row per familiar rather than one row per ledger session', () => {
@@ -269,10 +418,15 @@ describe('production Familiars layout', () => {
   });
 
   it('tells a ready user without a familiar that one must be selected, matching the disabled composer', () => {
-    render(<ChatLayout {...layoutProps()} ready />);
+    // `connected` is what makes this the healthy/no-selection state. Rendering
+    // `ready` alone left the assertion below satisfied by the inspector's
+    // unrelated prose while the composer named the runtime instead.
+    render(<ChatLayout {...layoutProps()} connected ready />);
     expect(screen.getByRole('button', { name: 'Send' })).toBeDisabled();
     expect(screen.queryByText(/optional/i)).not.toBeInTheDocument();
     expect(screen.getAllByText(/select a familiar/i).length).toBeGreaterThan(0);
+    // The name promises the composer specifically, so assert it directly.
+    expect(screen.getByPlaceholderText('Select a familiar to send a message.')).toBeInTheDocument();
   });
 
   it('shows real messages, filters conversations and renders honest access', () => {
@@ -407,6 +561,37 @@ describe('compact viewports', () => {
     };
   }
 
+  it.each([300, 360])('rail tabs yield to the scrim at width %i', (width) => {
+    const restore = mockViewport(width);
+    try {
+      const { container } = render(<ChatLayout {...layoutProps()} ready />);
+      const shell = container.querySelector('.coven-chat');
+      expect(screen.getByRole('button', { name: 'Show familiars' })).toBeVisible();
+      expect(screen.getByRole('button', { name: 'Show inspector' })).toBeVisible();
+
+      // With a drawer open the scrim owns the surface. A reserved tab left on
+      // top of it would swallow the click that dismisses the drawer.
+      fireEvent.click(screen.getByRole('button', { name: 'Show familiars' }));
+      expect(shell).toHaveAttribute('data-sidebar', 'open');
+      expect(screen.queryByRole('button', { name: 'Show inspector' })).not.toBeInTheDocument();
+
+      fireEvent.click(screen.getByRole('button', { name: 'Close panels' }));
+      expect(shell).toHaveAttribute('data-sidebar', 'closed');
+      const right = screen.getByRole('button', { name: 'Show inspector' });
+      expect(right).toBeVisible();
+
+      right.focus();
+      fireEvent.click(right);
+      expect(shell).toHaveAttribute('data-sidebar', 'closed');
+      expect(shell).toHaveAttribute('data-inspector', 'open');
+      screen.getByRole('button', { name: 'Close inspector' }).focus();
+      fireEvent.keyDown(window, { key: 'Escape' });
+      expect(screen.getByRole('button', { name: 'Show inspector' })).toHaveFocus();
+    } finally {
+      restore();
+    }
+  });
+
   it('turns both rails into closed drawers that open one at a time and dismiss from the scrim or Escape', () => {
     const restore = mockViewport(390);
     try {
@@ -425,7 +610,10 @@ describe('compact viewports', () => {
       fireEvent.click(screen.getByRole('button', { name: 'Close panels' }));
       expect(sidebar).toHaveAttribute('aria-hidden', 'true');
 
+      // Switching rails goes through the scrim rather than tab-to-tab, so the
+      // dismiss target is never covered.
       fireEvent.click(screen.getByRole('button', { name: 'Show familiars' }));
+      fireEvent.click(screen.getByRole('button', { name: 'Close panels' }));
       fireEvent.click(screen.getByRole('button', { name: 'Show inspector' }));
       expect(sidebar).toHaveAttribute('aria-hidden', 'true');
       expect(inspector).not.toHaveAttribute('aria-hidden');
@@ -448,7 +636,7 @@ describe('compact viewports', () => {
       const hide = screen.getByRole('button', { name: 'Hide familiars' });
       hide.focus();
       fireEvent.click(hide);
-      // The header opener remounts, so a surviving equivalent takes focus.
+      // The full-height tab survives independently of the inert panel.
       expect(screen.getByRole('button', { name: 'Show familiars' })).toHaveFocus();
 
       const openInspector = screen.getByRole('button', { name: 'Show inspector' });

@@ -116,6 +116,7 @@ const nativeLaunchPublicationFailures = new WeakMap();
 const nativeRpcFailureCategories = new WeakMap();
 const nativeInstallationResponseCategories = new Map([
   ['secure_store_unavailable', 'secure-store-unavailable'],
+  ['installation_custody_unsupported', 'custody-unsupported'],
   ['installation_lock_unavailable', 'lock-unavailable'],
   ['installation_entry_unavailable', 'entry-unavailable'],
   ['installation_read_unavailable', 'read-unavailable'],
@@ -173,6 +174,7 @@ const schemaV2NativeFailureStages = new Set([
   'native-preflight-custody-proof',
   'native-preflight-installation-rpc',
   'native-preflight-installation-secure-store-unavailable',
+  'native-preflight-installation-custody-unsupported',
   'native-preflight-installation-lock-unavailable',
   'native-preflight-installation-entry-unavailable',
   'native-preflight-installation-read-unavailable',
