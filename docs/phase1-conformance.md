@@ -1,38 +1,5 @@
 # Phase 1 real-authority conformance
 
-## Bounded quota retry categories
-
-Protected [run 35146928092](https://github.com/OpenCoven/chat/actions/runs/35146928092)
-used Chat #311 at `157fb3206b9b90f24049aa2043bae534d2b9a709` and SDK #293 at
-`3459dcaad0877bbef2a25da24fbd521879ef020e`. Windows failed with `access-denied`,
-root `harness-execution-aggregate`, scope `checkouts`, operation
-`directory-enumeration-depth-3-plus`, and repeat `persistent`. Linux and macOS
-records passed identity, timing, privacy, schema, and all 197 ordered assertions.
-Windows emitted no record, and no accepted aggregate exists. This earlier quota
-failure does not establish that the Cave build home repair passed isolation.
-
-The legacy `persistent` label means the repeat threw a non-missing exception.
-It does not prove a second access denial. The bounded diagnostic now preserves
-the initial category and reports the repeat as `persistent-<category>`, using
-only the existing fixed exception categories. For example, first-attempt access
-denial followed by an I/O failure reports `access-denied` with `persistent-io`;
-two access denials report `access-denied` with `persistent-access-denied`.
-Legacy `persistent` remains accepted by the context normalizer.
-
-Run the portable classification and non-recovery checks with:
-
-```sh
-pwsh -NoLogo -NoProfile -NonInteractive -File scripts/windows-quota-diagnostics.test.ps1
-```
-
-The regression matrix covers every fixed repeat category, rejects private text,
-preserves the first failure, and requires one whole-pass attempt for each
-non-recoverable result. The change adds no retries and changes no quotas,
-permissions, or recovery predicates. Native Windows fixtures require the refined
-labels; their execution remains a delivery gate. Reviewed producer binding,
-actual-merge SDK rebinding, both scope rotations, and fresh protected validation
-remain required before claiming acceptance or identifying the failing checkout.
-
 ## Cave build home isolation checkpoint
 
 Protected run `35138402347` failed on Windows with
@@ -247,8 +214,8 @@ assignment, RPC decoder and primary/secondary exception pipeline. This fixture
 correction does not establish the protected installation failure's cause or
 relax the round-trip assertions.
 
-The lock now selects reviewed source `0a35e571de69c3f17b2f490974caec36b34205a5`,
-tree `4f98b5cff7ac65d7229c136490265ea60d2cd764`, including all 25 governed files
+The lock now selects reviewed source `28821d4d035d7815df396b756c2e30ecb0d54f5e`,
+tree `f893c71be4fd0eec23c8739716441bd2f533d764`, including all 25 governed files
 and ten production deltas. The checkout regression exercises all five labels
 from that immutable revision. SDK rebinding, both scope rotations and fresh
 protected validation remain required; this binding alone is not acceptance.
@@ -2053,7 +2020,7 @@ revision authorities can therefore have different workflow hashes:
 
 | File | Bytes | SHA-256 |
 | --- | ---: | --- |
-| `.github/workflows/client-v1-conformance.yml` | 178,086 | `3c2f0d5423533b7b2c6d601e9f91a250064704bceeb4e53090ebecc935cacb09` |
+| `.github/workflows/client-v1-conformance.yml` | 180,386 | `be7f36a7ce1b3dd6834b565e33825c5af410c49ed0e193ffaffda91ef79125b3` |
 | `scripts/contract-canary.mjs` | 40,618 | `a4c2fe0a5eb6a5ff4653de5374c34c0fb46907c6806a5d23b86d8b37206ef958` |
 | `scripts/executable-resolution.mjs` | 9,154 | `31e3c412ff8c835f14522f36a59e91f4a4ba82913210ae8e3b4455217503f430` |
 | `scripts/owned-temp-directory.mjs` | 7,762 | `95f546ef9ed614f2a0f55d356ddfc54c943fc53b595b4eebebfcbd4db68e5c0b` |
@@ -2821,31 +2788,26 @@ Fresh reviewed source binding, SDK rebinding, and protected validation are
 required before attributing the Windows failure or claiming a repaired run.
 
 
-### Unsupported custody installation
+### Dispatching a protected run against a specific merged revision
 
-`secure_store_unavailable` covered two unrelated causes on the installation
-preflight. `KeyringError::Unavailable` is returned both by a secure store that
-is genuinely unavailable and by `CredentialCustody::installation_id`'s default
-trait body, which a custody implementation reaches only by never overriding it.
-`InstallationStage::classify` already rewrites `Unavailable` into
-`installation_lock_unavailable`, `installation_entry_unavailable`,
-`installation_read_unavailable`, `installation_write_unavailable` and
-`installation_persistence_unavailable`, so those five stages were already
-distinguishable; the default trait body was the remaining unclassified path.
+`workflow_dispatch` previously validated whatever `main` pointed at when the
+run started. The cross-repository contract requires the evidence producer to be
+a merge whose tree equals its reviewed second parent's tree, so a binding names
+one exact merge; any later commit to `main` — conformance-related or not —
+leaves that binding unable to describe the tip. Protected runs were therefore
+only usable inside the window between a binding landing and the next merge.
 
-It now returns the fixed code `installation_custody_unsupported`, published as
-`phase1.native-scenarios.native-preflight-installation-custody-unsupported`.
-The outer launcher derives its native-stage allowlist from the producer
-registry, so the identifier survives extraction without a second edit. Only the
-fixed identifier is published: no message, stack, path, credential or
-subprocess output is added.
+The optional `producer_revision` input names the commit to validate. The
+`resolve-producer-revision` job requires an exact lowercase 40-hex commit that
+exists in this repository and is an **ancestor of the dispatch ref**, then
+publishes it for the supervisor build, the Windows bootstrap and the Unix
+workspace checkout. Omitting it keeps the previous behaviour of validating the
+dispatch ref tip.
 
-Protected run
-[35100084575](https://github.com/OpenCoven/chat/actions/runs/35100084575)
-reported `native-preflight-installation-secure-store-unavailable` on Windows
-while Linux and macOS passed. This change does not repair that failure and does
-not establish its cause; it separates the two causes so the next protected run
-attributes it.
+The ancestry requirement is what keeps this from widening the trust boundary:
+an unmerged branch, an unrelated commit, or a revision from a fork is refused,
+so a protected run still only ever validates reviewed history that reached
+`main`. What changes is that it no longer has to be the newest such history.
 
 ### Unexpected installation RPC failures
 
@@ -2947,7 +2909,7 @@ validation, attestation, and aggregation were skipped.
 `ReadBoundedDirectorySnapshot` materializes a bounded snapshot. On access denial,
 `ReadDirectorySnapshotOperation` performs one fresh, complete snapshot read under the
 existing quota-reader identity. A successful repeat supplies the measurement; a missing
-directory is classified separately. In that historical producer, any other repeat exception produced `persistent`,
+directory is classified separately. Any other repeat exception produces `persistent`,
 while the initial access-denied category is preserved. An injected access denial followed
 by an I/O exception now exercises that distinction through the production snapshot seam.
 Thus the log does not prove two identical ACL failures, a particular checkout, a denied

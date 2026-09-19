@@ -5,12 +5,65 @@ on:
       validator_revision:
         required: true
         type: string
+      producer_revision:
+        description: >-
+          Exact merged Chat commit to validate. Defaults to the dispatch ref
+          tip. It must already be an ancestor of that tip: an unmerged or
+          unrelated revision is refused, so this decouples a protected run from
+          whatever happens to be at the tip without widening what may be
+          validated.
+        required: false
+        type: string
 permissions:
   contents: read
 jobs:
+  producer-revision:
+    name: resolve-producer-revision
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    outputs:
+      revision: ${{ steps['resolve'].outputs.revision }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+          ref: ${{ github.sha }}
+      - id: resolve
+        name: Resolve and verify the producer revision
+        env:
+          OPENCOVEN_PRODUCER_REVISION_INPUT: ${{ inputs.producer_revision }}
+          OPENCOVEN_DISPATCH_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          requested="${OPENCOVEN_PRODUCER_REVISION_INPUT:-}"
+          if [ -z "$requested" ]; then
+            requested="$OPENCOVEN_DISPATCH_SHA"
+          fi
+          case "$requested" in
+            *[!0-9a-f]* | "" ) echo 'Producer revision must be an exact lowercase 40-hex commit.' >&2; exit 1 ;;
+          esac
+          if [ "${#requested}" -ne 40 ]; then
+            echo 'Producer revision must be an exact lowercase 40-hex commit.' >&2
+            exit 1
+          fi
+          if ! git cat-file -e "$requested^{commit}" 2>/dev/null; then
+            echo 'Producer revision is not a commit in this repository.' >&2
+            exit 1
+          fi
+          if ! git merge-base --is-ancestor "$requested" "$OPENCOVEN_DISPATCH_SHA"; then
+            echo 'Producer revision is not an ancestor of the dispatch ref; only merged revisions may be validated.' >&2
+            exit 1
+          fi
+          printf 'revision=%s\n' "$requested" >> "$GITHUB_OUTPUT"
+          echo "Validating producer revision $requested"
   windows-supervisor:
     name: build-windows-supervisor
     if: github.ref == 'refs/heads/main'
+    needs: producer-revision
     runs-on: macos-latest
     timeout-minutes: 30
     permissions:
@@ -22,7 +75,7 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
-          ref: ${{ github.sha }}
+          ref: ${{ needs['producer-revision'].outputs.revision }}
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
         with:
           node-version: 24.18.1
@@ -42,7 +95,7 @@ jobs:
   platform-conformance:
     name: platform-conformance (${{ matrix.platform }})
     if: github.ref == 'refs/heads/main'
-    needs: windows-supervisor
+    needs: [producer-revision, windows-supervisor]
     timeout-minutes: 60
     strategy:
       fail-fast: false
@@ -71,7 +124,7 @@ jobs:
           OPENCOVEN_VALIDATOR_REVISION_INPUT: ${{ inputs.validator_revision }}
           OPENCOVEN_PROTECTED_VALIDATOR_REVISION: ${{ vars.CLIENT_V1_CONFORMANCE_VALIDATOR_REVISION }}
           OPENCOVEN_CHAT_REPOSITORY: ${{ github.repository }}
-          OPENCOVEN_CHAT_SHA: ${{ github.sha }}
+          OPENCOVEN_CHAT_SHA: ${{ needs['producer-revision'].outputs.revision }}
           OPENCOVEN_WINDOWS_IMAGE_OS: 'win25-vs2026'
           OPENCOVEN_WINDOWS_IMAGE_VERSION: '20260907.229.1'
           OPENCOVEN_WINDOWS_PREVIOUS_IMAGE_VERSION: '20260824.214.3'
@@ -1819,7 +1872,7 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
-          ref: ${{ github.sha }}
+          ref: ${{ needs['producer-revision'].outputs.revision }}
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
         if: matrix.platform != 'win32-x64'
         with:
