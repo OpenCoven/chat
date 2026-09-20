@@ -228,29 +228,15 @@ describe('Phase 1 specification guards', () => {
     ) as CapabilityFile;
 
     expect(capability.windows).toEqual(['main']);
-    expect(capability.permissions).toEqual([
-      ...covenRuntimeCommands.map((command) => `allow-${command.replaceAll('_', '-')}`),
-      'allow-app-identity',
-      'allow-app-installation-id',
-      'allow-cave-read-discovery',
-      'allow-cave-cancel-operation',
-      'allow-cave-launch',
-      'allow-cave-health',
-      'allow-coven-health',
-      'allow-cave-pairing-create',
-      'allow-cave-pairing-poll',
-      'allow-cave-pairing-exchange',
-      'allow-cave-reset-pairing',
-      'allow-cave-credential-status',
-      'allow-cave-forget-credential',
-      'allow-cave-list-familiars',
-      'allow-cave-list-projects',
-      'allow-cave-list-conversations',
-      'allow-cave-get-conversation',
-      'allow-cave-list-conversation-messages',
-      'allow-cave-familiar-contract',
-      'allow-cave-familiar-analytics',
-    ]);
+    // The chat UI invokes only the coven_runtime_* commands. The Cave adapter
+    // and identity commands remain registered for their native and conformance
+    // coverage, but the webview must not be able to reach them.
+    expect(capability.permissions).toEqual(
+      covenRuntimeCommands.map((command) => `allow-${command.replaceAll('_', '-')}`),
+    );
+    for (const command of registeredCommandNames(readText('src-tauri/src/commands.rs'))) {
+      expect(capability.permissions).not.toContain(`allow-${command.replaceAll('_', '-')}`);
+    }
 
     for (const permission of capability.permissions) {
       expect(typeof permission).toBe('string');
