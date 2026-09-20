@@ -53,10 +53,10 @@ jobs:
             validator_revision="${OPENCOVEN_VALIDATOR_REVISION_INPUT:-}"
             protected_validator_revision="${OPENCOVEN_PROTECTED_VALIDATOR_REVISION:-}"
             case "$validator_revision" in
-              *[!0-9a-f]* | "" ) echo 'Protected workflow revision must be an exact lowercase 40-hex commit.' >&2; exit 1 ;;
+              *[!0-9a-f]* | "" ) echo 'Validator input revision must be an exact lowercase 40-hex commit.' >&2; exit 1 ;;
             esac
             if [ "${#validator_revision}" -ne 40 ]; then
-              echo 'Protected workflow revision must be an exact lowercase 40-hex commit.' >&2
+              echo 'Validator input revision must be an exact lowercase 40-hex commit.' >&2
               exit 1
             fi
             case "$protected_validator_revision" in
@@ -67,18 +67,27 @@ jobs:
               exit 1
             fi
             if [ "$validator_revision" != "$protected_validator_revision" ]; then
-              echo 'Protected workflow revision does not match the environment validator revision.' >&2
+              echo 'inputs.validator_revision does not match the protected environment validator revision.' >&2
               exit 1
             fi
             requested="$(
               node --input-type=module --eval "
                 import { readFileSync } from 'node:fs';
-                const lock = JSON.parse(
-                  readFileSync(process.argv[1], 'utf8'),
-                );
+                const lockPath = process.argv[1];
+                let lock;
+                try {
+                  lock = JSON.parse(readFileSync(lockPath, 'utf8'));
+                } catch (error) {
+                  const message = error instanceof Error ? error.message : String(error);
+                  console.error(\`Validator lock at \${lockPath} is missing or invalid JSON: \${message}\`);
+                  process.exit(1);
+                }
                 const commit = lock?.evidenceProducer?.commit;
                 if (typeof commit !== 'string' || !/^[0-9a-f]{40}$/.test(commit)) {
-                  throw new Error('Validator lock evidence producer commit must be an exact lowercase 40-hex commit.');
+                  console.error(
+                    \`Validator lock at \${lockPath} must contain evidenceProducer.commit as an exact lowercase 40-hex commit.\`,
+                  );
+                  process.exit(1);
                 }
                 process.stdout.write(commit);
               " ".phase1-counterparts/sdk-validator/conformance/client-v1-cross-repository-lock.json"

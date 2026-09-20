@@ -825,6 +825,28 @@ describe('producer revision ancestry gate', () => {
     expect(outcome.revision).toBe('');
     expect(outcome.stderr).toContain('not a commit in this repository');
   });
+
+  test('refuses when validator input revision does not match the protected validator revision', () => {
+    const outputPath = resolve(repository, 'github-output-mismatch');
+    writeFileSync(outputPath, '');
+    const result = spawnSync('bash', ['-c', script], {
+      cwd: repository,
+      encoding: 'utf8',
+      timeout: 20_000,
+      env: {
+        ...process.env,
+        GITHUB_OUTPUT: outputPath,
+        OPENCOVEN_DISPATCH_SHA: tip,
+        OPENCOVEN_VALIDATOR_REVISION_INPUT: 'a'.repeat(40),
+        OPENCOVEN_PROTECTED_VALIDATOR_REVISION: 'b'.repeat(40),
+      },
+    });
+    expect(result.status).toBe(1);
+    expect(result.stderr ?? '').toContain(
+      'inputs.validator_revision does not match the protected environment validator revision.',
+    );
+    expect(readFileSync(outputPath, 'utf8')).toBe('');
+  });
 });
 
 describe.skipIf(!validatorAvailable)('protected client-v1 conformance workflow', () => {
