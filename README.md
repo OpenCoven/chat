@@ -212,6 +212,10 @@ production preview on `4174`.
 Runtime operations cross typed, narrowly scoped Tauri commands. There is no
 generic shell, filesystem, or HTTP command exposed to the webview, and no
 Tauri shell, filesystem, opener, or network plugin permission is granted.
+The main window is allowed to invoke only the seven `coven_runtime_*`
+commands the chat interface uses; the Cave adapter and app-identity commands
+remain registered for native and conformance coverage but are not reachable
+from the webview.
 
 The reviewed Cave adapter remains in the repository for its independent
 native and conformance coverage. The single Chat entrypoint does not start
