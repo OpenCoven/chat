@@ -1540,7 +1540,18 @@ describe('Phase 1 specification guards', () => {
     }
     expect(heavyConfig).toContain('fileParallelism: false');
     expect(heavyConfig).toContain('maxWorkers: 1');
-    expect(workflow.match(/pnpm test:unit/g)).toHaveLength(1);
+    // The normal suite runs on every branch; the heavy suites run when the
+    // harness could have moved and on every push to main. Each runs once.
+    expect(workflow.match(/- run: pnpm test:unit:normal/g)).toHaveLength(1);
+    expect(workflow.match(/run: pnpm test:unit:heavy/g)).toHaveLength(1);
+    expect(workflow).toContain(
+      '      - name: Heavy Phase 1 suites\n' +
+        "        if: github.event_name == 'push' || needs.changes.outputs.product_only != 'true'\n" +
+        '        run: pnpm test:unit:heavy',
+    );
+    expect(
+      workflow.match(/^ {2}web:\n(?<job>[\s\S]*?)(?=\n {2}[a-z][\w-]*:\n)/m)?.groups?.job,
+    ).toContain('needs: changes');
   });
 
   it('documents immutable Phase 1 conformance separately from the Phase 0 canary', () => {
