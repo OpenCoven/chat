@@ -16,14 +16,18 @@
  *   node scripts/phase1-authority-freshness.mjs [ref]
  */
 import { execFileSync } from 'node:child_process';
+import { realpathSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { createGitEnvironment } from './phase1-conformance-lock.mjs';
 
 const projectRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 
-function git(args) {
+function runGit(repositoryRoot, args) {
   return execFileSync('git', args, {
-    cwd: projectRoot,
+    cwd: repositoryRoot,
+    env: createGitEnvironment(),
+    timeout: 30_000,
     encoding: 'utf8',
     maxBuffer: 64 * 1024 * 1024,
     stdio: ['ignore', 'pipe', 'pipe'],
@@ -35,7 +39,7 @@ function git(args) {
  * governs 35 paths, so the naive form spawns seventy processes and takes
  * long enough to trip a test timeout.
  */
-function blobsAt(ref) {
+function blobsAt(git, ref) {
   const blobs = new Map();
   let listing;
   try {
@@ -59,13 +63,18 @@ function blobsAt(ref) {
   return blobs;
 }
 
-export function checkAuthorityFreshness(ref = 'HEAD') {
+export function checkAuthorityFreshness(ref = 'HEAD', repositoryRoot = projectRoot) {
+  const git = (args) => runGit(repositoryRoot, args);
+  ref = git(['rev-parse', '--verify', '--end-of-options', `${ref}^{commit}`]);
   // Read the lock as it exists at `ref`, not from the working tree. Reading
   // from disk would compare today's pin against a historical tree, which
   // silently answers a different question than the one being asked.
   const lock = JSON.parse(git(['show', `${ref}:phase1-conformance.lock.json`]));
   const authority = lock.harnessAuthority;
   const revision = authority.revision;
+  if (!/^[0-9a-f]{40}$/u.test(revision)) {
+    throw new Error('harnessAuthority.revision must be an immutable Git ID');
+  }
   const failures = [];
 
   // Orphaned pin: a squash or rebase leaves the authority reachable only while
@@ -81,6 +90,11 @@ export function checkAuthorityFreshness(ref = 'HEAD') {
   // A branch-tip pin is what makes two conformance branches collide. Authority
   // belongs on a merge commit that is already part of the history.
   if (reachable) {
+    if (!git(['rev-list', '--first-parent', ref]).split('\n').includes(revision)) {
+      failures.push(
+        'harnessAuthority.revision must be on the first-parent history of the checked ref',
+      );
+    }
     const parents = git(['rev-list', '--parents', '-n', '1', revision]).split(/\s+/u).slice(1);
     if (parents.length < 2) {
       failures.push(
@@ -94,10 +108,18 @@ export function checkAuthorityFreshness(ref = 'HEAD') {
   // tree have silently diverged.
   const adrift = [];
   if (reachable) {
-    const pinnedBlobs = blobsAt(revision);
-    const shippedBlobs = blobsAt(ref);
+    const pinnedBlobs = blobsAt(git, revision);
+    const shippedBlobs = blobsAt(git, ref);
+    const guard = 'scripts/phase1-authority-freshness.mjs';
+    if (!pinnedBlobs.has(guard)) {
+      failures.push('Pinned freshness guard is missing; a repin is due');
+    }
+    const groups = {
+      files: [...authority.files, { path: guard }],
+      productionDeltas: authority.productionDeltas,
+    };
     for (const group of ['files', 'productionDeltas']) {
-      for (const entry of authority[group] ?? []) {
+      for (const entry of groups[group] ?? []) {
         const pinned = pinnedBlobs.get(entry.path) ?? null;
         const shipped = shippedBlobs.get(entry.path) ?? null;
         if (pinned !== shipped) {
@@ -116,9 +138,9 @@ export function checkAuthorityFreshness(ref = 'HEAD') {
   return { revision, ref, reachable, adrift, failures };
 }
 
-if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const ref = process.argv[2] ?? 'HEAD';
-  const result = checkAuthorityFreshness(ref);
+  const result = checkAuthorityFreshness(ref, process.argv[3] ?? projectRoot);
   if (result.failures.length === 0) {
     process.stdout.write(
       `Phase 1 authority ${result.revision.slice(0, 8)} is current for ${ref}.\n`,

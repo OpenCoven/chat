@@ -13,4 +13,4 @@ export type AuthorityFreshness = {
   failures: string[];
 };
 
-export function checkAuthorityFreshness(ref?: string): AuthorityFreshness;
+export function checkAuthorityFreshness(ref?: string, repositoryRoot?: string): AuthorityFreshness;

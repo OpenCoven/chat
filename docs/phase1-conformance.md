@@ -2072,7 +2072,7 @@ not discoverable until a test fails on it.
 
 `harnessAuthority.revision` names a merge commit that is already part of
 `main`. It is never a commit on the branch that introduces the change, and a
-pull request never advances it.
+content pull request never advances it.
 
 That ordering is forced rather than chosen. A merge commit's SHA does not
 exist until the merge happens, so the lock inside the merged tree cannot name
@@ -2084,20 +2084,20 @@ last left a pin describing a tree that no longer matched what shipped.
 Landing a change to a governed file therefore takes two pull requests:
 
 1. **The content PR** changes governed files and leaves
-   `phase1-conformance.lock.json` alone. It may be squashed or rebased
-   freely, because it pins nothing. `main` stays green across it: the lock
-   still describes the previous authority, whose tree is immutable, and the
-   lock test verifies digests against a detached checkout of exactly that
-   revision.
+   `phase1-conformance.lock.json` alone. It lands as a merge commit so the
+   follow-up can name that commit.
+   The lock test stays green: it verifies digests against the previous
+   immutable authority. The main-only freshness guard fails until the repin
+   lands.
 2. **The repin PR** follows, and is the only PR that touches the lock. It
    points `harness.revision` and `harnessAuthority.revision`/`.tree` at the
    content PR's merge commit on `main`, refreshes every digest to that
-   commit's tree — the harness digest, both workflow pin tables, every
-   affected row in the table above, and every affected
-   `harnessAuthority.files` and `harnessAuthority.productionDeltas` entry,
-   the workflow's own self-referential one included — and updates the test's
-   literal copy. Digests and the revision move together, against a commit
-   that already exists, so there is no ordering to get wrong.
+   commit's tree in `harnessAuthority.files` and
+   `harnessAuthority.productionDeltas`, including the workflow entries,
+   and updates the test's literal copy and the prose records. Workflow source
+   pin tables belong in the content PR; editing a governed workflow during
+   the repin would create fresh drift. Digests and the revision move together,
+   against a commit that already exists, so there is no ordering to get wrong.
 
 Because only the repin PR writes the lock, and it runs serially on `main`,
 two content branches can no longer conflict over it.
@@ -2113,9 +2113,13 @@ when a later change advanced the authority and had to reconcile all three at
 once.
 
 `scripts/phase1-authority-freshness.mjs` closes that gap. It asserts the pin
-is reachable from the ref under test, that it is a merge commit rather than a
-branch tip, and that no governed file or production delta has moved since it
-was pinned. CI runs it on `main` pushes only, since a pull request is allowed
+is on the first-parent history of the ref under test, that it is a merge
+commit rather than a branch tip, and that no governed file or production
+delta has moved since it was pinned. CI extracts and executes the guard and its imports from the
+pinned authority, so changing the working-tree guard cannot bypass the check. The guard also
+compares its own blob, even though it is outside the frozen harness file list.
+The first content merge has no pinned guard yet and fails closed until its
+repin lands. CI runs it on `main` pushes only, since a pull request is allowed
 to lag by construction. A forgotten repin now turns `main` red instead of
 staying silent.
 
