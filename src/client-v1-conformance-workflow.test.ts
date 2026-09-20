@@ -1,6 +1,6 @@
 import { execFileSync, spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { dirname, relative, resolve } from 'node:path';
@@ -703,6 +703,7 @@ function runProducerResolve(
   repository: string,
   dispatchSha: string,
   requested: string | undefined,
+  validatorRevision = 'a'.repeat(40),
 ): ResolveOutcome {
   const outputPath = resolve(repository, 'github-output');
   writeFileSync(outputPath, '');
@@ -714,6 +715,8 @@ function runProducerResolve(
       ...process.env,
       GITHUB_OUTPUT: outputPath,
       OPENCOVEN_DISPATCH_SHA: dispatchSha,
+      OPENCOVEN_VALIDATOR_REVISION_INPUT: validatorRevision,
+      OPENCOVEN_PROTECTED_VALIDATOR_REVISION: validatorRevision,
       ...(requested === undefined ? {} : { OPENCOVEN_PRODUCER_REVISION_INPUT: requested }),
     },
   });
@@ -752,15 +755,28 @@ describe('producer revision ancestry gate', () => {
   git('-c', 'commit.gpgsign=false', 'commit', '--quiet', '--allow-empty', '-m', 'unmerged');
   const unmerged = git('rev-parse', 'HEAD');
   git('checkout', '--quiet', 'main');
+  mkdirSync(resolve(repository, '.phase1-counterparts', 'sdk-validator', 'conformance'), {
+    recursive: true,
+  });
+  writeFileSync(
+    resolve(
+      repository,
+      '.phase1-counterparts',
+      'sdk-validator',
+      'conformance',
+      'client-v1-cross-repository-lock.json',
+    ),
+    `${JSON.stringify({ evidenceProducer: { commit: merged } })}\n`,
+  );
 
   afterAll(() => {
     rmSync(repository, { force: true, recursive: true });
   });
 
-  test('defaults to the dispatch tip when no revision is requested', () => {
+  test('defaults to the validator-locked evidence producer commit when no revision is requested', () => {
     const outcome = runProducerResolve(script, repository, tip, undefined);
     expect(outcome.status).toBe(0);
-    expect(outcome.revision).toBe(tip);
+    expect(outcome.revision).toBe(merged);
   });
 
   test('accepts an exact merged ancestor of the dispatch tip', () => {
