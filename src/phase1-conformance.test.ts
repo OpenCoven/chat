@@ -1948,7 +1948,7 @@ describe('Phase 1 real-authority conformance harness', () => {
     );
   });
 
-  test('binds schema-v2 producer identity to the supplied workflow checkout', async () => {
+  test('checks out the schema-v2 producer from the validator-approved Chat revision', async () => {
     const producerModulePath = '../scripts/phase1-schema-v2-producer.mjs';
     const { readSchemaV2ProducerIdentity } = await import(producerModulePath);
     const revision = execFileSync('git', ['rev-parse', 'HEAD'], {
@@ -1965,8 +1965,14 @@ describe('Phase 1 real-authority conformance harness', () => {
       resolve(projectRoot, 'scripts', 'phase1-schema-v2-producer.mjs'),
       'utf8',
     );
+    expect(source).toContain('const identity = reviewedSchemaV2ProducerIdentity(sdkContract);');
     expect(source).toContain(
-      'cloneProducerCheckout(artifactRoot, options.chatSourceRoot, environment)',
+      'cloneProducerCheckout(executionRoot, options.chatSourceRoot, sdkContract, environment)',
+    );
+    expect(source.indexOf('loadSdkEvidenceContract({')).toBeLessThan(
+      source.indexOf(
+        'cloneProducerCheckout(executionRoot, options.chatSourceRoot, sdkContract, environment)',
+      ),
     );
   });
 

@@ -3317,8 +3317,25 @@ export function readSchemaV2ProducerIdentity(sourceRoot) {
   };
 }
 
-async function cloneProducerCheckout(artifactRoot, sourceRoot, environment) {
-  const identity = readSchemaV2ProducerIdentity(sourceRoot);
+function reviewedSchemaV2ProducerIdentity(sdkContract) {
+  const producer = sdkContract.contract.assertEvidenceProducerCompatibility(sdkContract.frozenLock);
+  if (
+    producer === null ||
+    typeof producer !== 'object' ||
+    producer.repository !== 'OpenCoven/chat' ||
+    !/^[0-9a-f]{40}$/u.test(producer.commit ?? '') ||
+    !/^[0-9a-f]{40}$/u.test(producer.tree ?? '')
+  ) {
+    throw new Error('Schema-v2 producer identity is invalid.');
+  }
+  return {
+    revision: producer.commit,
+    tree: producer.tree,
+  };
+}
+
+async function cloneProducerCheckout(artifactRoot, sourceRoot, sdkContract, environment) {
+  const identity = reviewedSchemaV2ProducerIdentity(sdkContract);
   const producerRoot = resolve(artifactRoot.rootPath, 'checkouts', 'producer');
   await cloneExactCheckout({
     artifactRoot,
@@ -3453,12 +3470,6 @@ async function createExactCheckouts(artifactRoot, options, lock, environment) {
         }
         return validatorIdentity;
       },
-    );
-    Object.assign(
-      roots,
-      await runSchemaV2StageAsync('phase1.stage.checkouts.producer.failed', () =>
-        cloneProducerCheckout(artifactRoot, options.chatSourceRoot, environment),
-      ),
     );
   }
   return roots;
@@ -6264,14 +6275,6 @@ export async function runSchemaV2Conformance(options, lock, harnessAuthorityVeri
     roots = await createExactCheckouts(executionRoot, options, lock, environment);
     if (schemaV2) {
       activeStage = 'phase1.stage.evidence-authority.failed';
-      runSchemaV2PreflightStage('phase1.stage.evidence-authority.producer', () =>
-        validateSchemaV2AuthorityCheckouts({
-          lock,
-          harnessRoot: projectRoot,
-          producerRoot: roots.producerRoot,
-          producerIdentity: roots.producerIdentity,
-        }),
-      );
       sdkContract = await runSchemaV2StageAsync('phase1.stage.evidence-authority.validator', () =>
         loadSdkEvidenceContract({
           validatorRoot: roots.validatorRoot,
@@ -6283,10 +6286,24 @@ export async function runSchemaV2Conformance(options, lock, harnessAuthorityVeri
         }),
       );
       runSchemaV2PreflightStage('phase1.stage.evidence-authority.compatibility', () =>
-        sdkContract.contract.assertEvidenceProducerCompatibility(sdkContract.frozenLock),
+        reviewedSchemaV2ProducerIdentity(sdkContract),
       );
       runSchemaV2PreflightStage('phase1.stage.evidence-authority.lock', () =>
         assertSdkContractMatchesPhase1Lock(sdkContract, lock),
+      );
+      Object.assign(
+        roots,
+        await runSchemaV2StageAsync('phase1.stage.checkouts.producer.failed', () =>
+          cloneProducerCheckout(executionRoot, options.chatSourceRoot, sdkContract, environment),
+        ),
+      );
+      runSchemaV2PreflightStage('phase1.stage.evidence-authority.producer', () =>
+        validateSchemaV2AuthorityCheckouts({
+          lock,
+          harnessRoot: projectRoot,
+          producerRoot: roots.producerRoot,
+          producerIdentity: roots.producerIdentity,
+        }),
       );
       producer = await runSchemaV2StageAsync('phase1.stage.evidence-authority.checkout', () =>
         verifySchemaV2ProducerCheckout({
