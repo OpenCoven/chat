@@ -103,6 +103,33 @@ jobs:
       - run: pnpm lint
       - run: pnpm typecheck
       - run: pnpm test:unit
+      # The lock test verifies digests against a detached checkout of the
+      # authority, which is self-consistent however far main moves on, so it
+      # cannot see a content merge whose repin was never made. That is how
+      # three governed files drifted for four merges without a red build.
+      #
+      # A pull request is allowed to drift: the repin follows the merge, and
+      # cannot name a merge commit that does not exist yet. Main is not.
+      - name: Phase 1 authority is current
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Execute the authority's guard and imports, never the unpinned copy.
+          # Clear inherited Git settings before reading the lock or archive.
+          authority_git() {
+            env -i PATH="$PATH" HOME="$RUNNER_TEMP" \
+              GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1 \
+              GIT_NO_REPLACE_OBJECTS=1 GIT_NO_LAZY_FETCH=1 \
+              GIT_TERMINAL_PROMPT=0 GIT_ALLOW_PROTOCOL= \
+              git "$@"
+          }
+          authority=$(authority_git show HEAD:phase1-conformance.lock.json | jq -er '.harnessAuthority.revision')
+          [[ "$authority" =~ ^[0-9a-f]{40}$ ]]
+          pinned=$(mktemp -d)
+          trap 'rm -rf "$pinned"' EXIT
+          authority_git archive "$authority" scripts/ | tar -x -C "$pinned"
+          node "$pinned/scripts/phase1-authority-freshness.mjs" HEAD "$GITHUB_WORKSPACE"
 
   e2e:
     name: E2E
