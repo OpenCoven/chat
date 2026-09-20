@@ -1,6 +1,6 @@
 import { execFileSync, spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { dirname, relative, resolve } from 'node:path';
@@ -252,11 +252,14 @@ function verifyExactMainRefConstraint(label: string, job: string): void {
 
 function verifyResolvedProducerRevision(job: string, workflow: string): void {
   if (
+    !job.includes('repository: OpenCoven/sdk') ||
+    !job.includes(`ref: ${protectedValidatorExpression}`) ||
     !job.includes('git merge-base --is-ancestor "$requested" "$OPENCOVEN_DISPATCH_SHA"') ||
     !job.includes('OPENCOVEN_DISPATCH_SHA: ' + githubShaExpression) ||
-    !job.includes('revision: ' + resolvedProducerExpression)
+    !job.includes('revision: ' + resolvedProducerExpression) ||
+    !job.includes("Path('validator/conformance/client-v1-cross-repository-lock.json').read_text")
   ) {
-    throw new Error('producer revision job does not verify ancestry of the dispatch ref');
+    throw new Error('producer revision job does not bind to the protected validator lock');
   }
   if (
     workflow.includes(
@@ -752,15 +755,26 @@ describe('producer revision ancestry gate', () => {
   git('-c', 'commit.gpgsign=false', 'commit', '--quiet', '--allow-empty', '-m', 'unmerged');
   const unmerged = git('rev-parse', 'HEAD');
   git('checkout', '--quiet', 'main');
+  const validatorLockPath = resolve(
+    repository,
+    'validator',
+    'conformance',
+    'client-v1-cross-repository-lock.json',
+  );
+  mkdirSync(dirname(validatorLockPath), { recursive: true });
+  writeFileSync(
+    validatorLockPath,
+    `${JSON.stringify({ evidenceProducer: { commit: merged } }, null, 2)}\n`,
+  );
 
   afterAll(() => {
     rmSync(repository, { force: true, recursive: true });
   });
 
-  test('defaults to the dispatch tip when no revision is requested', () => {
+  test('defaults to the validator-reviewed producer revision when no revision is requested', () => {
     const outcome = runProducerResolve(script, repository, tip, undefined);
     expect(outcome.status).toBe(0);
-    expect(outcome.revision).toBe(tip);
+    expect(outcome.revision).toBe(merged);
   });
 
   test('accepts an exact merged ancestor of the dispatch tip', () => {

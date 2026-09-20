@@ -2020,7 +2020,7 @@ revision authorities can therefore have different workflow hashes:
 
 | File | Bytes | SHA-256 |
 | --- | ---: | --- |
-| `.github/workflows/client-v1-conformance.yml` | 180,386 | `be7f36a7ce1b3dd6834b565e33825c5af410c49ed0e193ffaffda91ef79125b3` |
+| `.github/workflows/client-v1-conformance.yml` | 181,402 | `681536e9c34b27d36e0ff0e109e7ec03dc5a9e56eca3c643950f4013f35885dd` |
 | `scripts/contract-canary.mjs` | 40,618 | `a4c2fe0a5eb6a5ff4653de5374c34c0fb46907c6806a5d23b86d8b37206ef958` |
 | `scripts/executable-resolution.mjs` | 9,154 | `31e3c412ff8c835f14522f36a59e91f4a4ba82913210ae8e3b4455217503f430` |
 | `scripts/owned-temp-directory.mjs` | 7,762 | `95f546ef9ed614f2a0f55d356ddfc54c943fc53b595b4eebebfcbd4db68e5c0b` |
@@ -2837,8 +2837,9 @@ The optional `producer_revision` input names the commit to validate. The
 `resolve-producer-revision` job requires an exact lowercase 40-hex commit that
 exists in this repository and is an **ancestor of the dispatch ref**, then
 publishes it for the supervisor build, the Windows bootstrap and the Unix
-workspace checkout. Omitting it keeps the previous behaviour of validating the
-dispatch ref tip.
+workspace checkout. Omitting it now defaults to the protected validator's
+reviewed producer commit instead of the dispatch ref tip, so protected runs keep
+using the frozen producer unless a merged ancestor is named explicitly.
 
 The ancestry requirement is what keeps this from widening the trust boundary:
 an unmerged branch, an unrelated commit, or a revision from a fork is refused,

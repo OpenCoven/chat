@@ -7,11 +7,11 @@ on:
         type: string
       producer_revision:
         description: >-
-          Exact merged Chat commit to validate. Defaults to the dispatch ref
-          tip. It must already be an ancestor of that tip: an unmerged or
-          unrelated revision is refused, so this decouples a protected run from
-          whatever happens to be at the tip without widening what may be
-          validated.
+          Exact merged Chat commit to validate. Defaults to the validator's
+          reviewed producer commit. It must already be an ancestor of the
+          dispatch ref: an unmerged or unrelated revision is refused, so this
+          decouples a protected run from whatever happens to be at the tip
+          without widening what may be validated.
         required: false
         type: string
 permissions:
@@ -32,6 +32,13 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
           ref: ${{ github.sha }}
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          repository: OpenCoven/sdk
+          fetch-depth: 1
+          persist-credentials: false
+          path: validator
+          ref: ${{ vars.CLIENT_V1_CONFORMANCE_VALIDATOR_REVISION }}
       - id: resolve
         name: Resolve and verify the producer revision
         env:
@@ -39,9 +46,30 @@ jobs:
           OPENCOVEN_DISPATCH_SHA: ${{ github.sha }}
         run: |
           set -euo pipefail
+          reviewed="$(python3 - <<'PY'
+          import json
+          from pathlib import Path
+
+          commit = json.loads(
+              Path('validator/conformance/client-v1-cross-repository-lock.json').read_text(
+                  encoding='utf-8',
+              ),
+          )['evidenceProducer']['commit']
+          if (
+              not isinstance(commit, str)
+              or len(commit) != 40
+              or any(character not in '0123456789abcdef' for character in commit)
+          ):
+              raise SystemExit(1)
+          print(commit)
+          PY
+          )" || {
+            echo 'Protected validator lock does not publish an exact reviewed producer revision.' >&2
+            exit 1
+          }
           requested="${OPENCOVEN_PRODUCER_REVISION_INPUT:-}"
           if [ -z "$requested" ]; then
-            requested="$OPENCOVEN_DISPATCH_SHA"
+            requested="$reviewed"
           fi
           case "$requested" in
             *[!0-9a-f]* | "" ) echo 'Producer revision must be an exact lowercase 40-hex commit.' >&2; exit 1 ;;
