@@ -54,6 +54,13 @@ jobs:
             git -C validator init --quiet
             git -C validator remote add origin https://github.com/OpenCoven/sdk
             git -C validator fetch --depth=1 origin "$OPENCOVEN_PROTECTED_VALIDATOR_REVISION"
+            git -C validator fetch origin refs/heads/main:refs/remotes/origin/main
+            if ! git -C validator merge-base --is-ancestor \
+              "$OPENCOVEN_PROTECTED_VALIDATOR_REVISION" \
+              refs/remotes/origin/main; then
+              echo 'Protected validator revision must stay reachable from OpenCoven/sdk main.' >&2
+              exit 1
+            fi
             git -C validator checkout --quiet --detach FETCH_HEAD
           fi
           reviewed="$(python3 - <<'PY'

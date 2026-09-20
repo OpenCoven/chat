@@ -253,7 +253,13 @@ function verifyExactMainRefConstraint(label: string, job: string): void {
 function verifyResolvedProducerRevision(job: string, workflow: string): void {
   if (
     !job.includes(`OPENCOVEN_PROTECTED_VALIDATOR_REVISION: ${protectedValidatorExpression}`) ||
-    !job.includes('https://github.com/OpenCoven/sdk') ||
+    !job.includes('git -C validator remote add origin ') ||
+    !job.includes('git -C validator fetch origin refs/heads/main:refs/remotes/origin/main') ||
+    !job.includes(
+      'git -C validator merge-base --is-ancestor \\\n' +
+        '              "$OPENCOVEN_PROTECTED_VALIDATOR_REVISION" \\\n' +
+        '              refs/remotes/origin/main',
+    ) ||
     !job.includes('git merge-base --is-ancestor "$requested" "$OPENCOVEN_DISPATCH_SHA"') ||
     !job.includes('OPENCOVEN_DISPATCH_SHA: ' + githubShaExpression) ||
     !job.includes('revision: ' + resolvedProducerExpression) ||
