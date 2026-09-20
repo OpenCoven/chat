@@ -12,15 +12,10 @@ import { Icon, type IconName } from './minimal-icons';
  */
 
 export type InspectorTab = 'overview' | 'access' | 'activity';
-export type ActivityKey = 'completion' | 'duration' | 'tools' | 'recent';
-export type AccessGroupKey = 'auto' | 'review' | 'paths' | 'contract';
-export type DemoEmpty = 'conversations' | 'runs' | 'familiar';
 /**
- * Presence is declared here rather than derived from a fixture. The design
- * system is what the app renders; deriving its vocabulary from mock data made
- * production typing depend on `src/demo`, which is the coupling this module's
- * move out of that directory exists to remove. `mock-familiars` now imports
- * this type, so the two still cannot drift.
+ * Presence is declared here rather than derived from a fixture: the design
+ * system is what the app renders, so its vocabulary must not depend on mock
+ * data or on any caller.
  */
 export type Presence = 'available' | 'working' | 'offline';
 

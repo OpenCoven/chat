@@ -1,6 +1,6 @@
 # Standalone QueryAdapter design
 
-Status: **implemented in PR #61**
+Status: **implemented in PR #61; the code it describes (`src/app.tsx`, `src/chat-shell.tsx`, `src/lib/local/`) was retired once the Coven CLI chat became the only mounted surface.** Kept as design history only.
 Target: `v0.0.1`, release blocker "standalone chat, Cave optional"
 Author lane: Kitty (coordination)
 

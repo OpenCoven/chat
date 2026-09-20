@@ -58,8 +58,6 @@ async function installRuntimeFixture(
             window.__covenFixture.calls.push(command);
             persist();
             switch (command) {
-              case 'coven_voice_status':
-                return { provider: 'openai', configured: false, model: 'gpt-live-1' };
               case 'coven_runtime_status':
                 return ready
                   ? {

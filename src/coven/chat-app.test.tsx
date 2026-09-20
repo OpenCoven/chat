@@ -11,7 +11,6 @@ import { ChatApp } from './chat-app';
 import type { ChatLayoutProps } from './chat-layout';
 
 const counters = vi.hoisted(() => ({ layoutRenders: 0 }));
-let currentLayout: ChatLayoutProps;
 
 // Exercise the controller contract independently of the parent's evolving visual layout.
 vi.mock('./chat-layout', () => ({
@@ -22,7 +21,6 @@ vi.mock('./chat-layout', () => ({
 }));
 
 function MockLayout(props: ChatLayoutProps) {
-  currentLayout = props;
   return (
     <div>
       {props.familiars
@@ -177,99 +175,6 @@ async function attachNote() {
 
 describe('canonical familiar controller', () => {
   beforeEach(() => localStorage.clear());
-
-  it('routes voice through the canonical chat without sending or clearing the typed draft', async () => {
-    const api = runtime();
-    vi.mocked(api.send).mockResolvedValue({
-      runId: 'voice',
-      events: [{ type: 'text_delta', text: 'Verified familiar reply.' }],
-    });
-    await ready(api);
-    draft('Unsent typed idea');
-    await attachNote();
-    act(() => currentLayout.onVoiceActiveChange?.(true));
-    click('Other familiar');
-    expect(screen.getByTestId('familiar')).toHaveTextContent('f');
-    expect(screen.getByRole('button', { name: 'Archive' })).toBeDisabled();
-    let answer: string | undefined;
-    await act(async () => {
-      answer = await currentLayout.onVoiceRequest?.(
-        'Spoken question',
-        new AbortController().signal,
-      );
-    });
-    expect(answer).toBe('Verified familiar reply.');
-    expect(api.send).toHaveBeenCalledWith(
-      expect.objectContaining({
-        familiarId: 'f',
-        sessionId: 'one',
-        prompt: 'Spoken question',
-      }),
-      expect.any(Function),
-    );
-    expect(vi.mocked(api.send).mock.calls[0]?.[0]).not.toHaveProperty('attachments');
-    expect(screen.getByRole('textbox')).toHaveValue('Unsent typed idea');
-    expect(screen.getByRole('button', { name: 'note.txt' })).toBeInTheDocument();
-  });
-
-  it('aborts the voice-owned run', async () => {
-    const api = runtime();
-    const run = deferred<CovenRunResult>();
-    vi.mocked(api.send).mockReturnValueOnce(run.promise);
-    await ready(api);
-    const controller = new AbortController();
-    let result: Promise<string | undefined> | undefined;
-    act(() => {
-      result = currentLayout.onVoiceRequest?.('Voice work', controller.signal);
-    });
-    const rejected = expect(result).rejects.toThrow('cancelled');
-    act(() => controller.abort());
-    expect(api.cancel).toHaveBeenCalledOnce();
-    await act(async () => {
-      run.reject(new Error('cancelled'));
-      await rejected;
-    });
-    draft('Typed next');
-    click('Send');
-    act(() => controller.abort());
-    expect(api.cancel).toHaveBeenCalledOnce();
-  });
-
-  it('does not cancel newer typed work when a completed voice request is aborted', async () => {
-    const api = runtime();
-    vi.mocked(api.send).mockResolvedValueOnce({
-      runId: 'voice',
-      events: [{ type: 'text_delta', text: 'Done.' }],
-    });
-    await ready(api);
-    const controller = new AbortController();
-    await act(async () => {
-      await currentLayout.onVoiceRequest?.('Voice work', controller.signal);
-    });
-    const typed = deferred<CovenRunResult>();
-    vi.mocked(api.send).mockReturnValueOnce(typed.promise);
-    draft('Next typed request');
-    click('Send');
-    act(() => controller.abort());
-    expect(api.cancel).not.toHaveBeenCalled();
-    await act(async () => typed.resolve({ runId: 'typed', events: [] }));
-  });
-
-  it('rejects voice results if the canonical head cannot be refreshed', async () => {
-    const api = runtime();
-    await ready(api);
-    vi.mocked(api.send).mockResolvedValueOnce({
-      runId: 'voice',
-      events: [{ type: 'text_delta', text: 'Answer.' }],
-    });
-    vi.mocked(api.listSessions).mockRejectedValueOnce(new Error('Metadata unavailable'));
-    await act(async () => {
-      await expect(
-        currentLayout.onVoiceRequest?.('Voice work', new AbortController().signal),
-      ).rejects.toThrow('Refresh the canonical chat');
-    });
-    expect(screen.getByRole('textbox')).toBeDisabled();
-  });
 
   it('opens only the canonical head, replacing stale navigation without reading the older thread', async () => {
     localStorage.setItem(STORAGE, JSON.stringify({ familiarId: 'f', sessionId: 'older' }));
