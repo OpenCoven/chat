@@ -16,8 +16,6 @@ test.beforeEach(async ({ page }) => {
         async invoke(command: string, args: { id?: string; lifecycle?: string } = {}) {
           const state = localStorage.getItem('fixture-lifecycle') ?? 'active';
           switch (command) {
-            case 'coven_voice_status':
-              return { provider: 'openai', configured: false, model: 'gpt-live-1' };
             case 'coven_runtime_status':
               return { available: true, version: 'fixture' };
             case 'coven_runtime_familiars':

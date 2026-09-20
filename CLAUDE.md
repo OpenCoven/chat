@@ -28,8 +28,10 @@ a sibling checkout — confirm before assuming, and do not assume the reverse
 ```
 src/coven/          The live chat UI. chat-app.tsx (state) + chat-layout.tsx (render).
 src/design/         familiars-ui + familiars-shell.css — the .fr-* design system.
-src/ui/             Composer, attachment chips.
-src/demo/           Non-live mock shell. Editing this changes nothing the user sees.
+src/ui/             Composer, attachment chips (vendored OpenCoven/ui).
+src/lib/            coven-runtime.ts is the only bridge the UI uses. lib/sdk/ is the
+                    Cave SDK boundary: unmounted, but run by the protected
+                    conformance producer by file name — do not delete or rename.
 src-tauri/src/      Rust backend. Every user-facing error string starts here.
 docs/               Conformance, release, platform notes.
 ```
@@ -42,8 +44,10 @@ Backend modules worth knowing before touching chat behaviour:
 - `chat_origin.rs` — only app-owned history may become a familiar's head.
 - `coven_runtime.rs` — spawns the CLI, streams run events, enforces send rules.
 
-`src/demo/` and `src/coven/` contain near-identical markup. Confirm which one
-renders before editing: the app mounts the real one at `/`; `?demo=` is gone.
+`src/main.tsx` mounts `src/coven/chat-app.tsx` at `/` and nothing else. The
+former demo shell, the Cave-connected app, and the IndexedDB chat store were
+removed; `?demo=` is gone. If a file is not reachable from `main.tsx`, the
+user cannot see it.
 
 ## Commands
 

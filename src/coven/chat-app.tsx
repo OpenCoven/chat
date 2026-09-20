@@ -10,14 +10,12 @@ import {
 import { type ChatAttachment, MAX_ATTACHMENTS, readAttachments } from './attachments';
 import { ChatLayout } from './chat-layout';
 import { projectEvents } from './events';
-import { segmentToolCalls } from './tool-activity';
 
 const defaultRuntime = createCovenRuntime();
 const STORAGE_KEY = 'opencoven.chat.navigation.v1';
 /** One transcript update per frame keeps long streams smooth. */
 const STREAM_FLUSH_MS = 16;
 type Navigation = { familiarId: string; sessionId: string; drafts: Record<string, string> };
-type VoiceRequest = { message: string; signal: AbortSignal; familiarId: string };
 function errorText(error: unknown) {
   return error instanceof Error ? error.message : String(error);
 }
@@ -110,8 +108,6 @@ export function ChatApp({ runtime = defaultRuntime }: { runtime?: CovenRuntime }
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(saved.error);
   const [busy, setBusy] = useState(false);
-  const [voiceActive, setVoiceActive] = useState(false);
-  const voiceActiveRef = useRef(false);
   const draftVersions = useRef<Record<string, number>>({});
   const [cancelling, setCancelling] = useState(false);
   const [archived, setArchived] = useState(false);
@@ -238,29 +234,20 @@ export function ChatApp({ runtime = defaultRuntime }: { runtime?: CovenRuntime }
     };
   }, [runtime, available, navigation.sessionId]);
 
-  async function send(voice?: VoiceRequest) {
+  async function send() {
     const current = navigationRef.current;
-    if (voice && (voice.signal.aborted || current.familiarId !== voice.familiarId))
-      throw new Error('The voice request no longer belongs to this familiar.');
-    if (voice && (!voice.message.trim() || voice.message.length > 16_000))
-      throw new Error('Voice requests must contain 1-16000 characters.');
-    if (lifecyclePending.current) {
-      if (voice) throw new Error('Wait for the chat operation to finish.');
-      return;
-    }
+    if (lifecyclePending.current) return;
     if (sessions.some((session) => session.id === current.sessionId && session.archived)) {
-      if (voice) throw new Error('This familiar chat is archived.');
       setError('Restore this archived chat before sending a message.');
       return;
     }
     if (!current.familiarId) {
-      if (voice) throw new Error('Select a familiar before starting a voice request.');
       setError('Select a familiar before sending a message.');
       return;
     }
     const key = draftKey(current);
-    const prompt = voice?.message ?? current.drafts[key] ?? '';
-    const selectedFiles = voice ? [] : (attachmentRef.current[key] ?? []);
+    const prompt = current.drafts[key] ?? '';
+    const selectedFiles = attachmentRef.current[key] ?? [];
     if (
       activeRun.current ||
       selecting.current ||
@@ -268,17 +255,14 @@ export function ChatApp({ runtime = defaultRuntime }: { runtime?: CovenRuntime }
       loading ||
       (!prompt.trim() && !selectedFiles.length)
     ) {
-      if (voice) throw new Error('The familiar is busy or unavailable. Wait before trying again.');
       return;
     }
     const run = { id: crypto.randomUUID(), cancelRequested: false };
     activeRun.current = run;
     const draftVersion = draftVersions.current[key] ?? 0;
-    if (!voice) {
-      navigate({ ...current, drafts: { ...current.drafts, [key]: '' } });
-      attachmentRef.current = { ...attachmentRef.current, [key]: [] };
-      setAttachments(attachmentRef.current);
-    }
+    navigate({ ...current, drafts: { ...current.drafts, [key]: '' } });
+    attachmentRef.current = { ...attachmentRef.current, [key]: [] };
+    setAttachments(attachmentRef.current);
     const life = lifetime.current;
     setBusy(true);
     setError('');
@@ -287,12 +271,6 @@ export function ChatApp({ runtime = defaultRuntime }: { runtime?: CovenRuntime }
     let streamedSession = '';
     let flush: ReturnType<typeof setTimeout> | null = null;
     let completed = false;
-    let voiceReply: string | undefined;
-    let voiceFailure: Error | undefined;
-    const abortVoice = () => {
-      if (activeRun.current === run) void cancel();
-    };
-    voice?.signal.addEventListener('abort', abortVoice, { once: true });
     function publish(nextEvents: CovenRunEvent[], runError = '', sessionId = streamedSession) {
       if (flush) {
         clearTimeout(flush);
@@ -345,26 +323,11 @@ export function ChatApp({ runtime = defaultRuntime }: { runtime?: CovenRuntime }
       publish(streamed.slice(), projected.error);
       if (projected.error) throw new Error(projected.error);
       completed = !run.cancelRequested;
-      if (voice) {
-        voiceReply = projectEvents(streamed)
-          .messages.filter((message) => message.role === 'assistant')
-          .flatMap((message) =>
-            segmentToolCalls(message.text).flatMap((segment) =>
-              segment.kind === 'text' ? [segment.text] : [],
-            ),
-          )
-          .join('\n\n');
-        if (!completed) throw new Error('The familiar request was cancelled.');
-        if (!voiceReply.trim())
-          throw new Error('Coven returned no text response. Inspect the conversation for details.');
-      }
     } catch (failure) {
       publish(streamed.slice(), errorText(failure));
-      if (voice) voiceFailure = new Error(errorText(failure));
     } finally {
-      voice?.signal.removeEventListener('abort', abortVoice);
       if (lifetime.current === life) {
-        if (!completed && !voice) {
+        if (!completed) {
           const latest = navigationRef.current;
           if ((draftVersions.current[key] ?? 0) === draftVersion && latest.drafts[key] === '')
             navigate({ ...latest, drafts: { ...latest.drafts, [key]: prompt } });
@@ -386,8 +349,6 @@ export function ChatApp({ runtime = defaultRuntime }: { runtime?: CovenRuntime }
               `Could not reload this familiar's chat: ${errorText(failure)}. Reopen the familiar before sending again.`,
             );
             setAvailable(false);
-            if (voice)
-              voiceFailure = new Error('Refresh the canonical chat before another voice request.');
           }
         }
       }
@@ -397,9 +358,6 @@ export function ChatApp({ runtime = defaultRuntime }: { runtime?: CovenRuntime }
         setCancelling(false);
       }
     }
-    if (voice?.signal.aborted) throw new Error('The voice request was cancelled.');
-    if (voiceFailure) throw voiceFailure;
-    return voiceReply;
   }
 
   async function cancel() {
@@ -445,7 +403,6 @@ export function ChatApp({ runtime = defaultRuntime }: { runtime?: CovenRuntime }
     const current = navigationRef.current;
     if (
       !available ||
-      voiceActiveRef.current ||
       !current.sessionId ||
       lifecyclePending.current ||
       activeRun.current ||
@@ -528,17 +485,7 @@ export function ChatApp({ runtime = defaultRuntime }: { runtime?: CovenRuntime }
       lifecycleBusy={changingLifecycle}
       // A failed refresh leaves the last known lists visible for context but
       // never mutable: lifecycle stays locked until the runtime is available.
-      lifecycleLocked={!available || voiceActive}
-      voiceActive={voiceActive}
-      onVoiceActiveChange={(active) => {
-        voiceActiveRef.current = active;
-        setVoiceActive(active);
-      }}
-      onVoiceRequest={async (message, signal) => {
-        const reply = await send({ message, signal, familiarId: navigation.familiarId });
-        if (reply === undefined) throw new Error('The voice request did not complete.');
-        return reply;
-      }}
+      lifecycleLocked={!available}
       onLifecycle={(next) => void changeLifecycle(next)}
       attachments={attachments[draftKey(navigation)] ?? []}
       attaching={attaching}
@@ -583,7 +530,7 @@ export function ChatApp({ runtime = defaultRuntime }: { runtime?: CovenRuntime }
       cancelling={cancelling}
       error={error || runOutputs[draftKey(navigation)]?.error || ''}
       onFamiliar={(id) => {
-        if (lifecyclePending.current || voiceActiveRef.current) return;
+        if (lifecyclePending.current) return;
         setError('');
         navigate(
           selectCanonical(
@@ -604,7 +551,7 @@ export function ChatApp({ runtime = defaultRuntime }: { runtime?: CovenRuntime }
       onSend={() => void send()}
       onCancel={() => void cancel()}
       onRefresh={() => {
-        if (!activeRun.current && !lifecyclePending.current && !voiceActiveRef.current) {
+        if (!activeRun.current && !lifecyclePending.current) {
           setError('');
           setRefresh((value) => value + 1);
         }

@@ -68,9 +68,6 @@ export type ChatLayoutProps = Readonly<{
   lifecycleBusy?: boolean;
   /** Runtime unavailable: archive/restore/delete must not mutate stale state. */
   lifecycleLocked?: boolean;
-  voiceActive?: boolean;
-  onVoiceActiveChange?: (active: boolean) => void;
-  onVoiceRequest?: (message: string, signal: AbortSignal) => Promise<string>;
   onLifecycle?: (next: ChatLifecycle) => void;
   busy: boolean;
   loading: boolean;
@@ -346,7 +343,7 @@ export function ChatLayout(props: ChatLayoutProps) {
                     className="fr-conv coven-agent-row"
                     aria-label={item.name}
                     aria-current={item.id === props.familiarId || undefined}
-                    disabled={props.lifecycleBusy || props.voiceActive}
+                    disabled={props.lifecycleBusy}
                     onClick={() => {
                       props.onFamiliar(item.id);
                       if (drawers) setSidebar(false);
@@ -437,7 +434,7 @@ export function ChatLayout(props: ChatLayoutProps) {
             <FamIconButton
               icon="arrow-clockwise"
               label="Refresh Coven"
-              disabled={props.busy || props.loading || props.lifecycleBusy || props.voiceActive}
+              disabled={props.busy || props.loading || props.lifecycleBusy}
               onClick={props.onRefresh}
             />
           </div>
@@ -730,7 +727,7 @@ export function ChatLayout(props: ChatLayoutProps) {
                 <FamButton
                   size="sm"
                   onClick={props.onRefresh}
-                  disabled={props.busy || props.loading || props.voiceActive}
+                  disabled={props.busy || props.loading}
                 >
                   Refresh local data
                 </FamButton>
