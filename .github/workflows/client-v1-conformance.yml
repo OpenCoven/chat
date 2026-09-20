@@ -32,20 +32,30 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
           ref: ${{ github.sha }}
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
-        with:
-          repository: OpenCoven/sdk
-          fetch-depth: 1
-          persist-credentials: false
-          path: validator
-          ref: ${{ vars.CLIENT_V1_CONFORMANCE_VALIDATOR_REVISION }}
       - id: resolve
         name: Resolve and verify the producer revision
         env:
           OPENCOVEN_PRODUCER_REVISION_INPUT: ${{ inputs.producer_revision }}
           OPENCOVEN_DISPATCH_SHA: ${{ github.sha }}
+          OPENCOVEN_PROTECTED_VALIDATOR_REVISION: ${{ vars.CLIENT_V1_CONFORMANCE_VALIDATOR_REVISION }}
         run: |
           set -euo pipefail
+          lock_path='validator/conformance/client-v1-cross-repository-lock.json'
+          if [ ! -f "$lock_path" ]; then
+            case "${OPENCOVEN_PROTECTED_VALIDATOR_REVISION:-}" in
+              *[!0-9a-f]* | "" ) echo 'Protected validator revision must be an exact lowercase 40-hex commit.' >&2; exit 1 ;;
+            esac
+            if [ "${#OPENCOVEN_PROTECTED_VALIDATOR_REVISION}" -ne 40 ]; then
+              echo 'Protected validator revision must be an exact lowercase 40-hex commit.' >&2
+              exit 1
+            fi
+            rm -rf validator
+            mkdir validator
+            git -C validator init --quiet
+            git -C validator remote add origin https://github.com/OpenCoven/sdk
+            git -C validator fetch --depth=1 origin "$OPENCOVEN_PROTECTED_VALIDATOR_REVISION"
+            git -C validator checkout --quiet --detach FETCH_HEAD
+          fi
           reviewed="$(python3 - <<'PY'
           import json
           from pathlib import Path
