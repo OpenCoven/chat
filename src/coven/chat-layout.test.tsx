@@ -1583,3 +1583,43 @@ describe('tool breakdown and the attachment hint', () => {
     expect(screen.getByText('Text/code · 4 files max · 64 KiB each')).toBeInTheDocument();
   });
 });
+
+describe('the clock', () => {
+  afterEach(() => vi.useRealTimers());
+
+  it('shows how long the run has been going and keeps counting', () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(Date.parse('2026-09-20T12:00:00Z'));
+    render(
+      <ChatLayout
+        {...layoutProps()}
+        connected
+        ready
+        familiars={[{ id: 'a', name: 'Astra' }]}
+        familiarId="a"
+        busy
+        runFamiliarId="a"
+        runStartedAt={Date.now() - 75_000}
+      />,
+    );
+    expect(screen.getByText(/Astra is responding/)).toHaveTextContent('· 1m 15s');
+    act(() => vi.advanceTimersByTime(5_000));
+    expect(screen.getByText(/Astra is responding/)).toHaveTextContent('· 1m 20s');
+  });
+
+  it('ages the sidebar caption while the window sits open', () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(Date.parse('2026-09-20T12:00:00Z'));
+    render(
+      <ChatLayout
+        {...layoutProps()}
+        connected
+        familiars={[{ id: 'a', name: 'Astra' }]}
+        sessions={[{ id: 's-a', familiarId: 'a', title: 'a', updatedAt: '2026-09-20T11:59:50Z' }]}
+      />,
+    );
+    expect(screen.getByRole('button', { name: 'Astra' })).toHaveTextContent('now');
+    act(() => vi.advanceTimersByTime(120_000));
+    expect(screen.getByRole('button', { name: 'Astra' })).toHaveTextContent('2m');
+  });
+});

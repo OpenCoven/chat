@@ -118,6 +118,7 @@ export function ChatApp({
   // The familiar the active run addresses. Selection may move while a run is
   // live, and the layout must not credit the run to whichever familiar is shown.
   const [runFamiliarId, setRunFamiliarId] = useState('');
+  const [runStartedAt, setRunStartedAt] = useState(0);
   // Runs that ended while another familiar was shown, until that familiar is
   // opened again: the sidebar row says a reply arrived or the run failed.
   const [finished, setFinished] = useState<Record<string, 'reply' | 'error'>>({});
@@ -158,6 +159,7 @@ export function ChatApp({
     setChangingLifecycle(false);
     setBusy(false);
     setRunFamiliarId('');
+    setRunStartedAt(0);
     setFinished({});
     setCancelling(false);
     setLoading(true);
@@ -285,6 +287,7 @@ export function ChatApp({
     const life = lifetime.current;
     setBusy(true);
     setRunFamiliarId(current.familiarId);
+    setRunStartedAt(Date.now());
     setError('');
     const previousOutput = runOutputs[key]?.events ?? [];
     let streamed: CovenRunEvent[] = [];
@@ -382,6 +385,7 @@ export function ChatApp({
       if (lifetime.current === life) {
         setBusy(false);
         setRunFamiliarId('');
+        setRunStartedAt(0);
         setCancelling(false);
         if (outcome && navigationRef.current.familiarId !== current.familiarId) {
           const result = outcome;
@@ -571,6 +575,7 @@ export function ChatApp({
       }
       busy={busy}
       runFamiliarId={runFamiliarId}
+      runStartedAt={runStartedAt}
       finished={finished}
       loading={loading}
       cancelling={cancelling}

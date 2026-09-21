@@ -59,3 +59,12 @@ export function formatUpdatedCaption(value: string | undefined, now: number = Da
     ? `Updated ${date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' })}`
     : `Updated in ${date.getUTCFullYear()}`;
 }
+
+/** A run's elapsed time: seconds under a minute, then minutes and seconds, then hours and minutes. */
+export function formatElapsed(ms: number): string {
+  const total = Math.max(0, Math.floor(ms / 1000));
+  if (total < 60) return `${total}s`;
+  const minutes = Math.floor(total / 60);
+  if (minutes < 60) return `${minutes}m ${String(total % 60).padStart(2, '0')}s`;
+  return `${Math.floor(minutes / 60)}h ${String(minutes % 60).padStart(2, '0')}m`;
+}

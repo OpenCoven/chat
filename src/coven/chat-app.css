@@ -164,6 +164,11 @@
   font-size: 12px;
 }
 
+.coven-run-elapsed {
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
 .coven-jump-latest {
   display: flex;
   align-items: center;

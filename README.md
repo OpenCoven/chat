@@ -59,7 +59,8 @@ desktop webviews so long paths do not push the composer out of view.
 Connection diagnostics are collapsed during normal use. Run status and Stop
 stay beside the composer, and the end of the thread shows the familiar's
 avatar with what the run is doing right now (waiting for the familiar, running
-a named tool, or stopping) until reply text starts to stream. A run belongs to
+a named tool, or stopping) until reply text starts to stream, and the status
+counts how long the run has been going. A run belongs to
 the familiar it was sent to: if you switch to another familiar while it is
 live, that familiar's sidebar row reads **Responding…**, the status beside the
 composer names them and says the composer is free once their run finishes or
@@ -108,7 +109,8 @@ The sidebar is an agent list: each familiar has one canonical, persistent Chat
 conversation. Select a familiar to return to that thread. There is no separate
 familiar selector or new-conversation chooser. Rows are ordered by the most
 recent activity Coven reports, each captioned with how long ago that was
-(hover for the full timestamp); familiars whose chats carry no readable
+(hover for the full timestamp, and the captions age on their own while the
+window stays open); familiars whose chats carry no readable
 timestamp keep the CLI's order after them; hovering a row shows the familiar's
 purpose. The search box matches a familiar's name, identity, or purpose. From the search box, **Enter**
 opens the first match, **Escape** clears the filter, and the arrow keys move

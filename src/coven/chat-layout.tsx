@@ -41,10 +41,12 @@ import {
 import {
   activityTime,
   formatAbsoluteTime,
+  formatElapsed,
   formatRelativeTime,
   formatUpdatedCaption,
 } from './relative-time';
 import { type LoadRfb, ScreenViewer } from './screen-viewer';
+import { useNow } from './use-now';
 import { useViewportTier } from './viewport';
 import '../design/familiars-shell.css';
 import './chat-app.css';
@@ -96,6 +98,8 @@ export type ChatLayoutProps = Readonly<{
    * live; absent, the run is credited to the shown familiar.
    */
   runFamiliarId?: string;
+  /** When the active run started (epoch ms); the status shows how long it has run. */
+  runStartedAt?: number;
   /**
    * Familiars whose run ended while another was shown, by outcome, until they
    * are opened again. Their rows say so.
@@ -362,7 +366,10 @@ export function ChatLayout(props: ChatLayoutProps) {
   const runName =
     props.familiars.find((item) => item.id === runFamiliarId)?.name ?? 'Another familiar';
   const composer = composerCopy(props.connected, familiar?.name);
-  const updated = formatUpdatedCaption(session?.updatedAt);
+  // Captions age while the window sits open; a live run counts by the second.
+  const now = useNow(props.busy ? 1000 : 60_000);
+  const updated = formatUpdatedCaption(session?.updatedAt, now);
+  const elapsed = props.busy && props.runStartedAt ? formatElapsed(now - props.runStartedAt) : '';
   const workspace = session?.projectRoot || familiar?.workspace;
   const workspaceLabel = session?.projectRoot ? 'Chat project' : 'Familiar workspace';
   const composerDisabled =
@@ -588,7 +595,7 @@ export function ChatLayout(props: ChatLayoutProps) {
             <div className="fr-conv-list" ref={listRef}>
               {agents.map((item, index) => {
                 const thread = headOf(item.id);
-                const when = formatRelativeTime(thread?.updatedAt);
+                const when = formatRelativeTime(thread?.updatedAt, now);
                 const live = props.busy && item.id === runFamiliarId;
                 const draft = props.drafts?.[item.id]?.trim() ?? '';
                 const done = live ? undefined : props.finished?.[item.id];
@@ -960,6 +967,7 @@ export function ChatLayout(props: ChatLayoutProps) {
             {props.busy && (
               <output className="coven-run-status">
                 {runStatusText(name, runName, runHere, props.cancelling, runningTool)}
+                {elapsed ? <span className="coven-run-elapsed"> · {elapsed}</span> : null}
               </output>
             )}
             {props.readOnly && (
