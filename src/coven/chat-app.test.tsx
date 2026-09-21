@@ -37,6 +37,7 @@ function MockLayout(props: ChatLayoutProps) {
       <output data-testid="familiar">{props.familiarId}</output>
       <output data-testid="run-familiar">{props.busy ? props.runFamiliarId : 'idle'}</output>
       <output data-testid="drafts">{JSON.stringify(props.drafts ?? {})}</output>
+      <output data-testid="finished">{JSON.stringify(props.finished ?? {})}</output>
       <output data-testid="connected">{String(props.connected)}</output>
       <output data-testid="ready">{String(props.ready)}</output>
       <output>{props.status}</output>
@@ -391,6 +392,41 @@ describe('canonical familiar controller', () => {
     expect(screen.getByTestId('head')).toHaveTextContent('two');
     expect(screen.getByRole('textbox')).toHaveValue('');
     expect(screen.getByTestId('run-familiar')).toHaveTextContent('idle');
+  });
+
+  it('marks a run that ended while another familiar was shown, until that familiar is opened', async () => {
+    const api = runtime();
+    const run = deferred<CovenRunResult>();
+    vi.mocked(api.send).mockReturnValue(run.promise);
+    await ready(api);
+    draft('work');
+    click('Send');
+    click('Other familiar');
+    await act(async () => run.resolve({ runId: 'run', events: [] }));
+    expect(screen.getByTestId('finished')).toHaveTextContent('{"f":"reply"}');
+    click('First familiar');
+    await waitFor(() => expect(screen.getByTestId('familiar')).toHaveTextContent('f'));
+    expect(screen.getByTestId('finished')).toHaveTextContent('{}');
+  });
+
+  it('marks a failed run as failed and leaves no marker for a run the reader is watching', async () => {
+    const api = runtime();
+    const failing = deferred<CovenRunResult>();
+    vi.mocked(api.send).mockReturnValueOnce(failing.promise);
+    await ready(api);
+    draft('work');
+    click('Send');
+    click('Other familiar');
+    await act(async () => failing.reject(new Error('engine exited')));
+    expect(screen.getByTestId('finished')).toHaveTextContent('{"f":"error"}');
+    // A run that ends on the familiar being shown needs no reminder.
+    const watched = deferred<CovenRunResult>();
+    vi.mocked(api.send).mockReturnValueOnce(watched.promise);
+    await waitFor(() => expect(screen.getByRole('textbox')).toBeEnabled());
+    draft('more');
+    click('Send');
+    await act(async () => watched.resolve({ runId: 'run-2', events: [] }));
+    expect(screen.getByTestId('finished')).toHaveTextContent('{"f":"error"}');
   });
 
   it('archives a familiar and keeps it hidden after refresh without changing its history', async () => {

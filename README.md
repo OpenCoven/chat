@@ -62,7 +62,10 @@ a named tool, or stopping) until reply text starts to stream. A run belongs to
 the familiar it was sent to: if you switch to another familiar while it is
 live, that familiar's sidebar row reads **Responding…**, the status beside the
 composer names them and says the composer is free once their run finishes or
-is stopped, and the thread you are viewing does not claim the run. **Jump to
+is stopped, and the thread you are viewing does not claim the run. When that
+run ends, their row reads **New reply** (or **Run failed**) until you open
+them again; a run you stop yourself leaves no marker. Without a connected CLI
+the empty familiar list says to connect rather than to configure a familiar. **Jump to
 latest** returns to new output after you scroll back and counts the messages
 that arrived while you were reading. Error notices carry a dismiss control; a
 notice also clears on the next send, familiar switch, or refresh. Replies and the composer share a responsive reading column up to
@@ -105,7 +108,8 @@ conversation. Select a familiar to return to that thread. There is no separate
 familiar selector or new-conversation chooser. Rows are ordered by the most
 recent activity Coven reports, each captioned with how long ago that was
 (hover for the full timestamp); familiars whose chats carry no readable
-timestamp keep the CLI's order after them. From the search box, **Enter**
+timestamp keep the CLI's order after them. The search box matches a
+familiar's name, identity, or purpose. From the search box, **Enter**
 opens the first match, **Escape** clears the filter, and the arrow keys move
 into and along the list. A search that matches nothing offers **Clear search**.
 Choosing a familiar, by click or by Enter, puts the cursor in the composer as

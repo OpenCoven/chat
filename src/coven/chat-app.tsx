@@ -118,6 +118,9 @@ export function ChatApp({
   // The familiar the active run addresses. Selection may move while a run is
   // live, and the layout must not credit the run to whichever familiar is shown.
   const [runFamiliarId, setRunFamiliarId] = useState('');
+  // Runs that ended while another familiar was shown, until that familiar is
+  // opened again: the sidebar row says a reply arrived or the run failed.
+  const [finished, setFinished] = useState<Record<string, 'reply' | 'error'>>({});
   const draftVersions = useRef<Record<string, number>>({});
   const [cancelling, setCancelling] = useState(false);
   const [archived, setArchived] = useState(false);
@@ -152,6 +155,7 @@ export function ChatApp({
     setChangingLifecycle(false);
     setBusy(false);
     setRunFamiliarId('');
+    setFinished({});
     setCancelling(false);
     setLoading(true);
     setAvailable(false);
@@ -283,6 +287,7 @@ export function ChatApp({
     let streamedSession = '';
     let flush: ReturnType<typeof setTimeout> | null = null;
     let completed = false;
+    let outcome: 'reply' | 'error' | '' = '';
     function publish(nextEvents: CovenRunEvent[], runError = '', sessionId = streamedSession) {
       if (flush) {
         clearTimeout(flush);
@@ -335,8 +340,10 @@ export function ChatApp({
       publish(streamed.slice(), projected.error);
       if (projected.error) throw new Error(projected.error);
       completed = !run.cancelRequested;
+      if (completed) outcome = 'reply';
     } catch (failure) {
       publish(streamed.slice(), errorText(failure));
+      if (!run.cancelRequested) outcome = 'error';
     } finally {
       if (lifetime.current === life) {
         if (!completed) {
@@ -369,6 +376,10 @@ export function ChatApp({
         setBusy(false);
         setRunFamiliarId('');
         setCancelling(false);
+        if (outcome && navigationRef.current.familiarId !== current.familiarId) {
+          const result = outcome;
+          setFinished((previous) => ({ ...previous, [current.familiarId]: result }));
+        }
       }
     }
   }
@@ -551,6 +562,7 @@ export function ChatApp({
       }
       busy={busy}
       runFamiliarId={runFamiliarId}
+      finished={finished}
       loading={loading}
       cancelling={cancelling}
       error={error || runOutputs[draftKey(navigation)]?.error || ''}
@@ -565,6 +577,11 @@ export function ChatApp({
       onFamiliar={(id) => {
         if (lifecyclePending.current) return;
         setError('');
+        setFinished((previous) => {
+          if (!(id in previous)) return previous;
+          const { [id]: _seen, ...rest } = previous;
+          return rest;
+        });
         navigate(
           selectCanonical(
             { ...navigationRef.current, familiarId: id },

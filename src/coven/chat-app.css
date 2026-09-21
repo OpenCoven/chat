@@ -453,6 +453,17 @@
   font-variant-numeric: normal;
 }
 
+/* A run that ended while the reader was elsewhere; the row says how. */
+.coven-agent-done {
+  color: var(--accent-presence);
+  font-variant-numeric: normal;
+  font-weight: 500;
+}
+
+.coven-agent-done--error {
+  color: var(--color-danger);
+}
+
 /* A row with unsent text leads its preview with the word, in the accent. */
 .coven-agent-draft {
   flex: none;

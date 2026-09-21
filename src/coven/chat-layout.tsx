@@ -96,6 +96,11 @@ export type ChatLayoutProps = Readonly<{
    * live; absent, the run is credited to the shown familiar.
    */
   runFamiliarId?: string;
+  /**
+   * Familiars whose run ended while another was shown, by outcome, until they
+   * are opened again. Their rows say so.
+   */
+  finished?: Readonly<Record<string, 'reply' | 'error'>>;
   loading: boolean;
   cancelling: boolean;
   error: string;
@@ -210,6 +215,18 @@ export function runStatusText(
   if (cancelling) return 'Stopping; waiting for Coven…';
   if (runningTool) return `${name} is running ${runningTool}…`;
   return `${name} is responding…`;
+}
+
+/** The sidebar filter: name, identity, or purpose, case-insensitively. */
+export function matchesFamiliar(
+  item: Readonly<{ name: string; id: string; description?: string | undefined }>,
+  query: string,
+): boolean {
+  const needle = query.trim().toLowerCase();
+  if (!needle) return true;
+  return [item.name, item.id, item.description ?? ''].some((field) =>
+    field.toLowerCase().includes(needle),
+  );
 }
 
 /** Counts for the inspector's Activity tab, from the loaded transcript alone. */
@@ -418,7 +435,7 @@ export function ChatLayout(props: ChatLayoutProps) {
   const agents = props.familiars
     .filter(
       (item) =>
-        item.name.toLowerCase().includes(query.toLowerCase()) &&
+        matchesFamiliar(item, query) &&
         Boolean(headOf(item.id)?.archived) === Boolean(props.archivedFilter),
     )
     .sort((a, b) => activityTime(headOf(b.id)?.updatedAt) - activityTime(headOf(a.id)?.updatedAt));
@@ -555,12 +572,14 @@ export function ChatLayout(props: ChatLayoutProps) {
                 const when = formatRelativeTime(thread?.updatedAt);
                 const live = props.busy && item.id === runFamiliarId;
                 const draft = props.drafts?.[item.id]?.trim() ?? '';
+                const done = live ? undefined : props.finished?.[item.id];
+                const doneLabel = done === 'error' ? 'Run failed' : 'New reply';
                 return (
                   <button
                     type="button"
                     key={item.id}
                     className="fr-conv coven-agent-row"
-                    aria-label={item.name}
+                    aria-label={done ? `${item.name} (${doneLabel.toLowerCase()})` : item.name}
                     aria-current={item.id === props.familiarId || undefined}
                     disabled={props.lifecycleBusy}
                     onKeyDown={(event) => moveRowFocus(event, index)}
@@ -573,6 +592,12 @@ export function ChatLayout(props: ChatLayoutProps) {
                         {live ? (
                           <span className="fr-conv-time coven-agent-live">
                             {props.cancelling ? 'Stopping…' : 'Responding…'}
+                          </span>
+                        ) : done ? (
+                          <span
+                            className={`fr-conv-time coven-agent-done${done === 'error' ? ' coven-agent-done--error' : ''}`}
+                          >
+                            {doneLabel}
                           </span>
                         ) : when ? (
                           <time
@@ -606,11 +631,13 @@ export function ChatLayout(props: ChatLayoutProps) {
                   <Icon name="chats-circle" size={16} />
                 </span>
                 <span className="fr-empty-text">
-                  {query
-                    ? 'No matching familiars.'
-                    : props.archivedFilter
-                      ? 'No archived familiars.'
-                      : 'No active familiars available. Configure a familiar in Coven, then refresh.'}
+                  {!props.connected
+                    ? 'Connect to your local Coven CLI to see your familiars.'
+                    : query
+                      ? 'No matching familiars.'
+                      : props.archivedFilter
+                        ? 'No archived familiars.'
+                        : 'No active familiars available. Configure a familiar in Coven, then refresh.'}
                 </span>
                 {query ? (
                   <FamButton size="sm" onClick={() => setQuery('')}>

@@ -7,6 +7,7 @@ import {
   type ChatLayoutProps,
   composerCopy,
   emptyThreadText,
+  matchesFamiliar,
   runStatusText,
 } from './chat-layout';
 import type { RfbClass } from './screen-viewer';
@@ -1343,5 +1344,79 @@ describe('draft reminders', () => {
     const astra = screen.getByRole('button', { name: 'Astra' });
     expect(astra).not.toHaveTextContent('Draft:');
     expect(astra).toHaveTextContent('Reviewing the branch');
+  });
+});
+
+describe('finished runs', () => {
+  const props = () => ({
+    ...layoutProps(),
+    connected: true,
+    ready: true,
+    familiars: [
+      { id: 'a', name: 'Astra' },
+      { id: 'b', name: 'Bram' },
+      { id: 'c', name: 'Cass' },
+    ],
+    sessions: [
+      { id: 's-a', familiarId: 'a', title: 'a', updatedAt: '2026-09-20T11:30:00Z' },
+      { id: 's-b', familiarId: 'b', title: 'b', updatedAt: '2026-09-20T11:30:00Z' },
+    ],
+    familiarId: 'c',
+  });
+
+  it('marks the rows whose runs ended elsewhere, by outcome, in place of their age', () => {
+    render(<ChatLayout {...props()} finished={{ a: 'reply', b: 'error' }} />);
+    const astra = screen.getByRole('button', { name: 'Astra (new reply)' });
+    expect(astra).toHaveTextContent('New reply');
+    expect(astra.querySelector('time')).toBeNull();
+    const bram = screen.getByRole('button', { name: 'Bram (run failed)' });
+    expect(bram).toHaveTextContent('Run failed');
+    expect(screen.getByRole('button', { name: 'Cass' })).not.toHaveTextContent(/New reply|failed/);
+  });
+
+  it('lets a live run outrank a stale marker on the same row', () => {
+    render(<ChatLayout {...props()} finished={{ a: 'reply' }} busy runFamiliarId="a" />);
+    const astra = screen.getByRole('button', { name: 'Astra' });
+    expect(astra).toHaveTextContent('Responding…');
+    expect(astra).not.toHaveTextContent('New reply');
+  });
+});
+
+describe('sidebar filter', () => {
+  it('matches name, identity, or purpose without regard to case', () => {
+    const item = { id: 'fam-astra-01', name: 'Astra', description: 'Reviews pull requests.' };
+    expect(matchesFamiliar(item, '')).toBe(true);
+    expect(matchesFamiliar(item, '  ')).toBe(true);
+    expect(matchesFamiliar(item, 'AST')).toBe(true);
+    expect(matchesFamiliar(item, 'astra-01')).toBe(true);
+    expect(matchesFamiliar(item, 'pull req')).toBe(true);
+    expect(matchesFamiliar(item, 'release')).toBe(false);
+    expect(matchesFamiliar({ id: 'x', name: 'Bram' }, 'pull')).toBe(false);
+  });
+
+  it('finds a familiar by purpose from the search box', () => {
+    render(
+      <ChatLayout
+        {...layoutProps()}
+        connected
+        familiars={[
+          { id: 'a', name: 'Astra', description: 'Reviews pull requests.' },
+          { id: 'b', name: 'Bram', description: 'Keeps CI honest.' },
+        ]}
+      />,
+    );
+    fireEvent.change(screen.getByRole('searchbox'), { target: { value: 'ci honest' } });
+    expect(screen.getByRole('button', { name: 'Bram' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Astra' })).not.toBeInTheDocument();
+  });
+
+  it('tells a disconnected reader to connect, not to configure a familiar', () => {
+    const { rerender } = render(<ChatLayout {...layoutProps()} />);
+    expect(
+      screen.getByText(/Connect to your local Coven CLI to see your familiars/),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/Configure a familiar/)).not.toBeInTheDocument();
+    rerender(<ChatLayout {...layoutProps()} connected />);
+    expect(screen.getByText(/Configure a familiar in Coven/)).toBeInTheDocument();
   });
 });
