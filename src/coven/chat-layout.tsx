@@ -118,6 +118,8 @@ export type ChatLayoutProps = Readonly<{
   onDismissError?: () => void;
   /** Sends the restored draft again; present only while a failed run's error shows. */
   onRetry?: () => void;
+  /** Reads the chat's history again; present only while a failed read's error shows. */
+  onReloadChat?: () => void;
   /** The host-side VNC relay; absent in the browser, where the pane says so. */
   screen?: ScreenRelay | undefined;
   /** Test seam for the screen viewer's VNC client. */
@@ -913,6 +915,11 @@ export function ChatLayout(props: ChatLayoutProps) {
               <details className="coven-connection" open={!props.ready}>
                 <summary>{props.ready ? 'Connection details' : 'Coven setup required'}</summary>
                 <output className="coven-status">{props.status}</output>
+                <CopyButton
+                  className="coven-status-copy"
+                  text={props.status}
+                  label="Copy connection details"
+                />
               </details>
             ) : null}
             {props.partialHistory ? (
@@ -924,6 +931,11 @@ export function ChatLayout(props: ChatLayoutProps) {
             {props.error ? (
               <div className="coven-error" role="alert">
                 <span className="coven-error-text">{props.error}</span>
+                {props.onReloadChat && !props.loading ? (
+                  <FamButton size="sm" className="coven-error-retry" onClick={props.onReloadChat}>
+                    Reload chat
+                  </FamButton>
+                ) : null}
                 <CopyButton className="coven-error-copy" text={props.error} label="Copy error" />
                 {props.onRetry &&
                 !composerDisabled &&

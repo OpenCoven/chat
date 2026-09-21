@@ -82,7 +82,10 @@ is collapsed, its tab carries a count of such runs so they are not missed. Witho
 the empty familiar list says to connect rather than to configure a familiar. **Jump to
 latest** returns to new output after you scroll back and counts the messages
 that arrived while you were reading. Error notices carry Copy and dismiss controls; a
-notice also clears on the next send, familiar switch, or refresh. Replies and the composer share a responsive reading column up to
+notice also clears on the next send, familiar switch, or refresh. When a
+chat's history could not be read, its notice offers **Reload chat**, which
+reads it again without refreshing everything. The collapsed connection
+details have a Copy control too, for a bug report. Replies and the composer share a responsive reading column up to
 1200px wide (36% wider than the previous 880px limit), while
 the application frame remains stationary.
 The window can shrink to 480×520: above 1100px every rail stays in the grid,

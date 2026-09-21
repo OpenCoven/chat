@@ -114,6 +114,11 @@ function MockLayout(props: ChatLayoutProps) {
           Try again
         </button>
       )}
+      {props.onReloadChat && (
+        <button type="button" onClick={props.onReloadChat}>
+          Reload chat
+        </button>
+      )}
     </div>
   );
 }
@@ -516,6 +521,20 @@ describe('canonical familiar controller', () => {
     click('Other familiar');
     await waitFor(() => expect(screen.getByTestId('head')).toHaveTextContent('two'));
     expect(screen.getByTestId('partial')).toHaveTextContent('false');
+  });
+
+  it('offers to read the history again after a failed read, and only then', async () => {
+    const api = runtime();
+    vi.mocked(api.readSession).mockRejectedValueOnce(new Error('transcript locked'));
+    await act(async () => {
+      render(<ChatApp runtime={api} />);
+    });
+    await screen.findByRole('alert');
+    expect(screen.getByRole('alert')).toHaveTextContent('transcript locked');
+    click('Reload chat');
+    await waitFor(() => expect(api.readSession).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(screen.queryByRole('alert')).not.toBeInTheDocument());
+    expect(screen.queryByRole('button', { name: 'Reload chat' })).not.toBeInTheDocument();
   });
 
   it('marks a failed run as failed and leaves no marker for a run the reader is watching', async () => {
