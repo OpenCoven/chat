@@ -212,7 +212,7 @@ const expectedEntries = {
     windowsSupervisor: {
       source: {
         repository: 'OpenCoven/chat',
-        revision: '9612dc81e330952bbd9d357e862944e43dffa58c',
+        revision: '4146299e4e358275ebc3e66448bc12c9889621a5',
         path: 'tools/phase1-process-supervisor/src/main.rs',
         blob: '6a95b4db7612ed0a502e91c4c21a7df5cbfe9021',
         sha256: 'fa4c4759c0b01ce7f9bbd662ed3073b0aeed42dc7da0001026703482a5b9708a',
