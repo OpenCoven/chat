@@ -17,6 +17,8 @@ applications. `VITE_DEFAULT_DEMO` and `app:build:demo` are removed.
 The application frame stays within the window and does not scroll globally.
 Conversation history, rails, and long drafts scroll inside their own regions,
 so a long reply or a short window does not push the composer off the page.
+The conversation region can take keyboard focus, so it scrolls with the
+arrow and page keys without a control inside it being focused.
 
 Toggle the familiar list with **Cmd/Ctrl+\\** and the inspector with
 **Cmd/Ctrl+Shift+\\**, and reach the familiar search with **Cmd/Ctrl+K**
@@ -70,7 +72,8 @@ live, that familiar's sidebar row reads **Responding…**, the status beside the
 composer names them and says the composer is free once their run finishes or
 is stopped, and the thread you are viewing does not claim the run. When that
 run ends, their row reads **New reply** (or **Run failed**) until you open
-them again; a run you stop yourself leaves no marker. Without a connected CLI
+them again; a run you stop yourself leaves no marker. While the familiar list
+is collapsed, its tab carries a count of such runs so they are not missed. Without a connected CLI
 the empty familiar list says to connect rather than to configure a familiar. **Jump to
 latest** returns to new output after you scroll back and counts the messages
 that arrived while you were reading. Error notices carry Copy and dismiss controls; a

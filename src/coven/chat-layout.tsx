@@ -376,6 +376,11 @@ export function ChatLayout(props: ChatLayoutProps) {
   const runHere = props.busy && runFamiliarId === props.familiarId;
   const runName =
     props.familiars.find((item) => item.id === runFamiliarId)?.name ?? 'Another familiar';
+  // Runs that ended elsewhere and have not been looked at; the collapsed
+  // familiar tab counts them, since the rows that say so are out of sight.
+  const pendingRuns = Object.keys(props.finished ?? {}).filter(
+    (id) => id !== runFamiliarId && props.familiars.some((item) => item.id === id),
+  ).length;
   const composer = composerCopy(props.connected, familiar?.name);
   // The familiar's declared access, write grants first so they stand out.
   const projectAccess = [...(familiar?.projectAccess ?? [])].sort(
@@ -529,7 +534,11 @@ export function ChatLayout(props: ChatLayoutProps) {
         // While the scrim is up it owns the surface; a reserved tab sitting
         // over it would swallow the dismiss click.
         hidden={sidebar || scrim}
-        aria-label="Show familiars"
+        aria-label={
+          pendingRuns
+            ? `Show familiars (${pendingRuns} finished ${pendingRuns === 1 ? 'run' : 'runs'})`
+            : 'Show familiars'
+        }
         aria-controls="coven-familiars-sidebar"
         aria-expanded={false}
         aria-keyshortcuts={LEFT_RAIL_SHORTCUT}
@@ -537,6 +546,11 @@ export function ChatLayout(props: ChatLayoutProps) {
         data-opens="sidebar"
         onClick={openSidebar}
       >
+        {pendingRuns ? (
+          <span className="coven-rail-tab-badge" aria-hidden="true">
+            {pendingRuns}
+          </span>
+        ) : null}
         <span className="coven-rail-tab-label">Familiars</span>
         <span className="coven-rail-tab-cue" aria-hidden="true">
           ›
@@ -801,6 +815,8 @@ export function ChatLayout(props: ChatLayoutProps) {
           role="log"
           aria-label="Messages"
           aria-busy={props.loading}
+          // biome-ignore lint/a11y/noNoninteractiveTabindex: The transcript scrolls; the keyboard needs a way in.
+          tabIndex={0}
           onScroll={(event) => {
             const transcript = event.currentTarget;
             nearBottom.current =
