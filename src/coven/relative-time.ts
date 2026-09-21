@@ -36,3 +36,26 @@ export function activityTime(value: string | undefined): number {
   const time = Date.parse(value);
   return Number.isNaN(time) ? Number.NEGATIVE_INFINITY : time;
 }
+
+/**
+ * The thread header's caption for a chat's last activity, in words. Empty for
+ * a value that is not a date, so the header never shows a wrong caption.
+ */
+export function formatUpdatedCaption(value: string | undefined, now: number = Date.now()): string {
+  if (!value) return '';
+  const time = Date.parse(value);
+  if (Number.isNaN(time)) return '';
+  const elapsed = now - time;
+  const minute = 60_000;
+  const hour = 60 * minute;
+  const day = 24 * hour;
+  if (elapsed < minute) return 'Updated just now';
+  if (elapsed < hour) return `Updated ${Math.floor(elapsed / minute)}m ago`;
+  if (elapsed < day) return `Updated ${Math.floor(elapsed / hour)}h ago`;
+  if (elapsed < 7 * day) return `Updated ${Math.floor(elapsed / day)}d ago`;
+  const date = new Date(time);
+  const current = new Date(now);
+  return date.getUTCFullYear() === current.getUTCFullYear()
+    ? `Updated ${date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' })}`
+    : `Updated in ${date.getUTCFullYear()}`;
+}

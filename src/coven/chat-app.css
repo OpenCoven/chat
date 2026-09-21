@@ -453,6 +453,28 @@
   font-variant-numeric: normal;
 }
 
+/* A row with unsent text leads its preview with the word, in the accent. */
+.coven-agent-draft {
+  flex: none;
+  color: var(--accent-presence);
+  font-weight: 500;
+}
+
+/* The header's last-activity caption sits after the name and yields to it. */
+.coven-chat .coven-thread-updated {
+  flex: none;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--text-muted);
+}
+
+/* The familiar's purpose under the empty thread's heading. */
+.coven-thread-empty-purpose {
+  font-size: 13px;
+  color: var(--text-primary);
+  text-wrap: balance;
+}
+
 .coven-chat .fr-thread-header-lead {
   flex: 1 1 140px;
 }

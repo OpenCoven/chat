@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { activityTime, formatAbsoluteTime, formatRelativeTime } from './relative-time';
+import {
+  activityTime,
+  formatAbsoluteTime,
+  formatRelativeTime,
+  formatUpdatedCaption,
+} from './relative-time';
 
 const now = Date.parse('2026-09-20T12:00:00Z');
 
@@ -40,5 +45,21 @@ describe('activityTime', () => {
     expect(activityTime('2026-09-14')).toBeGreaterThan(activityTime('2026-09-13'));
     expect(activityTime('today')).toBe(Number.NEGATIVE_INFINITY);
     expect(activityTime(undefined)).toBe(Number.NEGATIVE_INFINITY);
+  });
+});
+
+describe('formatUpdatedCaption', () => {
+  it('says in words how long ago the chat last moved', () => {
+    expect(formatUpdatedCaption('2026-09-20T11:59:40Z', now)).toBe('Updated just now');
+    expect(formatUpdatedCaption('2026-09-20T11:35:00Z', now)).toBe('Updated 25m ago');
+    expect(formatUpdatedCaption('2026-09-20T09:00:00Z', now)).toBe('Updated 3h ago');
+    expect(formatUpdatedCaption('2026-09-18T12:00:00Z', now)).toBe('Updated 2d ago');
+    expect(formatUpdatedCaption('2026-09-01T12:00:00Z', now)).toBe('Updated Sep 1');
+    expect(formatUpdatedCaption('2025-12-31T12:00:00Z', now)).toBe('Updated in 2025');
+  });
+
+  it('shows nothing for a value that is not a date', () => {
+    expect(formatUpdatedCaption('today', now)).toBe('');
+    expect(formatUpdatedCaption(undefined, now)).toBe('');
   });
 });

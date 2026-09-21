@@ -556,7 +556,12 @@ describe('production Familiars layout', () => {
         ]}
       />,
     );
-    expect(screen.getByText('My configured purpose').closest('.fr-card')).toBeInTheDocument();
+    // The empty thread shows the purpose too; this asserts the inspector card.
+    expect(
+      within(screen.getByRole('region', { name: 'Overview' }))
+        .getByText('My configured purpose')
+        .closest('.fr-card'),
+    ).toBeInTheDocument();
     expect(screen.getByText('/actual/workspace')).toBeInTheDocument();
     expect(screen.queryByText('SOUL.md')).not.toBeInTheDocument();
   });
@@ -1220,5 +1225,123 @@ describe('screen viewer pane', () => {
     expect(closes[0]).toHaveBeenCalledOnce();
     expect(screen.getByText('Not connected.')).toBeInTheDocument();
     expect(screen.getByLabelText('Screen address')).toHaveValue('');
+  });
+});
+
+describe('choosing a familiar', () => {
+  const props = () => ({
+    ...layoutProps(),
+    connected: true,
+    ready: true,
+    familiars: [
+      { id: 'a', name: 'Astra', description: 'Reviews pull requests.' },
+      { id: 'b', name: 'Bram' },
+    ],
+    sessions: [{ id: 's-a', familiarId: 'a', title: 'a', updatedAt: '2026-09-20T11:30:00Z' }],
+  });
+
+  it('hands focus to the composer after a row is chosen', () => {
+    const view = render(<ChatLayout {...props()} familiarId="a" sessionId="s-a" />);
+    fireEvent.click(screen.getByRole('button', { name: 'Bram' }));
+    // The host switches the selection; the composer takes focus once it is shown.
+    view.rerender(<ChatLayout {...props()} familiarId="b" sessionId="" />);
+    expect(screen.getByRole('textbox', { name: 'Message Bram' })).toHaveFocus();
+  });
+
+  it('waits for the thread to load before focusing, and drops a stale request', () => {
+    const view = render(<ChatLayout {...props()} familiarId="a" sessionId="s-a" />);
+    fireEvent.click(screen.getByRole('button', { name: 'Bram' }));
+    view.rerender(<ChatLayout {...props()} familiarId="b" sessionId="" loading />);
+    expect(screen.getByRole('textbox', { name: 'Message Bram' })).not.toHaveFocus();
+    view.rerender(<ChatLayout {...props()} familiarId="b" sessionId="" />);
+    expect(screen.getByRole('textbox', { name: 'Message Bram' })).toHaveFocus();
+    // A request for Bram never fires on Astra's composer: the host moved on.
+    fireEvent.click(screen.getByRole('button', { name: 'Bram' }));
+    screen.getByRole('searchbox').focus();
+    view.rerender(<ChatLayout {...props()} familiarId="a" sessionId="s-a" loading />);
+    view.rerender(<ChatLayout {...props()} familiarId="a" sessionId="s-a" />);
+    expect(screen.getByRole('searchbox')).toHaveFocus();
+  });
+
+  it('focuses the composer after Enter in the search box opens the first match', () => {
+    const view = render(<ChatLayout {...props()} familiarId="a" sessionId="s-a" />);
+    const search = screen.getByRole('searchbox');
+    search.focus();
+    fireEvent.change(search, { target: { value: 'Br' } });
+    fireEvent.keyDown(search, { key: 'Enter' });
+    view.rerender(<ChatLayout {...props()} familiarId="b" sessionId="" />);
+    expect(screen.getByRole('textbox', { name: 'Message Bram' })).toHaveFocus();
+  });
+
+  it('reaches the familiar search with Cmd/Ctrl+K, opening the sidebar if needed', () => {
+    render(<ChatLayout {...props()} familiarId="a" sessionId="s-a" />);
+    fireEvent.click(screen.getByRole('button', { name: 'Hide familiars' }));
+    expect(screen.getByRole('button', { name: 'Show familiars' })).toBeInTheDocument();
+    fireEvent.keyDown(window, { key: 'k', code: 'KeyK', metaKey: true });
+    expect(screen.getByRole('searchbox')).toHaveFocus();
+    expect(screen.queryByRole('button', { name: 'Show familiars' })).not.toBeInTheDocument();
+    screen.getByRole('textbox', { name: 'Message Astra' }).focus();
+    fireEvent.keyDown(window, { key: 'K', code: 'KeyK', ctrlKey: true });
+    expect(screen.getByRole('searchbox')).toHaveFocus();
+    // Shift+K, a bare K, and an Alt chord are not the shortcut.
+    screen.getByRole('textbox', { name: 'Message Astra' }).focus();
+    fireEvent.keyDown(window, { key: 'K', code: 'KeyK', metaKey: true, shiftKey: true });
+    fireEvent.keyDown(window, { key: 'k', code: 'KeyK' });
+    fireEvent.keyDown(window, { key: 'k', code: 'KeyK', metaKey: true, altKey: true });
+    expect(screen.getByRole('searchbox')).not.toHaveFocus();
+    expect(screen.getByRole('searchbox')).toHaveAttribute('aria-keyshortcuts', 'Meta+K Control+K');
+  });
+
+  it("shows the familiar's purpose under the empty thread heading", () => {
+    render(<ChatLayout {...props()} familiarId="a" sessionId="s-a" />);
+    const empty = screen.getByText('Chat with Astra').parentElement;
+    expect(empty).toHaveTextContent('Reviews pull requests.');
+    expect(empty).toHaveTextContent('start of your conversation with Astra');
+  });
+
+  it("captions the header with the chat's last activity when it is a date", () => {
+    const view = render(<ChatLayout {...props()} familiarId="a" sessionId="s-a" />);
+    const caption = screen.getByRole('banner').querySelector('time');
+    expect(caption?.textContent).toMatch(/^Updated /);
+    expect(caption).toHaveAttribute('datetime', '2026-09-20T11:30:00Z');
+    view.rerender(
+      <ChatLayout
+        {...props()}
+        familiarId="a"
+        sessionId="s-a"
+        sessions={[{ id: 's-a', familiarId: 'a', title: 'a', updatedAt: 'today' }]}
+      />,
+    );
+    expect(screen.getByRole('banner').querySelector('time')).toBeNull();
+  });
+});
+
+describe('draft reminders', () => {
+  it("leads a row's preview with the unsent draft instead of the last message", () => {
+    render(
+      <ChatLayout
+        {...layoutProps()}
+        connected
+        ready
+        familiars={[
+          { id: 'a', name: 'Astra' },
+          { id: 'b', name: 'Bram' },
+        ]}
+        sessions={[
+          { id: 's-a', familiarId: 'a', title: 'a', preview: 'Reviewing the branch' },
+          { id: 's-b', familiarId: 'b', title: 'b', preview: 'CI is green' },
+        ]}
+        familiarId="a"
+        sessionId="s-a"
+        drafts={{ b: 'ask about the flaky job', a: '   ' }}
+      />,
+    );
+    const bram = screen.getByRole('button', { name: 'Bram' });
+    expect(bram).toHaveTextContent('Draft:ask about the flaky job');
+    expect(bram).not.toHaveTextContent('CI is green');
+    // Whitespace is not a draft.
+    const astra = screen.getByRole('button', { name: 'Astra' });
+    expect(astra).not.toHaveTextContent('Draft:');
+    expect(astra).toHaveTextContent('Reviewing the branch');
   });
 });
