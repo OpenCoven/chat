@@ -21,7 +21,8 @@ so a long reply or a short window does not push the composer off the page.
 Toggle the familiar list with **Cmd/Ctrl+\\** and the inspector with
 **Cmd/Ctrl+Shift+\\**, and reach the familiar search with **Cmd/Ctrl+K**
 (it opens the list if it is closed). These shortcuts work while composing
-without changing your text. Rail buttons include shortcut hints; modal dialogs and input-method
+without changing your text, and **Keyboard shortcuts** at the foot of the
+familiar list lists them all. Rail buttons include shortcut hints; modal dialogs and input-method
 composition do not trigger the shortcuts.
 
 Closed rails remain as 28px full-height tabs: **Familiars** on the left and the
@@ -62,7 +63,10 @@ a named tool, or stopping) until reply text starts to stream. A run belongs to
 the familiar it was sent to: if you switch to another familiar while it is
 live, that familiar's sidebar row reads **Responding…**, the status beside the
 composer names them and says the composer is free once their run finishes or
-is stopped, and the thread you are viewing does not claim the run. **Jump to
+is stopped, and the thread you are viewing does not claim the run. When that
+run ends, their row reads **New reply** (or **Run failed**) until you open
+them again; a run you stop yourself leaves no marker. Without a connected CLI
+the empty familiar list says to connect rather than to configure a familiar. **Jump to
 latest** returns to new output after you scroll back and counts the messages
 that arrived while you were reading. Error notices carry a dismiss control; a
 notice also clears on the next send, familiar switch, or refresh. Replies and the composer share a responsive reading column up to
@@ -105,7 +109,8 @@ conversation. Select a familiar to return to that thread. There is no separate
 familiar selector or new-conversation chooser. Rows are ordered by the most
 recent activity Coven reports, each captioned with how long ago that was
 (hover for the full timestamp); familiars whose chats carry no readable
-timestamp keep the CLI's order after them. From the search box, **Enter**
+timestamp keep the CLI's order after them; hovering a row shows the familiar's
+purpose. The search box matches a familiar's name, identity, or purpose. From the search box, **Enter**
 opens the first match, **Escape** clears the filter, and the arrow keys move
 into and along the list. A search that matches nothing offers **Clear search**.
 Choosing a familiar, by click or by Enter, puts the cursor in the composer as
@@ -115,7 +120,8 @@ familiar's name with when their chat last moved (hover for the full
 timestamp), and an empty thread shows the familiar's purpose under its
 heading.
 
-The inspector's Overview shows the familiar's purpose, identity and workspace,
+The inspector's Overview shows the familiar's purpose, identity and workspace
+(each path with its own **Copy** control),
 whether their chat is active, archived or not yet started, and its last
 activity. Activity reports the run state and counts the messages you sent, the
 replies and the tool calls (with failures) in the loaded transcript; tokens,
@@ -131,7 +137,8 @@ The bundled Coven Code engine cannot reopen a thread's earlier turns that way,
 so when you continue a Coven Code chat, Chat replays the most recent turns from
 its saved transcript into the new run (the newest turns first, up to 24 KiB,
 each message capped at 4 KiB) and adds a notice to the thread saying how many
-turns were replayed and whether older ones were left out. The saved transcript
+turns were replayed and whether older ones were left out. That notice is a
+quiet line between messages, not a reply from anyone. The saved transcript
 keeps only your original message, not the replayed prompt.
 
 **Archive chat** keeps the saved history and hides the familiar from the active list.
@@ -153,8 +160,8 @@ cancellation cleanup, have finished; deleting a chat never cancels an agent.
 ## Attachments and formatted replies
 
 Use the compact **+** attachment button beside the message field. Selected files
-appear as cards with their filename, size, and a remove control; sent messages
-retain file cards in the transcript.
+appear as cards with their filename, size (in KiB above a kibibyte), and a
+remove control; sent messages retain file cards in the transcript.
 
 The composer accepts up to four UTF-8 text/code files, each at most 64 KiB.
 Selected bytes are validated and passed to Coven as actual file contents, not
@@ -170,7 +177,9 @@ retained files; originals are never modified.
 Sending clears the submitted text and attachment cards immediately. You can
 compose the next message while the familiar responds. A failed or cancelled
 send restores its attachments and restores its text only if you have not
-edited the new draft; later edits are never overwritten.
+edited the new draft; later edits are never overwritten. While a failed run's
+error notice shows and the restored text or attachments are still in the
+composer, the notice offers **Try again**, which sends them once more.
 
 Assistant replies render Markdown headings, lists, emphasis, quotes, code,
 tables, and task lists. Wide code and tables scroll inside the message.
@@ -181,12 +190,15 @@ code alone. The control reports "Copied" only after the clipboard accepted
 the text and "Copy failed" when it did not.
 
 Tool calls appear as activity rows between the prose, each expanding to the
-call's arguments. When the runtime reports a call as data rather than as a
+call's input and, once reported, its result, each block labeled and with its
+own **Copy** control. When the runtime reports a call as data rather than as a
 `⚒ Name(args)` line — a `tool_start` frame from the bundled engine, a
 `tool_use` block in an assistant message, or a `tool_result` frame — the row
 also shows the input (cut at 16 KiB with a note saying so) and, once
 reported, the result, and the run status
-names the tool that is executing while its row is marked as running. The bundled engine's Claude CLI provider
+names the tool that is executing while its row is marked as running. A run of
+more than ten consecutive calls folds to its newest six, behind a control that
+says how many earlier calls it hides and how many of those failed. The bundled engine's Claude CLI provider
 reports calls as text only, so those rows carry the one-line summary alone.
 
 ## Remote screen (VNC)

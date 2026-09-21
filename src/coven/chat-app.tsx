@@ -118,6 +118,12 @@ export function ChatApp({
   // The familiar the active run addresses. Selection may move while a run is
   // live, and the layout must not credit the run to whichever familiar is shown.
   const [runFamiliarId, setRunFamiliarId] = useState('');
+  // Runs that ended while another familiar was shown, until that familiar is
+  // opened again: the sidebar row says a reply arrived or the run failed.
+  const [finished, setFinished] = useState<Record<string, 'reply' | 'error'>>({});
+  // The draft key whose failed run's input is exactly what the composer holds
+  // again, so Try again resends that input and nothing else. Any edit clears it.
+  const [retryKey, setRetryKey] = useState('');
   const draftVersions = useRef<Record<string, number>>({});
   const [cancelling, setCancelling] = useState(false);
   const [archived, setArchived] = useState(false);
@@ -152,6 +158,7 @@ export function ChatApp({
     setChangingLifecycle(false);
     setBusy(false);
     setRunFamiliarId('');
+    setFinished({});
     setCancelling(false);
     setLoading(true);
     setAvailable(false);
@@ -270,6 +277,7 @@ export function ChatApp({
     }
     const run = { id: crypto.randomUUID(), cancelRequested: false };
     activeRun.current = run;
+    setRetryKey('');
     const draftVersion = draftVersions.current[key] ?? 0;
     navigate({ ...current, drafts: { ...current.drafts, [key]: '' } });
     attachmentRef.current = { ...attachmentRef.current, [key]: [] };
@@ -283,6 +291,7 @@ export function ChatApp({
     let streamedSession = '';
     let flush: ReturnType<typeof setTimeout> | null = null;
     let completed = false;
+    let outcome: 'reply' | 'error' | '' = '';
     function publish(nextEvents: CovenRunEvent[], runError = '', sessionId = streamedSession) {
       if (flush) {
         clearTimeout(flush);
@@ -335,16 +344,21 @@ export function ChatApp({
       publish(streamed.slice(), projected.error);
       if (projected.error) throw new Error(projected.error);
       completed = !run.cancelRequested;
+      if (completed) outcome = 'reply';
     } catch (failure) {
       publish(streamed.slice(), errorText(failure));
+      if (!run.cancelRequested) outcome = 'error';
     } finally {
       if (lifetime.current === life) {
         if (!completed) {
           const latest = navigationRef.current;
-          if ((draftVersions.current[key] ?? 0) === draftVersion && latest.drafts[key] === '')
+          const untouched = (draftVersions.current[key] ?? 0) === draftVersion;
+          if (untouched && latest.drafts[key] === '')
             navigate({ ...latest, drafts: { ...latest.drafts, [key]: prompt } });
           attachmentRef.current = { ...attachmentRef.current, [key]: selectedFiles };
           setAttachments(attachmentRef.current);
+          // A draft typed during the run is the reader's, not the failed input.
+          setRetryKey(untouched ? key : '');
         }
         try {
           // Initialization persists the canonical sibling even if the run fails or is cancelled.
@@ -369,6 +383,10 @@ export function ChatApp({
         setBusy(false);
         setRunFamiliarId('');
         setCancelling(false);
+        if (outcome && navigationRef.current.familiarId !== current.familiarId) {
+          const result = outcome;
+          setFinished((previous) => ({ ...previous, [current.familiarId]: result }));
+        }
       }
     }
   }
@@ -395,6 +413,7 @@ export function ChatApp({
       return;
     const key = draftKey(navigationRef.current);
     selecting.current = true;
+    setRetryKey('');
     setAttaching(true);
     try {
       const existing = attachmentRef.current[key] ?? [];
@@ -515,6 +534,7 @@ export function ChatApp({
       onRemoveAttachment={(id) => {
         if (activeRun.current || selecting.current || lifecyclePending.current) return;
         const key = draftKey(navigationRef.current);
+        setRetryKey('');
         attachmentRef.current = {
           ...attachmentRef.current,
           [key]: (attachmentRef.current[key] ?? []).filter((file) => file.id !== id),
@@ -551,9 +571,14 @@ export function ChatApp({
       }
       busy={busy}
       runFamiliarId={runFamiliarId}
+      finished={finished}
       loading={loading}
       cancelling={cancelling}
       error={error || runOutputs[draftKey(navigation)]?.error || ''}
+      // A failed run restores what it was sent; the notice can send it again.
+      {...(runOutputs[draftKey(navigation)]?.error && !busy && retryKey === draftKey(navigation)
+        ? { onRetry: () => void send() }
+        : {})}
       onDismissError={() => {
         setError('');
         const key = draftKey(navigationRef.current);
@@ -565,6 +590,11 @@ export function ChatApp({
       onFamiliar={(id) => {
         if (lifecyclePending.current) return;
         setError('');
+        setFinished((previous) => {
+          if (!(id in previous)) return previous;
+          const { [id]: _seen, ...rest } = previous;
+          return rest;
+        });
         navigate(
           selectCanonical(
             { ...navigationRef.current, familiarId: id },
@@ -579,6 +609,7 @@ export function ChatApp({
         const latest = navigationRef.current;
         const key = draftKey(latest);
         draftVersions.current[key] = (draftVersions.current[key] ?? 0) + 1;
+        setRetryKey('');
         navigate({ ...latest, drafts: { ...latest.drafts, [draftKey(latest)]: value } });
       }}
       onSend={() => void send()}

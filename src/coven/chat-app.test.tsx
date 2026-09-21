@@ -37,6 +37,7 @@ function MockLayout(props: ChatLayoutProps) {
       <output data-testid="familiar">{props.familiarId}</output>
       <output data-testid="run-familiar">{props.busy ? props.runFamiliarId : 'idle'}</output>
       <output data-testid="drafts">{JSON.stringify(props.drafts ?? {})}</output>
+      <output data-testid="finished">{JSON.stringify(props.finished ?? {})}</output>
       <output data-testid="connected">{String(props.connected)}</output>
       <output data-testid="ready">{String(props.ready)}</output>
       <output>{props.status}</output>
@@ -103,6 +104,11 @@ function MockLayout(props: ChatLayoutProps) {
         ))}
       </div>
       {props.error && <div role="alert">{props.error}</div>}
+      {props.onRetry && (
+        <button type="button" onClick={props.onRetry}>
+          Try again
+        </button>
+      )}
     </div>
   );
 }
@@ -391,6 +397,79 @@ describe('canonical familiar controller', () => {
     expect(screen.getByTestId('head')).toHaveTextContent('two');
     expect(screen.getByRole('textbox')).toHaveValue('');
     expect(screen.getByTestId('run-familiar')).toHaveTextContent('idle');
+  });
+
+  it('marks a run that ended while another familiar was shown, until that familiar is opened', async () => {
+    const api = runtime();
+    const run = deferred<CovenRunResult>();
+    vi.mocked(api.send).mockReturnValue(run.promise);
+    await ready(api);
+    draft('work');
+    click('Send');
+    click('Other familiar');
+    await act(async () => run.resolve({ runId: 'run', events: [] }));
+    expect(screen.getByTestId('finished')).toHaveTextContent('{"f":"reply"}');
+    click('First familiar');
+    await waitFor(() => expect(screen.getByTestId('familiar')).toHaveTextContent('f'));
+    expect(screen.getByTestId('finished')).toHaveTextContent('{}');
+  });
+
+  it("sends the restored draft again from the failed run's notice", async () => {
+    const api = runtime();
+    vi.mocked(api.send).mockRejectedValueOnce(new Error('engine exited'));
+    await ready(api);
+    draft('work');
+    click('Send');
+    await screen.findByRole('alert');
+    expect(screen.getByRole('textbox')).toHaveValue('work');
+    expect(screen.getByRole('button', { name: 'Try again' })).toBeInTheDocument();
+    click('Try again');
+    await waitFor(() => expect(api.send).toHaveBeenCalledTimes(2));
+    expect(vi.mocked(api.send).mock.calls[1]?.[0]).toMatchObject({ prompt: 'work' });
+    await waitFor(() => expect(screen.queryByRole('alert')).not.toBeInTheDocument());
+    expect(screen.queryByRole('button', { name: 'Try again' })).not.toBeInTheDocument();
+  });
+
+  it('does not offer Try again once the reader has typed or edited since the failed send', async () => {
+    const api = runtime();
+    const run = deferred<CovenRunResult>();
+    vi.mocked(api.send).mockReturnValueOnce(run.promise);
+    await ready(api);
+    draft('work');
+    click('Send');
+    draft('a new idea');
+    await act(async () => run.reject(new Error('engine exited')));
+    await screen.findByRole('alert');
+    // The new draft is the reader's; the failed input was not restored over it.
+    expect(screen.getByRole('textbox')).toHaveValue('a new idea');
+    expect(screen.queryByRole('button', { name: 'Try again' })).not.toBeInTheDocument();
+    // And an edit after a restore withdraws the offer too.
+    vi.mocked(api.send).mockRejectedValueOnce(new Error('engine exited again'));
+    click('Send');
+    await waitFor(() => expect(api.send).toHaveBeenCalledTimes(2));
+    await screen.findByRole('button', { name: 'Try again' });
+    draft('a new idea, edited');
+    expect(screen.queryByRole('button', { name: 'Try again' })).not.toBeInTheDocument();
+  });
+
+  it('marks a failed run as failed and leaves no marker for a run the reader is watching', async () => {
+    const api = runtime();
+    const failing = deferred<CovenRunResult>();
+    vi.mocked(api.send).mockReturnValueOnce(failing.promise);
+    await ready(api);
+    draft('work');
+    click('Send');
+    click('Other familiar');
+    await act(async () => failing.reject(new Error('engine exited')));
+    expect(screen.getByTestId('finished')).toHaveTextContent('{"f":"error"}');
+    // A run that ends on the familiar being shown needs no reminder.
+    const watched = deferred<CovenRunResult>();
+    vi.mocked(api.send).mockReturnValueOnce(watched.promise);
+    await waitFor(() => expect(screen.getByRole('textbox')).toBeEnabled());
+    draft('more');
+    click('Send');
+    await act(async () => watched.resolve({ runId: 'run-2', events: [] }));
+    expect(screen.getByTestId('finished')).toHaveTextContent('{"f":"error"}');
   });
 
   it('archives a familiar and keeps it hidden after refresh without changing its history', async () => {

@@ -7,7 +7,9 @@ import {
   type ChatLayoutProps,
   composerCopy,
   emptyThreadText,
+  matchesFamiliar,
   runStatusText,
+  SHORTCUTS,
 } from './chat-layout';
 import type { RfbClass } from './screen-viewer';
 
@@ -1343,5 +1345,204 @@ describe('draft reminders', () => {
     const astra = screen.getByRole('button', { name: 'Astra' });
     expect(astra).not.toHaveTextContent('Draft:');
     expect(astra).toHaveTextContent('Reviewing the branch');
+  });
+});
+
+describe('finished runs', () => {
+  const props = () => ({
+    ...layoutProps(),
+    connected: true,
+    ready: true,
+    familiars: [
+      { id: 'a', name: 'Astra' },
+      { id: 'b', name: 'Bram' },
+      { id: 'c', name: 'Cass' },
+    ],
+    sessions: [
+      { id: 's-a', familiarId: 'a', title: 'a', updatedAt: '2026-09-20T11:30:00Z' },
+      { id: 's-b', familiarId: 'b', title: 'b', updatedAt: '2026-09-20T11:30:00Z' },
+    ],
+    familiarId: 'c',
+  });
+
+  it('marks the rows whose runs ended elsewhere, by outcome, in place of their age', () => {
+    render(<ChatLayout {...props()} finished={{ a: 'reply', b: 'error' }} />);
+    const astra = screen.getByRole('button', { name: 'Astra (new reply)' });
+    expect(astra).toHaveTextContent('New reply');
+    expect(astra.querySelector('time')).toBeNull();
+    const bram = screen.getByRole('button', { name: 'Bram (run failed)' });
+    expect(bram).toHaveTextContent('Run failed');
+    expect(screen.getByRole('button', { name: 'Cass' })).not.toHaveTextContent(/New reply|failed/);
+  });
+
+  it('lets a live run outrank a stale marker on the same row', () => {
+    render(<ChatLayout {...props()} finished={{ a: 'reply' }} busy runFamiliarId="a" />);
+    const astra = screen.getByRole('button', { name: 'Astra' });
+    expect(astra).toHaveTextContent('Responding…');
+    expect(astra).not.toHaveTextContent('New reply');
+  });
+});
+
+describe('sidebar filter', () => {
+  it('matches name, identity, or purpose without regard to case', () => {
+    const item = { id: 'fam-astra-01', name: 'Astra', description: 'Reviews pull requests.' };
+    expect(matchesFamiliar(item, '')).toBe(true);
+    expect(matchesFamiliar(item, '  ')).toBe(true);
+    expect(matchesFamiliar(item, 'AST')).toBe(true);
+    expect(matchesFamiliar(item, 'astra-01')).toBe(true);
+    expect(matchesFamiliar(item, 'pull req')).toBe(true);
+    expect(matchesFamiliar(item, 'release')).toBe(false);
+    expect(matchesFamiliar({ id: 'x', name: 'Bram' }, 'pull')).toBe(false);
+  });
+
+  it('finds a familiar by purpose from the search box', () => {
+    render(
+      <ChatLayout
+        {...layoutProps()}
+        connected
+        familiars={[
+          { id: 'a', name: 'Astra', description: 'Reviews pull requests.' },
+          { id: 'b', name: 'Bram', description: 'Keeps CI honest.' },
+        ]}
+      />,
+    );
+    fireEvent.change(screen.getByRole('searchbox'), { target: { value: 'ci honest' } });
+    expect(screen.getByRole('button', { name: 'Bram' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Astra' })).not.toBeInTheDocument();
+  });
+
+  it('tells a disconnected reader to connect, not to configure a familiar', () => {
+    const { rerender } = render(<ChatLayout {...layoutProps()} />);
+    expect(
+      screen.getByText(/Connect to your local Coven CLI to see your familiars/),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/Configure a familiar/)).not.toBeInTheDocument();
+    rerender(<ChatLayout {...layoutProps()} connected />);
+    expect(screen.getByText(/Configure a familiar in Coven/)).toBeInTheDocument();
+  });
+});
+
+describe('inspector copy controls and row tooltips', () => {
+  it('offers to copy the identity and the workspace path', () => {
+    const { rerender } = render(
+      <ChatLayout
+        {...layoutProps()}
+        connected
+        ready
+        familiars={[
+          { id: 'fam-astra-01', name: 'Astra', workspace: '/w/astra', description: 'Reviews PRs.' },
+        ]}
+        familiarId="fam-astra-01"
+      />,
+    );
+    expect(screen.getByRole('button', { name: 'Copy identity' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Copy workspace path' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Astra' })).toHaveAttribute('title', 'Reviews PRs.');
+    rerender(
+      <ChatLayout
+        {...layoutProps()}
+        connected
+        ready
+        familiars={[{ id: 'fam-astra-01', name: 'Astra' }]}
+        familiarId="fam-astra-01"
+      />,
+    );
+    expect(screen.queryByRole('button', { name: 'Copy workspace path' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Astra' })).not.toHaveAttribute('title');
+  });
+});
+
+describe('retrying a failed run', () => {
+  const props = () => ({
+    ...layoutProps(),
+    connected: true,
+    ready: true,
+    familiars: [{ id: 'a', name: 'Astra' }],
+    familiarId: 'a',
+    error: 'Coven reported a failed run.',
+    onRetry: vi.fn(),
+  });
+
+  it('offers to send the restored draft again from the error notice', () => {
+    const p = { ...props(), draft: 'the restored text' };
+    render(<ChatLayout {...p} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Try again' }));
+    expect(p.onRetry).toHaveBeenCalledOnce();
+  });
+
+  it('offers it for restored attachments alone, and not once nothing is left to send', () => {
+    const { rerender } = render(
+      <ChatLayout {...props()} attachments={[{ id: 'x', name: 'note.txt', bytes: [97] }]} />,
+    );
+    expect(screen.getByRole('button', { name: 'Try again' })).toBeInTheDocument();
+    rerender(<ChatLayout {...props()} draft="   " />);
+    expect(screen.queryByRole('button', { name: 'Try again' })).not.toBeInTheDocument();
+  });
+
+  it('does not offer it while the composer cannot send, or for an error that is not a run', () => {
+    const { rerender } = render(<ChatLayout {...props()} draft="text" loading />);
+    expect(screen.queryByRole('button', { name: 'Try again' })).not.toBeInTheDocument();
+    const { onRetry: _none, ...noRetry } = props();
+    rerender(<ChatLayout {...noRetry} draft="text" />);
+    expect(screen.queryByRole('button', { name: 'Try again' })).not.toBeInTheDocument();
+  });
+});
+
+describe('notices, sizes and the shortcut reference', () => {
+  it('renders a replay notice as a quiet line, not as a reply from anyone', () => {
+    const { container } = render(
+      <ChatLayout
+        {...layoutProps()}
+        connected
+        ready
+        familiars={[{ id: 'a', name: 'Astra' }]}
+        familiarId="a"
+        messages={[
+          { id: 'n', role: 'notice', text: 'Replayed the 3 most recent turns.' },
+          { id: 'a1', role: 'assistant', text: 'Hello again.' },
+        ]}
+      />,
+    );
+    const note = screen.getByRole('note');
+    expect(note).toHaveTextContent('Replayed the 3 most recent turns.');
+    expect(note.closest('.fr-familiar')).toBeNull();
+    expect(screen.queryByText('Notice')).not.toBeInTheDocument();
+    expect(container.querySelectorAll('.fr-familiar')).toHaveLength(1);
+  });
+
+  it('shows attachment sizes in KiB above a kibibyte', () => {
+    render(
+      <ChatLayout
+        {...layoutProps()}
+        connected
+        ready
+        familiars={[{ id: 'a', name: 'Astra' }]}
+        familiarId="a"
+        messages={[
+          {
+            id: 'u',
+            role: 'user',
+            text: 'see file',
+            attachments: [{ name: 'big.txt', size: 40_000 }],
+          },
+        ]}
+        attachments={[{ id: 'x', name: 'small.txt', bytes: [97, 98, 99] }]}
+      />,
+    );
+    expect(screen.getByText('39 KiB')).toBeInTheDocument();
+    expect(screen.getByText('3 bytes')).toBeInTheDocument();
+  });
+
+  it('lists every shell shortcut at the foot of the familiar list', () => {
+    render(<ChatLayout {...layoutProps()} />);
+    const reference = screen.getByText('Keyboard shortcuts').closest('details');
+    expect(reference).not.toBeNull();
+    for (const [keys, action] of SHORTCUTS) {
+      expect(reference).toHaveTextContent(keys);
+      expect(reference).toHaveTextContent(action);
+    }
+    expect(SHORTCUTS.map(([keys]) => keys)).toEqual(
+      expect.arrayContaining(['Cmd/Ctrl+\\', 'Cmd/Ctrl+Shift+\\', 'Cmd/Ctrl+K']),
+    );
   });
 });

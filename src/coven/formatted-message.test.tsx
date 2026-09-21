@@ -1,5 +1,5 @@
 import { fireEvent, render, screen } from '@testing-library/react';
-import { FormattedMessage, ToolActivity } from './formatted-message';
+import { FormattedMessage, TOOL_FOLD_KEEP, ToolActivity, toolFoldLabel } from './formatted-message';
 
 test('renders headings, emphasis, lists, quotes, and fenced code as formatted text', () => {
   const { container } = render(
@@ -120,7 +120,7 @@ test('crossed-tools calls have concise, independently expandable native argument
   expect(details?.tagName).toBe('DETAILS');
   expect(details).not.toHaveAttribute('open');
   expect(summary.querySelector('.coven-tool-args')?.textContent).toBe(args);
-  expect(screen.getByLabelText('Bash raw arguments').textContent).toBe(args);
+  expect(screen.getByLabelText('Bash raw arguments').querySelector('pre')?.textContent).toBe(args);
   expect(screen.getByLabelText('Bash raw arguments')).not.toBeVisible();
 
   fireEvent.click(summary);
@@ -139,9 +139,11 @@ test('crossed-tools calls have concise, independently expandable native argument
 test('raw details retain multiline, empty, and truncated arguments without formatting them', () => {
   const args = ' \tfirst\nsecond  ';
   render(<FormattedMessage text={`⚒ Edit(${args})✳ Read()✶ Bash(echo "unfinished`} />);
-  expect(screen.getByLabelText('Edit raw arguments').textContent).toBe(args);
-  expect(screen.getByLabelText('Read raw arguments').textContent).toBe('');
-  expect(screen.getByLabelText('Bash raw arguments').textContent).toBe('echo "unfinished');
+  expect(screen.getByLabelText('Edit raw arguments').querySelector('pre')?.textContent).toBe(args);
+  expect(screen.getByLabelText('Read raw arguments').querySelector('pre')?.textContent).toBe('');
+  expect(screen.getByLabelText('Bash raw arguments').querySelector('pre')?.textContent).toBe(
+    'echo "unfinished',
+  );
 });
 
 test('keeps crossed-tools examples inside fenced code out of activity rows', () => {
@@ -169,7 +171,11 @@ test('structured rows show the full input and the result once reported, and mark
     </div>,
   );
   expect(screen.getAllByRole('listitem')).toHaveLength(3);
-  expect(screen.getByLabelText('Bash raw arguments').textContent).toBe(raw);
+  expect(screen.getByLabelText('Bash raw arguments').querySelector('pre')?.textContent).toBe(raw);
+  expect(screen.getByRole('button', { name: 'Copy Bash input' })).toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: 'Copy Bash result' })).not.toBeInTheDocument();
+  expect(screen.getByRole('button', { name: 'Copy Read result' })).toBeInTheDocument();
+  expect(screen.getByLabelText('Read result')).toHaveTextContent(/^Result/);
   expect(screen.queryByLabelText('Bash result')).toBeNull();
   expect(screen.getByLabelText('Read result')).toHaveTextContent('file body');
   expect(screen.getByLabelText('Read result')).not.toBeVisible();
@@ -219,4 +225,36 @@ test('marks the call a live run is executing as running', () => {
   expect(rows[1]).toHaveAttribute('data-running', 'true');
   expect(rows[1]).toHaveTextContent('running');
   expect(screen.queryByText('failed')).not.toBeInTheDocument();
+});
+
+test('folds a long run of calls to its newest, naming what it hides and how much failed', () => {
+  const rows = Array.from({ length: 14 }, (_, index) => ({
+    name: index % 2 ? 'Read' : 'Bash',
+    args: `step ${index}`,
+    result: 'ok',
+    ...(index === 1 || index === 4 ? { isError: true } : {}),
+  }));
+  render(<ToolActivity rows={rows} />);
+  const calls = () =>
+    screen.getAllByRole('listitem').filter((item) => item.classList.contains('coven-tool'));
+  expect(calls()).toHaveLength(TOOL_FOLD_KEEP);
+  // Each call's args appear in its summary and its raw block, so count matches.
+  expect(screen.queryAllByText('step 0')).toHaveLength(0);
+  expect(screen.getAllByText('step 13').length).toBeGreaterThan(0);
+  const fold = screen.getByRole('button', { name: 'Show 8 earlier tool calls (2 failed)' });
+  expect(fold).toHaveAttribute('aria-expanded', 'false');
+  fireEvent.click(fold);
+  expect(calls()).toHaveLength(14);
+  expect(screen.getAllByText('step 0').length).toBeGreaterThan(0);
+  expect(
+    screen.getByRole('button', { name: `Show only the latest ${TOOL_FOLD_KEEP}` }),
+  ).toHaveAttribute('aria-expanded', 'true');
+  expect(toolFoldLabel(1, 0)).toBe('Show 1 earlier tool call');
+});
+
+test('does not fold a short run of calls', () => {
+  const rows = Array.from({ length: 10 }, (_, index) => ({ name: 'Bash', args: `step ${index}` }));
+  render(<ToolActivity rows={rows} />);
+  expect(screen.getAllByRole('listitem')).toHaveLength(10);
+  expect(screen.queryByRole('button', { name: /earlier tool/ })).not.toBeInTheDocument();
 });

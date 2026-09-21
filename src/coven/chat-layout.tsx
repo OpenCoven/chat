@@ -20,7 +20,7 @@ import type { ChatLifecycle, CovenProjectAccess } from '../lib/coven-runtime';
 import type { ScreenRelay } from '../lib/screen-relay';
 import { AttachmentChip } from '../ui/attachment-chip';
 import { Composer } from '../ui/composer';
-import { ATTACHMENT_ACCEPT, type ChatAttachment } from './attachments';
+import { ATTACHMENT_ACCEPT, type ChatAttachment, formatAttachmentSize } from './attachments';
 import { ChatLifecycleControls } from './chat-lifecycle';
 import { ContextPicker } from './context-picker';
 import { CopyButton } from './copy-button';
@@ -96,11 +96,18 @@ export type ChatLayoutProps = Readonly<{
    * live; absent, the run is credited to the shown familiar.
    */
   runFamiliarId?: string;
+  /**
+   * Familiars whose run ended while another was shown, by outcome, until they
+   * are opened again. Their rows say so.
+   */
+  finished?: Readonly<Record<string, 'reply' | 'error'>>;
   loading: boolean;
   cancelling: boolean;
   error: string;
   /** Clears the error notice; absent when the host cannot clear it. */
   onDismissError?: () => void;
+  /** Sends the restored draft again; present only while a failed run's error shows. */
+  onRetry?: () => void;
   /** The host-side VNC relay; absent in the browser, where the pane says so. */
   screen?: ScreenRelay | undefined;
   /** Test seam for the screen viewer's VNC client. */
@@ -212,6 +219,18 @@ export function runStatusText(
   return `${name} is responding…`;
 }
 
+/** The sidebar filter: name, identity, or purpose, case-insensitively. */
+export function matchesFamiliar(
+  item: Readonly<{ name: string; id: string; description?: string | undefined }>,
+  query: string,
+): boolean {
+  const needle = query.trim().toLowerCase();
+  if (!needle) return true;
+  return [item.name, item.id, item.description ?? ''].some((field) =>
+    field.toLowerCase().includes(needle),
+  );
+}
+
 /** Counts for the inspector's Activity tab, from the loaded transcript alone. */
 export function activityCounts(messages: readonly ChatMessage[]) {
   let sent = 0;
@@ -227,6 +246,16 @@ export function activityCounts(messages: readonly ChatMessage[]) {
   }
   return { sent, replies, tools, failed };
 }
+
+/** The shell's keys, listed in the sidebar footer. Every entry is wired above. */
+export const SHORTCUTS: readonly (readonly [keys: string, action: string])[] = [
+  ['Cmd/Ctrl+\\', 'Show or hide the familiar list'],
+  ['Cmd/Ctrl+Shift+\\', 'Show or hide the inspector'],
+  ['Cmd/Ctrl+K', 'Search familiars'],
+  ['↑ ↓ Home End', 'Move through the list; Enter opens, Escape clears the search'],
+  ['Enter', 'Send the message; Shift+Enter starts a new line'],
+  ['@ or #', 'Mention a familiar or project; Tab confirms, Escape dismisses'],
+];
 
 function activeControl(): HTMLElement | null {
   return document.activeElement instanceof HTMLElement ? document.activeElement : null;
@@ -418,7 +447,7 @@ export function ChatLayout(props: ChatLayoutProps) {
   const agents = props.familiars
     .filter(
       (item) =>
-        item.name.toLowerCase().includes(query.toLowerCase()) &&
+        matchesFamiliar(item, query) &&
         Boolean(headOf(item.id)?.archived) === Boolean(props.archivedFilter),
     )
     .sort((a, b) => activityTime(headOf(b.id)?.updatedAt) - activityTime(headOf(a.id)?.updatedAt));
@@ -555,12 +584,15 @@ export function ChatLayout(props: ChatLayoutProps) {
                 const when = formatRelativeTime(thread?.updatedAt);
                 const live = props.busy && item.id === runFamiliarId;
                 const draft = props.drafts?.[item.id]?.trim() ?? '';
+                const done = live ? undefined : props.finished?.[item.id];
+                const doneLabel = done === 'error' ? 'Run failed' : 'New reply';
                 return (
                   <button
                     type="button"
                     key={item.id}
                     className="fr-conv coven-agent-row"
-                    aria-label={item.name}
+                    aria-label={done ? `${item.name} (${doneLabel.toLowerCase()})` : item.name}
+                    title={item.description}
                     aria-current={item.id === props.familiarId || undefined}
                     disabled={props.lifecycleBusy}
                     onKeyDown={(event) => moveRowFocus(event, index)}
@@ -573,6 +605,12 @@ export function ChatLayout(props: ChatLayoutProps) {
                         {live ? (
                           <span className="fr-conv-time coven-agent-live">
                             {props.cancelling ? 'Stopping…' : 'Responding…'}
+                          </span>
+                        ) : done ? (
+                          <span
+                            className={`fr-conv-time coven-agent-done${done === 'error' ? ' coven-agent-done--error' : ''}`}
+                          >
+                            {doneLabel}
                           </span>
                         ) : when ? (
                           <time
@@ -606,11 +644,13 @@ export function ChatLayout(props: ChatLayoutProps) {
                   <Icon name="chats-circle" size={16} />
                 </span>
                 <span className="fr-empty-text">
-                  {query
-                    ? 'No matching familiars.'
-                    : props.archivedFilter
-                      ? 'No archived familiars.'
-                      : 'No active familiars available. Configure a familiar in Coven, then refresh.'}
+                  {!props.connected
+                    ? 'Connect to your local Coven CLI to see your familiars.'
+                    : query
+                      ? 'No matching familiars.'
+                      : props.archivedFilter
+                        ? 'No archived familiars.'
+                        : 'No active familiars available. Configure a familiar in Coven, then refresh.'}
                 </span>
                 {query ? (
                   <FamButton size="sm" onClick={() => setQuery('')}>
@@ -634,9 +674,20 @@ export function ChatLayout(props: ChatLayoutProps) {
                   Show archived chats
                 </label>
               </details>
-            ) : (
-              'Coven CLI'
-            )}
+            ) : null}
+            <details className="coven-shortcuts">
+              <summary>Keyboard shortcuts</summary>
+              <dl>
+                {SHORTCUTS.map(([keys, action]) => (
+                  <div key={keys}>
+                    <dt>
+                      <kbd>{keys}</kbd>
+                    </dt>
+                    <dd>{action}</dd>
+                  </div>
+                ))}
+              </dl>
+            </details>
           </div>
         </div>
       </aside>
@@ -736,6 +787,13 @@ export function ChatLayout(props: ChatLayoutProps) {
             {props.error ? (
               <div className="coven-error" role="alert">
                 <span className="coven-error-text">{props.error}</span>
+                {props.onRetry &&
+                !composerDisabled &&
+                (props.draft.trim() || props.attachments?.length) ? (
+                  <FamButton size="sm" className="coven-error-retry" onClick={props.onRetry}>
+                    Try again
+                  </FamButton>
+                ) : null}
                 {props.onDismissError ? (
                   <button
                     type="button"
@@ -763,6 +821,12 @@ export function ChatLayout(props: ChatLayoutProps) {
                     </div>
                   </div>
                 </div>
+              ) : block.message.role === 'notice' ? (
+                // Chat's own disclosure (a replayed-history notice): a quiet
+                // line between messages, not a reply from anyone.
+                <p className="coven-notice" key={block.message.id} role="note">
+                  {block.message.text}
+                </p>
               ) : block.message.role === 'user' ? (
                 <div className="fr-user fr-msg" key={block.message.id}>
                   <div className="fr-user-body">
@@ -773,7 +837,10 @@ export function ChatLayout(props: ChatLayoutProps) {
                       <ul className="coven-history-attachments" aria-label="Message attachments">
                         {block.message.attachments.map((file, index) => (
                           <li key={`${index}-${file.name}`}>
-                            <AttachmentChip name={file.name} meta={`${file.size} bytes`} />
+                            <AttachmentChip
+                              name={file.name}
+                              meta={formatAttachmentSize(file.size)}
+                            />
                           </li>
                         ))}
                       </ul>
@@ -919,7 +986,7 @@ export function ChatLayout(props: ChatLayoutProps) {
                 attachments={(props.attachments ?? []).map((file) => ({
                   id: file.id,
                   name: file.name,
-                  meta: `${file.bytes.length} bytes`,
+                  meta: formatAttachmentSize(file.bytes.length),
                 }))}
                 {...(props.onAttach && !props.busy && !props.attaching
                   ? { onAttach: () => fileInput.current?.click() }
@@ -1023,18 +1090,32 @@ export function ChatLayout(props: ChatLayoutProps) {
                   <div className="fr-card fr-card--lift fr-rows">
                     <div className="fr-row">
                       <span className="fr-row-label">Identity</span>
-                      <code className="fr-row-value coven-row-value--path" title={familiar.id}>
-                        {familiar.id}
-                      </code>
+                      <span className="coven-row-path">
+                        <code className="fr-row-value coven-row-value--path" title={familiar.id}>
+                          {familiar.id}
+                        </code>
+                        <CopyButton
+                          className="coven-row-copy"
+                          text={familiar.id}
+                          label="Copy identity"
+                        />
+                      </span>
                     </div>
                     <div className="fr-row">
                       <span className="fr-row-label">Workspace</span>
                       {familiar.workspace ? (
-                        <span
-                          className="fr-row-value coven-row-value--path"
-                          title={familiar.workspace}
-                        >
-                          {familiar.workspace}
+                        <span className="coven-row-path">
+                          <span
+                            className="fr-row-value coven-row-value--path"
+                            title={familiar.workspace}
+                          >
+                            {familiar.workspace}
+                          </span>
+                          <CopyButton
+                            className="coven-row-copy"
+                            text={familiar.workspace}
+                            label="Copy workspace path"
+                          />
                         </span>
                       ) : (
                         <span className="fr-row-value">Not reported</span>

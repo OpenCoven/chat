@@ -1023,9 +1023,17 @@ test('renders runtime-reported tool calls as rows with input, result and a runni
   const bash = page.locator('.coven-tool').first();
   await expect(bash.locator('.coven-tool-args')).toHaveText(command);
   await bash.locator('summary').click();
-  await expect(bash.getByLabel('Bash raw arguments')).toContainText('"description": "List"');
-  await expect(bash.getByLabel('Bash result')).toHaveText('README.md');
-  await expect(page.locator('.coven-tool').nth(1).getByLabel('Read result')).toHaveCount(0);
+  // Exact labels: each block also carries a "Copy <name> result" control,
+  // and the block's own text starts with its caption.
+  await expect(bash.getByLabel('Bash raw arguments', { exact: true })).toContainText(
+    '"description": "List"',
+  );
+  await expect(bash.getByLabel('Bash result', { exact: true }).locator('pre')).toHaveText(
+    'README.md',
+  );
+  await expect(
+    page.locator('.coven-tool').nth(1).getByLabel('Read result', { exact: true }),
+  ).toHaveCount(0);
   await page.evaluate(() => window.__covenFixture.finish?.());
   await expect(page.getByText(/is running Read/)).toHaveCount(0);
   await expect(page.getByRole('list', { name: 'Tool activity' })).toHaveCount(2);
