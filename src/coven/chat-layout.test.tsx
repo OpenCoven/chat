@@ -2050,3 +2050,30 @@ describe('partial history', () => {
     );
   });
 });
+
+describe('reload after a failed read, and copying connection details', () => {
+  it('offers Reload chat only when the host can read again, and not while loading', () => {
+    const onReloadChat = vi.fn();
+    const { rerender } = render(
+      <ChatLayout {...layoutProps()} error="transcript locked" onReloadChat={onReloadChat} />,
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Reload chat' }));
+    expect(onReloadChat).toHaveBeenCalledOnce();
+    rerender(
+      <ChatLayout
+        {...layoutProps()}
+        error="transcript locked"
+        onReloadChat={onReloadChat}
+        loading
+      />,
+    );
+    expect(screen.queryByRole('button', { name: 'Reload chat' })).toBeNull();
+    rerender(<ChatLayout {...layoutProps()} error="something else" />);
+    expect(screen.queryByRole('button', { name: 'Reload chat' })).toBeNull();
+  });
+
+  it('lets the connection details be copied', () => {
+    render(<ChatLayout {...layoutProps()} status="Coven 0.7.0 · local sessions" />);
+    expect(screen.getByRole('button', { name: 'Copy connection details' })).toBeInTheDocument();
+  });
+});

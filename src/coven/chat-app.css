@@ -176,6 +176,10 @@
   font-size: 11px;
 }
 
+.coven-connection .coven-status-copy {
+  margin: 2px 0 4px;
+}
+
 .coven-connection summary {
   cursor: pointer;
   width: fit-content;

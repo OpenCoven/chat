@@ -109,9 +109,19 @@ function MockLayout(props: ChatLayoutProps) {
         ))}
       </div>
       {props.error && <div role="alert">{props.error}</div>}
+      {props.error && props.onDismissError && (
+        <button type="button" onClick={props.onDismissError}>
+          Dismiss
+        </button>
+      )}
       {props.onRetry && (
         <button type="button" onClick={props.onRetry}>
           Try again
+        </button>
+      )}
+      {props.onReloadChat && (
+        <button type="button" onClick={props.onReloadChat}>
+          Reload chat
         </button>
       )}
     </div>
@@ -516,6 +526,41 @@ describe('canonical familiar controller', () => {
     click('Other familiar');
     await waitFor(() => expect(screen.getByTestId('head')).toHaveTextContent('two'));
     expect(screen.getByTestId('partial')).toHaveTextContent('false');
+  });
+
+  it('offers to read the history again after a failed read, and only then', async () => {
+    const api = runtime();
+    vi.mocked(api.readSession).mockRejectedValueOnce(new Error('transcript locked'));
+    await act(async () => {
+      render(<ChatApp runtime={api} />);
+    });
+    await screen.findByRole('alert');
+    expect(screen.getByRole('alert')).toHaveTextContent('transcript locked');
+    click('Reload chat');
+    await waitFor(() => expect(api.readSession).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(screen.queryByRole('alert')).not.toBeInTheDocument());
+    expect(screen.queryByRole('button', { name: 'Reload chat' })).not.toBeInTheDocument();
+  });
+
+  it('withdraws Reload chat once the read error is dismissed or replaced by another error', async () => {
+    const api = runtime();
+    vi.mocked(api.readSession).mockRejectedValueOnce(new Error('transcript locked'));
+    await act(async () => {
+      render(<ChatApp runtime={api} />);
+    });
+    await screen.findByRole('button', { name: 'Reload chat' });
+    click('Dismiss');
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Reload chat' })).not.toBeInTheDocument();
+    // An unrelated failure afterwards must not resurrect the read offer.
+    await waitFor(() => expect(screen.getByRole('textbox')).toBeEnabled());
+    vi.mocked(api.send).mockRejectedValueOnce(new Error('engine exited'));
+    draft('work');
+    click('Send');
+    await screen.findByRole('alert');
+    expect(screen.getByRole('alert')).toHaveTextContent('engine exited');
+    expect(screen.queryByRole('button', { name: 'Reload chat' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Try again' })).toBeInTheDocument();
   });
 
   it('marks a failed run as failed and leaves no marker for a run the reader is watching', async () => {
