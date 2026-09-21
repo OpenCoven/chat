@@ -22,7 +22,9 @@ arrow and page keys without a control inside it being focused.
 
 Toggle the familiar list with **Cmd/Ctrl+\\** and the inspector with
 **Cmd/Ctrl+Shift+\\**, and reach the familiar search with **Cmd/Ctrl+K**
-(it opens the list if it is closed). These shortcuts work while composing
+(it opens the list if it is closed), and step to the previous or next
+familiar with **Cmd/Ctrl+[** and **Cmd/Ctrl+]**, in the list's own order and
+filter. These shortcuts work while composing
 without changing your text, and **Keyboard shortcuts** at the foot of the
 familiar list lists them all. Typing a letter while nothing editable has
 focus starts a message: the keystroke moves to the composer and lands there,

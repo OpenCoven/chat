@@ -38,6 +38,7 @@ import {
   SEARCH_SHORTCUT,
   useRailShortcuts,
   useSearchShortcut,
+  useStepShortcut,
   useTypeToCompose,
 } from './rail-shortcuts';
 import {
@@ -301,6 +302,7 @@ export const SHORTCUTS: readonly (readonly [keys: string, action: string])[] = [
   ['Cmd/Ctrl+\\', 'Show or hide the familiar list'],
   ['Cmd/Ctrl+Shift+\\', 'Show or hide the inspector'],
   ['Cmd/Ctrl+K', 'Search familiars'],
+  ['Cmd/Ctrl+[ and ]', 'Previous or next familiar in the list'],
   ['↑ ↓ Home End', 'Move through the list; Enter opens, Escape clears the search'],
   ['Enter', 'Send the message; Shift+Enter starts a new line'],
   ['@ or #', 'Mention a familiar or project; Tab confirms, Escape dismisses'],
@@ -565,6 +567,14 @@ export function ChatLayout(props: ChatLayoutProps) {
     )
     .sort((a, b) => activityTime(headOf(b.id)?.updatedAt) - activityTime(headOf(a.id)?.updatedAt));
   const listRef = useRef<HTMLDivElement>(null);
+  // Cmd/Ctrl+[ and ] walk the list as it is shown: same filter, same order.
+  useStepShortcut((direction) => {
+    if (props.lifecycleBusy || !agents.length) return;
+    const at = agents.findIndex((item) => item.id === props.familiarId);
+    const next = at < 0 ? (direction > 0 ? 0 : agents.length - 1) : at + direction;
+    const target = agents[next];
+    if (target) chooseFamiliar(target.id);
+  });
   function rowButtons() {
     return Array.from(
       listRef.current?.querySelectorAll<HTMLButtonElement>('button.coven-agent-row') ?? [],

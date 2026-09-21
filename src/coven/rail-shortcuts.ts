@@ -5,6 +5,7 @@ export const RIGHT_RAIL_SHORTCUT = 'Meta+Shift+\\ Control+Shift+\\';
 export const LEFT_RAIL_HINT = 'Toggle familiars (Cmd/Ctrl+\\)';
 export const RIGHT_RAIL_HINT = 'Toggle inspector (Cmd/Ctrl+Shift+\\)';
 export const SEARCH_SHORTCUT = 'Meta+K Control+K';
+export const STEP_SHORTCUT = 'Meta+[ Meta+] Control+[ Control+]';
 export const SEARCH_HINT = 'Search familiars (Cmd/Ctrl+K)';
 
 /** A modifier chord the shell owns, ignored while composing text or a dialog is open. */
@@ -65,6 +66,25 @@ export function useTypeToCompose(compose: (key: string) => boolean) {
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [compose]);
+}
+
+/** Cmd/Ctrl+[ and Cmd/Ctrl+] step to the previous or next familiar in the list. */
+export function useStepShortcut(step: (direction: -1 | 1) => void) {
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.shiftKey) return;
+      const direction = shellChord(event, 'BracketLeft', '[')
+        ? -1
+        : shellChord(event, 'BracketRight', ']')
+          ? 1
+          : 0;
+      if (!direction) return;
+      event.preventDefault();
+      step(direction);
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [step]);
 }
 
 /** Cmd/Ctrl+K reaches the familiar search from anywhere in the shell. */
