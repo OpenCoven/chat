@@ -963,7 +963,7 @@ describe('Phase 1 real-authority conformance harness', () => {
 
   test('requires an exact nonce-bound Windows Job Object environment for Windows evidence', () => {
     const nonce = '0123456789abcdef0123456789abcdef';
-    const bootstrapRoot = `C:\\OpenCoven\\opencoven-win32-${nonce}`;
+    const bootstrapRoot = `C:\\OpenCoven\\oc${nonce.slice(0, 8)}`;
     const workspace = `${bootstrapRoot}\\workspace`;
     const caveConformanceTemp = `${bootstrapRoot}\\cave-conformance-temp`;
     const artifactDirectory = `${workspace}\\.artifacts`;
@@ -1471,7 +1471,7 @@ describe('Phase 1 real-authority conformance harness', () => {
 
   test('projects only validated Windows Job and toolchain proof into the verified runner', () => {
     const nonce = '0123456789abcdef0123456789abcdef';
-    const bootstrapRoot = `C:\\OpenCoven\\opencoven-win32-${nonce}`;
+    const bootstrapRoot = `C:\\OpenCoven\\oc${nonce.slice(0, 8)}`;
     const workspace = `${bootstrapRoot}\\workspace`;
     const artifactDirectory = `${workspace}\\.artifacts`;
     const environment = {
