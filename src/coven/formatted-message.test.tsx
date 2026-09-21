@@ -287,3 +287,16 @@ test('a collapsed row says how much its result holds, and nothing while it is ru
   expect(rows[2]).not.toHaveTextContent(/line|output/);
   expect(rows[3]).not.toHaveTextContent(/line|output/);
 });
+
+test('external links show their address on hover unless the author gave a title', () => {
+  render(
+    <FormattedMessage
+      text={'See [docs](https://example.com/docs) and [titled](https://example.com/t "The title").'}
+    />,
+  );
+  expect(screen.getByRole('link', { name: 'docs' })).toHaveAttribute(
+    'title',
+    'https://example.com/docs',
+  );
+  expect(screen.getByRole('link', { name: 'titled' })).toHaveAttribute('title', 'The title');
+});

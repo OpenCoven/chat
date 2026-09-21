@@ -198,10 +198,21 @@ export function liveRowText(
   familiarName: string,
   cancelling: boolean,
   runningTool: string | undefined,
+  long = false,
 ): string {
   if (cancelling) return 'Stopping…';
-  if (runningTool) return `Running ${runningTool}…`;
-  return `Waiting for ${familiarName}…`;
+  if (runningTool) return long ? `Still running ${runningTool}…` : `Running ${runningTool}…`;
+  return long ? `Still waiting for ${familiarName}…` : `Waiting for ${familiarName}…`;
+}
+
+/** After this long without a sign of life, the live row says it is still waiting. */
+export const LONG_WAIT_MS = 30_000;
+
+/** The tool turn's header: how many calls it holds and how many failed. */
+export function toolTurnSummary(rows: readonly ToolRow[]): string {
+  const failed = rows.filter((row) => row.isError).length;
+  const calls = `${rows.length} ${rows.length === 1 ? 'call' : 'calls'}`;
+  return failed ? `${calls} · ${failed} failed` : calls;
 }
 
 /**
@@ -501,7 +512,12 @@ export function ChatLayout(props: ChatLayoutProps) {
   // moment of a run, from the send until the first token or tool.
   const liveRow =
     runHere && !(lastMessage?.role === 'assistant' && lastMessage.text)
-      ? liveRowText(name, props.cancelling, runningTool)
+      ? liveRowText(
+          name,
+          props.cancelling,
+          runningTool,
+          Boolean(props.runStartedAt) && now - (props.runStartedAt ?? 0) >= LONG_WAIT_MS,
+        )
       : '';
   const headOf = (familiarId: string) =>
     props.sessions.find((session) => session.familiarId === familiarId);
@@ -894,6 +910,7 @@ export function ChatLayout(props: ChatLayoutProps) {
                   <div className="fr-familiar-body">
                     <span className="fr-familiar-meta">
                       <span className="fr-familiar-name">Tool activity</span>
+                      <span className="coven-tool-turn-count">{toolTurnSummary(block.rows)}</span>
                     </span>
                     <div className="coven-formatted">
                       <ToolActivity rows={block.rows} />
