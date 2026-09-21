@@ -1796,6 +1796,32 @@ describe('run-end announcements', () => {
     expect(region()).toHaveTextContent('Astra: Replied in 12s');
   });
 
+  it('speaks again when a later run ends with the very same words', () => {
+    const idle = () => (
+      <ChatLayout {...props()} familiarId="a" lastRun={{ ms: 12_000, outcome: 'reply' }} />
+    );
+    const busy = () => (
+      <ChatLayout
+        {...props()}
+        familiarId="a"
+        busy
+        runFamiliarId="a"
+        lastRun={{ ms: 12_000, outcome: 'reply' }}
+      />
+    );
+    const { rerender } = render(busy());
+    rerender(idle());
+    const first = region().firstElementChild;
+    expect(first).toHaveTextContent('Astra: Replied in 12s');
+    rerender(busy());
+    expect(region().firstElementChild).toBe(first);
+    rerender(idle());
+    const second = region().firstElementChild;
+    expect(second).toHaveTextContent('Astra: Replied in 12s');
+    // A fresh node, so the live region saw a mutation for the second run.
+    expect(second).not.toBe(first);
+  });
+
   it('says which familiar replied or failed in another chat', () => {
     const { rerender } = render(<ChatLayout {...props()} familiarId="c" busy runFamiliarId="a" />);
     rerender(<ChatLayout {...props()} familiarId="c" finished={{ a: 'error' }} />);

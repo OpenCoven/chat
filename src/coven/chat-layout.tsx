@@ -389,14 +389,17 @@ export function ChatLayout(props: ChatLayoutProps) {
   );
   // A run's end is announced to assistive technology, since the status line
   // that reported it simply disappears. Only the busy-to-idle edge speaks.
-  const [announcement, setAnnouncement] = useState('');
+  // Each completion remounts the text node, so two identical results still
+  // mutate the live region; a bare string would be deduplicated by React.
+  const [announcement, setAnnouncement] = useState({ text: '', n: 0 });
   const previousRun = useRef({ busy: props.busy, id: runFamiliarId, name: runName });
   useEffect(() => {
+    const announce = (text: string) => setAnnouncement((prev) => ({ text, n: prev.n + 1 }));
     const previous = previousRun.current;
     previousRun.current = { busy: props.busy, id: runFamiliarId, name: runName };
     if (!previous.busy || props.busy) return;
     if (previous.id === props.familiarId) {
-      setAnnouncement(
+      announce(
         props.lastRun
           ? `${previous.name}: ${lastRunText(props.lastRun)}`
           : `${previous.name}'s run ended`,
@@ -404,7 +407,7 @@ export function ChatLayout(props: ChatLayoutProps) {
       return;
     }
     const outcome = props.finished?.[previous.id];
-    setAnnouncement(
+    announce(
       outcome === 'reply'
         ? `${previous.name} replied in another chat`
         : outcome === 'error'
@@ -762,7 +765,7 @@ export function ChatLayout(props: ChatLayoutProps) {
       </aside>
       <main className="fr-thread">
         <output className="coven-sr-only" aria-live="polite" aria-label="Run announcements">
-          {announcement}
+          {announcement.n ? <span key={announcement.n}>{announcement.text}</span> : null}
         </output>
         <header className="fr-thread-header">
           <div className="fr-thread-header-lead">
