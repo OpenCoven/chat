@@ -147,6 +147,42 @@ still reported RUSTSEC-2024-0429
 as an `unsound` warning for the path package (despite exiting zero).
 No advisory is ignored, dismissed, or relabeled here.
 
+The backport was adopted through two merges:
+[#204](https://github.com/OpenCoven/chat/pull/204) landed as
+`8d5215e24755b671ef1caee6f62aafc66212e4c1` on 2026-09-10 and
+[#210](https://github.com/OpenCoven/chat/pull/210), binding both frozen
+sources, landed as `9f073f05241c2d3241b23ed9d73b26c6cd55ce7e` on 2026-09-11.
+
+GitHub Dependabot alert #1 on this repository (GHSA-wrw7-89jp-8q8g, manifest
+`src-tauri/Cargo.lock`, vulnerable range `>= 0.15.0, < 0.20.0`, first patched
+`0.20.0`) moved to state `fixed` at `2026-09-10T08:59:12Z`, seconds after the
+#204 merge. It was never dismissed (`dismissed_at` and `dismissed_reason` are
+null), and on 2026-09-20 the repository had no open and no dismissed
+Dependabot alerts. That state reflects only what Dependabot can see: the
+lockfile no longer lists a registry-sourced `glib` inside the advisory range.
+It is a scanner disposition, not evidence that the backport is correct.
+
+A readback on 2026-09-20 with cargo-audit 0.22.1 and the cached advisory
+database (`cargo audit --no-fetch --file src-tauri/Cargo.lock`, 1246
+advisories, last fetched 2026-09-16) still reported RUSTSEC-2024-0429 as an
+`unsound` warning for `glib 0.18.5`, listed among "7 allowed warnings found"
+with the six `unmaintained` findings, and exited zero. This is expected and
+must not be read as a regression or as a clean result: cargo-audit matches
+the package name and version recorded in `Cargo.lock` against the advisory
+range and does not distinguish a `[patch]` path resolution from the registry
+crate of the same version. No `audit.toml` ignore list is present, and the
+warning is non-fatal only because cargo-audit does not fail on warnings by
+default. The finding will persist until the dependency graph moves to an
+upstream `glib >= 0.20.0`. The two scanners therefore disagree for mechanical
+reasons, and neither replaces the source evidence above.
+
+Protected three-platform acceptance is still outstanding. The latest
+protected [run 35146928092](https://github.com/OpenCoven/chat/actions/runs/35146928092)
+passed on Linux and macOS and failed on Windows during quota enumeration,
+tracked in [#219](https://github.com/OpenCoven/chat/issues/219).
+[#188](https://github.com/OpenCoven/chat/issues/188) stays open for that
+acceptance; this section records the advisory reconciliation only.
+
 OpenCoven owns review and maintenance of these bytes until a compatible
 upstream dependency graph replaces them. Reassess this patch when Tauri,
 GTK, or WebKit dependencies change; do not treat it as general maintenance
