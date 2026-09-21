@@ -38,6 +38,7 @@ function MockLayout(props: ChatLayoutProps) {
       <output data-testid="run-familiar">{props.busy ? props.runFamiliarId : 'idle'}</output>
       <output data-testid="drafts">{JSON.stringify(props.drafts ?? {})}</output>
       <output data-testid="finished">{JSON.stringify(props.finished ?? {})}</output>
+      <output data-testid="last-run">{props.lastRun ? props.lastRun.outcome : 'none'}</output>
       <output data-testid="connected">{String(props.connected)}</output>
       <output data-testid="ready">{String(props.ready)}</output>
       <output>{props.status}</output>
@@ -450,6 +451,23 @@ describe('canonical familiar controller', () => {
     await screen.findByRole('button', { name: 'Try again' });
     draft('a new idea, edited');
     expect(screen.queryByRole('button', { name: 'Try again' })).not.toBeInTheDocument();
+  });
+
+  it("records how the shown familiar's most recent run ended", async () => {
+    const api = runtime();
+    await ready(api);
+    expect(screen.getByTestId('last-run')).toHaveTextContent('none');
+    draft('work');
+    click('Send');
+    await waitFor(() => expect(screen.getByTestId('last-run')).toHaveTextContent('reply'));
+    vi.mocked(api.send).mockRejectedValueOnce(new Error('engine exited'));
+    draft('more');
+    click('Send');
+    await waitFor(() => expect(screen.getByTestId('last-run')).toHaveTextContent('error'));
+    // Another familiar has no run of its own yet.
+    click('Other familiar');
+    await waitFor(() => expect(screen.getByTestId('familiar')).toHaveTextContent('g'));
+    expect(screen.getByTestId('last-run')).toHaveTextContent('none');
   });
 
   it('marks a failed run as failed and leaves no marker for a run the reader is watching', async () => {

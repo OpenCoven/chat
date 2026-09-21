@@ -125,7 +125,8 @@ heading.
 The inspector's Overview shows the familiar's purpose, identity and workspace
 (each path with its own **Copy** control),
 whether their chat is active, archived or not yet started, and its last
-activity. Activity reports the run state and counts the messages you sent, the
+activity. Activity reports the run state, how the most recent run in this window
+ended and how long it took, and counts the messages you sent, the
 replies and the tool calls (with failures, and a breakdown by tool) in the
 loaded transcript; tokens,
 cost and timing are not reported by this CLI integration.

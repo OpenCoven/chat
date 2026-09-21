@@ -100,6 +100,8 @@ export type ChatLayoutProps = Readonly<{
   runFamiliarId?: string;
   /** When the active run started (epoch ms); the status shows how long it has run. */
   runStartedAt?: number;
+  /** How the shown familiar's most recent run in this window ended, and how long it took. */
+  lastRun?: Readonly<{ ms: number; outcome: 'reply' | 'error' | 'stopped' }>;
   /**
    * Familiars whose run ended while another was shown, by outcome, until they
    * are opened again. Their rows say so.
@@ -233,6 +235,14 @@ export function matchesFamiliar(
   return [item.name, item.id, item.description ?? ''].some((field) =>
     field.toLowerCase().includes(needle),
   );
+}
+
+/** The Activity tab's account of the most recent run: how it ended, and how long it took. */
+export function lastRunText(run: Readonly<{ ms: number; outcome: 'reply' | 'error' | 'stopped' }>) {
+  const took = formatElapsed(run.ms);
+  if (run.outcome === 'reply') return `Replied in ${took}`;
+  if (run.outcome === 'error') return `Failed after ${took}`;
+  return `Stopped after ${took}`;
 }
 
 /** Counts for the inspector's Activity tab, from the loaded transcript alone. */
@@ -760,6 +770,7 @@ export function ChatLayout(props: ChatLayoutProps) {
             <FamIconButton
               icon="arrow-clockwise"
               label="Refresh Coven"
+              className={props.loading ? 'coven-refreshing' : undefined}
               disabled={props.busy || props.loading || props.lifecycleBusy}
               onClick={props.onRefresh}
             />
@@ -835,6 +846,12 @@ export function ChatLayout(props: ChatLayoutProps) {
                     </div>
                   </div>
                 </div>
+              ) : block.message.role === 'output' ? (
+                // Raw engine output: text the runtime printed outside the
+                // protocol. Shown as it came, attributed to no one.
+                <section className="coven-output" key={block.message.id} aria-label="Engine output">
+                  <pre>{block.message.text}</pre>
+                </section>
               ) : block.message.role === 'notice' ? (
                 // Chat's own disclosure (a replayed-history notice): a quiet
                 // line between messages, not a reply from anyone.
@@ -1201,6 +1218,12 @@ export function ChatLayout(props: ChatLayoutProps) {
                               : `${name} is responding`}
                     </span>
                   </div>
+                  {props.lastRun ? (
+                    <div className="fr-row">
+                      <span className="fr-row-label">Last run</span>
+                      <span className="fr-row-value">{lastRunText(props.lastRun)}</span>
+                    </div>
+                  ) : null}
                   <div className="fr-row">
                     <span className="fr-row-label">Your messages</span>
                     <span className="fr-row-value">{counts.sent}</span>

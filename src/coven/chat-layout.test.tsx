@@ -7,6 +7,7 @@ import {
   type ChatLayoutProps,
   composerCopy,
   emptyThreadText,
+  lastRunText,
   matchesFamiliar,
   runStatusText,
   SHORTCUTS,
@@ -1621,5 +1622,52 @@ describe('the clock', () => {
     expect(screen.getByRole('button', { name: 'Astra' })).toHaveTextContent('now');
     act(() => vi.advanceTimersByTime(120_000));
     expect(screen.getByRole('button', { name: 'Astra' })).toHaveTextContent('2m');
+  });
+});
+
+describe('last run, engine output and the refresh control', () => {
+  const base = () => ({
+    ...layoutProps(),
+    connected: true,
+    ready: true,
+    familiars: [{ id: 'a', name: 'Astra' }],
+    familiarId: 'a',
+  });
+
+  it('accounts for the most recent run by outcome and duration', () => {
+    expect(lastRunText({ ms: 75_000, outcome: 'reply' })).toBe('Replied in 1m 15s');
+    expect(lastRunText({ ms: 12_000, outcome: 'error' })).toBe('Failed after 12s');
+    expect(lastRunText({ ms: 3_000, outcome: 'stopped' })).toBe('Stopped after 3s');
+    const { rerender } = render(<ChatLayout {...base()} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Activity' }));
+    expect(screen.getByRole('region', { name: 'Activity' })).not.toHaveTextContent('Last run');
+    rerender(<ChatLayout {...base()} lastRun={{ ms: 75_000, outcome: 'reply' }} />);
+    expect(screen.getByRole('region', { name: 'Activity' })).toHaveTextContent(
+      'Last runReplied in 1m 15s',
+    );
+  });
+
+  it('shows raw engine output as a quiet block, attributed to no one', () => {
+    const { container } = render(
+      <ChatLayout
+        {...base()}
+        messages={[{ id: 'o', role: 'output', text: 'warning: model provider not configured' }]}
+      />,
+    );
+    const output = screen.getByRole('region', { name: 'Engine output' });
+    expect(output.querySelector('pre')).toHaveTextContent('warning: model provider not configured');
+    expect(screen.queryByText('Output')).not.toBeInTheDocument();
+    expect(container.querySelector('.fr-familiar')).toBeNull();
+  });
+
+  it('turns the refresh control while loading', () => {
+    const { rerender } = render(<ChatLayout {...base()} />);
+    expect(screen.getByRole('button', { name: 'Refresh Coven' })).not.toHaveClass(
+      'coven-refreshing',
+    );
+    rerender(<ChatLayout {...base()} loading />);
+    const refresh = screen.getByRole('button', { name: 'Refresh Coven' });
+    expect(refresh).toHaveClass('coven-refreshing');
+    expect(refresh).toBeDisabled();
   });
 });
