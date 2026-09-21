@@ -1,5 +1,5 @@
 import { act, fireEvent, render, screen } from '@testing-library/react';
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { ChatLayout, type ChatLayoutProps, composerCopy, emptyThreadText } from './chat-layout';
 
 function layoutProps(): ChatLayoutProps {
@@ -763,5 +763,232 @@ describe('inspector metadata rows', () => {
       '/Users/someone/.coven/workspaces/familiars/astra/very/deep/path',
     );
     expect(value).toHaveClass('coven-row-value--path');
+  });
+});
+
+describe('sidebar recency', () => {
+  const now = Date.parse('2026-09-20T12:00:00Z');
+
+  it('orders familiars by latest activity, captions each with its age, and keeps undated ones last', () => {
+    vi.useFakeTimers({ now });
+    try {
+      render(
+        <ChatLayout
+          {...layoutProps()}
+          connected
+          familiars={[
+            { id: 'a', name: 'Alder' },
+            { id: 'b', name: 'Birch' },
+            { id: 'c', name: 'Cedar' },
+            { id: 'd', name: 'Dove' },
+          ]}
+          sessions={[
+            { id: 's-a', familiarId: 'a', title: 'a', updatedAt: '2026-09-18T12:00:00Z' },
+            { id: 's-b', familiarId: 'b', title: 'b', updatedAt: '2026-09-20T11:30:00Z' },
+            { id: 's-c', familiarId: 'c', title: 'c', updatedAt: 'today' },
+          ]}
+        />,
+      );
+      const names = screen
+        .getAllByRole('button', { name: /^(Alder|Birch|Cedar|Dove)$/ })
+        .map((row) => row.getAttribute('aria-label'));
+      expect(names).toEqual(['Birch', 'Alder', 'Cedar', 'Dove']);
+      expect(screen.getByRole('button', { name: 'Birch' })).toHaveTextContent('30m');
+      expect(screen.getByRole('button', { name: 'Alder' })).toHaveTextContent('2d');
+      expect(screen.getByRole('button', { name: 'Alder' }).querySelector('time')).toHaveAttribute(
+        'datetime',
+        '2026-09-18T12:00:00Z',
+      );
+      // An unparseable CLI timestamp gets no caption rather than a wrong one.
+      expect(screen.getByRole('button', { name: 'Cedar' }).querySelector('time')).toBeNull();
+      expect(screen.getByRole('button', { name: 'Dove' }).querySelector('time')).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
+describe('familiar list keyboard navigation', () => {
+  function renderList() {
+    const props = layoutProps();
+    render(
+      <ChatLayout
+        {...props}
+        connected
+        familiars={[
+          { id: 'a', name: 'Alder' },
+          { id: 'b', name: 'Birch' },
+          { id: 'c', name: 'Cedar' },
+        ]}
+      />,
+    );
+    return props;
+  }
+
+  it('moves from the search box into the rows and between them with the arrow keys', () => {
+    renderList();
+    const search = screen.getByRole('searchbox', { name: 'Search familiars' });
+    search.focus();
+    fireEvent.keyDown(search, { key: 'ArrowDown' });
+    expect(screen.getByRole('button', { name: 'Alder' })).toHaveFocus();
+    fireEvent.keyDown(document.activeElement as HTMLElement, { key: 'ArrowDown' });
+    expect(screen.getByRole('button', { name: 'Birch' })).toHaveFocus();
+    fireEvent.keyDown(document.activeElement as HTMLElement, { key: 'End' });
+    expect(screen.getByRole('button', { name: 'Cedar' })).toHaveFocus();
+    fireEvent.keyDown(document.activeElement as HTMLElement, { key: 'ArrowDown' });
+    expect(screen.getByRole('button', { name: 'Cedar' })).toHaveFocus();
+    fireEvent.keyDown(document.activeElement as HTMLElement, { key: 'ArrowUp' });
+    expect(screen.getByRole('button', { name: 'Birch' })).toHaveFocus();
+    fireEvent.keyDown(document.activeElement as HTMLElement, { key: 'Home' });
+    expect(screen.getByRole('button', { name: 'Alder' })).toHaveFocus();
+  });
+
+  it('selects the first match with Enter and clears the filter with Escape', () => {
+    const props = renderList();
+    const search = screen.getByRole('searchbox', { name: 'Search familiars' });
+    fireEvent.change(search, { target: { value: 'ced' } });
+    fireEvent.keyDown(search, { key: 'Enter' });
+    expect(props.onFamiliar).toHaveBeenCalledWith('c');
+    fireEvent.keyDown(search, { key: 'Escape' });
+    expect(search).toHaveValue('');
+    expect(screen.getAllByRole('button', { name: /^(Alder|Birch|Cedar)$/ })).toHaveLength(3);
+    fireEvent.change(search, { target: { value: 'zzz' } });
+    fireEvent.keyDown(search, { key: 'Enter' });
+    expect(props.onFamiliar).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('error notices', () => {
+  it('offers a dismiss control only when the host can clear the error', () => {
+    const onDismissError = vi.fn();
+    const view = render(<ChatLayout {...layoutProps()} error="The run failed." />);
+    expect(screen.getByRole('alert')).toHaveTextContent('The run failed.');
+    expect(screen.queryByRole('button', { name: 'Dismiss error' })).not.toBeInTheDocument();
+    view.rerender(
+      <ChatLayout {...layoutProps()} error="The run failed." onDismissError={onDismissError} />,
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Dismiss error' }));
+    expect(onDismissError).toHaveBeenCalledOnce();
+  });
+});
+
+describe('live run row', () => {
+  const props = () => ({
+    ...layoutProps(),
+    familiars: [{ id: 'f', name: 'Astra' }],
+    familiarId: 'f',
+    connected: true,
+    ready: true,
+    busy: true,
+  });
+  const tool = (id: string, name: string, extra: Record<string, unknown> = {}) => ({
+    id,
+    role: 'tool',
+    text: name,
+    tool: { name, args: 'ls', ...extra },
+  });
+
+  it('waits at the end of the thread until prose streams, then yields to it', () => {
+    const view = render(
+      <ChatLayout {...props()} messages={[{ id: '1', role: 'user', text: 'Hi' }]} />,
+    );
+    expect(screen.getByText('Waiting for Astra…')).toBeVisible();
+    view.rerender(
+      <ChatLayout
+        {...props()}
+        messages={[
+          { id: '1', role: 'user', text: 'Hi' },
+          { id: '2', role: 'assistant', text: 'Hel' },
+        ]}
+      />,
+    );
+    expect(screen.queryByText('Waiting for Astra…')).not.toBeInTheDocument();
+    view.rerender(<ChatLayout {...props()} busy={false} messages={[]} />);
+    expect(screen.queryByText(/Waiting for/)).not.toBeInTheDocument();
+    expect(screen.getByText('Chat with Astra')).toBeInTheDocument();
+  });
+
+  it('names the executing tool, marks its row as running, and reports stopping', () => {
+    const view = render(<ChatLayout {...props()} messages={[tool('1', 'Bash')]} />);
+    expect(screen.getByText('Running Bash…')).toBeVisible();
+    expect(screen.getByText('running')).toBeInTheDocument();
+    expect(screen.getByRole('listitem')).toHaveAttribute('data-running', 'true');
+    view.rerender(<ChatLayout {...props()} messages={[tool('1', 'Bash', { result: 'ok' })]} />);
+    expect(screen.queryByText('running')).not.toBeInTheDocument();
+    expect(screen.getByText('Waiting for Astra…')).toBeVisible();
+    view.rerender(<ChatLayout {...props()} cancelling messages={[tool('1', 'Bash')]} />);
+    expect(screen.getByText('Stopping…')).toBeVisible();
+  });
+});
+
+describe('jump to latest', () => {
+  it('counts the messages that arrived while the reader was scrolled back', () => {
+    const props = { ...layoutProps(), messages: [{ id: '1', role: 'assistant', text: 'One' }] };
+    const view = render(<ChatLayout {...props} />);
+    const transcript = screen.getByRole('log');
+    Object.defineProperties(transcript, {
+      scrollHeight: { configurable: true, value: 1000 },
+      clientHeight: { configurable: true, value: 300 },
+    });
+    transcript.scrollTop = 100;
+    fireEvent.scroll(transcript);
+    expect(screen.getByRole('button', { name: /Jump to latest/ })).toHaveTextContent(
+      /^Jump to latest$/,
+    );
+    view.rerender(
+      <ChatLayout
+        {...props}
+        messages={[
+          { id: '1', role: 'assistant', text: 'One' },
+          { id: '2', role: 'user', text: 'Two' },
+          { id: '3', role: 'assistant', text: 'Three' },
+        ]}
+      />,
+    );
+    expect(screen.getByRole('button', { name: /Jump to latest/ })).toHaveTextContent(
+      '2 new messages',
+    );
+    fireEvent.click(screen.getByRole('button', { name: /Jump to latest/ }));
+    expect(screen.queryByRole('button', { name: /Jump to latest/ })).not.toBeInTheDocument();
+    expect(transcript.scrollTop).toBe(1000);
+  });
+});
+
+describe('copying a reply', () => {
+  const original = Object.getOwnPropertyDescriptor(navigator, 'clipboard');
+  afterEach(() => {
+    if (original) Object.defineProperty(navigator, 'clipboard', original);
+    else Reflect.deleteProperty(navigator, 'clipboard');
+  });
+
+  it('copies the reply source and reports the outcome honestly', async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } });
+    render(
+      <ChatLayout
+        {...layoutProps()}
+        familiars={[{ id: 'f', name: 'Astra' }]}
+        familiarId="f"
+        messages={[
+          { id: '1', role: 'user', text: 'Question' },
+          { id: '2', role: 'assistant', text: '**Answer**' },
+        ]}
+      />,
+    );
+    const button = screen.getByRole('button', { name: 'Copy reply' });
+    expect(screen.getAllByRole('button', { name: 'Copy reply' })).toHaveLength(1);
+    fireEvent.click(button);
+    expect(writeText).toHaveBeenCalledWith('**Answer**');
+    await screen.findByText('Copied');
+    expect(button).toHaveAttribute('data-state', 'copied');
+
+    writeText.mockRejectedValue(new Error('denied'));
+    Object.defineProperty(document, 'execCommand', {
+      configurable: true,
+      value: vi.fn().mockReturnValue(false),
+    });
+    fireEvent.click(button);
+    await screen.findByText('Copy failed');
+    expect(button).toHaveAttribute('data-state', 'failed');
   });
 });

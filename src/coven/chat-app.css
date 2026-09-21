@@ -165,14 +165,59 @@
 }
 
 .coven-jump-latest {
-  display: block;
+  display: flex;
+  align-items: center;
+  gap: 8px;
   margin: 0 auto 8px;
   padding: 6px 12px;
   border: 1px solid var(--border-hairline);
   border-radius: 16px;
   background: var(--bg-elevated);
   color: var(--text-primary);
+  font-size: 12px;
   cursor: pointer;
+  box-shadow: 0 6px 18px -10px rgba(0, 0, 0, 0.8);
+}
+
+.coven-jump-latest:hover {
+  background: var(--bg-hover);
+}
+
+.coven-jump-latest:focus-visible {
+  outline: 2px solid var(--ring-focus);
+  outline-offset: 1px;
+}
+
+.coven-jump-count {
+  padding: 1px 7px;
+  border-radius: 10px;
+  background: color-mix(in oklch, var(--accent-presence) 22%, transparent);
+  color: var(--accent-presence);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* The live row: the familiar's avatar beside the run's current state. */
+.coven-chat .coven-live-row {
+  max-width: 72%;
+}
+
+/* A reply's copy control sits in its meta line, quiet until pointed at. */
+.coven-chat .fr-familiar-meta {
+  align-items: center;
+}
+
+.coven-message-copy {
+  margin-inline-start: auto;
+  opacity: 0.55;
+  transition: opacity 120ms;
+}
+
+.fr-familiar:hover .coven-message-copy,
+.coven-message-copy:focus-visible,
+.coven-message-copy[data-state="copied"],
+.coven-message-copy[data-state="failed"] {
+  opacity: 1;
 }
 
 .coven-chat :is(.fr-sidebar, .fr-inspector)[aria-hidden="true"] {
@@ -288,6 +333,44 @@
   background: var(--color-danger);
 }
 
+.coven-error {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+}
+
+.coven-error-text {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.coven-error-dismiss {
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  width: 22px;
+  height: 22px;
+  margin: -3px -4px -3px 0;
+  padding: 0;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: inherit;
+  opacity: 0.7;
+  cursor: pointer;
+}
+
+.coven-error-dismiss:hover {
+  background: color-mix(in oklch, var(--color-danger) 14%, transparent);
+  opacity: 1;
+}
+
+.coven-error-dismiss:focus-visible {
+  outline: 2px solid var(--ring-focus);
+  outline-offset: 1px;
+  opacity: 1;
+}
+
 .coven-details {
   padding: 20px;
   color: var(--text-secondary);
@@ -354,6 +437,14 @@
   display: grid;
   gap: 3px;
   min-width: 0;
+}
+
+.coven-agent-row .fr-conv-top {
+  align-items: baseline;
+}
+
+.coven-agent-row .fr-conv-time {
+  margin-inline-start: auto;
 }
 
 .coven-chat .fr-thread-header-lead {

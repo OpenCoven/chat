@@ -529,6 +529,14 @@ export function ChatApp({ runtime = defaultRuntime }: { runtime?: CovenRuntime }
       loading={loading}
       cancelling={cancelling}
       error={error || runOutputs[draftKey(navigation)]?.error || ''}
+      onDismissError={() => {
+        setError('');
+        const key = draftKey(navigationRef.current);
+        setRunOutputs((previous) => {
+          const output = previous[key];
+          return output?.error ? { ...previous, [key]: { ...output, error: '' } } : previous;
+        });
+      }}
       onFamiliar={(id) => {
         if (lifecyclePending.current) return;
         setError('');
