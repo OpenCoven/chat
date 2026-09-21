@@ -461,6 +461,9 @@ jobs:
           $msvcBin = Join-Path $msvcRoot 'bin\Hostx64\x64'
           $msvcLib = Join-Path $msvcRoot 'lib\x64'
           $msvcInclude = Join-Path $msvcRoot 'include'
+          $cmakeBin = Join-Path `
+            $visualStudioRoot `
+            'Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin'
           $windowsSdkVersion = $env:OPENCOVEN_WINDOWS_SDK_VERSION
           $windowsSdkRoot = 'C:\Program Files (x86)\Windows Kits\10'
           $windowsSdkBin = Join-Path $windowsSdkRoot "bin\$windowsSdkVersion\x64"
@@ -473,6 +476,7 @@ jobs:
             throw 'The exact reviewed Windows SDK resource compiler path changed.'
           }
           foreach ($facility in @(
+            $cmakeBin,
             $msvcBin,
             $msvcLib,
             $msvcInclude,
@@ -484,10 +488,11 @@ jobs:
             Assert-NoReparsePath -Path $facility -Label 'MSVC/Windows SDK facility'
           }
           if (
+            -not [IO.File]::Exists((Join-Path $cmakeBin 'cmake.exe')) -or
             (Join-Path $msvcBin 'cl.exe') -ne $env:OPENCOVEN_WINDOWS_CL_PATH -or
             (Join-Path $msvcBin 'link.exe') -ne $env:OPENCOVEN_WINDOWS_LINK_PATH
           ) {
-            throw 'The exact reviewed MSVC compiler or linker path changed.'
+            throw 'The exact reviewed CMake, MSVC compiler, or linker path changed.'
           }
           $trustedBuildTools = @(
             $env:OPENCOVEN_WINDOWS_LINK_PATH,
@@ -1110,6 +1115,7 @@ jobs:
             $nodeRoot,
             $pnpmRoot,
             $cargoBin,
+            $cmakeBin,
             $env:OPENCOVEN_MSVC_BIN,
             $env:OPENCOVEN_WINDOWS_SDK_BIN,
             'C:\Windows\System32',

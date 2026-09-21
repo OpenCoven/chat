@@ -3175,6 +3175,7 @@ $gitRoot = '/fixture/git'
 $nodeRoot = '/fixture/node'
 $pnpmRoot = '/fixture/pnpm'
 $cargoBin = '/fixture/cargo'
+$cmakeBin = '/fixture/cmake'
 $env:OPENCOVEN_MSVC_BIN = '/fixture/msvc'
 $env:OPENCOVEN_WINDOWS_SDK_BIN = '/fixture/windows-sdk'
 $env:OPENCOVEN_WINDOWS_SYSTEM_PWSH = '/fixture/powershell/pwsh.exe'
@@ -3193,6 +3194,7 @@ ${pathAssignment}
       '/fixture/node',
       '/fixture/pnpm',
       '/fixture/cargo',
+      '/fixture/cmake',
       '/fixture/msvc',
       '/fixture/windows-sdk',
       'C:\\Windows\\System32',
