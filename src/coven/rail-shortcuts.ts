@@ -8,7 +8,10 @@ export const SEARCH_SHORTCUT = 'Meta+K Control+K';
 export const STEP_SHORTCUT = 'Meta+[ Meta+] Control+[ Control+]';
 export const SEARCH_HINT = 'Search familiars (Cmd/Ctrl+K)';
 
-/** A modifier chord the shell owns, ignored while composing text or a dialog is open. */
+/**
+ * A modifier chord the shell owns, ignored while composing text or while a
+ * dialog, menu or listbox is open: those own the keyboard until they close.
+ */
 function shellChord(event: KeyboardEvent, code: string, key: string): boolean {
   return !(
     event.defaultPrevented ||
@@ -17,7 +20,9 @@ function shellChord(event: KeyboardEvent, code: string, key: string): boolean {
     event.altKey ||
     !(event.metaKey || event.ctrlKey) ||
     (event.code !== code && event.key.toLowerCase() !== key) ||
-    document.querySelector('dialog[open], [role="dialog"][aria-modal="true"]')
+    document.querySelector(
+      'dialog[open], [role="dialog"][aria-modal="true"], [role="menu"], [role="listbox"]',
+    )
   );
 }
 

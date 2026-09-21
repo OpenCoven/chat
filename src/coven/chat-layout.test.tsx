@@ -2125,4 +2125,22 @@ describe('stepping between familiars', () => {
     fireEvent.keyDown(window, { key: ']', code: 'BracketRight', metaKey: true });
     expect(p.onFamiliar).toHaveBeenCalledTimes(1);
   });
+
+  it('stays quiet while a menu owns the keyboard', () => {
+    const p = { ...props(), familiarId: 'b' };
+    render(<ChatLayout {...p} />);
+    const menu = document.createElement('div');
+    menu.setAttribute('role', 'menu');
+    document.body.appendChild(menu);
+    try {
+      fireEvent.keyDown(window, { key: ']', code: 'BracketRight', metaKey: true });
+      fireEvent.keyDown(window, { key: 'k', code: 'KeyK', metaKey: true });
+      expect(p.onFamiliar).not.toHaveBeenCalled();
+      expect(screen.getByRole('searchbox')).not.toHaveFocus();
+    } finally {
+      menu.remove();
+    }
+    fireEvent.keyDown(window, { key: ']', code: 'BracketRight', metaKey: true });
+    expect(p.onFamiliar).toHaveBeenCalledWith('c');
+  });
 });
