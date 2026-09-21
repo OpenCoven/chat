@@ -7,6 +7,7 @@ import {
   type CovenSession,
   createCovenRuntime,
 } from '../lib/coven-runtime';
+import { defaultScreenRelay, type ScreenRelay } from '../lib/screen-relay';
 import { type ChatAttachment, MAX_ATTACHMENTS, readAttachments } from './attachments';
 import { ChatLayout } from './chat-layout';
 import { projectEvents } from './events';
@@ -93,7 +94,13 @@ function selectCanonical(
   return next;
 }
 
-export function ChatApp({ runtime = defaultRuntime }: { runtime?: CovenRuntime }) {
+export function ChatApp({
+  runtime = defaultRuntime,
+  screen = defaultScreenRelay,
+}: {
+  runtime?: CovenRuntime;
+  screen?: ScreenRelay;
+}) {
   const [saved] = useState(readNavigation);
   const [navigation, setNavigation] = useState(saved.navigation);
   const navigationRef = useRef(navigation);
@@ -509,6 +516,7 @@ export function ChatApp({ runtime = defaultRuntime }: { runtime?: CovenRuntime }
           'avatarUrl' in item && typeof item.avatarUrl === 'string' ? item.avatarUrl : undefined,
       }))}
       sessions={sessions}
+      screen={screen}
       messages={messages}
       familiarId={navigation.familiarId}
       sessionId={navigation.sessionId}

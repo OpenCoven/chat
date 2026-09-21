@@ -172,6 +172,33 @@ reported, the result, and the run status
 names the tool that is executing while its row is marked as running. The bundled engine's Claude CLI provider
 reports calls as text only, so those rows carry the one-line summary alone.
 
+## Remote screen (VNC)
+
+The **Show screen** button in the thread header opens a viewer pane above the
+transcript. Enter the WebSocket address of a VNC server that speaks the noVNC
+transport (for example the `websockify` endpoint of a Daytona sandbox, with its
+access token in the query string), an optional password, and choose
+**Connect**. The desktop appears scaled to fit and starts **view only**; clear
+that toggle to send mouse and keyboard input. The status line names the
+desktop reported by the server, and a failure names the reason the host saw:
+an HTTP status instead of a WebSocket upgrade, a refused or timed-out
+connection, a handshake that did not complete, or a server that rejected the
+password.
+
+The window never opens the connection itself. The desktop host performs the
+WebSocket upgrade, forwards opaque frames both ways, and reports the close;
+it adds no credentials or headers, follows no redirects, refuses anything but
+`ws://` and `wss://`, caps a message at 16 KiB upstream and 16 MiB
+downstream, and holds at most two screens per window. Its error messages
+never repeat the address, because the address may carry a token. The address
+and password live only in the pane while it is open; closing the pane,
+switching away, or closing the window drops the connection, and nothing is
+written to browser storage. In the browser (`pnpm dev`) the pane says that
+screen viewing needs the desktop app.
+
+The VNC client is [noVNC](https://github.com/novnc/noVNC) 1.7.0, vendored
+under `src/vendor/novnc` (MPL-2.0); see its `README.md` for provenance.
+
 ## Familiar avatars
 
 Your familiar's portrait lives at

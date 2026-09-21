@@ -17,6 +17,7 @@ import {
 } from '../design/familiars-ui';
 import { Icon } from '../design/minimal-icons';
 import type { ChatLifecycle, CovenProjectAccess } from '../lib/coven-runtime';
+import type { ScreenRelay } from '../lib/screen-relay';
 import { AttachmentChip } from '../ui/attachment-chip';
 import { Composer } from '../ui/composer';
 import { ATTACHMENT_ACCEPT, type ChatAttachment } from './attachments';
@@ -35,6 +36,7 @@ import {
   useRailShortcuts,
 } from './rail-shortcuts';
 import { activityTime, formatAbsoluteTime, formatRelativeTime } from './relative-time';
+import { type LoadRfb, ScreenViewer } from './screen-viewer';
 import { useViewportTier } from './viewport';
 import '../design/familiars-shell.css';
 import './chat-app.css';
@@ -84,6 +86,10 @@ export type ChatLayoutProps = Readonly<{
   error: string;
   /** Clears the error notice; absent when the host cannot clear it. */
   onDismissError?: () => void;
+  /** The host-side VNC relay; absent in the browser, where the pane says so. */
+  screen?: ScreenRelay | undefined;
+  /** Test seam for the screen viewer's VNC client. */
+  screenLoadRfb?: LoadRfb | undefined;
   onFamiliar: (id: string) => void;
   onDraft: (value: string) => void;
   onSend: () => void;
@@ -179,6 +185,7 @@ export function ChatLayout(props: ChatLayoutProps) {
   const [inspector, setInspector] = useState(() => tier === 'wide');
   const [query, setQuery] = useState('');
   const [tab, setTab] = useState<InspectorTab>('overview');
+  const [screenOpen, setScreenOpen] = useState(false);
   const drawers = tier === 'compact';
   const inspectorOverlay = tier !== 'wide';
   const shellRef = useRef<HTMLDivElement>(null);
@@ -554,6 +561,14 @@ export function ChatLayout(props: ChatLayoutProps) {
           )}
           <div className="fr-thread-header-actions">
             <FamIconButton
+              icon="squares-four"
+              label={screenOpen ? 'Hide screen' : 'Show screen'}
+              title={screenOpen ? 'Hide the remote screen' : 'View a remote screen over VNC'}
+              aria-pressed={screenOpen}
+              aria-controls="coven-screen-viewer"
+              onClick={() => setScreenOpen((open) => !open)}
+            />
+            <FamIconButton
               icon="arrow-clockwise"
               label="Refresh Coven"
               disabled={props.busy || props.loading || props.lifecycleBusy}
@@ -561,6 +576,16 @@ export function ChatLayout(props: ChatLayoutProps) {
             />
           </div>
         </header>
+        {screenOpen ? (
+          <div id="coven-screen-viewer">
+            <ScreenViewer
+              relay={props.screen}
+              familiarName={familiar?.name}
+              onClose={() => setScreenOpen(false)}
+              {...(props.screenLoadRfb ? { loadRfb: props.screenLoadRfb } : {})}
+            />
+          </div>
+        ) : null}
         <div
           className="fr-transcript"
           ref={transcriptRef}

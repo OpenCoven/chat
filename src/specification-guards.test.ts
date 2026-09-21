@@ -62,6 +62,14 @@ const covenRuntimeCommands = [
   'coven_runtime_send',
   'coven_runtime_cancel',
 ];
+// The screen relay is the one place the webview may name a network
+// destination: a WebSocket upgrade the host performs itself, forwarding
+// opaque frames for the VNC viewer. See src-tauri/src/screen_relay.rs.
+const screenRelayCommands = [
+  'coven_screen_connect',
+  'coven_screen_send',
+  'coven_screen_disconnect',
+];
 
 function readText(relativePath: string) {
   return readFileSync(resolve(projectRoot, relativePath), 'utf8');
@@ -232,7 +240,9 @@ describe('Phase 1 specification guards', () => {
     // and identity commands remain registered for their native and conformance
     // coverage, but the webview must not be able to reach them.
     expect(capability.permissions).toEqual(
-      covenRuntimeCommands.map((command) => `allow-${command.replaceAll('_', '-')}`),
+      [...covenRuntimeCommands, ...screenRelayCommands].map(
+        (command) => `allow-${command.replaceAll('_', '-')}`,
+      ),
     );
     for (const command of registeredCommandNames(readText('src-tauri/src/commands.rs'))) {
       expect(capability.permissions).not.toContain(`allow-${command.replaceAll('_', '-')}`);
@@ -700,6 +710,7 @@ describe('Phase 1 specification guards', () => {
     const schema = readText('src-tauri/gen/schemas/desktop-schema.json');
     const expectedCommands = [
       ...covenRuntimeCommands,
+      ...screenRelayCommands,
       'app_identity',
       'app_installation_id',
       'cave_read_discovery',
@@ -764,6 +775,7 @@ describe('Phase 1 specification guards', () => {
     expect(registeredCommandNames(commands)).toEqual(expected);
     expect(invokeHandlerCommandNames(lib)).toEqual([
       ...covenRuntimeCommands.map((command) => `coven_runtime::${command}`),
+      ...screenRelayCommands.map((command) => `screen_relay::${command}`),
       ...expected,
     ]);
 
@@ -806,6 +818,30 @@ describe('Phase 1 specification guards', () => {
       );
     }
     expect(commands).not.toMatch(/\b(?:origin|endpoint|url):\s*String/);
+  });
+
+  it('keeps the screen relay a bounded WebSocket forwarder rather than a request bridge', () => {
+    const relay = readText('src-tauri/src/screen_relay.rs');
+    for (const command of screenRelayCommands) {
+      expect(relay).toMatch(new RegExp(`pub\\(crate\\)\\s+(?:async\\s+)?fn\\s+${command}\\s*\\(`));
+    }
+    // Only ws/wss targets, refused before any request is built.
+    expect(relay).toMatch(/"ws" => "http",\s*"wss" => "https",\s*_ => return Err/);
+    // The host adds nothing the webview chose: no header, cookie or
+    // credential parameters exist on any command.
+    expect(relay).not.toMatch(
+      /fn\s+coven_screen_\w+\([^)]*(?:header|cookie|token|bearer|credential)/i,
+    );
+    // No HTTP response body ever crosses to the webview.
+    expect(relay).not.toMatch(/\.(?:text|bytes|json)\(\)/);
+    // Bounded in every direction, and at most two screens per window.
+    expect(relay).toMatch(/MAX_SESSIONS: usize = 2;/);
+    expect(relay).toMatch(/MAX_DOWNSTREAM: usize = 16 \* 1024 \* 1024;/);
+    expect(relay).toMatch(/MAX_UPSTREAM: usize = 64 \* 1024;/);
+    expect(relay).toMatch(/CONNECT_TIMEOUT: Duration/);
+    // Failures never echo the address, which may carry an access token.
+    expect(relay).toMatch(/error\.without_url\(\)/);
+    expect(relay).toMatch(/redirect\(reqwest::redirect::Policy::none\(\)\)/);
   });
 
   it('derives native identity name and identifier from tauri.conf.json', () => {
