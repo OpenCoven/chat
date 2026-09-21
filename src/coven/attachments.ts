@@ -5,6 +5,13 @@ export const ATTACHMENT_ACCEPT =
 export type ChatAttachment = { id: string; name: string; bytes: number[] };
 export type AttachmentMetadata = { name: string; size: number };
 
+/** A file size for a chip: bytes below a KiB, else KiB to a sensible precision. */
+export function formatAttachmentSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} ${bytes === 1 ? 'byte' : 'bytes'}`;
+  const kib = bytes / 1024;
+  return `${kib >= 10 ? Math.round(kib) : Math.round(kib * 10) / 10} KiB`;
+}
+
 export async function readAttachments(files: readonly File[]): Promise<ChatAttachment[]> {
   if (files.length > MAX_ATTACHMENTS) throw new Error('Attach at most 4 files per message.');
   return Promise.all(

@@ -700,6 +700,57 @@
   opacity: 1;
 }
 
+/* A replayed-history notice: a quiet line between messages, addressed by no one. */
+.coven-chat .coven-notice {
+  margin: 0 auto;
+  max-width: 560px;
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1.5;
+  text-align: center;
+  text-wrap: balance;
+}
+
+/* The footer's shortcut reference, folded until asked for. */
+.coven-shortcuts summary {
+  cursor: pointer;
+  width: fit-content;
+}
+
+.coven-shortcuts dl {
+  display: grid;
+  gap: 6px;
+  margin: 8px 0 2px;
+  font-size: 11px;
+}
+
+.coven-shortcuts dl > div {
+  display: grid;
+  grid-template-columns: minmax(92px, auto) 1fr;
+  gap: 8px;
+  align-items: baseline;
+}
+
+.coven-shortcuts dt,
+.coven-shortcuts dd {
+  margin: 0;
+}
+
+.coven-shortcuts dd {
+  color: var(--text-secondary);
+}
+
+.coven-shortcuts kbd {
+  padding: 1px 5px;
+  border: 1px solid var(--border-hairline);
+  border-radius: 4px;
+  background: var(--bg-sunken);
+  color: var(--text-primary);
+  font-family: var(--font-jetbrains-mono);
+  font-size: 10.5px;
+  white-space: nowrap;
+}
+
 /* ------------------------------------------------------------- composer */
 
 .coven-composer-note {

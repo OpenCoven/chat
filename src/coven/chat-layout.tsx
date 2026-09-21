@@ -20,7 +20,7 @@ import type { ChatLifecycle, CovenProjectAccess } from '../lib/coven-runtime';
 import type { ScreenRelay } from '../lib/screen-relay';
 import { AttachmentChip } from '../ui/attachment-chip';
 import { Composer } from '../ui/composer';
-import { ATTACHMENT_ACCEPT, type ChatAttachment } from './attachments';
+import { ATTACHMENT_ACCEPT, type ChatAttachment, formatAttachmentSize } from './attachments';
 import { ChatLifecycleControls } from './chat-lifecycle';
 import { ContextPicker } from './context-picker';
 import { CopyButton } from './copy-button';
@@ -246,6 +246,16 @@ export function activityCounts(messages: readonly ChatMessage[]) {
   }
   return { sent, replies, tools, failed };
 }
+
+/** The shell's keys, listed in the sidebar footer. Every entry is wired above. */
+export const SHORTCUTS: readonly (readonly [keys: string, action: string])[] = [
+  ['Cmd/Ctrl+\\', 'Show or hide the familiar list'],
+  ['Cmd/Ctrl+Shift+\\', 'Show or hide the inspector'],
+  ['Cmd/Ctrl+K', 'Search familiars'],
+  ['↑ ↓ Home End', 'Move through the list; Enter opens, Escape clears the search'],
+  ['Enter', 'Send the message; Shift+Enter starts a new line'],
+  ['@ or #', 'Mention a familiar or project; Tab confirms, Escape dismisses'],
+];
 
 function activeControl(): HTMLElement | null {
   return document.activeElement instanceof HTMLElement ? document.activeElement : null;
@@ -664,9 +674,20 @@ export function ChatLayout(props: ChatLayoutProps) {
                   Show archived chats
                 </label>
               </details>
-            ) : (
-              'Coven CLI'
-            )}
+            ) : null}
+            <details className="coven-shortcuts">
+              <summary>Keyboard shortcuts</summary>
+              <dl>
+                {SHORTCUTS.map(([keys, action]) => (
+                  <div key={keys}>
+                    <dt>
+                      <kbd>{keys}</kbd>
+                    </dt>
+                    <dd>{action}</dd>
+                  </div>
+                ))}
+              </dl>
+            </details>
           </div>
         </div>
       </aside>
@@ -800,6 +821,12 @@ export function ChatLayout(props: ChatLayoutProps) {
                     </div>
                   </div>
                 </div>
+              ) : block.message.role === 'notice' ? (
+                // Chat's own disclosure (a replayed-history notice): a quiet
+                // line between messages, not a reply from anyone.
+                <p className="coven-notice" key={block.message.id} role="note">
+                  {block.message.text}
+                </p>
               ) : block.message.role === 'user' ? (
                 <div className="fr-user fr-msg" key={block.message.id}>
                   <div className="fr-user-body">
@@ -810,7 +837,10 @@ export function ChatLayout(props: ChatLayoutProps) {
                       <ul className="coven-history-attachments" aria-label="Message attachments">
                         {block.message.attachments.map((file, index) => (
                           <li key={`${index}-${file.name}`}>
-                            <AttachmentChip name={file.name} meta={`${file.size} bytes`} />
+                            <AttachmentChip
+                              name={file.name}
+                              meta={formatAttachmentSize(file.size)}
+                            />
                           </li>
                         ))}
                       </ul>
@@ -956,7 +986,7 @@ export function ChatLayout(props: ChatLayoutProps) {
                 attachments={(props.attachments ?? []).map((file) => ({
                   id: file.id,
                   name: file.name,
-                  meta: `${file.bytes.length} bytes`,
+                  meta: formatAttachmentSize(file.bytes.length),
                 }))}
                 {...(props.onAttach && !props.busy && !props.attaching
                   ? { onAttach: () => fileInput.current?.click() }

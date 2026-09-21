@@ -21,7 +21,8 @@ so a long reply or a short window does not push the composer off the page.
 Toggle the familiar list with **Cmd/Ctrl+\\** and the inspector with
 **Cmd/Ctrl+Shift+\\**, and reach the familiar search with **Cmd/Ctrl+K**
 (it opens the list if it is closed). These shortcuts work while composing
-without changing your text. Rail buttons include shortcut hints; modal dialogs and input-method
+without changing your text, and **Keyboard shortcuts** at the foot of the
+familiar list lists them all. Rail buttons include shortcut hints; modal dialogs and input-method
 composition do not trigger the shortcuts.
 
 Closed rails remain as 28px full-height tabs: **Familiars** on the left and the
@@ -136,7 +137,8 @@ The bundled Coven Code engine cannot reopen a thread's earlier turns that way,
 so when you continue a Coven Code chat, Chat replays the most recent turns from
 its saved transcript into the new run (the newest turns first, up to 24 KiB,
 each message capped at 4 KiB) and adds a notice to the thread saying how many
-turns were replayed and whether older ones were left out. The saved transcript
+turns were replayed and whether older ones were left out. That notice is a
+quiet line between messages, not a reply from anyone. The saved transcript
 keeps only your original message, not the replayed prompt.
 
 **Archive chat** keeps the saved history and hides the familiar from the active list.
@@ -158,8 +160,8 @@ cancellation cleanup, have finished; deleting a chat never cancels an agent.
 ## Attachments and formatted replies
 
 Use the compact **+** attachment button beside the message field. Selected files
-appear as cards with their filename, size, and a remove control; sent messages
-retain file cards in the transcript.
+appear as cards with their filename, size (in KiB above a kibibyte), and a
+remove control; sent messages retain file cards in the transcript.
 
 The composer accepts up to four UTF-8 text/code files, each at most 64 KiB.
 Selected bytes are validated and passed to Coven as actual file contents, not

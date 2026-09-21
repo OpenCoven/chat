@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { MAX_ATTACHMENT_BYTES, readAttachments } from './attachments';
+import { formatAttachmentSize, MAX_ATTACHMENT_BYTES, readAttachments } from './attachments';
 
 function file(name: string, bytes: Uint8Array) {
   const selected = new File([], name);
@@ -29,5 +29,17 @@ describe('real text attachment selection', () => {
     await expect(
       readAttachments(Array.from({ length: 5 }, () => file('a.txt', new Uint8Array()))),
     ).rejects.toThrow('4 files');
+  });
+});
+
+describe('formatAttachmentSize', () => {
+  it('counts bytes below a KiB and rounds KiB sensibly above it', () => {
+    expect(formatAttachmentSize(0)).toBe('0 bytes');
+    expect(formatAttachmentSize(1)).toBe('1 byte');
+    expect(formatAttachmentSize(1023)).toBe('1023 bytes');
+    expect(formatAttachmentSize(1024)).toBe('1 KiB');
+    expect(formatAttachmentSize(1536)).toBe('1.5 KiB');
+    expect(formatAttachmentSize(40_000)).toBe('39 KiB');
+    expect(formatAttachmentSize(MAX_ATTACHMENT_BYTES)).toBe('64 KiB');
   });
 });

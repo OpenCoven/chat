@@ -9,6 +9,7 @@ import {
   emptyThreadText,
   matchesFamiliar,
   runStatusText,
+  SHORTCUTS,
 } from './chat-layout';
 import type { RfbClass } from './screen-viewer';
 
@@ -1484,5 +1485,64 @@ describe('retrying a failed run', () => {
     const { onRetry: _none, ...noRetry } = props();
     rerender(<ChatLayout {...noRetry} draft="text" />);
     expect(screen.queryByRole('button', { name: 'Try again' })).not.toBeInTheDocument();
+  });
+});
+
+describe('notices, sizes and the shortcut reference', () => {
+  it('renders a replay notice as a quiet line, not as a reply from anyone', () => {
+    const { container } = render(
+      <ChatLayout
+        {...layoutProps()}
+        connected
+        ready
+        familiars={[{ id: 'a', name: 'Astra' }]}
+        familiarId="a"
+        messages={[
+          { id: 'n', role: 'notice', text: 'Replayed the 3 most recent turns.' },
+          { id: 'a1', role: 'assistant', text: 'Hello again.' },
+        ]}
+      />,
+    );
+    const note = screen.getByRole('note');
+    expect(note).toHaveTextContent('Replayed the 3 most recent turns.');
+    expect(note.closest('.fr-familiar')).toBeNull();
+    expect(screen.queryByText('Notice')).not.toBeInTheDocument();
+    expect(container.querySelectorAll('.fr-familiar')).toHaveLength(1);
+  });
+
+  it('shows attachment sizes in KiB above a kibibyte', () => {
+    render(
+      <ChatLayout
+        {...layoutProps()}
+        connected
+        ready
+        familiars={[{ id: 'a', name: 'Astra' }]}
+        familiarId="a"
+        messages={[
+          {
+            id: 'u',
+            role: 'user',
+            text: 'see file',
+            attachments: [{ name: 'big.txt', size: 40_000 }],
+          },
+        ]}
+        attachments={[{ id: 'x', name: 'small.txt', bytes: [97, 98, 99] }]}
+      />,
+    );
+    expect(screen.getByText('39 KiB')).toBeInTheDocument();
+    expect(screen.getByText('3 bytes')).toBeInTheDocument();
+  });
+
+  it('lists every shell shortcut at the foot of the familiar list', () => {
+    render(<ChatLayout {...layoutProps()} />);
+    const reference = screen.getByText('Keyboard shortcuts').closest('details');
+    expect(reference).not.toBeNull();
+    for (const [keys, action] of SHORTCUTS) {
+      expect(reference).toHaveTextContent(keys);
+      expect(reference).toHaveTextContent(action);
+    }
+    expect(SHORTCUTS.map(([keys]) => keys)).toEqual(
+      expect.arrayContaining(['Cmd/Ctrl+\\', 'Cmd/Ctrl+Shift+\\', 'Cmd/Ctrl+K']),
+    );
   });
 });
