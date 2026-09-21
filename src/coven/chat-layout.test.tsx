@@ -1450,3 +1450,39 @@ describe('inspector copy controls and row tooltips', () => {
     expect(screen.getByRole('button', { name: 'Astra' })).not.toHaveAttribute('title');
   });
 });
+
+describe('retrying a failed run', () => {
+  const props = () => ({
+    ...layoutProps(),
+    connected: true,
+    ready: true,
+    familiars: [{ id: 'a', name: 'Astra' }],
+    familiarId: 'a',
+    error: 'Coven reported a failed run.',
+    onRetry: vi.fn(),
+  });
+
+  it('offers to send the restored draft again from the error notice', () => {
+    const p = { ...props(), draft: 'the restored text' };
+    render(<ChatLayout {...p} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Try again' }));
+    expect(p.onRetry).toHaveBeenCalledOnce();
+  });
+
+  it('offers it for restored attachments alone, and not once nothing is left to send', () => {
+    const { rerender } = render(
+      <ChatLayout {...props()} attachments={[{ id: 'x', name: 'note.txt', bytes: [97] }]} />,
+    );
+    expect(screen.getByRole('button', { name: 'Try again' })).toBeInTheDocument();
+    rerender(<ChatLayout {...props()} draft="   " />);
+    expect(screen.queryByRole('button', { name: 'Try again' })).not.toBeInTheDocument();
+  });
+
+  it('does not offer it while the composer cannot send, or for an error that is not a run', () => {
+    const { rerender } = render(<ChatLayout {...props()} draft="text" loading />);
+    expect(screen.queryByRole('button', { name: 'Try again' })).not.toBeInTheDocument();
+    const { onRetry: _none, ...noRetry } = props();
+    rerender(<ChatLayout {...noRetry} draft="text" />);
+    expect(screen.queryByRole('button', { name: 'Try again' })).not.toBeInTheDocument();
+  });
+});

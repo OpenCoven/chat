@@ -566,6 +566,8 @@ export function ChatApp({
       loading={loading}
       cancelling={cancelling}
       error={error || runOutputs[draftKey(navigation)]?.error || ''}
+      // A failed run restores what it was sent; the notice can send it again.
+      {...(runOutputs[draftKey(navigation)]?.error && !busy ? { onRetry: () => void send() } : {})}
       onDismissError={() => {
         setError('');
         const key = draftKey(navigationRef.current);

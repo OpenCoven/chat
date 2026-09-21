@@ -160,13 +160,21 @@ export function ToolActivity({ rows }: { rows: readonly ToolRow[] }) {
                 </span>
               </summary>
               <section aria-label={`${row.name} raw arguments`}>
+                <div className="coven-tool-section-bar">
+                  <span className="coven-tool-section-label">Input</span>
+                  <CopyButton text={row.raw ?? row.args} label={`Copy ${row.name} input`} />
+                </div>
                 <pre className="coven-tool-raw">
                   <code>{row.raw ?? row.args}</code>
                 </pre>
               </section>
               {row.result !== undefined ? (
-                <section aria-label={`${row.name} result`}>
-                  <pre className="coven-tool-raw coven-tool-result">
+                <section className="coven-tool-result" aria-label={`${row.name} result`}>
+                  <div className="coven-tool-section-bar">
+                    <span className="coven-tool-section-label">Result</span>
+                    <CopyButton text={row.result} label={`Copy ${row.name} result`} />
+                  </div>
+                  <pre className="coven-tool-raw">
                     <code>{row.result}</code>
                   </pre>
                 </section>

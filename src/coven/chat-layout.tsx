@@ -106,6 +106,8 @@ export type ChatLayoutProps = Readonly<{
   error: string;
   /** Clears the error notice; absent when the host cannot clear it. */
   onDismissError?: () => void;
+  /** Sends the restored draft again; present only while a failed run's error shows. */
+  onRetry?: () => void;
   /** The host-side VNC relay; absent in the browser, where the pane says so. */
   screen?: ScreenRelay | undefined;
   /** Test seam for the screen viewer's VNC client. */
@@ -764,6 +766,13 @@ export function ChatLayout(props: ChatLayoutProps) {
             {props.error ? (
               <div className="coven-error" role="alert">
                 <span className="coven-error-text">{props.error}</span>
+                {props.onRetry &&
+                !composerDisabled &&
+                (props.draft.trim() || props.attachments?.length) ? (
+                  <FamButton size="sm" className="coven-error-retry" onClick={props.onRetry}>
+                    Try again
+                  </FamButton>
+                ) : null}
                 {props.onDismissError ? (
                   <button
                     type="button"

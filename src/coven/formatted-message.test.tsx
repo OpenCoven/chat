@@ -120,7 +120,7 @@ test('crossed-tools calls have concise, independently expandable native argument
   expect(details?.tagName).toBe('DETAILS');
   expect(details).not.toHaveAttribute('open');
   expect(summary.querySelector('.coven-tool-args')?.textContent).toBe(args);
-  expect(screen.getByLabelText('Bash raw arguments').textContent).toBe(args);
+  expect(screen.getByLabelText('Bash raw arguments').querySelector('pre')?.textContent).toBe(args);
   expect(screen.getByLabelText('Bash raw arguments')).not.toBeVisible();
 
   fireEvent.click(summary);
@@ -139,9 +139,11 @@ test('crossed-tools calls have concise, independently expandable native argument
 test('raw details retain multiline, empty, and truncated arguments without formatting them', () => {
   const args = ' \tfirst\nsecond  ';
   render(<FormattedMessage text={`⚒ Edit(${args})✳ Read()✶ Bash(echo "unfinished`} />);
-  expect(screen.getByLabelText('Edit raw arguments').textContent).toBe(args);
-  expect(screen.getByLabelText('Read raw arguments').textContent).toBe('');
-  expect(screen.getByLabelText('Bash raw arguments').textContent).toBe('echo "unfinished');
+  expect(screen.getByLabelText('Edit raw arguments').querySelector('pre')?.textContent).toBe(args);
+  expect(screen.getByLabelText('Read raw arguments').querySelector('pre')?.textContent).toBe('');
+  expect(screen.getByLabelText('Bash raw arguments').querySelector('pre')?.textContent).toBe(
+    'echo "unfinished',
+  );
 });
 
 test('keeps crossed-tools examples inside fenced code out of activity rows', () => {
@@ -169,7 +171,11 @@ test('structured rows show the full input and the result once reported, and mark
     </div>,
   );
   expect(screen.getAllByRole('listitem')).toHaveLength(3);
-  expect(screen.getByLabelText('Bash raw arguments').textContent).toBe(raw);
+  expect(screen.getByLabelText('Bash raw arguments').querySelector('pre')?.textContent).toBe(raw);
+  expect(screen.getByRole('button', { name: 'Copy Bash input' })).toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: 'Copy Bash result' })).not.toBeInTheDocument();
+  expect(screen.getByRole('button', { name: 'Copy Read result' })).toBeInTheDocument();
+  expect(screen.getByLabelText('Read result')).toHaveTextContent(/^Result/);
   expect(screen.queryByLabelText('Bash result')).toBeNull();
   expect(screen.getByLabelText('Read result')).toHaveTextContent('file body');
   expect(screen.getByLabelText('Read result')).not.toBeVisible();

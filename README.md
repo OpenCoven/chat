@@ -175,7 +175,9 @@ retained files; originals are never modified.
 Sending clears the submitted text and attachment cards immediately. You can
 compose the next message while the familiar responds. A failed or cancelled
 send restores its attachments and restores its text only if you have not
-edited the new draft; later edits are never overwritten.
+edited the new draft; later edits are never overwritten. While a failed run's
+error notice shows and the restored text or attachments are still in the
+composer, the notice offers **Try again**, which sends them once more.
 
 Assistant replies render Markdown headings, lists, emphasis, quotes, code,
 tables, and task lists. Wide code and tables scroll inside the message.
@@ -186,7 +188,8 @@ code alone. The control reports "Copied" only after the clipboard accepted
 the text and "Copy failed" when it did not.
 
 Tool calls appear as activity rows between the prose, each expanding to the
-call's arguments. When the runtime reports a call as data rather than as a
+call's input and, once reported, its result, each block labeled and with its
+own **Copy** control. When the runtime reports a call as data rather than as a
 `⚒ Name(args)` line — a `tool_start` frame from the bundled engine, a
 `tool_use` block in an assistant message, or a `tool_result` frame — the row
 also shows the input (cut at 16 KiB with a note saying so) and, once

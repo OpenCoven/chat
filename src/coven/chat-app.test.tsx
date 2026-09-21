@@ -104,6 +104,11 @@ function MockLayout(props: ChatLayoutProps) {
         ))}
       </div>
       {props.error && <div role="alert">{props.error}</div>}
+      {props.onRetry && (
+        <button type="button" onClick={props.onRetry}>
+          Try again
+        </button>
+      )}
     </div>
   );
 }
@@ -407,6 +412,22 @@ describe('canonical familiar controller', () => {
     click('First familiar');
     await waitFor(() => expect(screen.getByTestId('familiar')).toHaveTextContent('f'));
     expect(screen.getByTestId('finished')).toHaveTextContent('{}');
+  });
+
+  it("sends the restored draft again from the failed run's notice", async () => {
+    const api = runtime();
+    vi.mocked(api.send).mockRejectedValueOnce(new Error('engine exited'));
+    await ready(api);
+    draft('work');
+    click('Send');
+    await screen.findByRole('alert');
+    expect(screen.getByRole('textbox')).toHaveValue('work');
+    expect(screen.getByRole('button', { name: 'Try again' })).toBeInTheDocument();
+    click('Try again');
+    await waitFor(() => expect(api.send).toHaveBeenCalledTimes(2));
+    expect(vi.mocked(api.send).mock.calls[1]?.[0]).toMatchObject({ prompt: 'work' });
+    await waitFor(() => expect(screen.queryByRole('alert')).not.toBeInTheDocument());
+    expect(screen.queryByRole('button', { name: 'Try again' })).not.toBeInTheDocument();
   });
 
   it('marks a failed run as failed and leaves no marker for a run the reader is watching', async () => {

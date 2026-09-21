@@ -344,6 +344,11 @@
   min-width: 0;
 }
 
+.coven-chat .coven-error-retry {
+  flex: none;
+  margin: -3px 0;
+}
+
 .coven-error-dismiss {
   display: inline-grid;
   place-items: center;

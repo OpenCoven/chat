@@ -224,6 +224,23 @@
   transform: rotate(90deg);
 }
 
+/* Each detail block names itself and offers its text to the clipboard. */
+.coven-tool-section-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 10px 2px;
+}
+
+.coven-tool-section-label {
+  font-family: var(--font-jetbrains-mono);
+  font-size: 10.5px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
 .coven-formatted .coven-tool-raw {
   margin: 0 10px 10px;
   white-space: pre-wrap;
