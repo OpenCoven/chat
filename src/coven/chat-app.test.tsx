@@ -36,6 +36,7 @@ function MockLayout(props: ChatLayoutProps) {
       <output data-testid="head">{props.sessionId}</output>
       <output data-testid="familiar">{props.familiarId}</output>
       <output data-testid="run-familiar">{props.busy ? props.runFamiliarId : 'idle'}</output>
+      <output data-testid="drafts">{JSON.stringify(props.drafts ?? {})}</output>
       <output data-testid="connected">{String(props.connected)}</output>
       <output data-testid="ready">{String(props.ready)}</output>
       <output>{props.status}</output>
@@ -232,6 +233,22 @@ describe('canonical familiar controller', () => {
     click('First familiar');
     await waitFor(() => expect(screen.getByTestId('familiar')).toHaveTextContent('f'));
     expect(screen.getByRole('textbox')).toHaveValue('first familiar draft');
+  });
+
+  it("reports each familiar's unsent draft so the sidebar can remind the reader", async () => {
+    const api = runtime();
+    await ready(api);
+    expect(screen.getByTestId('drafts')).toHaveTextContent('{}');
+    draft('ask first');
+    click('Other familiar');
+    await waitFor(() => expect(screen.getByRole('textbox')).toBeEnabled());
+    expect(JSON.parse(screen.getByTestId('drafts').textContent ?? '{}')).toEqual({
+      f: 'ask first',
+    });
+    draft('   ');
+    expect(JSON.parse(screen.getByTestId('drafts').textContent ?? '{}')).toEqual({
+      f: 'ask first',
+    });
   });
 
   it('continues the durable sibling head and preserves a newer familiar draft', async () => {

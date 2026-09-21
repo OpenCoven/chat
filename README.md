@@ -19,8 +19,9 @@ Conversation history, rails, and long drafts scroll inside their own regions,
 so a long reply or a short window does not push the composer off the page.
 
 Toggle the familiar list with **Cmd/Ctrl+\\** and the inspector with
-**Cmd/Ctrl+Shift+\\**. These shortcuts work while composing without changing
-your text. Rail buttons include shortcut hints; modal dialogs and input-method
+**Cmd/Ctrl+Shift+\\**, and reach the familiar search with **Cmd/Ctrl+K**
+(it opens the list if it is closed). These shortcuts work while composing
+without changing your text. Rail buttons include shortcut hints; modal dialogs and input-method
 composition do not trigger the shortcuts.
 
 Closed rails remain as 28px full-height tabs: **Familiars** on the left and the
@@ -107,6 +108,12 @@ recent activity Coven reports, each captioned with how long ago that was
 timestamp keep the CLI's order after them. From the search box, **Enter**
 opens the first match, **Escape** clears the filter, and the arrow keys move
 into and along the list. A search that matches nothing offers **Clear search**.
+Choosing a familiar, by click or by Enter, puts the cursor in the composer as
+soon as their thread is ready. A row whose familiar has unsent text leads its
+preview with **Draft:** and that text. The thread header captions the
+familiar's name with when their chat last moved (hover for the full
+timestamp), and an empty thread shows the familiar's purpose under its
+heading.
 
 The inspector's Overview shows the familiar's purpose, identity and workspace,
 whether their chat is active, archived or not yet started, and its last

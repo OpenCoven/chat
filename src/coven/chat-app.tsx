@@ -478,6 +478,15 @@ export function ChatApp({
     }
   }
 
+  // Rows remind the reader of unsent text; keys are per familiar (see draftKey).
+  const drafts = useMemo(() => {
+    const byFamiliar: Record<string, string> = {};
+    for (const familiar of familiars) {
+      const text = navigation.drafts[draftKey({ ...navigation, familiarId: familiar.id })];
+      if (text?.trim()) byFamiliar[familiar.id] = text;
+    }
+    return byFamiliar;
+  }, [familiars, navigation]);
   const liveEvents = runOutputs[draftKey(navigation)]?.events;
   const messages = useMemo(
     () => projectEvents(liveEvents ? [...events, ...liveEvents] : events).messages,
@@ -527,6 +536,7 @@ export function ChatApp({
       familiarId={navigation.familiarId}
       sessionId={navigation.sessionId}
       draft={navigation.drafts[draftKey(navigation)] ?? ''}
+      drafts={drafts}
       status={
         saved.writable
           ? status

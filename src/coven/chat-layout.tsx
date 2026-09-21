@@ -33,9 +33,17 @@ import {
   LEFT_RAIL_SHORTCUT,
   RIGHT_RAIL_HINT,
   RIGHT_RAIL_SHORTCUT,
+  SEARCH_HINT,
+  SEARCH_SHORTCUT,
   useRailShortcuts,
+  useSearchShortcut,
 } from './rail-shortcuts';
-import { activityTime, formatAbsoluteTime, formatRelativeTime } from './relative-time';
+import {
+  activityTime,
+  formatAbsoluteTime,
+  formatRelativeTime,
+  formatUpdatedCaption,
+} from './relative-time';
 import { type LoadRfb, ScreenViewer } from './screen-viewer';
 import { useViewportTier } from './viewport';
 import '../design/familiars-shell.css';
@@ -68,6 +76,8 @@ export type ChatLayoutProps = Readonly<{
   familiarId: string;
   sessionId: string;
   draft: string;
+  /** Unsent draft text per familiar id, so a row can remind the reader of it. */
+  drafts?: Readonly<Record<string, string>>;
   status: string;
   ready: boolean;
   /** Real runtime availability. `ready` also demands a live, non-archived selection. */
@@ -229,6 +239,21 @@ export function ChatLayout(props: ChatLayoutProps) {
   const [query, setQuery] = useState('');
   const [tab, setTab] = useState<InspectorTab>('overview');
   const [screenOpen, setScreenOpen] = useState(false);
+  const searchRef = useRef<HTMLInputElement>(null);
+  // Cmd/Ctrl+K: the sidebar must be open (and no longer inert) before the
+  // search box can take focus, so the request is settled after that render.
+  const [searchFocus, setSearchFocus] = useState(0);
+  useEffect(() => {
+    if (searchFocus && sidebar) searchRef.current?.focus();
+  }, [searchFocus, sidebar]);
+  // Choosing a familiar hands focus to the composer once it can accept it.
+  // The request is filed before the host switches, so it waits while the old
+  // familiar is still shown and is dropped once a third one is.
+  const [composerFocus, setComposerFocus] = useState<{
+    id: string;
+    from: string;
+    n: number;
+  } | null>(null);
   const drawers = tier === 'compact';
   const inspectorOverlay = tier !== 'wide';
   const shellRef = useRef<HTMLDivElement>(null);
@@ -279,6 +304,19 @@ export function ChatLayout(props: ChatLayoutProps) {
     () => (sidebar ? setSidebar(false) : openSidebar()),
     () => (inspector ? setInspector(false) : openInspector()),
   );
+  useSearchShortcut(() => {
+    if (!sidebar) openSidebar();
+    setSearchFocus((n) => n + 1);
+  });
+  function chooseFamiliar(id: string) {
+    props.onFamiliar(id);
+    setComposerFocus((previous) => ({
+      id,
+      from: props.familiarId,
+      n: (previous?.n ?? 0) + 1,
+    }));
+    if (drawers) setSidebar(false);
+  }
   const familiar = props.familiars.find((item) => item.id === props.familiarId);
   const session = props.sessions.find((item) => item.id === props.sessionId);
   const name = familiar?.name ?? 'Coven';
@@ -288,6 +326,7 @@ export function ChatLayout(props: ChatLayoutProps) {
   const runName =
     props.familiars.find((item) => item.id === runFamiliarId)?.name ?? 'Another familiar';
   const composer = composerCopy(props.connected, familiar?.name);
+  const updated = formatUpdatedCaption(session?.updatedAt);
   const workspace = session?.projectRoot || familiar?.workspace;
   const workspaceLabel = session?.projectRoot ? 'Chat project' : 'Familiar workspace';
   const composerDisabled =
@@ -295,6 +334,16 @@ export function ChatLayout(props: ChatLayoutProps) {
   const transcriptRef = useRef<HTMLDivElement>(null);
   const fileInput = useRef<HTMLInputElement>(null);
   const composerRef = useRef<HTMLTextAreaElement>(null);
+  useEffect(() => {
+    if (!composerFocus) return;
+    if (composerFocus.id !== props.familiarId) {
+      if (composerFocus.from !== props.familiarId) setComposerFocus(null);
+      return;
+    }
+    if (composerDisabled) return;
+    composerRef.current?.focus();
+    setComposerFocus(null);
+  }, [composerFocus, props.familiarId, composerDisabled]);
   const mentionCompletion = useMentionCompletion({
     familiars: props.familiars,
     familiarId: props.familiarId,
@@ -474,8 +523,11 @@ export function ChatLayout(props: ChatLayoutProps) {
           <label className="coven-agent-search">
             <Icon name="magnifying-glass" size={14} />
             <input
+              ref={searchRef}
               type="search"
               aria-label="Search familiars"
+              aria-keyshortcuts={SEARCH_SHORTCUT}
+              title={SEARCH_HINT}
               placeholder="Search"
               value={query}
               onChange={(event) => setQuery(event.target.value)}
@@ -488,8 +540,7 @@ export function ChatLayout(props: ChatLayoutProps) {
                   const first = agents[0];
                   if (!first || props.lifecycleBusy) return;
                   event.preventDefault();
-                  props.onFamiliar(first.id);
-                  if (drawers) setSidebar(false);
+                  chooseFamiliar(first.id);
                 } else if (event.key === 'Escape' && query) {
                   event.preventDefault();
                   setQuery('');
@@ -503,6 +554,7 @@ export function ChatLayout(props: ChatLayoutProps) {
                 const thread = headOf(item.id);
                 const when = formatRelativeTime(thread?.updatedAt);
                 const live = props.busy && item.id === runFamiliarId;
+                const draft = props.drafts?.[item.id]?.trim() ?? '';
                 return (
                   <button
                     type="button"
@@ -512,10 +564,7 @@ export function ChatLayout(props: ChatLayoutProps) {
                     aria-current={item.id === props.familiarId || undefined}
                     disabled={props.lifecycleBusy}
                     onKeyDown={(event) => moveRowFocus(event, index)}
-                    onClick={() => {
-                      props.onFamiliar(item.id);
-                      if (drawers) setSidebar(false);
-                    }}
+                    onClick={() => chooseFamiliar(item.id)}
                   >
                     <FamiliarAvatar name={item.name} avatarUrl={item.avatarUrl} size={36} />
                     <span className="coven-agent-copy">
@@ -536,8 +585,15 @@ export function ChatLayout(props: ChatLayoutProps) {
                         ) : null}
                       </span>
                       <span className="fr-conv-preview">
-                        {thread?.preview ||
-                          (thread ? 'Continue your conversation' : 'Start a conversation')}
+                        {draft ? (
+                          <>
+                            <span className="coven-agent-draft">Draft:</span>
+                            <span className="fr-conv-preview-text">{draft}</span>
+                          </>
+                        ) : (
+                          thread?.preview ||
+                          (thread ? 'Continue your conversation' : 'Start a conversation')
+                        )}
                       </span>
                     </span>
                   </button>
@@ -599,6 +655,15 @@ export function ChatLayout(props: ChatLayoutProps) {
             >
               {familiar ? name : 'No familiar selected'}
             </button>
+            {familiar && updated ? (
+              <time
+                className="fr-thread-familiar coven-thread-updated"
+                dateTime={session?.updatedAt}
+                title={formatAbsoluteTime(session?.updatedAt)}
+              >
+                {updated}
+              </time>
+            ) : null}
           </div>
           {session && props.onLifecycle && (
             <ChatLifecycleControls
@@ -784,6 +849,9 @@ export function ChatLayout(props: ChatLayoutProps) {
                 <span className="fr-thread-empty-title">
                   {familiar ? `Chat with ${name}` : 'No familiar selected'}
                 </span>
+                {familiar?.description ? (
+                  <span className="coven-thread-empty-purpose">{familiar.description}</span>
+                ) : null}
                 <span className="fr-empty-text">
                   {emptyThreadText(props.connected, familiar?.name)}
                 </span>
