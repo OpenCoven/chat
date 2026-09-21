@@ -177,7 +177,7 @@ jobs:
     # no longer downloads a browser or calls apt. That removed the step that
     # hung five times. See .github/ci-image/Dockerfile.
     container:
-      image: ghcr.io/opencoven/chat-ci@sha256:341e9b9a050fbbe655118a2414f05cbc525380e5b20ea01ba4e669ba188a0605
+      image: ghcr.io/opencoven/chat-ci@sha256:5d1dd0a735bff26bfd4599228451caf8db331df72662f86a16815cd944afb89d
       # A package published by a workflow starts out private regardless of the
       # repository's visibility, so the pull is authenticated rather than
       # relying on it being public.
@@ -482,7 +482,7 @@ jobs:
     # which is how the cause was finally identified: a second job, sharing no
     # code with the first, stuck on the same kind of step.
     container:
-      image: ghcr.io/opencoven/chat-ci@sha256:341e9b9a050fbbe655118a2414f05cbc525380e5b20ea01ba4e669ba188a0605
+      image: ghcr.io/opencoven/chat-ci@sha256:5d1dd0a735bff26bfd4599228451caf8db331df72662f86a16815cd944afb89d
       credentials:
         username: ${{ github.actor }}
         password: ${{ secrets.GITHUB_TOKEN }}
