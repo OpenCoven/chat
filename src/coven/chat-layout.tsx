@@ -166,9 +166,12 @@ function useFocusReturn(
  * it is false whenever no familiar is selected -- feeding it here claimed the
  * CLI was disconnected on a perfectly healthy runtime.
  */
-export function emptyThreadText(connected: boolean, familiarName?: string) {
+export function emptyThreadText(connected: boolean, familiarName?: string, anyFamiliars = true) {
   if (!connected) return 'Connect to your local Coven CLI to see real conversations here.';
-  if (!familiarName) return 'Select a familiar from the sidebar to start a conversation.';
+  if (!familiarName)
+    return anyFamiliars
+      ? 'Select a familiar from the sidebar to start a conversation.'
+      : 'No familiars are configured in Coven yet. Configure one, then refresh.';
   return `This is the start of your conversation with ${familiarName}. Send the first message below.`;
 }
 
@@ -180,11 +183,16 @@ export function emptyThreadText(connected: boolean, familiarName?: string) {
  * `connected`, never `ready` -- `ready` is false for an archived chat that
  * still has a familiar to address, which would drop the name from the field.
  */
-export function composerCopy(connected: boolean, familiarName?: string) {
+export function composerCopy(connected: boolean, familiarName?: string, anyFamiliars = true) {
   if (!connected)
     return { label: 'Message', placeholder: 'Connect to your local Coven CLI to send a message.' };
   if (!familiarName)
-    return { label: 'Message', placeholder: 'Select a familiar to send a message.' };
+    return {
+      label: 'Message',
+      placeholder: anyFamiliars
+        ? 'Select a familiar to send a message.'
+        : 'Configure a familiar in Coven, then refresh, to send a message.',
+    };
   return {
     label: `Message ${familiarName}`,
     placeholder: `Message ${familiarName} · @ familiar · # project`,
@@ -205,6 +213,9 @@ export function liveRowText(
   if (runningTool) return long ? `Still running ${runningTool}…` : `Running ${runningTool}…`;
   return long ? `Still waiting for ${familiarName}…` : `Waiting for ${familiarName}…`;
 }
+
+/** The host's cap on a prompt, in UTF-8 bytes (see `validate` in coven_runtime.rs). */
+export const PROMPT_LIMIT_BYTES = 32 * 1024;
 
 /** After this long without a sign of life, the live row says it is still waiting. */
 export const LONG_WAIT_MS = 30_000;
@@ -394,7 +405,10 @@ export function ChatLayout(props: ChatLayoutProps) {
   const pendingRuns = Object.keys(props.finished ?? {}).filter(
     (id) => id !== runFamiliarId && props.familiars.some((item) => item.id === id),
   ).length;
-  const composer = composerCopy(props.connected, familiar?.name);
+  const composer = composerCopy(props.connected, familiar?.name, props.familiars.length > 0);
+  // The host refuses a prompt over 32 KiB; say so before the send, not after.
+  const draftBytes = new TextEncoder().encode(props.draft).length;
+  const oversize = draftBytes > PROMPT_LIMIT_BYTES;
   // The familiar's declared access, write grants first so they stand out.
   const projectAccess = [...(familiar?.projectAccess ?? [])].sort(
     (a, b) =>
@@ -1043,7 +1057,7 @@ export function ChatLayout(props: ChatLayoutProps) {
                   <span className="coven-thread-empty-purpose">{familiar.description}</span>
                 ) : null}
                 <span className="fr-empty-text">
-                  {emptyThreadText(props.connected, familiar?.name)}
+                  {emptyThreadText(props.connected, familiar?.name, props.familiars.length > 0)}
                 </span>
               </div>
             ) : null}
@@ -1104,6 +1118,14 @@ export function ChatLayout(props: ChatLayoutProps) {
                 label={composer.label}
                 placeholder={composer.placeholder}
                 onSend={props.onSend}
+                {...(oversize
+                  ? {
+                      warning: {
+                        // Exact bytes: a rounded size could read as within the limit.
+                        label: `Message is ${draftBytes.toLocaleString('en-US')} bytes; Coven accepts up to ${PROMPT_LIMIT_BYTES.toLocaleString('en-US')}. Shorten it or attach a file.`,
+                      },
+                    }
+                  : {})}
                 running={props.busy && !composerDisabled}
                 onStop={props.onCancel}
                 allowAttachmentOnly
