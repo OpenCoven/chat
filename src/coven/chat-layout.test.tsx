@@ -1991,3 +1991,40 @@ describe('no familiars yet, and oversize drafts', () => {
     ).toBeInTheDocument();
   });
 });
+
+describe('actionable empty states', () => {
+  it('offers to check for familiars where the copy says to refresh', () => {
+    const p = { ...layoutProps(), connected: true, onRefresh: vi.fn() };
+    render(<ChatLayout {...p} />);
+    const buttons = screen.getAllByRole('button', { name: 'Check for familiars' });
+    expect(buttons).toHaveLength(2);
+    for (const button of buttons) fireEvent.click(button);
+    expect(p.onRefresh).toHaveBeenCalledTimes(2);
+  });
+
+  it('offers to check again while disconnected, and holds still while loading', () => {
+    const p = { ...layoutProps(), onRefresh: vi.fn() };
+    const { rerender } = render(<ChatLayout {...p} />);
+    expect(screen.getAllByRole('button', { name: 'Check again' })).toHaveLength(2);
+    rerender(<ChatLayout {...p} loading />);
+    for (const button of screen.getAllByRole('button', { name: 'Check again' })) {
+      expect(button).toBeDisabled();
+    }
+  });
+
+  it('offers nothing extra once familiars exist or a search is in play', () => {
+    render(
+      <ChatLayout
+        {...layoutProps()}
+        connected
+        ready
+        familiars={[{ id: 'a', name: 'Astra' }]}
+        familiarId="a"
+      />,
+    );
+    expect(screen.queryByRole('button', { name: /Check for familiars|Check again/ })).toBeNull();
+    fireEvent.change(screen.getByRole('searchbox'), { target: { value: 'zzz' } });
+    expect(screen.getByRole('button', { name: 'Clear search' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Check for familiars' })).toBeNull();
+  });
+});
