@@ -2077,3 +2077,70 @@ describe('reload after a failed read, and copying connection details', () => {
     expect(screen.getByRole('button', { name: 'Copy connection details' })).toBeInTheDocument();
   });
 });
+
+describe('stepping between familiars', () => {
+  const props = () => ({
+    ...layoutProps(),
+    connected: true,
+    ready: true,
+    familiars: [
+      { id: 'a', name: 'Astra' },
+      { id: 'b', name: 'Bram' },
+      { id: 'c', name: 'Cass' },
+    ],
+    sessions: [
+      { id: 's-a', familiarId: 'a', title: 'a', updatedAt: '2026-09-18T12:00:00Z' },
+      { id: 's-b', familiarId: 'b', title: 'b', updatedAt: '2026-09-20T12:00:00Z' },
+      { id: 's-c', familiarId: 'c', title: 'c', updatedAt: '2026-09-19T12:00:00Z' },
+    ],
+    onFamiliar: vi.fn(),
+  });
+
+  it('walks the list in its shown order and stops at the ends', () => {
+    // Shown order by recency: Bram, Cass, Astra.
+    const p = { ...props(), familiarId: 'c' };
+    render(<ChatLayout {...p} />);
+    fireEvent.keyDown(window, { key: ']', code: 'BracketRight', metaKey: true });
+    expect(p.onFamiliar).toHaveBeenLastCalledWith('a');
+    fireEvent.keyDown(window, { key: '[', code: 'BracketLeft', ctrlKey: true });
+    expect(p.onFamiliar).toHaveBeenLastCalledWith('b');
+    p.onFamiliar.mockClear();
+    const first = { ...props(), familiarId: 'b' };
+    render(<ChatLayout {...first} />);
+    fireEvent.keyDown(window, { key: '[', code: 'BracketLeft', metaKey: true });
+    expect(first.onFamiliar).not.toHaveBeenCalled();
+  });
+
+  it('respects the filter, needs a modifier, and stays quiet during lifecycle work', () => {
+    const p = { ...props(), familiarId: 'b' };
+    const { rerender } = render(<ChatLayout {...p} />);
+    fireEvent.change(screen.getByRole('searchbox'), { target: { value: 'a' } });
+    // Matches: Cass and Astra (both contain "a"); Bram is out, so the step starts from the top.
+    fireEvent.keyDown(window, { key: ']', code: 'BracketRight', metaKey: true });
+    expect(p.onFamiliar).toHaveBeenLastCalledWith('c');
+    fireEvent.keyDown(window, { key: ']', code: 'BracketRight' });
+    fireEvent.keyDown(window, { key: '}', code: 'BracketRight', metaKey: true, shiftKey: true });
+    expect(p.onFamiliar).toHaveBeenCalledTimes(1);
+    rerender(<ChatLayout {...p} lifecycleBusy />);
+    fireEvent.keyDown(window, { key: ']', code: 'BracketRight', metaKey: true });
+    expect(p.onFamiliar).toHaveBeenCalledTimes(1);
+  });
+
+  it('stays quiet while a menu owns the keyboard', () => {
+    const p = { ...props(), familiarId: 'b' };
+    render(<ChatLayout {...p} />);
+    const menu = document.createElement('div');
+    menu.setAttribute('role', 'menu');
+    document.body.appendChild(menu);
+    try {
+      fireEvent.keyDown(window, { key: ']', code: 'BracketRight', metaKey: true });
+      fireEvent.keyDown(window, { key: 'k', code: 'KeyK', metaKey: true });
+      expect(p.onFamiliar).not.toHaveBeenCalled();
+      expect(screen.getByRole('searchbox')).not.toHaveFocus();
+    } finally {
+      menu.remove();
+    }
+    fireEvent.keyDown(window, { key: ']', code: 'BracketRight', metaKey: true });
+    expect(p.onFamiliar).toHaveBeenCalledWith('c');
+  });
+});
