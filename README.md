@@ -145,7 +145,10 @@ turns were replayed and whether older ones were left out. That notice is a
 quiet line between messages, not a reply from anyone. The saved transcript
 keeps only your original message, not the replayed prompt.
 
-**Archive chat** keeps the saved history and hides the familiar from the active list.
+The chat's actions live behind the **Chat actions** control (the ⋯ in the
+thread header). **Archive chat** keeps the saved history and hides the
+familiar from the active list; an archived chat shows **Restore chat** in the
+header itself, since restoring is what lets you send again.
 This interface only shows active familiar chats: it has no User settings or
 archived-chat browser. Archived history is preserved, and archive state survives
 refreshes and app restarts.
