@@ -393,7 +393,7 @@ describe('Phase 1 specification guards', () => {
       ?.job;
 
     expect(webJob).toMatch(/actions\/checkout@[0-9a-f]{40}[^\n]*\n {8}with:\n {10}fetch-depth: 0/u);
-    expect(webJob).toContain('- run: pnpm test:unit');
+    expect(webJob).toContain('- run: pnpm test:unit:normal');
   });
 
   it('fetches the locked harness revision for protected platform evidence', () => {
@@ -1124,6 +1124,40 @@ describe('Phase 1 specification guards', () => {
     expect(workflow).toContain('No usable base commit; treating this as a code change.');
     expect(workflow).toContain('No files changed; treating this as a code change.');
     expect(workflow).toMatch(/\*\) docs_only=false ;;/);
+  });
+
+  it.each([
+    [
+      'chat UI, browser suite and prose',
+      'src/coven/chat-app.tsx\ne2e/app.spec.ts\nREADME.md',
+      'true',
+    ],
+    ['the unmounted SDK boundary', 'src/lib/sdk/query-adapter.ts', 'true'],
+    ['a conformance script', 'scripts/phase1-conformance.mjs', 'false'],
+    ['the native backend', 'src-tauri/src/lib.rs', 'false'],
+    ['the conformance lock', 'phase1-conformance.lock.json', 'false'],
+    ['a heavy suite file', 'src/phase1-conformance.test.ts', 'false'],
+    ['a root guard test', 'src/specification-guards.test.ts', 'false'],
+    ['this workflow', '.github/workflows/ci.yml', 'false'],
+    ['the package manifest', 'package.json', 'false'],
+    ['the Vitest setup file', 'src/test/setup.ts', 'false'],
+    ['a path nobody has classified', 'somewhere-new/index.ts', 'false'],
+    [
+      'a UI file alongside a script',
+      'src/coven/chat-app.tsx\nscripts/supervised-exec.mjs',
+      'false',
+    ],
+  ])('classifies a diff touching %s for the heavy suites', (_name, files, expected) => {
+    // The guard above pins the step condition; this runs the classification
+    // itself, so a typo in the allowlist cannot silently skip the suites for a
+    // harness-affecting change. The case statement is lifted verbatim from the
+    // workflow so the test cannot drift from what CI executes.
+    const workflow = readText('.github/workflows/ci.yml');
+    const block = workflow.match(/\n {10}product_only=true\n(?<body>[\s\S]*?)\n {10}done <<EOF\n/u)
+      ?.groups?.body;
+    expect(block).toBeDefined();
+    const script = `product_only=true\n${(block ?? '').replaceAll(/^ {10}/gmu, '')}\ndone <<EOF\n${files}\nEOF\necho "$product_only"`;
+    expect(execFileSync('bash', ['-c', script], { encoding: 'utf8' }).trim()).toBe(expected);
   });
 
   it('proposes an image bump only after running the suites inside the new image', () => {
