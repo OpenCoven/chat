@@ -7,6 +7,7 @@ import {
   useState,
 } from 'react';
 import {
+  cx,
   FamButton,
   FamIconButton,
   INSPECTOR_TABS,
@@ -376,6 +377,11 @@ export function ChatLayout(props: ChatLayoutProps) {
   const runName =
     props.familiars.find((item) => item.id === runFamiliarId)?.name ?? 'Another familiar';
   const composer = composerCopy(props.connected, familiar?.name);
+  // The familiar's declared access, write grants first so they stand out.
+  const projectAccess = [...(familiar?.projectAccess ?? [])].sort(
+    (a, b) =>
+      Number(b.access === 'write') - Number(a.access === 'write') || a.name.localeCompare(b.name),
+  );
   // Captions age while the window sits open; a live run counts by the second.
   const now = useNow(props.busy ? 1000 : 60_000);
   const updated = formatUpdatedCaption(session?.updatedAt, now);
@@ -812,6 +818,7 @@ export function ChatLayout(props: ChatLayoutProps) {
             {props.error ? (
               <div className="coven-error" role="alert">
                 <span className="coven-error-text">{props.error}</span>
+                <CopyButton className="coven-error-copy" text={props.error} label="Copy error" />
                 {props.onRetry &&
                 !composerDisabled &&
                 (props.draft.trim() || props.attachments?.length) ? (
@@ -1187,18 +1194,55 @@ export function ChatLayout(props: ChatLayoutProps) {
               </div>
             ) : null}
             {tab === 'access' ? (
-              <div className="coven-details fr-card fr-card--lift">
-                <h2>Access</h2>
-                <p>Access rules and approvals are not exposed by this CLI integration.</p>
-                <p>
-                  Configure your familiar in Coven. This app does not define or enforce an
-                  additional permission boundary.
-                </p>
-                <p>
-                  Text and code attachments are sent with your message. Show screen in the thread
-                  header opens a remote desktop over VNC; it starts view only. Tool approval
-                  controls are unavailable here.
-                </p>
+              <div className="fr-stack">
+                {familiar ? (
+                  <div className="fr-card fr-card--lift coven-access">
+                    <span className="fr-eyebrow">Declared project access</span>
+                    {projectAccess.length ? (
+                      <div className="fr-rows coven-access-rows">
+                        {projectAccess.map((project) => (
+                          <div className="fr-row" key={`${project.path}:${project.access}`}>
+                            <span className="fr-row-copy">
+                              <span className="fr-row-label">{project.name}</span>
+                              <span className="fr-row-hint" title={project.path}>
+                                {project.path}
+                              </span>
+                            </span>
+                            <span
+                              className={cx(
+                                'fr-row-value',
+                                project.access === 'write' && 'fr-row-value--warn',
+                              )}
+                            >
+                              {project.access === 'write' ? 'Read and write' : 'Read only'}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <span className="fr-purpose">
+                        No project access is declared for {name} in the local registry or grants.
+                      </span>
+                    )}
+                  </div>
+                ) : null}
+                <div className="coven-details fr-card fr-card--lift">
+                  <h2>Access</h2>
+                  <p>
+                    Declared access comes from Coven's local project registry and grants; Chat shows
+                    it as declared and neither enforces nor extends it. Access rules and approvals
+                    are not exposed by this CLI integration.
+                  </p>
+                  <p>
+                    Configure your familiar in Coven. This app does not define or enforce an
+                    additional permission boundary.
+                  </p>
+                  <p>
+                    Text and code attachments are sent with your message. Show screen in the thread
+                    header opens a remote desktop over VNC; it starts view only. Tool approval
+                    controls are unavailable here.
+                  </p>
+                </div>
               </div>
             ) : null}
             {tab === 'activity' ? (

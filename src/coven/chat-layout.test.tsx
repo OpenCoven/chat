@@ -1671,3 +1671,69 @@ describe('last run, engine output and the refresh control', () => {
     expect(refresh).toBeDisabled();
   });
 });
+
+describe('declared access and error copying', () => {
+  it("lists the familiar's declared project access, write grants first", () => {
+    render(
+      <ChatLayout
+        {...layoutProps()}
+        connected
+        ready
+        familiars={[
+          {
+            id: 'a',
+            name: 'Astra',
+            projectAccess: [
+              { name: 'docs', path: '/work/docs', access: 'read' },
+              { name: 'chat', path: '/work/chat', access: 'write' },
+              { name: 'api', path: '/work/api', access: 'read' },
+            ],
+          },
+          { id: 'b', name: 'Bram' },
+        ]}
+        familiarId="a"
+      />,
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Access' }));
+    const access = screen.getByRole('region', { name: 'Access' });
+    expect(access).toHaveTextContent('Declared project access');
+    expect(access.textContent?.indexOf('chat')).toBeLessThan(
+      access.textContent?.indexOf('api') ?? -1,
+    );
+    expect(access).toHaveTextContent('chat/work/chatRead and write');
+    expect(access).toHaveTextContent('api/work/apiRead only');
+    expect(access).toHaveTextContent(/neither enforces nor extends/);
+    expect(access).toHaveTextContent(/Access rules and approvals are not exposed/);
+  });
+
+  it('says so when no access is declared', () => {
+    render(
+      <ChatLayout
+        {...layoutProps()}
+        connected
+        ready
+        familiars={[{ id: 'b', name: 'Bram' }]}
+        familiarId="b"
+      />,
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Access' }));
+    expect(screen.getByRole('region', { name: 'Access' })).toHaveTextContent(
+      'No project access is declared for Bram',
+    );
+  });
+
+  it('offers to copy an error notice', async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    const original = Object.getOwnPropertyDescriptor(navigator, 'clipboard');
+    Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } });
+    try {
+      render(<ChatLayout {...layoutProps()} error={'engine exited: code 2\nstderr follows'} />);
+      fireEvent.click(screen.getByRole('button', { name: 'Copy error' }));
+      expect(writeText).toHaveBeenCalledWith('engine exited: code 2\nstderr follows');
+      await screen.findByText('Copied');
+    } finally {
+      if (original) Object.defineProperty(navigator, 'clipboard', original);
+      else Reflect.deleteProperty(navigator, 'clipboard');
+    }
+  });
+});
