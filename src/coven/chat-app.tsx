@@ -163,7 +163,7 @@ export function ChatApp({
     setBusy(false);
     setRunFamiliarId('');
     setRunStartedAt(0);
-    setLastRuns({});
+    // lastRuns survives a refresh: it describes this window, not this load.
     setFinished({});
     setCancelling(false);
     setLoading(true);
@@ -357,6 +357,8 @@ export function ChatApp({
       publish(streamed.slice(), errorText(failure));
       if (!run.cancelRequested) outcome = 'error';
     } finally {
+      // The run is over here; the session reload below is not part of it.
+      const finishedAt = Date.now();
       if (lifetime.current === life) {
         if (!completed) {
           const latest = navigationRef.current;
@@ -394,7 +396,7 @@ export function ChatApp({
         setCancelling(false);
         setLastRuns((previous) => ({
           ...previous,
-          [current.familiarId]: { ms: Date.now() - startedAt, outcome: outcome || 'stopped' },
+          [current.familiarId]: { ms: finishedAt - startedAt, outcome: outcome || 'stopped' },
         }));
         if (outcome && navigationRef.current.familiarId !== current.familiarId) {
           const result = outcome;
