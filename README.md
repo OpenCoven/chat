@@ -149,6 +149,10 @@ replies and the tool calls (with failures, and a breakdown by tool) in the
 loaded transcript; tokens,
 cost and timing are not reported by this CLI integration.
 
+When Chat holds only the most recent part of a chat's history, a quiet line at
+the top of the thread says so and points to the Coven CLI for the rest;
+nothing has failed, so it is not an error notice.
+
 Chat and Cave are separate applications. There is no Cave import action or
 runtime import command, and Cave history does not appear in Chat. Previously
 saved import files are not automatically deleted or submitted to a model.
@@ -168,9 +172,9 @@ thread header; focus returns there after the delete dialog closes).
 **Archive chat** keeps the saved history and hides the
 familiar from the active list; an archived chat shows **Restore chat** in the
 header itself, since restoring is what lets you send again.
-This interface only shows active familiar chats: it has no User settings or
-archived-chat browser. Archived history is preserved, and archive state survives
-refreshes and app restarts.
+The familiar list shows active chats; **Show archived chats**, under **User
+settings** at the foot of the list, switches it to archived ones. Archived
+history is preserved, and archive state survives refreshes and app restarts.
 
 **Delete chat** requires confirmation and is strictly app-local: it removes the
 saved Chat transcript and that chat's local draft. It does

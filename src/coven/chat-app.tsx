@@ -108,6 +108,8 @@ export function ChatApp({
   const [familiars, setFamiliars] = useState<CovenFamiliar[]>([]);
   const [sessions, setSessions] = useState<CovenSession[]>([]);
   const [events, setEvents] = useState<CovenRunEvent[]>([]);
+  // The host holds only the newest part of this chat's history; nothing failed.
+  const [partial, setPartial] = useState(false);
   const [runOutputs, setRunOutputs] = useState<
     Record<string, { events: CovenRunEvent[]; error: string; sessionId: string }>
   >({});
@@ -224,6 +226,7 @@ export function ChatApp({
   useEffect(() => {
     const request = ++readId.current;
     setEvents([]);
+    setPartial(false);
     if (!available || !navigation.sessionId) {
       if (available) setLoading(false);
       return;
@@ -242,10 +245,7 @@ export function ChatApp({
             ]),
           ),
         );
-        if (result.hasMore)
-          setError(
-            'Only part of this session is available. Use the Coven CLI to inspect the full history.',
-          );
+        setPartial(Boolean(result.hasMore));
       })
       .catch((failure: unknown) => {
         if (readId.current === request) setError(errorText(failure));
@@ -586,6 +586,7 @@ export function ChatApp({
       }
       busy={busy}
       runFamiliarId={runFamiliarId}
+      partialHistory={partial}
       runStartedAt={runStartedAt}
       {...(lastRuns[navigation.familiarId] ? { lastRun: lastRuns[navigation.familiarId] } : {})}
       finished={finished}

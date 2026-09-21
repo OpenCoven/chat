@@ -100,6 +100,8 @@ export type ChatLayoutProps = Readonly<{
    * live; absent, the run is credited to the shown familiar.
    */
   runFamiliarId?: string;
+  /** Only the newest part of this chat's history is loaded; said as a notice, not an error. */
+  partialHistory?: boolean;
   /** When the active run started (epoch ms); the status shows how long it has run. */
   runStartedAt?: number;
   /** How the shown familiar's most recent run in this window ended, and how long it took. */
@@ -912,6 +914,12 @@ export function ChatLayout(props: ChatLayoutProps) {
                 <summary>{props.ready ? 'Connection details' : 'Coven setup required'}</summary>
                 <output className="coven-status">{props.status}</output>
               </details>
+            ) : null}
+            {props.partialHistory ? (
+              <p className="coven-notice" role="note">
+                Only the most recent part of this chat is shown here. Use the Coven CLI to read the
+                full history.
+              </p>
             ) : null}
             {props.error ? (
               <div className="coven-error" role="alert">

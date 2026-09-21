@@ -39,6 +39,7 @@ function MockLayout(props: ChatLayoutProps) {
       <output data-testid="drafts">{JSON.stringify(props.drafts ?? {})}</output>
       <output data-testid="finished">{JSON.stringify(props.finished ?? {})}</output>
       <output data-testid="last-run">{props.lastRun ? props.lastRun.outcome : 'none'}</output>
+      <output data-testid="partial">{String(props.partialHistory ?? false)}</output>
       <output data-testid="last-run-ms">
         {props.lastRun && props.lastRun.ms > 2_000 ? 'slow' : 'quick'}
       </output>
@@ -500,6 +501,21 @@ describe('canonical familiar controller', () => {
     }
     await waitFor(() => expect(screen.getByTestId('last-run')).toHaveTextContent('reply'));
     expect(screen.getByTestId('last-run-ms')).toHaveTextContent('quick');
+  });
+
+  it('reports a partial history as a notice, not as an error', async () => {
+    const api = runtime();
+    vi.mocked(api.readSession).mockImplementation(async (id: string) => ({
+      session: id === 'two' ? second : { ...first, id },
+      events: [],
+      hasMore: id === 'one',
+    }));
+    await ready(api);
+    expect(screen.getByTestId('partial')).toHaveTextContent('true');
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    click('Other familiar');
+    await waitFor(() => expect(screen.getByTestId('head')).toHaveTextContent('two'));
+    expect(screen.getByTestId('partial')).toHaveTextContent('false');
   });
 
   it('marks a failed run as failed and leaves no marker for a run the reader is watching', async () => {
