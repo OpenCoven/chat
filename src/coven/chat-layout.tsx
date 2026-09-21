@@ -450,6 +450,8 @@ export function ChatLayout(props: ChatLayoutProps) {
   const workspaceLabel = session?.projectRoot ? 'Chat project' : 'Familiar workspace';
   const composerDisabled =
     !props.ready || props.loading || props.cancelling || props.attaching || props.readOnly;
+  // The same gate as the header's refresh control.
+  const refreshBlocked = Boolean(props.busy || props.loading || props.lifecycleBusy);
   const transcriptRef = useRef<HTMLDivElement>(null);
   const fileInput = useRef<HTMLInputElement>(null);
   const composerRef = useRef<HTMLTextAreaElement>(null);
@@ -772,6 +774,11 @@ export function ChatLayout(props: ChatLayoutProps) {
                   <FamButton size="sm" onClick={() => setQuery('')}>
                     Clear search
                   </FamButton>
+                ) : !props.archivedFilter ? (
+                  // The copy says to refresh; the control to do it is right here.
+                  <FamButton size="sm" disabled={refreshBlocked} onClick={props.onRefresh}>
+                    {props.connected ? 'Check for familiars' : 'Check again'}
+                  </FamButton>
                 ) : null}
               </div>
             ) : null}
@@ -1059,6 +1066,11 @@ export function ChatLayout(props: ChatLayoutProps) {
                 <span className="fr-empty-text">
                   {emptyThreadText(props.connected, familiar?.name, props.familiars.length > 0)}
                 </span>
+                {!props.connected || !props.familiars.length ? (
+                  <FamButton size="sm" disabled={refreshBlocked} onClick={props.onRefresh}>
+                    {props.connected ? 'Check for familiars' : 'Check again'}
+                  </FamButton>
+                ) : null}
               </div>
             ) : null}
           </div>

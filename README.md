@@ -95,7 +95,10 @@ browser storage (see `SECURITY.md`), and only the selected familiar is
 remembered across restarts.
 
 With a connected CLI but no familiars configured, the empty thread and the
-composer say so, rather than asking you to select from an empty list.
+composer say so, rather than asking you to select from an empty list, and
+the empty thread and the empty familiar list each offer **Check for
+familiars**, which refreshes Coven. Without a connected CLI they offer
+**Check again** instead.
 
 ## Local runtime
 
