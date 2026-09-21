@@ -198,7 +198,7 @@ password.
 The window never opens the connection itself. The desktop host performs the
 WebSocket upgrade, forwards opaque frames both ways, and reports the close;
 it adds no credentials or headers, follows no redirects, refuses anything but
-`ws://` and `wss://`, caps a message at 16 KiB upstream and 16 MiB
+`ws://` and `wss://`, caps a message at 64 KiB upstream and 16 MiB
 downstream, and holds at most two screens per window. Its error messages
 never repeat the address, because the address may carry a token. The address
 and password live only in the pane while it is open; closing the pane,

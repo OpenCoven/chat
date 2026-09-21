@@ -637,7 +637,10 @@ export function ChatLayout(props: ChatLayoutProps) {
         </header>
         {screenOpen ? (
           <div id="coven-screen-viewer">
+            {/* Keyed by familiar: switching threads unmounts the pane, and its
+                teardown closes the host connection and forgets the address. */}
             <ScreenViewer
+              key={props.familiarId}
               relay={props.screen}
               familiarName={familiar?.name}
               onClose={() => setScreenOpen(false)}

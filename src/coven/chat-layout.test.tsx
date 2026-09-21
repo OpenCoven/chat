@@ -1,5 +1,6 @@
 import { act, fireEvent, render, screen, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import type { ScreenChannel, ScreenRelay } from '../lib/screen-relay';
 import {
   activityCounts,
   ChatLayout,
@@ -8,6 +9,7 @@ import {
   emptyThreadText,
   runStatusText,
 } from './chat-layout';
+import type { RfbClass } from './screen-viewer';
 
 function layoutProps(): ChatLayoutProps {
   return {
@@ -1161,5 +1163,62 @@ describe('sidebar search', () => {
     expect(screen.getByRole('searchbox')).toHaveValue('');
     expect(screen.getByRole('button', { name: 'Astra' })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Clear search' })).not.toBeInTheDocument();
+  });
+});
+
+describe('screen viewer pane', () => {
+  it('closes the host connection and forgets the address when the familiar changes', async () => {
+    const closes: ReturnType<typeof vi.fn>[] = [];
+    const relay: ScreenRelay = {
+      available: true,
+      open: (url) => {
+        const close = vi.fn();
+        closes.push(close);
+        return {
+          url,
+          binaryType: 'arraybuffer',
+          protocol: '',
+          readyState: 0,
+          onopen: null,
+          onmessage: null,
+          onclose: null,
+          onerror: null,
+          lastError: '',
+          send: vi.fn(),
+          close,
+        } as unknown as ScreenChannel;
+      },
+    };
+    class FakeRfb extends EventTarget {
+      viewOnly = false;
+      scaleViewport = false;
+      background = '';
+      disconnect = vi.fn();
+    }
+    const props = {
+      ...layoutProps(),
+      connected: true,
+      ready: true,
+      familiars: [
+        { id: 'a', name: 'Alder' },
+        { id: 'b', name: 'Birch' },
+      ],
+      screen: relay,
+      screenLoadRfb: async () => FakeRfb as unknown as RfbClass,
+    };
+    const view = render(<ChatLayout {...props} familiarId="a" />);
+    fireEvent.click(screen.getByRole('button', { name: 'Show screen' }));
+    fireEvent.change(screen.getByLabelText('Screen address'), {
+      target: { value: 'wss://sandbox/websockify' },
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Connect' }));
+    });
+    expect(closes).toHaveLength(1);
+    expect(screen.getByText('Connecting…')).toBeInTheDocument();
+    view.rerender(<ChatLayout {...props} familiarId="b" />);
+    expect(closes[0]).toHaveBeenCalledOnce();
+    expect(screen.getByText('Not connected.')).toBeInTheDocument();
+    expect(screen.getByLabelText('Screen address')).toHaveValue('');
   });
 });
