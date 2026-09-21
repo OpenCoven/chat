@@ -66,7 +66,8 @@ Connection diagnostics are collapsed during normal use. Run status and Stop
 stay beside the composer, and the end of the thread shows the familiar's
 avatar with what the run is doing right now (waiting for the familiar, running
 a named tool, or stopping) until reply text starts to stream, and the status
-counts how long the run has been going. When a run ends, assistive
+counts how long the run has been going. After thirty seconds without a sign
+of life the row says it is still waiting, or still running the tool. When a run ends, assistive
 technology hears how: the familiar's outcome and duration, or that a
 familiar replied or failed in another chat. A run belongs to
 the familiar it was sent to: if you switch to another familiar while it is
@@ -201,6 +202,7 @@ composer, the notice offers **Try again**, which sends them once more.
 Assistant replies render Markdown headings, lists, emphasis, quotes, code,
 tables, and task lists. Wide code and tables scroll inside the message.
 Raw HTML is disabled and remote Markdown images are not fetched automatically.
+Links open outside the window, so hovering one shows its address first.
 Each reply has a **Copy** control that copies its Markdown source, and each
 fenced code block names its language with its own **Copy** control for the
 code alone. The control reports "Copied" only after the clipboard accepted
@@ -208,7 +210,8 @@ the text and "Copy failed" when it did not.
 
 Tool calls appear as activity rows between the prose, each expanding to the
 call's input and, once reported, its result, each block labeled and with its
-own **Copy** control. When the runtime reports a call as data rather than as a
+own **Copy** control. The turn's header counts the calls it holds and how
+many failed, whether or not the list is folded. When the runtime reports a call as data rather than as a
 `⚒ Name(args)` line — a `tool_start` frame from the bundled engine, a
 `tool_use` block in an assistant message, or a `tool_result` frame — the row
 also shows the input (cut at 16 KiB with a note saying so) and, once

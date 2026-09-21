@@ -7,10 +7,13 @@ import {
   type ChatLayoutProps,
   composerCopy,
   emptyThreadText,
+  LONG_WAIT_MS,
   lastRunText,
+  liveRowText,
   matchesFamiliar,
   runStatusText,
   SHORTCUTS,
+  toolTurnSummary,
 } from './chat-layout';
 import type { RfbClass } from './screen-viewer';
 
@@ -1831,5 +1834,60 @@ describe('run-end announcements', () => {
     );
     rerender(<ChatLayout {...props()} familiarId="c" finished={{ a: 'reply' }} />);
     expect(region()).toHaveTextContent('Astra replied in another chat');
+  });
+});
+
+describe('long waits and tool turn headers', () => {
+  const props = () => ({
+    ...layoutProps(),
+    connected: true,
+    ready: true,
+    familiars: [{ id: 'a', name: 'Astra' }],
+    familiarId: 'a',
+  });
+
+  it('says it is still waiting once a run has gone quiet for a while', () => {
+    expect(liveRowText('Astra', false, undefined, true)).toBe('Still waiting for Astra…');
+    expect(liveRowText('Astra', false, 'Bash', true)).toBe('Still running Bash…');
+    expect(liveRowText('Astra', true, 'Bash', true)).toBe('Stopping…');
+    const { rerender } = render(
+      <ChatLayout {...props()} busy runFamiliarId="a" runStartedAt={Date.now() - 5_000} />,
+    );
+    expect(screen.getByText('Waiting for Astra…')).toBeInTheDocument();
+    rerender(
+      <ChatLayout
+        {...props()}
+        busy
+        runFamiliarId="a"
+        runStartedAt={Date.now() - LONG_WAIT_MS - 1_000}
+      />,
+    );
+    expect(screen.getByText('Still waiting for Astra…')).toBeInTheDocument();
+  });
+
+  it("counts a tool turn's calls and failures in its header", () => {
+    expect(toolTurnSummary([{ name: 'Bash', args: '' }])).toBe('1 call');
+    expect(
+      toolTurnSummary([
+        { name: 'Bash', args: '' },
+        { name: 'Read', args: '', isError: true },
+        { name: 'Grep', args: '' },
+      ]),
+    ).toBe('3 calls · 1 failed');
+    const tool = (id: string, name: string, isError = false) => ({
+      id,
+      role: 'tool',
+      text: name,
+      tool: { name, args: '', ...(isError ? { isError } : {}) },
+    });
+    render(
+      <ChatLayout
+        {...props()}
+        messages={[tool('1', 'Bash'), tool('2', 'Read', true), tool('3', 'Grep')]}
+      />,
+    );
+    expect(screen.getByText('Tool activity').parentElement).toHaveTextContent(
+      'Tool activity3 calls · 1 failed',
+    );
   });
 });

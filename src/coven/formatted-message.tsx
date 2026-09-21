@@ -38,7 +38,8 @@ const components: Components = {
         {children}
       </a>
     ) : (
-      <a href={href} title={title} target="_blank" rel="noopener noreferrer">
+      // Links open outside the window, so the address shows before the click.
+      <a href={href} title={title ?? href} target="_blank" rel="noopener noreferrer">
         {children}
       </a>
     );

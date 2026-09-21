@@ -236,6 +236,12 @@
   font-variant-numeric: tabular-nums;
 }
 
+/* The tool turn's header counts what the list below holds, folded or not. */
+.coven-tool-turn-count {
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
 /* The live row: the familiar's avatar beside the run's current state. */
 .coven-chat .coven-live-row {
   max-width: 72%;
