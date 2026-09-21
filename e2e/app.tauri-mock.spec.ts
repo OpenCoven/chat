@@ -240,6 +240,22 @@ test('keeps the familiar list and inspector scrollable inside a short window', a
   expect(await page.evaluate(() => [window.scrollX, window.scrollY])).toEqual([0, 0]);
 });
 
+test('typing anywhere starts a message with that very letter', async ({ page }) => {
+  await installRuntimeFixture(page);
+  await page.goto('/');
+  const composer = page.getByRole('textbox', { name: 'Message Local familiar' });
+  await expect(composer).toBeEnabled();
+  await page.getByRole('log', { name: 'Messages' }).focus();
+  await page.keyboard.type('hey');
+  await expect(composer).toBeFocused();
+  await expect(composer).toHaveValue('hey');
+  // A modifier chord and a field that already has focus are left alone.
+  await page.getByRole('searchbox').focus();
+  await page.keyboard.type('x');
+  await expect(page.getByRole('searchbox')).toHaveValue('x');
+  await expect(composer).toHaveValue('hey');
+});
+
 test('sends actual attachment bytes and retains them after cancellation', async ({ page }) => {
   await page.setViewportSize({ width: 820, height: 600 });
   await installRuntimeFixture(page);

@@ -34,11 +34,12 @@ export function useRailShortcuts(toggleLeft: () => void, toggleRight: () => void
 }
 
 /**
- * Typing while nothing editable has focus starts a message: the keystroke
- * moves focus to the composer and lands there. Chords, function keys, and
- * anything inside a dialog or menu are left alone.
+ * Typing while nothing editable has focus starts a message: the handler gets
+ * the character, puts it in the draft and focuses the composer, and the
+ * keystroke's default is suppressed so the letter is not delivered twice.
+ * Chords, function keys, and anything inside a dialog or menu are left alone.
  */
-export function useTypeToCompose(focusComposer: () => boolean) {
+export function useTypeToCompose(compose: (key: string) => boolean) {
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       if (
@@ -59,11 +60,11 @@ export function useTypeToCompose(focusComposer: () => boolean) {
           active.closest('dialog[open], [role="dialog"], [role="menu"], [role="listbox"]'))
       )
         return;
-      focusComposer();
+      if (compose(event.key)) event.preventDefault();
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [focusComposer]);
+  }, [compose]);
 }
 
 /** Cmd/Ctrl+K reaches the familiar search from anywhere in the shell. */

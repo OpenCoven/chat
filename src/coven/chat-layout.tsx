@@ -439,10 +439,16 @@ export function ChatLayout(props: ChatLayoutProps) {
   const transcriptRef = useRef<HTMLDivElement>(null);
   const fileInput = useRef<HTMLInputElement>(null);
   const composerRef = useRef<HTMLTextAreaElement>(null);
-  // Start typing anywhere in the shell and the words go to the familiar.
-  useTypeToCompose(() => {
-    if (composerDisabled || !composerRef.current) return false;
-    composerRef.current.focus();
+  // Start typing anywhere in the shell and the words go to the familiar. The
+  // first letter is appended here rather than left to the browser, so it is
+  // neither lost to a controlled field nor delivered twice.
+  useTypeToCompose((key) => {
+    const field = composerRef.current;
+    if (composerDisabled || !field) return false;
+    props.onDraft(props.draft + key);
+    field.focus();
+    const end = props.draft.length + key.length;
+    field.setSelectionRange(end, end);
     return true;
   });
   useEffect(() => {

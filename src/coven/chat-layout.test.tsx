@@ -1901,15 +1901,21 @@ describe('type to compose and message copy', () => {
     familiarId: 'a',
   });
 
-  it('moves a plain keystroke to the composer from the transcript or the body', () => {
-    render(<ChatLayout {...props()} />);
+  it('moves a plain keystroke to the composer, and the letter with it', () => {
+    const p = { ...props(), draft: 'hi ', onDraft: vi.fn() };
+    render(<ChatLayout {...p} />);
     const composer = screen.getByRole('textbox', { name: 'Message Astra' });
     screen.getByRole('log', { name: 'Messages' }).focus();
-    fireEvent.keyDown(window, { key: 'h' });
+    const first = new KeyboardEvent('keydown', { key: 't', bubbles: true, cancelable: true });
+    window.dispatchEvent(first);
     expect(composer).toHaveFocus();
+    expect(p.onDraft).toHaveBeenCalledWith('hi t');
+    // The browser must not deliver the letter a second time.
+    expect(first.defaultPrevented).toBe(true);
     (document.activeElement as HTMLElement).blur();
     fireEvent.keyDown(window, { key: 'H', shiftKey: true });
     expect(composer).toHaveFocus();
+    expect(p.onDraft).toHaveBeenLastCalledWith('hi H');
   });
 
   it('leaves chords, editable fields, menus and a disabled composer alone', () => {
