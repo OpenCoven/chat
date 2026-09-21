@@ -228,3 +228,19 @@
   color: var(--text-muted);
   overflow-wrap: anywhere;
 }
+
+.coven-tool-state {
+  margin-inline-start: 0.5em;
+  font-size: 0.75em;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--color-danger);
+}
+
+.coven-tool[data-error] .coven-tool-glyph {
+  background: var(--color-danger);
+}
+
+.coven-formatted .coven-tool-result {
+  border-top: 1px solid var(--border-hairline);
+}
