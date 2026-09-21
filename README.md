@@ -186,8 +186,8 @@ Use the compact **+** attachment button beside the message field. Selected files
 appear as cards with their filename, size (in KiB above a kibibyte), and a
 remove control; sent messages retain file cards in the transcript.
 
-A message itself may be up to 32 KiB; past that the composer warns before
-you send, since Coven would refuse it. The composer accepts up to four UTF-8
+A message itself may be up to 32,768 bytes; past that the composer warns
+before you send, naming the exact byte count, since Coven would refuse it. The composer accepts up to four UTF-8
 text/code files, each at most 64 KiB.
 Selected bytes are validated and passed to Coven as actual file contents, not
 just filenames. You can send files with or without an accompanying message.

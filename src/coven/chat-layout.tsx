@@ -191,7 +191,7 @@ export function composerCopy(connected: boolean, familiarName?: string, anyFamil
       label: 'Message',
       placeholder: anyFamiliars
         ? 'Select a familiar to send a message.'
-        : 'Configure a familiar in Coven to send a message.',
+        : 'Configure a familiar in Coven, then refresh, to send a message.',
     };
   return {
     label: `Message ${familiarName}`,
@@ -1121,7 +1121,8 @@ export function ChatLayout(props: ChatLayoutProps) {
                 {...(oversize
                   ? {
                       warning: {
-                        label: `Message is ${formatAttachmentSize(draftBytes)}; Coven accepts up to 32 KiB. Shorten it or attach a file.`,
+                        // Exact bytes: a rounded size could read as within the limit.
+                        label: `Message is ${draftBytes.toLocaleString('en-US')} bytes; Coven accepts up to ${PROMPT_LIMIT_BYTES.toLocaleString('en-US')}. Shorten it or attach a file.`,
                       },
                     }
                   : {})}

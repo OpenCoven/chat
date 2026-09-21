@@ -1963,7 +1963,9 @@ describe('no familiars yet, and oversize drafts', () => {
     expect(screen.getByText(/No familiars are configured in Coven yet/)).toBeInTheDocument();
     expect(screen.queryByText(/Select a familiar from the sidebar/)).not.toBeInTheDocument();
     expect(
-      screen.getByPlaceholderText('Configure a familiar in Coven to send a message.'),
+      screen.getByPlaceholderText(
+        'Configure a familiar in Coven, then refresh, to send a message.',
+      ),
     ).toBeInTheDocument();
   });
 
@@ -1976,11 +1978,16 @@ describe('no familiars yet, and oversize drafts', () => {
       familiarId: 'a',
     };
     const { rerender } = render(<ChatLayout {...base} draft={'x'.repeat(PROMPT_LIMIT_BYTES)} />);
-    expect(screen.queryByText(/Coven accepts up to 32 KiB/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Coven accepts up to 32,768/)).not.toBeInTheDocument();
     rerender(<ChatLayout {...base} draft={'x'.repeat(PROMPT_LIMIT_BYTES + 1)} />);
-    expect(screen.getByText(/Message is 32 KiB; Coven accepts up to 32 KiB/)).toBeInTheDocument();
+    // The first byte over reads as over, not as a rounded 32 KiB.
+    expect(
+      screen.getByText(/Message is 32,769 bytes; Coven accepts up to 32,768/),
+    ).toBeInTheDocument();
     // Bytes, not characters: a two-byte letter counts twice.
     rerender(<ChatLayout {...base} draft={'é'.repeat(PROMPT_LIMIT_BYTES / 2 + 1)} />);
-    expect(screen.getByText(/Coven accepts up to 32 KiB/)).toBeInTheDocument();
+    expect(
+      screen.getByText(/Message is 32,770 bytes; Coven accepts up to 32,768/),
+    ).toBeInTheDocument();
   });
 });
