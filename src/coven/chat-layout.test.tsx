@@ -74,6 +74,67 @@ describe('empty transcript copy', () => {
   });
 });
 
+describe('structured tool activity', () => {
+  const tool = (id: string, name: string, extra: Record<string, unknown> = {}) => ({
+    id,
+    role: 'tool',
+    text: name,
+    tool: { name, args: 'ls -la', ...extra },
+  });
+
+  it('groups consecutive tool rows into one activity list inside the familiar turn', () => {
+    render(
+      <ChatLayout
+        {...layoutProps()}
+        familiars={[{ id: 'f', name: 'Astra' }]}
+        familiarId="f"
+        connected
+        ready
+        messages={[
+          { id: '1', role: 'assistant', text: 'Looking.' },
+          tool('2', 'Bash'),
+          tool('3', 'Read', { args: 'src/app.ts', result: 'file body' }),
+          { id: '4', role: 'assistant', text: 'Found it.' },
+          tool('5', 'Grep', { isError: true, result: 'exit 1' }),
+        ]}
+      />,
+    );
+    const lists = screen.getAllByRole('list', { name: 'Tool activity' });
+    expect(lists).toHaveLength(2);
+    expect(screen.getAllByRole('listitem')).toHaveLength(3);
+    expect(screen.getAllByText('Tool activity')).toHaveLength(2);
+    expect(screen.getByLabelText('Read result')).toHaveTextContent('file body');
+    expect(screen.queryByLabelText('Bash result')).toBeNull();
+    expect(screen.getByLabelText('Grep result')).toHaveTextContent('exit 1');
+    expect(screen.getByText('failed')).toBeInTheDocument();
+    expect(screen.queryByText('Tool')).not.toBeInTheDocument();
+  });
+
+  it('names the tool a run is executing and returns to responding once it settles', () => {
+    const props = {
+      ...layoutProps(),
+      familiars: [{ id: 'f', name: 'Astra' }],
+      familiarId: 'f',
+      connected: true,
+      ready: true,
+      busy: true,
+    };
+    const view = render(<ChatLayout {...props} messages={[tool('1', 'Bash')]} />);
+    expect(screen.getByText('Astra is running Bash…')).toBeVisible();
+    view.rerender(<ChatLayout {...props} messages={[tool('1', 'Bash', { result: 'ok' })]} />);
+    expect(screen.getByText('Astra is responding…')).toBeVisible();
+    view.rerender(
+      <ChatLayout
+        {...props}
+        messages={[tool('1', 'Bash'), { id: '2', role: 'assistant', text: 'Done.' }]}
+      />,
+    );
+    expect(screen.getByText('Astra is responding…')).toBeVisible();
+    view.rerender(<ChatLayout {...props} cancelling messages={[tool('1', 'Bash')]} />);
+    expect(screen.getByText('Stopping; waiting for Coven…')).toBeVisible();
+  });
+});
+
 describe('top bar identity', () => {
   it('shows no familiar identity when none is selected', () => {
     render(<ChatLayout {...layoutProps()} familiars={[{ id: 'f', name: 'Astra' }]} ready />);

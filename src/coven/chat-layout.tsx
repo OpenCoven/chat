@@ -17,7 +17,7 @@ import { ChatLifecycleControls } from './chat-lifecycle';
 import { ContextPicker } from './context-picker';
 import type { ChatMessage } from './events';
 import { FamiliarAvatar } from './familiar-avatar';
-import { FormattedMessage } from './formatted-message';
+import { FormattedMessage, ToolActivity, type ToolRow } from './formatted-message';
 import { useMentionCompletion } from './mention-completion';
 import {
   LEFT_RAIL_HINT,
@@ -236,6 +236,35 @@ export function ChatLayout(props: ChatLayoutProps) {
     const transcript = transcriptRef.current;
     if (transcript && nearBottom.current) transcript.scrollTop = transcript.scrollHeight;
   }, [props.messages, props.sessionId]);
+  // Consecutive tool rows render as one activity list; the transcript is
+  // otherwise one element per message.
+  const blocks: (
+    | Readonly<{ kind: 'message'; message: ChatMessage }>
+    | Readonly<{ kind: 'tools'; id: string; rows: ToolRow[] }>
+  )[] = [];
+  for (const message of props.messages) {
+    const last = blocks[blocks.length - 1];
+    if (message.tool) {
+      const row: ToolRow = {
+        name: message.tool.name,
+        args: message.tool.args,
+        raw: message.tool.raw,
+        result: message.tool.result,
+        isError: message.tool.isError,
+      };
+      if (last?.kind === 'tools') last.rows.push(row);
+      else blocks.push({ kind: 'tools', id: message.id, rows: [row] });
+    } else {
+      blocks.push({ kind: 'message', message });
+    }
+  }
+  const lastMessage = props.messages[props.messages.length - 1];
+  // A run whose newest event is an unfinished tool call is running that tool,
+  // and the status says so instead of "responding".
+  const runningTool =
+    props.busy && lastMessage?.tool && lastMessage.tool.result === undefined
+      ? lastMessage.tool.name
+      : undefined;
   const agents = props.familiars.filter(
     (item) =>
       item.name.toLowerCase().includes(query.toLowerCase()) &&
@@ -465,14 +494,28 @@ export function ChatLayout(props: ChatLayoutProps) {
               </div>
             ) : null}
             {props.loading ? <ThinkingIndicator label="Loading conversation" /> : null}
-            {props.messages.map((message) =>
-              message.role === 'user' ? (
-                <div className="fr-user fr-msg" key={message.id}>
+            {blocks.map((block) =>
+              block.kind === 'tools' ? (
+                <div className="fr-familiar fr-msg coven-tool-turn" key={block.id}>
+                  <FamiliarAvatar name={name} avatarUrl={familiar?.avatarUrl} size={22} />
+                  <div className="fr-familiar-body">
+                    <span className="fr-familiar-meta">
+                      <span className="fr-familiar-name">Tool activity</span>
+                    </span>
+                    <div className="coven-formatted">
+                      <ToolActivity rows={block.rows} />
+                    </div>
+                  </div>
+                </div>
+              ) : block.message.role === 'user' ? (
+                <div className="fr-user fr-msg" key={block.message.id}>
                   <div className="fr-user-body">
-                    <div className="fr-bubble fr-bubble--user coven-message">{message.text}</div>
-                    {message.attachments?.length ? (
+                    <div className="fr-bubble fr-bubble--user coven-message">
+                      {block.message.text}
+                    </div>
+                    {block.message.attachments?.length ? (
                       <ul className="coven-history-attachments" aria-label="Message attachments">
-                        {message.attachments.map((file, index) => (
+                        {block.message.attachments.map((file, index) => (
                           <li key={`${index}-${file.name}`}>
                             <AttachmentChip name={file.name} meta={`${file.size} bytes`} />
                           </li>
@@ -482,8 +525,8 @@ export function ChatLayout(props: ChatLayoutProps) {
                   </div>
                 </div>
               ) : (
-                <div className="fr-familiar fr-msg" key={message.id}>
-                  {message.role === 'assistant' && familiar ? (
+                <div className="fr-familiar fr-msg" key={block.message.id}>
+                  {block.message.role === 'assistant' && familiar ? (
                     <button
                       type="button"
                       className="coven-familiar-card-trigger"
@@ -499,7 +542,7 @@ export function ChatLayout(props: ChatLayoutProps) {
                   )}
                   <div className="fr-familiar-body">
                     <span className="fr-familiar-meta">
-                      {message.role === 'assistant' && familiar ? (
+                      {block.message.role === 'assistant' && familiar ? (
                         <button
                           type="button"
                           className="fr-familiar-name coven-familiar-card-trigger"
@@ -512,15 +555,17 @@ export function ChatLayout(props: ChatLayoutProps) {
                         </button>
                       ) : (
                         <span className="fr-familiar-name">
-                          {message.role === 'assistant' ? name : titleCase(message.role)}
+                          {block.message.role === 'assistant'
+                            ? name
+                            : titleCase(block.message.role)}
                         </span>
                       )}
                     </span>
                     <div className="fr-bubble fr-bubble--familiar coven-message">
-                      {message.role === 'assistant' ? (
-                        <FormattedMessage text={message.text} />
+                      {block.message.role === 'assistant' ? (
+                        <FormattedMessage text={block.message.text} />
                       ) : (
-                        message.text
+                        block.message.text
                       )}
                     </div>
                   </div>
@@ -563,7 +608,11 @@ export function ChatLayout(props: ChatLayoutProps) {
             </div>
             {props.busy && (
               <output className="coven-run-status">
-                {props.cancelling ? 'Stopping; waiting for Coven…' : `${name} is responding…`}
+                {props.cancelling
+                  ? 'Stopping; waiting for Coven…'
+                  : runningTool
+                    ? `${name} is running ${runningTool}…`
+                    : `${name} is responding…`}
               </output>
             )}
             {props.readOnly && (

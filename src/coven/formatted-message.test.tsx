@@ -1,5 +1,5 @@
 import { fireEvent, render, screen } from '@testing-library/react';
-import { FormattedMessage } from './formatted-message';
+import { FormattedMessage, ToolActivity } from './formatted-message';
 
 test('renders headings, emphasis, lists, quotes, and fenced code as formatted text', () => {
   const { container } = render(
@@ -153,4 +153,30 @@ test('keeps crossed-tools examples inside fenced code out of activity rows', () 
   );
   expect(screen.getAllByRole('listitem')).toHaveLength(1);
   expect(screen.getByLabelText('Read tool arguments')).toBeInTheDocument();
+});
+
+test('structured rows show the full input and the result once reported, and mark failures', () => {
+  const raw = JSON.stringify({ command: 'ls -la', description: 'List' }, null, 2);
+  const { container } = render(
+    <div className="coven-formatted">
+      <ToolActivity
+        rows={[
+          { name: 'Bash', args: 'ls -la', raw },
+          { name: 'Read', args: 'src/app.ts', result: 'file body' },
+          { name: 'Grep', args: 'false', result: 'exit 1', isError: true },
+        ]}
+      />
+    </div>,
+  );
+  expect(screen.getAllByRole('listitem')).toHaveLength(3);
+  expect(screen.getByLabelText('Bash raw arguments').textContent).toBe(raw);
+  expect(screen.queryByLabelText('Bash result')).toBeNull();
+  expect(screen.getByLabelText('Read result')).toHaveTextContent('file body');
+  expect(screen.getByLabelText('Read result')).not.toBeVisible();
+  fireEvent.click(screen.getByLabelText('Read tool arguments'));
+  expect(screen.getByLabelText('Read result')).toBeVisible();
+  const failed = container.querySelectorAll('.coven-tool[data-error]');
+  expect(failed).toHaveLength(1);
+  expect(failed[0]).toHaveTextContent('failed');
+  expect(failed[0]?.querySelector('.coven-tool-result')).toHaveTextContent('exit 1');
 });

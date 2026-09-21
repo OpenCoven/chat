@@ -11,9 +11,12 @@ async function installRuntimeFixture(
   available = true,
   reply = 'Streamed through the Coven boundary.',
   population = 1,
+  // When set, these frames replace the single assistant reply so a test can
+  // stream the structured tool shapes the runtime documents.
+  stream?: Record<string, unknown>[],
 ) {
   await page.addInitScript(
-    ({ ready, reply, population }) => {
+    ({ ready, reply, population, stream }) => {
       const portrait = document.createElement('canvas');
       portrait.width = 2;
       portrait.height = 2;
@@ -157,13 +160,17 @@ async function installRuntimeFixture(
                         : [],
                     message: { content: [{ type: 'text', text: input.prompt }] },
                   },
-                  {
-                    type: 'assistant',
-                    session_id: session.id,
-                    message: {
-                      content: [{ type: 'text', text: reply }],
-                    },
-                  },
+                  ...(stream
+                    ? stream.map((frame) => ({ ...frame, session_id: session.id }))
+                    : [
+                        {
+                          type: 'assistant',
+                          session_id: session.id,
+                          message: {
+                            content: [{ type: 'text', text: reply }],
+                          },
+                        },
+                      ]),
                 ];
                 state.heads[familiarId] = {
                   session,
@@ -198,7 +205,7 @@ async function installRuntimeFixture(
         },
       });
     },
-    { ready: available, reply, population },
+    { ready: available, reply, population, stream },
   );
 }
 
@@ -978,6 +985,52 @@ test('separates CLI tool summaries from prose and reveals their exact arguments'
   });
   await page.evaluate(() => window.__covenFixture.finish?.());
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+});
+
+test('renders runtime-reported tool calls as rows with input, result and a running status', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1200, height: 800 });
+  const command = 'ls -la /fixture/workspace';
+  await installRuntimeFixture(page, true, 'unused', 1, [
+    { type: 'text_delta', text: 'Let me look.' },
+    {
+      type: 'assistant',
+      message: {
+        content: [
+          {
+            type: 'tool_use',
+            id: 'toolu_1',
+            name: 'Bash',
+            input: { command, description: 'List' },
+          },
+        ],
+      },
+    },
+    { type: 'tool_result', tool_use_id: 'toolu_1', content: [{ type: 'text', text: 'README.md' }] },
+    { type: 'text_delta', text: 'Now the file.' },
+    { type: 'tool_start', tool: 'Read' },
+  ]);
+  await page.goto('/');
+  await page.getByRole('textbox', { name: 'Message Local familiar' }).fill('Inspect the project');
+  await page.getByRole('button', { name: 'Send', exact: true }).click();
+  await expect(page.getByText('Local familiar is running Read…')).toBeVisible();
+  const lists = page.getByRole('list', { name: 'Tool activity' });
+  await expect(lists).toHaveCount(2);
+  await expect(page.locator('.coven-tool')).toHaveCount(2);
+  await expect(page.locator('.coven-formatted p').nth(0)).toHaveText('Let me look.');
+  await expect(page.locator('.coven-formatted p').nth(1)).toHaveText('Now the file.');
+  const bash = page.locator('.coven-tool').first();
+  await expect(bash.locator('.coven-tool-args')).toHaveText(command);
+  await bash.locator('summary').click();
+  await expect(bash.getByLabel('Bash raw arguments')).toContainText('"description": "List"');
+  await expect(bash.getByLabel('Bash result')).toHaveText('README.md');
+  await expect(page.locator('.coven-tool').nth(1).getByLabel('Read result')).toHaveCount(0);
+  await page.evaluate(() => window.__covenFixture.finish?.());
+  await expect(page.getByText(/is running Read/)).toHaveCount(0);
+  await expect(page.getByRole('list', { name: 'Tool activity' })).toHaveCount(2);
+  const commands = await page.evaluate(() => window.__covenFixture.calls);
+  expect(commands.every((invoked) => invoked.startsWith('coven_runtime_'))).toBe(true);
 });
 
 for (const viewport of [
