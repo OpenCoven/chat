@@ -121,6 +121,9 @@ export function ChatApp({
   // Runs that ended while another familiar was shown, until that familiar is
   // opened again: the sidebar row says a reply arrived or the run failed.
   const [finished, setFinished] = useState<Record<string, 'reply' | 'error'>>({});
+  // The draft key whose failed run's input is exactly what the composer holds
+  // again, so Try again resends that input and nothing else. Any edit clears it.
+  const [retryKey, setRetryKey] = useState('');
   const draftVersions = useRef<Record<string, number>>({});
   const [cancelling, setCancelling] = useState(false);
   const [archived, setArchived] = useState(false);
@@ -274,6 +277,7 @@ export function ChatApp({
     }
     const run = { id: crypto.randomUUID(), cancelRequested: false };
     activeRun.current = run;
+    setRetryKey('');
     const draftVersion = draftVersions.current[key] ?? 0;
     navigate({ ...current, drafts: { ...current.drafts, [key]: '' } });
     attachmentRef.current = { ...attachmentRef.current, [key]: [] };
@@ -348,10 +352,13 @@ export function ChatApp({
       if (lifetime.current === life) {
         if (!completed) {
           const latest = navigationRef.current;
-          if ((draftVersions.current[key] ?? 0) === draftVersion && latest.drafts[key] === '')
+          const untouched = (draftVersions.current[key] ?? 0) === draftVersion;
+          if (untouched && latest.drafts[key] === '')
             navigate({ ...latest, drafts: { ...latest.drafts, [key]: prompt } });
           attachmentRef.current = { ...attachmentRef.current, [key]: selectedFiles };
           setAttachments(attachmentRef.current);
+          // A draft typed during the run is the reader's, not the failed input.
+          setRetryKey(untouched ? key : '');
         }
         try {
           // Initialization persists the canonical sibling even if the run fails or is cancelled.
@@ -406,6 +413,7 @@ export function ChatApp({
       return;
     const key = draftKey(navigationRef.current);
     selecting.current = true;
+    setRetryKey('');
     setAttaching(true);
     try {
       const existing = attachmentRef.current[key] ?? [];
@@ -526,6 +534,7 @@ export function ChatApp({
       onRemoveAttachment={(id) => {
         if (activeRun.current || selecting.current || lifecyclePending.current) return;
         const key = draftKey(navigationRef.current);
+        setRetryKey('');
         attachmentRef.current = {
           ...attachmentRef.current,
           [key]: (attachmentRef.current[key] ?? []).filter((file) => file.id !== id),
@@ -567,7 +576,9 @@ export function ChatApp({
       cancelling={cancelling}
       error={error || runOutputs[draftKey(navigation)]?.error || ''}
       // A failed run restores what it was sent; the notice can send it again.
-      {...(runOutputs[draftKey(navigation)]?.error && !busy ? { onRetry: () => void send() } : {})}
+      {...(runOutputs[draftKey(navigation)]?.error && !busy && retryKey === draftKey(navigation)
+        ? { onRetry: () => void send() }
+        : {})}
       onDismissError={() => {
         setError('');
         const key = draftKey(navigationRef.current);
@@ -598,6 +609,7 @@ export function ChatApp({
         const latest = navigationRef.current;
         const key = draftKey(latest);
         draftVersions.current[key] = (draftVersions.current[key] ?? 0) + 1;
+        setRetryKey('');
         navigate({ ...latest, drafts: { ...latest.drafts, [draftKey(latest)]: value } });
       }}
       onSend={() => void send()}

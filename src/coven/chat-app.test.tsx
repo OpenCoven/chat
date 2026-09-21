@@ -430,6 +430,28 @@ describe('canonical familiar controller', () => {
     expect(screen.queryByRole('button', { name: 'Try again' })).not.toBeInTheDocument();
   });
 
+  it('does not offer Try again once the reader has typed or edited since the failed send', async () => {
+    const api = runtime();
+    const run = deferred<CovenRunResult>();
+    vi.mocked(api.send).mockReturnValueOnce(run.promise);
+    await ready(api);
+    draft('work');
+    click('Send');
+    draft('a new idea');
+    await act(async () => run.reject(new Error('engine exited')));
+    await screen.findByRole('alert');
+    // The new draft is the reader's; the failed input was not restored over it.
+    expect(screen.getByRole('textbox')).toHaveValue('a new idea');
+    expect(screen.queryByRole('button', { name: 'Try again' })).not.toBeInTheDocument();
+    // And an edit after a restore withdraws the offer too.
+    vi.mocked(api.send).mockRejectedValueOnce(new Error('engine exited again'));
+    click('Send');
+    await waitFor(() => expect(api.send).toHaveBeenCalledTimes(2));
+    await screen.findByRole('button', { name: 'Try again' });
+    draft('a new idea, edited');
+    expect(screen.queryByRole('button', { name: 'Try again' })).not.toBeInTheDocument();
+  });
+
   it('marks a failed run as failed and leaves no marker for a run the reader is watching', async () => {
     const api = runtime();
     const failing = deferred<CovenRunResult>();
