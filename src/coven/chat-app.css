@@ -349,6 +349,33 @@
   min-width: 0;
 }
 
+.coven-chat .coven-error-copy {
+  flex: none;
+  margin: -3px 0;
+  color: inherit;
+  opacity: 0.8;
+}
+
+.coven-chat .coven-error-copy:hover,
+.coven-chat .coven-error-copy:focus-visible {
+  opacity: 1;
+}
+
+/* Declared project access in the inspector. */
+.coven-access {
+  display: grid;
+  gap: 8px;
+}
+
+.coven-chat .coven-access-rows {
+  padding: 0;
+}
+
+.coven-chat .coven-access-rows .fr-row:last-child {
+  border-bottom: 0;
+  padding-bottom: 0;
+}
+
 .coven-chat .coven-error-retry {
   flex: none;
   margin: -3px 0;

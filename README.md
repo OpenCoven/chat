@@ -34,7 +34,11 @@ Use **Add context** in the composer to clarify which familiar or project you
 mean. Search by name, identity, or full path (`@` filters familiars; `#` filters
 workspaces). Suggestions come from known familiars and the selected familiar's
 declared read/write project access,
-with full identities and paths to distinguish similar names. Selection inserts
+with full identities and paths to distinguish similar names. The inspector's
+Access tab lists that same declared access, write grants first, and says
+plainly that Chat neither enforces nor extends it. When none was found it
+says so without claiming none exists, since an unreadable registry looks
+the same to Chat as an empty one. Selection inserts
 visible reference text at your cursor; it does not switch the recipient,
 delegate work, or grant file access.
 
@@ -69,7 +73,7 @@ run ends, their row reads **New reply** (or **Run failed**) until you open
 them again; a run you stop yourself leaves no marker. Without a connected CLI
 the empty familiar list says to connect rather than to configure a familiar. **Jump to
 latest** returns to new output after you scroll back and counts the messages
-that arrived while you were reading. Error notices carry a dismiss control; a
+that arrived while you were reading. Error notices carry Copy and dismiss controls; a
 notice also clears on the next send, familiar switch, or refresh. Replies and the composer share a responsive reading column up to
 1200px wide (36% wider than the previous 880px limit), while
 the application frame remains stationary.
