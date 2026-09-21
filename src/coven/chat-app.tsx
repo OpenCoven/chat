@@ -115,6 +115,9 @@ export function ChatApp({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(saved.error);
   const [busy, setBusy] = useState(false);
+  // The familiar the active run addresses. Selection may move while a run is
+  // live, and the layout must not credit the run to whichever familiar is shown.
+  const [runFamiliarId, setRunFamiliarId] = useState('');
   const draftVersions = useRef<Record<string, number>>({});
   const [cancelling, setCancelling] = useState(false);
   const [archived, setArchived] = useState(false);
@@ -148,6 +151,7 @@ export function ChatApp({
     lifecyclePending.current = null;
     setChangingLifecycle(false);
     setBusy(false);
+    setRunFamiliarId('');
     setCancelling(false);
     setLoading(true);
     setAvailable(false);
@@ -272,6 +276,7 @@ export function ChatApp({
     setAttachments(attachmentRef.current);
     const life = lifetime.current;
     setBusy(true);
+    setRunFamiliarId(current.familiarId);
     setError('');
     const previousOutput = runOutputs[key]?.events ?? [];
     let streamed: CovenRunEvent[] = [];
@@ -362,6 +367,7 @@ export function ChatApp({
       if (activeRun.current === run) activeRun.current = null;
       if (lifetime.current === life) {
         setBusy(false);
+        setRunFamiliarId('');
         setCancelling(false);
       }
     }
@@ -534,6 +540,7 @@ export function ChatApp({
         !sessions.some((item) => item.id === navigation.sessionId && item.archived)
       }
       busy={busy}
+      runFamiliarId={runFamiliarId}
       loading={loading}
       cancelling={cancelling}
       error={error || runOutputs[draftKey(navigation)]?.error || ''}

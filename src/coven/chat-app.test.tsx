@@ -35,6 +35,7 @@ function MockLayout(props: ChatLayoutProps) {
         ))}
       <output data-testid="head">{props.sessionId}</output>
       <output data-testid="familiar">{props.familiarId}</output>
+      <output data-testid="run-familiar">{props.busy ? props.runFamiliarId : 'idle'}</output>
       <output data-testid="connected">{String(props.connected)}</output>
       <output data-testid="ready">{String(props.ready)}</output>
       <output>{props.status}</output>
@@ -365,10 +366,14 @@ describe('canonical familiar controller', () => {
     draft('work');
     click('Send');
     click('Other familiar');
+    // The run stays attributed to the familiar it was sent to, not the one now shown.
+    expect(screen.getByTestId('familiar')).toHaveTextContent('g');
+    expect(screen.getByTestId('run-familiar')).toHaveTextContent('f');
     await act(async () => run.resolve({ runId: 'run', events: [] }));
     expect(screen.getByTestId('familiar')).toHaveTextContent('g');
     expect(screen.getByTestId('head')).toHaveTextContent('two');
     expect(screen.getByRole('textbox')).toHaveValue('');
+    expect(screen.getByTestId('run-familiar')).toHaveTextContent('idle');
   });
 
   it('archives a familiar and keeps it hidden after refresh without changing its history', async () => {

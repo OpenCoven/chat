@@ -57,7 +57,11 @@ desktop webviews so long paths do not push the composer out of view.
 Connection diagnostics are collapsed during normal use. Run status and Stop
 stay beside the composer, and the end of the thread shows the familiar's
 avatar with what the run is doing right now (waiting for the familiar, running
-a named tool, or stopping) until reply text starts to stream. **Jump to
+a named tool, or stopping) until reply text starts to stream. A run belongs to
+the familiar it was sent to: if you switch to another familiar while it is
+live, that familiar's sidebar row reads **Responding…**, the status beside the
+composer names them and says the composer is free once their run finishes or
+is stopped, and the thread you are viewing does not claim the run. **Jump to
 latest** returns to new output after you scroll back and counts the messages
 that arrived while you were reading. Error notices carry a dismiss control; a
 notice also clears on the next send, familiar switch, or refresh. Replies and the composer share a responsive reading column up to
@@ -102,7 +106,13 @@ recent activity Coven reports, each captioned with how long ago that was
 (hover for the full timestamp); familiars whose chats carry no readable
 timestamp keep the CLI's order after them. From the search box, **Enter**
 opens the first match, **Escape** clears the filter, and the arrow keys move
-into and along the list.
+into and along the list. A search that matches nothing offers **Clear search**.
+
+The inspector's Overview shows the familiar's purpose, identity and workspace,
+whether their chat is active, archived or not yet started, and its last
+activity. Activity reports the run state and counts the messages you sent, the
+replies and the tool calls (with failures) in the loaded transcript; tokens,
+cost and timing are not reported by this CLI integration.
 
 Chat and Cave are separate applications. There is no Cave import action or
 runtime import command, and Cave history does not appear in Chat. Previously

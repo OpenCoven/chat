@@ -1,6 +1,13 @@
-import { act, fireEvent, render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { ChatLayout, type ChatLayoutProps, composerCopy, emptyThreadText } from './chat-layout';
+import {
+  activityCounts,
+  ChatLayout,
+  type ChatLayoutProps,
+  composerCopy,
+  emptyThreadText,
+  runStatusText,
+} from './chat-layout';
 
 function layoutProps(): ChatLayoutProps {
   return {
@@ -917,7 +924,8 @@ describe('live run row', () => {
     expect(screen.queryByText('running')).not.toBeInTheDocument();
     expect(screen.getByText('Waiting for Astra…')).toBeVisible();
     view.rerender(<ChatLayout {...props()} cancelling messages={[tool('1', 'Bash')]} />);
-    expect(screen.getByText('Stopping…')).toBeVisible();
+    // The sidebar row marks the run as stopping too; this asserts the live row.
+    expect(within(screen.getByRole('log')).getByText('Stopping…')).toBeVisible();
   });
 });
 
@@ -990,5 +998,168 @@ describe('copying a reply', () => {
     fireEvent.click(button);
     await screen.findByText('Copy failed');
     expect(button).toHaveAttribute('data-state', 'failed');
+  });
+});
+
+describe('run attribution', () => {
+  const two = () => ({
+    ...layoutProps(),
+    connected: true,
+    ready: true,
+    familiars: [
+      { id: 'a', name: 'Astra' },
+      { id: 'b', name: 'Bram' },
+    ],
+    sessions: [
+      { id: 's-a', familiarId: 'a', title: 'a' },
+      { id: 's-b', familiarId: 'b', title: 'b' },
+    ],
+  });
+
+  it("names the run states without crediting another familiar's run to this one", () => {
+    expect(runStatusText('Bram', 'Astra', true, false, undefined)).toBe('Bram is responding…');
+    expect(runStatusText('Bram', 'Astra', true, false, 'Bash')).toBe('Bram is running Bash…');
+    expect(runStatusText('Bram', 'Astra', true, true, 'Bash')).toBe('Stopping; waiting for Coven…');
+    expect(runStatusText('Bram', 'Astra', false, false, undefined)).toBe(
+      'Astra is still responding in another chat. Wait for that run to finish or stop it before messaging Bram.',
+    );
+    expect(runStatusText('Bram', 'Astra', false, true, undefined)).toBe(
+      "Stopping Astra's run in another chat…",
+    );
+  });
+
+  it('keeps the run with the familiar it was sent to after switching away', () => {
+    render(
+      <ChatLayout {...two()} familiarId="b" sessionId="s-b" busy runFamiliarId="a" messages={[]} />,
+    );
+    // Bram's empty thread stays an empty thread: no live row, no claimed run.
+    expect(screen.getByText('Chat with Bram')).toBeInTheDocument();
+    expect(screen.queryByText(/Waiting for/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Bram is responding/)).not.toBeInTheDocument();
+    expect(screen.getByText(/Astra is still responding in another chat/)).toBeInTheDocument();
+    // Stop still reaches the one active run.
+    expect(screen.getByRole('button', { name: 'Stop run' })).toBeEnabled();
+    const astra = screen.getByRole('button', { name: 'Astra' });
+    const bram = screen.getByRole('button', { name: 'Bram' });
+    expect(astra).toHaveTextContent('Responding…');
+    expect(bram).not.toHaveTextContent('Responding…');
+    fireEvent.click(screen.getByRole('button', { name: 'Activity' }));
+    expect(screen.getByRole('region', { name: 'Activity' })).toHaveTextContent(
+      'Astra is responding in another chat',
+    );
+  });
+
+  it("marks the shown familiar's own run in the sidebar and says when it is stopping", () => {
+    const { rerender } = render(
+      <ChatLayout {...two()} familiarId="a" sessionId="s-a" busy runFamiliarId="a" />,
+    );
+    expect(screen.getByRole('button', { name: 'Astra' })).toHaveTextContent('Responding…');
+    expect(screen.getByText('Waiting for Astra…')).toBeInTheDocument();
+    expect(screen.getByText('Astra is responding…')).toBeInTheDocument();
+    rerender(
+      <ChatLayout {...two()} familiarId="a" sessionId="s-a" busy runFamiliarId="a" cancelling />,
+    );
+    expect(screen.getByRole('button', { name: 'Astra' })).toHaveTextContent('Stopping…');
+    rerender(<ChatLayout {...two()} familiarId="a" sessionId="s-a" />);
+    expect(screen.getByRole('button', { name: 'Astra' })).not.toHaveTextContent(
+      /Responding|Stopping/,
+    );
+  });
+
+  it('credits the run to the shown familiar when the host does not say whose it is', () => {
+    render(<ChatLayout {...two()} familiarId="a" sessionId="s-a" busy />);
+    expect(screen.getByText('Astra is responding…')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Astra' })).toHaveTextContent('Responding…');
+  });
+});
+
+describe('inspector detail rows', () => {
+  const props = () => ({
+    ...layoutProps(),
+    connected: true,
+    ready: true,
+    familiars: [
+      { id: 'a', name: 'Astra' },
+      { id: 'b', name: 'Bram' },
+    ],
+    sessions: [
+      { id: 's-a', familiarId: 'a', title: 'a', updatedAt: '2026-09-20T11:30:00Z' },
+      { id: 's-b', familiarId: 'b', title: 'b', archived: true },
+    ],
+  });
+
+  it('reports the chat state and last activity instead of a count of every session', () => {
+    const { rerender } = render(<ChatLayout {...props()} familiarId="a" sessionId="s-a" />);
+    const overview = () => screen.getByRole('region', { name: 'Overview' });
+    expect(overview()).not.toHaveTextContent('Conversations');
+    expect(overview()).toHaveTextContent('ChatActive');
+    expect(overview().querySelector('time')?.getAttribute('datetime')).toBe('2026-09-20T11:30:00Z');
+    rerender(<ChatLayout {...props()} familiarId="b" sessionId="s-b" />);
+    expect(overview()).toHaveTextContent('ChatArchived');
+    expect(overview()).toHaveTextContent('Last activityNot reported');
+    rerender(<ChatLayout {...props()} familiars={[{ id: 'c', name: 'Cass' }]} familiarId="c" />);
+    expect(overview()).toHaveTextContent('ChatNot started');
+  });
+
+  it('counts sent messages, replies and tool calls from the transcript', () => {
+    const messages = [
+      { id: 'u1', role: 'user', text: 'hi' },
+      { id: 'a1', role: 'assistant', text: 'hello' },
+      { id: 't1', role: 'tool', text: 'Bash', tool: { name: 'Bash', args: 'ls', result: 'ok' } },
+      {
+        id: 't2',
+        role: 'tool',
+        text: 'Read',
+        tool: { name: 'Read', args: 'x', result: 'missing', isError: true },
+      },
+      { id: 'u2', role: 'user', text: 'thanks' },
+      { id: 'a2', role: 'assistant', text: '' },
+    ];
+    expect(activityCounts(messages)).toEqual({ sent: 2, replies: 1, tools: 2, failed: 1 });
+    render(<ChatLayout {...props()} familiarId="a" sessionId="s-a" messages={messages} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Activity' }));
+    const activity = screen.getByRole('region', { name: 'Activity' });
+    expect(activity).toHaveTextContent('RunIdle');
+    expect(activity).toHaveTextContent('Your messages2');
+    expect(activity).toHaveTextContent('Replies1');
+    expect(activity).toHaveTextContent('Tool calls2 · 1 failed');
+    expect(activity).not.toHaveTextContent('messages loaded');
+  });
+
+  it('names the executing tool in the Activity run row', () => {
+    render(
+      <ChatLayout
+        {...props()}
+        familiarId="a"
+        sessionId="s-a"
+        busy
+        runFamiliarId="a"
+        messages={[{ id: 't', role: 'tool', text: 'Bash', tool: { name: 'Bash', args: 'ls' } }]}
+      />,
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Activity' }));
+    expect(screen.getByRole('region', { name: 'Activity' })).toHaveTextContent('RunRunning Bash');
+    expect(screen.getByRole('region', { name: 'Activity' })).toHaveTextContent('Tool calls1');
+  });
+
+  it('tells the reader the screen viewer exists instead of calling it unavailable', () => {
+    render(<ChatLayout {...props()} familiarId="a" sessionId="s-a" />);
+    fireEvent.click(screen.getByRole('button', { name: 'Access' }));
+    const access = screen.getByRole('region', { name: 'Access' });
+    expect(access).toHaveTextContent('Show screen');
+    expect(access).not.toHaveTextContent('Screen sharing');
+  });
+});
+
+describe('sidebar search', () => {
+  it('offers to clear a search that matches nothing', () => {
+    render(<ChatLayout {...layoutProps()} connected familiars={[{ id: 'a', name: 'Astra' }]} />);
+    expect(screen.queryByRole('button', { name: 'Clear search' })).not.toBeInTheDocument();
+    fireEvent.change(screen.getByRole('searchbox'), { target: { value: 'zzz' } });
+    expect(screen.getByText('No matching familiars.')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Clear search' }));
+    expect(screen.getByRole('searchbox')).toHaveValue('');
+    expect(screen.getByRole('button', { name: 'Astra' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Clear search' })).not.toBeInTheDocument();
   });
 });

@@ -447,6 +447,12 @@
   margin-inline-start: auto;
 }
 
+/* The row whose familiar owns the active run says so in place of its age. */
+.coven-agent-live {
+  color: var(--accent-presence);
+  font-variant-numeric: normal;
+}
+
 .coven-chat .fr-thread-header-lead {
   flex: 1 1 140px;
 }
