@@ -1124,14 +1124,14 @@ describe('inspector detail rows', () => {
       { id: 'u2', role: 'user', text: 'thanks' },
       { id: 'a2', role: 'assistant', text: '' },
     ];
-    expect(activityCounts(messages)).toEqual({ sent: 2, replies: 1, tools: 2, failed: 1 });
+    expect(activityCounts(messages)).toMatchObject({ sent: 2, replies: 1, tools: 2, failed: 1 });
     render(<ChatLayout {...props()} familiarId="a" sessionId="s-a" messages={messages} />);
     fireEvent.click(screen.getByRole('button', { name: 'Activity' }));
     const activity = screen.getByRole('region', { name: 'Activity' });
     expect(activity).toHaveTextContent('RunIdle');
     expect(activity).toHaveTextContent('Your messages2');
     expect(activity).toHaveTextContent('Replies1');
-    expect(activity).toHaveTextContent('Tool calls2 · 1 failed');
+    expect(activity).toHaveTextContent('Tool callsBash 1 · Read 12 · 1 failed');
     expect(activity).not.toHaveTextContent('messages loaded');
   });
 
@@ -1148,7 +1148,7 @@ describe('inspector detail rows', () => {
     );
     fireEvent.click(screen.getByRole('button', { name: 'Activity' }));
     expect(screen.getByRole('region', { name: 'Activity' })).toHaveTextContent('RunRunning Bash');
-    expect(screen.getByRole('region', { name: 'Activity' })).toHaveTextContent('Tool calls1');
+    expect(screen.getByRole('region', { name: 'Activity' })).toHaveTextContent('Tool callsBash 11');
   });
 
   it('tells the reader the screen viewer exists instead of calling it unavailable', () => {
@@ -1544,5 +1544,42 @@ describe('notices, sizes and the shortcut reference', () => {
     expect(SHORTCUTS.map(([keys]) => keys)).toEqual(
       expect.arrayContaining(['Cmd/Ctrl+\\', 'Cmd/Ctrl+Shift+\\', 'Cmd/Ctrl+K']),
     );
+  });
+});
+
+describe('tool breakdown and the attachment hint', () => {
+  const base = () => ({
+    ...layoutProps(),
+    connected: true,
+    ready: true,
+    familiars: [{ id: 'a', name: 'Astra' }],
+    familiarId: 'a',
+    onAttach: vi.fn(),
+  });
+
+  it('lists the tools by use under the Activity count', () => {
+    const tool = (id: string, name: string) => ({
+      id,
+      role: 'tool',
+      text: name,
+      tool: { name, args: '' },
+    });
+    const messages = [tool('1', 'Read'), tool('2', 'Bash'), tool('3', 'Read'), tool('4', 'Grep')];
+    expect(activityCounts(messages).breakdown).toBe('Read 2 · Bash 1 · Grep 1');
+    expect(activityCounts([]).breakdown).toBe('');
+    render(<ChatLayout {...base()} messages={messages} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Activity' }));
+    expect(screen.getByRole('region', { name: 'Activity' })).toHaveTextContent(
+      'Tool callsRead 2 · Bash 1 · Grep 14',
+    );
+  });
+
+  it('shows the attachment limits only once a file is in play', () => {
+    const { rerender } = render(<ChatLayout {...base()} />);
+    expect(screen.queryByText(/4 files max/)).not.toBeInTheDocument();
+    rerender(<ChatLayout {...base()} attaching />);
+    expect(screen.getByText('Reading files…')).toBeInTheDocument();
+    rerender(<ChatLayout {...base()} attachments={[{ id: 'x', name: 'a.txt', bytes: [97] }]} />);
+    expect(screen.getByText('Text/code · 4 files max · 64 KiB each')).toBeInTheDocument();
   });
 });

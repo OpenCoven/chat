@@ -237,14 +237,21 @@ export function activityCounts(messages: readonly ChatMessage[]) {
   let replies = 0;
   let tools = 0;
   let failed = 0;
+  const byName = new Map<string, number>();
   for (const message of messages) {
     if (message.tool) {
       tools += 1;
       if (message.tool.isError) failed += 1;
+      byName.set(message.tool.name, (byName.get(message.tool.name) ?? 0) + 1);
     } else if (message.role === 'user') sent += 1;
     else if (message.role === 'assistant' && message.text) replies += 1;
   }
-  return { sent, replies, tools, failed };
+  // Most-used first, then by name, so the hint reads the same on every render.
+  const breakdown = [...byName.entries()]
+    .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+    .map(([name, count]) => `${name} ${count}`)
+    .join(' · ');
+  return { sent, replies, tools, failed, breakdown };
 }
 
 /** The shell's keys, listed in the sidebar footer. Every entry is wired above. */
@@ -1021,11 +1028,13 @@ export function ChatLayout(props: ChatLayoutProps) {
                       event.target.value = '';
                     }}
                   />
-                  <p className="coven-attachment-note">
-                    {props.attaching
-                      ? 'Reading files…'
-                      : 'Text/code · 4 files max · 64 KiB each · Shift+Enter for a new line'}
-                  </p>
+                  {/* The limits matter once a file is in play; until then the
+                      line was permanent noise under the composer. */}
+                  {props.attaching ? (
+                    <p className="coven-attachment-note">Reading files…</p>
+                  ) : props.attachments?.length ? (
+                    <p className="coven-attachment-note">Text/code · 4 files max · 64 KiB each</p>
+                  ) : null}
                 </>
               ) : null}
             </fieldset>
@@ -1193,7 +1202,14 @@ export function ChatLayout(props: ChatLayoutProps) {
                     <span className="fr-row-value">{counts.replies}</span>
                   </div>
                   <div className="fr-row">
-                    <span className="fr-row-label">Tool calls</span>
+                    <span className="fr-row-copy">
+                      <span className="fr-row-label">Tool calls</span>
+                      {counts.breakdown ? (
+                        <span className="fr-row-hint" title={counts.breakdown}>
+                          {counts.breakdown}
+                        </span>
+                      ) : null}
+                    </span>
                     <span className="fr-row-value">
                       {counts.failed ? `${counts.tools} · ${counts.failed} failed` : counts.tools}
                     </span>

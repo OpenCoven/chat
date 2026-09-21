@@ -115,6 +115,13 @@ export function toolFoldLabel(hidden: number, failed: number): string {
   return failed ? `Show ${calls} (${failed} failed)` : `Show ${calls}`;
 }
 
+/** How much a reported result holds, so a collapsed row says whether it is worth opening. */
+export function resultSize(result: string): string {
+  if (!result.trim()) return 'no output';
+  const lines = result.replace(/\n$/, '').split('\n').length;
+  return lines === 1 ? '1 line' : `${lines} lines`;
+}
+
 export function ToolActivity({ rows }: { rows: readonly ToolRow[] }) {
   const [expanded, setExpanded] = useState(false);
   const folded = !expanded && rows.length > TOOL_FOLD_AT;
@@ -153,6 +160,9 @@ export function ToolActivity({ rows }: { rows: readonly ToolRow[] }) {
                     <span className="coven-tool-state coven-tool-state--running">running</span>
                   ) : row.isError ? (
                     <span className="coven-tool-state">failed</span>
+                  ) : null}
+                  {!row.running && row.result !== undefined ? (
+                    <span className="coven-tool-size">{resultSize(row.result)}</span>
                   ) : null}
                   <span className="coven-tool-chevron" aria-hidden="true">
                     &#8250;

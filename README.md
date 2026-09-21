@@ -124,7 +124,8 @@ The inspector's Overview shows the familiar's purpose, identity and workspace
 (each path with its own **Copy** control),
 whether their chat is active, archived or not yet started, and its last
 activity. Activity reports the run state and counts the messages you sent, the
-replies and the tool calls (with failures) in the loaded transcript; tokens,
+replies and the tool calls (with failures, and a breakdown by tool) in the
+loaded transcript; tokens,
 cost and timing are not reported by this CLI integration.
 
 Chat and Cave are separate applications. There is no Cave import action or
@@ -195,7 +196,7 @@ own **Copy** control. When the runtime reports a call as data rather than as a
 `⚒ Name(args)` line — a `tool_start` frame from the bundled engine, a
 `tool_use` block in an assistant message, or a `tool_result` frame — the row
 also shows the input (cut at 16 KiB with a note saying so) and, once
-reported, the result, and the run status
+reported, the result (a collapsed row says how many lines it holds), and the run status
 names the tool that is executing while its row is marked as running. A run of
 more than ten consecutive calls folds to its newest six, behind a control that
 says how many earlier calls it hides and how many of those failed. The bundled engine's Claude CLI provider

@@ -294,6 +294,12 @@
   border-top: 1px solid var(--border-hairline);
 }
 
+.coven-tool-size {
+  font-size: 0.75em;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
 .coven-tool-state--running {
   color: var(--accent-presence);
 }

@@ -1,5 +1,11 @@
 import { fireEvent, render, screen } from '@testing-library/react';
-import { FormattedMessage, TOOL_FOLD_KEEP, ToolActivity, toolFoldLabel } from './formatted-message';
+import {
+  FormattedMessage,
+  resultSize,
+  TOOL_FOLD_KEEP,
+  ToolActivity,
+  toolFoldLabel,
+} from './formatted-message';
 
 test('renders headings, emphasis, lists, quotes, and fenced code as formatted text', () => {
   const { container } = render(
@@ -257,4 +263,27 @@ test('does not fold a short run of calls', () => {
   render(<ToolActivity rows={rows} />);
   expect(screen.getAllByRole('listitem')).toHaveLength(10);
   expect(screen.queryByRole('button', { name: /earlier tool/ })).not.toBeInTheDocument();
+});
+
+test('a collapsed row says how much its result holds, and nothing while it is running', () => {
+  expect(resultSize('')).toBe('no output');
+  expect(resultSize('   \n')).toBe('no output');
+  expect(resultSize('one')).toBe('1 line');
+  expect(resultSize('a\nb\nc\n')).toBe('3 lines');
+  render(
+    <ToolActivity
+      rows={[
+        { name: 'Read', args: 'a.ts', result: 'a\nb\nc' },
+        { name: 'Grep', args: 'x', result: '', isError: true },
+        { name: 'Bash', args: 'ls', running: true },
+        { name: 'Write', args: 'b.ts' },
+      ]}
+    />,
+  );
+  const rows = screen.getAllByRole('listitem');
+  expect(rows[0]).toHaveTextContent('3 lines');
+  expect(rows[1]).toHaveTextContent('failed');
+  expect(rows[1]).toHaveTextContent('no output');
+  expect(rows[2]).not.toHaveTextContent(/line|output/);
+  expect(rows[3]).not.toHaveTextContent(/line|output/);
 });
