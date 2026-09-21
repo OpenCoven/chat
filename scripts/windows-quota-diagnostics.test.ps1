@@ -314,6 +314,25 @@ namespace OpenCoven.Tests
             throw new IOException("private-second-snapshot");
         }
 
+        public static int RepeatFailureCalls;
+        public static Exception RepeatFailure;
+        public static Func<string> RepeatFailureRead { get { return RepeatFailureMetadata; } }
+        public static Func<List<FileSystemInfo>> RepeatFailureSnapshotRead { get { return RepeatFailureSnapshot; } }
+
+        public static string RepeatFailureMetadata()
+        {
+            RepeatFailureCalls++;
+            if (RepeatFailureCalls == 1) throw new UnauthorizedAccessException("private-first-denial");
+            throw RepeatFailure;
+        }
+
+        private static List<FileSystemInfo> RepeatFailureSnapshot()
+        {
+            RepeatFailureCalls++;
+            if (RepeatFailureCalls == 1) throw new UnauthorizedAccessException("private-first-denial");
+            throw RepeatFailure;
+        }
+
         public static Func<List<FileSystemInfo>> TransientSnapshotRead
         {
             get { return TransientSnapshot; }
@@ -455,6 +474,75 @@ if ($null -eq $changedSnapshotError -or
   throw 'Changed snapshot retry did not retain the initial category and bounded persistent outcome.'
 }
 Write-Host 'Snapshot retry distinguishes changed I/O failure from repeated access denial.'
+
+# Chat #219: run 35146928092 reported only `repeat=persistent` after an access
+# denial. That label could not tell a second denial from an exhausted
+# traversal-wide entry budget or a changed I/O failure. Each second-attempt
+# outcome must keep its own fixed label at both production seams, with exactly
+# one repeat and no private text.
+$repeatOutcomeCases = @(
+  @($bound, 'persistent-entry-bound'),
+  @([UnauthorizedAccessException]::new('private-second-denial'), 'persistent-access-denied'),
+  @([IO.IOException]::new('private-second-io'), 'persistent-io'),
+  @([IO.IOException]::new('private-second-sharing', -2147024864), 'persistent-io-sharing-violation'),
+  @([IO.IOException]::new('private-second-delete', -2147024593), 'persistent-io-delete-pending'),
+  @([IO.FileNotFoundException]::new('private-second-file'), 'missing'),
+  @([IO.DirectoryNotFoundException]::new('private-second-directory'), 'missing'),
+  @([InvalidOperationException]::new('private-second-unexpected'), 'persistent-unexpected')
+)
+foreach ($seam in @(
+    @('entry-attributes', $readQuota, [OpenCoven.Tests.QuotaRepeatProbe]::RepeatFailureRead),
+    @('directory-enumeration-depth-3-plus', $readSnapshot, [OpenCoven.Tests.QuotaRepeatProbe]::RepeatFailureSnapshotRead))) {
+  foreach ($outcome in $repeatOutcomeCases) {
+    [OpenCoven.Tests.QuotaRepeatProbe]::RepeatFailureCalls = 0
+    [OpenCoven.Tests.QuotaRepeatProbe]::RepeatFailure = $outcome[0]
+    $repeatOutcomeError = $null
+    try {
+      $seam[1].Invoke($null, [object[]]@($seam[0], $seam[2], $true, [Type]::Missing)) | Out-Null
+    } catch {
+      $repeatOutcomeError = $_.Exception.GetBaseException()
+    }
+    if ($null -eq $repeatOutcomeError -or $repeatOutcomeError.GetType() -ne $contextType -or
+        [OpenCoven.Tests.QuotaRepeatProbe]::RepeatFailureCalls -ne 2 -or
+        $contextType.GetProperty('Category', $instanceFlags).GetValue($repeatOutcomeError) -cne 'access-denied' -or
+        $contextType.GetProperty('Operation', $instanceFlags).GetValue($repeatOutcomeError) -cne $seam[0] -or
+        $contextType.GetProperty('Repeat', $instanceFlags).GetValue($repeatOutcomeError) -cne $outcome[1] -or
+        $repeatOutcomeError.ToString().Contains('private-')) {
+      throw "Repeat outcome lost its label at $($seam[0]): expected $($outcome[1])."
+    }
+  }
+}
+[OpenCoven.Tests.QuotaRepeatProbe]::RepeatFailure = $null
+Write-Host 'Second denial, exhausted entry budget, other I/O failures, and missing paths keep distinct repeat labels at both seams.'
+
+# The entry budget is spent across one whole traversal, not per directory, so a
+# denied directory can be followed by an entry-bound repeat with no ACL change.
+# Without injection, a real directory over a spent budget must report
+# `entry-bound` on both attempts through the production enumeration path.
+$readBoundedSnapshot = [OpenCoven.WindowsJobSupervisor].GetMethod('ReadBoundedDirectorySnapshot', $flags)
+if ($null -eq $readBoundedSnapshot) { throw 'Missing bounded directory snapshot seam.' }
+$budgetRoot = Join-Path $PSScriptRoot ('.quota-budget-' + [guid]::NewGuid().ToString('N'))
+try {
+  [IO.Directory]::CreateDirectory($budgetRoot) | Out-Null
+  [IO.File]::WriteAllText((Join-Path $budgetRoot 'first'), 'quota')
+  [IO.File]::WriteAllText((Join-Path $budgetRoot 'second'), 'quota')
+  $budgetError = $null
+  try {
+    $readBoundedSnapshot.Invoke($null, [object[]]@([string]$budgetRoot, $null, $false, 1, 3, $true)) | Out-Null
+  } catch {
+    $budgetError = $_.Exception.GetBaseException()
+  }
+  if ($null -eq $budgetError -or $budgetError.GetType() -ne $contextType -or
+      $contextType.GetProperty('Category', $instanceFlags).GetValue($budgetError) -cne 'entry-bound' -or
+      $contextType.GetProperty('Operation', $instanceFlags).GetValue($budgetError) -cne 'directory-enumeration-depth-3-plus' -or
+      $contextType.GetProperty('Repeat', $instanceFlags).GetValue($budgetError) -cne 'persistent-entry-bound' -or
+      $budgetError.ToString().Contains($budgetRoot)) {
+    throw 'Spent entry budget was not reported as entry-bound on both attempts.'
+  }
+} finally {
+  Remove-Item -LiteralPath $budgetRoot -Recurse -Force -ErrorAction SilentlyContinue
+}
+Write-Host 'A spent traversal entry budget reports entry-bound on the first attempt and its repeat.'
 
 $snapshotRoot = Join-Path $PSScriptRoot ('.quota-readable-' + [guid]::NewGuid().ToString('N'))
 try {
