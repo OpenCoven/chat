@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { projectEvents, summarizeToolInput } from './events';
+import { projectEvents, RAW_LIMIT, RAW_TRUNCATED, summarizeToolInput } from './events';
 
 describe('genuine Coven event projection', () => {
   it('preserves explicitly imported Cave system text without displaying runtime system metadata', () => {
@@ -179,6 +179,10 @@ describe('genuine Coven event projection', () => {
       tool: { id: 'toolu_1', name: 'Bash', args: 'ls -la', raw: JSON.stringify(input, null, 2) },
     });
     expect(summarizeToolInput({ other: 'x'.repeat(100) }).args).toHaveLength(81);
+    const large = summarizeToolInput({ content: 'y'.repeat(RAW_LIMIT) }).raw;
+    expect(large.endsWith(RAW_TRUNCATED)).toBe(true);
+    expect(large).toHaveLength(RAW_LIMIT + RAW_TRUNCATED.length);
+    expect(summarizeToolInput({ content: 'y'.repeat(100) }).raw).not.toContain('truncated');
     expect(summarizeToolInput({}).args).toBe('');
     expect(summarizeToolInput('plain').args).toBe('"plain"');
   });

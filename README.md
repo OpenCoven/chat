@@ -154,7 +154,8 @@ Tool calls appear as activity rows between the prose, each expanding to the
 call's arguments. When the runtime reports a call as data rather than as a
 `⚒ Name(args)` line — a `tool_start` frame from the bundled engine, a
 `tool_use` block in an assistant message, or a `tool_result` frame — the row
-also shows the full input and, once reported, the result, and the run status
+also shows the input (cut at 16 KiB with a note saying so) and, once
+reported, the result, and the run status
 names the tool that is executing. The bundled engine's Claude CLI provider
 reports calls as text only, so those rows carry the one-line summary alone.
 

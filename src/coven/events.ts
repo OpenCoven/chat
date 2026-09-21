@@ -40,14 +40,20 @@ function contentText(content: unknown, separator: string): string {
 
 const SUMMARY_KEYS = ['command', 'file_path', 'path', 'pattern', 'url', 'query', 'description'];
 const SUMMARY_LIMIT = 80;
-const RAW_LIMIT = 16 * 1024;
+/** A Write of a whole file arrives as input; the details stay readable, not complete. */
+export const RAW_LIMIT = 16 * 1024;
+export const RAW_TRUNCATED = '\n… input truncated at 16 KiB; the run received all of it.';
 
 /**
  * The one-line argument summary uses the same key preference as the engine's
  * own `⚒ Name(arg)` notice, so a structured call reads like a prose one.
  */
 export function summarizeToolInput(input: unknown): { args: string; raw: string } {
-  const raw = input === undefined ? '' : JSON.stringify(input, null, 2).slice(0, RAW_LIMIT);
+  const serialized = input === undefined ? '' : JSON.stringify(input, null, 2);
+  const raw =
+    serialized.length > RAW_LIMIT
+      ? `${serialized.slice(0, RAW_LIMIT)}${RAW_TRUNCATED}`
+      : serialized;
   if (!record(input))
     return { args: raw.length > SUMMARY_LIMIT ? `${raw.slice(0, SUMMARY_LIMIT)}…` : raw, raw };
   const preferred = SUMMARY_KEYS.map((key) => input[key]).find(
