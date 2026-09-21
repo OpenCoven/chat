@@ -1737,3 +1737,37 @@ describe('declared access and error copying', () => {
     }
   });
 });
+
+describe('collapsed list badge and transcript focus', () => {
+  const props = () => ({
+    ...layoutProps(),
+    connected: true,
+    ready: true,
+    familiars: [
+      { id: 'a', name: 'Astra' },
+      { id: 'b', name: 'Bram' },
+      { id: 'c', name: 'Cass' },
+    ],
+    familiarId: 'c',
+  });
+
+  it('counts finished runs on the collapsed familiar tab, ignoring a live one', () => {
+    const { rerender } = render(<ChatLayout {...props()} finished={{ a: 'reply', b: 'error' }} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Hide familiars' }));
+    const tab = screen.getByRole('button', { name: 'Show familiars (2 finished runs)' });
+    expect(tab).toHaveTextContent('2');
+    rerender(
+      <ChatLayout {...props()} finished={{ a: 'reply', b: 'error' }} busy runFamiliarId="a" />,
+    );
+    expect(
+      screen.getByRole('button', { name: 'Show familiars (1 finished run)' }),
+    ).toBeInTheDocument();
+    rerender(<ChatLayout {...props()} />);
+    expect(screen.getByRole('button', { name: 'Show familiars' })).not.toHaveTextContent(/\d/);
+  });
+
+  it('lets the keyboard into the transcript', () => {
+    render(<ChatLayout {...props()} />);
+    expect(screen.getByRole('log', { name: 'Messages' })).toHaveAttribute('tabindex', '0');
+  });
+});
