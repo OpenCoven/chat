@@ -38,6 +38,10 @@ function MockLayout(props: ChatLayoutProps) {
       <output data-testid="run-familiar">{props.busy ? props.runFamiliarId : 'idle'}</output>
       <output data-testid="drafts">{JSON.stringify(props.drafts ?? {})}</output>
       <output data-testid="finished">{JSON.stringify(props.finished ?? {})}</output>
+      <output data-testid="last-run">{props.lastRun ? props.lastRun.outcome : 'none'}</output>
+      <output data-testid="last-run-ms">
+        {props.lastRun && props.lastRun.ms > 2_000 ? 'slow' : 'quick'}
+      </output>
       <output data-testid="connected">{String(props.connected)}</output>
       <output data-testid="ready">{String(props.ready)}</output>
       <output>{props.status}</output>
@@ -450,6 +454,52 @@ describe('canonical familiar controller', () => {
     await screen.findByRole('button', { name: 'Try again' });
     draft('a new idea, edited');
     expect(screen.queryByRole('button', { name: 'Try again' })).not.toBeInTheDocument();
+  });
+
+  it("records how the shown familiar's most recent run ended", async () => {
+    const api = runtime();
+    await ready(api);
+    expect(screen.getByTestId('last-run')).toHaveTextContent('none');
+    draft('work');
+    click('Send');
+    await waitFor(() => expect(screen.getByTestId('last-run')).toHaveTextContent('reply'));
+    vi.mocked(api.send).mockRejectedValueOnce(new Error('engine exited'));
+    draft('more');
+    click('Send');
+    await waitFor(() => expect(screen.getByTestId('last-run')).toHaveTextContent('error'));
+    // Another familiar has no run of its own yet.
+    click('Other familiar');
+    await waitFor(() => expect(screen.getByTestId('familiar')).toHaveTextContent('g'));
+    expect(screen.getByTestId('last-run')).toHaveTextContent('none');
+    // The account describes this window, so a refresh keeps it.
+    click('First familiar');
+    await waitFor(() => expect(screen.getByTestId('last-run')).toHaveTextContent('error'));
+    click('Refresh');
+    await waitFor(() => expect(screen.getByRole('textbox')).toBeEnabled());
+    expect(screen.getByTestId('last-run')).toHaveTextContent('error');
+  });
+
+  it('measures a run to its own end, not to the end of the session reload that follows', async () => {
+    const api = runtime();
+    const reload = deferred<CovenSession[]>();
+    vi.mocked(api.listSessions)
+      .mockResolvedValueOnce([first, second])
+      .mockReturnValueOnce(reload.promise);
+    await ready(api);
+    draft('work');
+    click('Send');
+    // The run has finished; the reload has not. Its duration is already fixed,
+    // so ten seconds of reload latency must not reach the account.
+    await waitFor(() => expect(api.listSessions).toHaveBeenCalledTimes(2));
+    vi.useFakeTimers({ toFake: ['Date'] });
+    try {
+      vi.setSystemTime(Date.now() + 10_000);
+      await act(async () => reload.resolve([first, second]));
+    } finally {
+      vi.useRealTimers();
+    }
+    await waitFor(() => expect(screen.getByTestId('last-run')).toHaveTextContent('reply'));
+    expect(screen.getByTestId('last-run-ms')).toHaveTextContent('quick');
   });
 
   it('marks a failed run as failed and leaves no marker for a run the reader is watching', async () => {

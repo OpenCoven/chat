@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   activityTime,
   formatAbsoluteTime,
+  formatElapsed,
   formatRelativeTime,
   formatUpdatedCaption,
 } from './relative-time';
@@ -61,5 +62,16 @@ describe('formatUpdatedCaption', () => {
   it('shows nothing for a value that is not a date', () => {
     expect(formatUpdatedCaption('today', now)).toBe('');
     expect(formatUpdatedCaption(undefined, now)).toBe('');
+  });
+});
+
+describe('formatElapsed', () => {
+  it('scales from seconds to minutes to hours and never goes negative', () => {
+    expect(formatElapsed(-500)).toBe('0s');
+    expect(formatElapsed(999)).toBe('0s');
+    expect(formatElapsed(12_000)).toBe('12s');
+    expect(formatElapsed(75_000)).toBe('1m 15s');
+    expect(formatElapsed(600_000)).toBe('10m 00s');
+    expect(formatElapsed(3_720_000)).toBe('1h 02m');
   });
 });

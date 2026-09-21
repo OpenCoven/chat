@@ -22,6 +22,9 @@
 .coven-lifecycle {
   min-width: 0;
 }
+.coven-lifecycle-danger {
+  color: var(--color-danger);
+}
 .coven-lifecycle-filter {
   padding: 8px 16px;
   margin: 0;

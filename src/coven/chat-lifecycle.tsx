@@ -1,5 +1,12 @@
 import { useEffect, useRef, useState } from 'react';
+import { Icon } from '../design/minimal-icons';
 import type { ChatLifecycle } from '../lib/coven-runtime';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '../ui/dropdown-menu';
 import './chat-lifecycle.css';
 
 export function ChatLifecycleControls({
@@ -32,22 +39,36 @@ export function ChatLifecycleControls({
   return (
     <div className="coven-lifecycle">
       {archived && <span className="coven-archived-label">Archived · restore to send</span>}
-      <button
-        type="button"
-        className="fr-btn fr-btn--secondary"
-        disabled={disabled}
-        onClick={() => onChange(archived ? 'active' : 'archived')}
-      >
-        {archived ? 'Restore chat' : 'Archive chat'}
-      </button>
-      <button
-        type="button"
-        className="fr-btn fr-btn--secondary"
-        disabled={disabled}
-        onClick={() => setConfirming(true)}
-      >
-        Delete chat
-      </button>
+      {/* Restoring is what lets the reader send again, so it stays in view;
+          the rarer actions wait in the menu. */}
+      {archived && (
+        <button
+          type="button"
+          className="fr-btn fr-btn--secondary"
+          disabled={disabled}
+          onClick={() => onChange('active')}
+        >
+          Restore chat
+        </button>
+      )}
+      <DropdownMenu>
+        <DropdownMenuTrigger
+          className="fr-icon-btn fr-icon-btn--sm coven-lifecycle-trigger"
+          aria-label="Chat actions"
+          title="Chat actions"
+          disabled={disabled}
+        >
+          <Icon name="dots-three" size={16} />
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end">
+          {!archived && (
+            <DropdownMenuItem onClick={() => onChange('archived')}>Archive chat</DropdownMenuItem>
+          )}
+          <DropdownMenuItem className="coven-lifecycle-danger" onClick={() => setConfirming(true)}>
+            Delete chat
+          </DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
       <dialog
         ref={dialog}
         className="coven-delete-dialog"

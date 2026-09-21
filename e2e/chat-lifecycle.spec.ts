@@ -60,7 +60,8 @@ test('archives and restores across reload through the archived view', async ({ p
   // The control lives inside a collapsed User settings disclosure.
   await expect(archived).not.toBeVisible();
   await expect(page.getByRole('button', { name: /^(Active|Archived)$/ })).toHaveCount(0);
-  await page.getByRole('button', { name: 'Archive chat', exact: true }).click();
+  await page.getByRole('button', { name: 'Chat actions' }).click();
+  await page.getByRole('menuitem', { name: 'Archive chat' }).click();
   await expect(page.getByRole('button', { name: 'Lifecycle familiar', exact: true })).toHaveCount(
     0,
   );
@@ -89,7 +90,11 @@ test('archives and restores across reload through the archived view', async ({ p
 test('confirms app-local delete and never lists tombstones', async ({ page }) => {
   await expect(page.getByRole('textbox', { name: 'Message Lifecycle familiar' })).toBeEnabled();
   await expect(page.getByText('Retained local history.')).toBeVisible();
-  await page.getByRole('button', { name: 'Delete chat', exact: true }).click();
+  const openDelete = async () => {
+    await page.getByRole('button', { name: 'Chat actions' }).click();
+    await page.getByRole('menuitem', { name: 'Delete chat' }).click();
+  };
+  await openDelete();
   const dialog = page.getByRole('dialog', { name: 'Delete chat from this app?' });
   await expect(dialog).toBeVisible();
   await expect(dialog).toContainText(/Original CLI.*history is untouched/);
@@ -99,7 +104,7 @@ test('confirms app-local delete and never lists tombstones', async ({ page }) =>
   await page.keyboard.press('Escape');
   await expect(dialog).not.toBeVisible();
   expect(await page.evaluate(() => localStorage.getItem('fixture-lifecycle'))).toBeNull();
-  await page.getByRole('button', { name: 'Delete chat', exact: true }).click();
+  await openDelete();
   await dialog.getByRole('button', { name: 'Delete from Chat' }).click();
   await expect(page.getByText('Retained local history.')).toHaveCount(0);
   expect(await page.evaluate(() => localStorage.getItem('fixture-lifecycle'))).toBe('deleted');
@@ -107,7 +112,7 @@ test('confirms app-local delete and never lists tombstones', async ({ page }) =>
   await expect(page.getByRole('button', { name: 'Refresh Coven' })).toBeEnabled();
   await expect(page.getByText('Retained local history.')).toHaveCount(0);
   await expect(page.getByRole('button', { name: 'Lifecycle familiar', exact: true })).toBeVisible();
-  await expect(page.getByRole('button', { name: 'Delete chat', exact: true })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Chat actions' })).toHaveCount(0);
   const archived = page.getByRole('checkbox', { name: 'Show archived chats' });
   await expect(archived).not.toBeVisible();
   await page.getByText('User settings', { exact: true }).click();

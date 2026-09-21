@@ -59,7 +59,8 @@ desktop webviews so long paths do not push the composer out of view.
 Connection diagnostics are collapsed during normal use. Run status and Stop
 stay beside the composer, and the end of the thread shows the familiar's
 avatar with what the run is doing right now (waiting for the familiar, running
-a named tool, or stopping) until reply text starts to stream. A run belongs to
+a named tool, or stopping) until reply text starts to stream, and the status
+counts how long the run has been going. A run belongs to
 the familiar it was sent to: if you switch to another familiar while it is
 live, that familiar's sidebar row reads **Responding…**, the status beside the
 composer names them and says the composer is free once their run finishes or
@@ -108,7 +109,8 @@ The sidebar is an agent list: each familiar has one canonical, persistent Chat
 conversation. Select a familiar to return to that thread. There is no separate
 familiar selector or new-conversation chooser. Rows are ordered by the most
 recent activity Coven reports, each captioned with how long ago that was
-(hover for the full timestamp); familiars whose chats carry no readable
+(hover for the full timestamp, and the captions age on their own while the
+window stays open); familiars whose chats carry no readable
 timestamp keep the CLI's order after them; hovering a row shows the familiar's
 purpose. The search box matches a familiar's name, identity, or purpose. From the search box, **Enter**
 opens the first match, **Escape** clears the filter, and the arrow keys move
@@ -123,8 +125,10 @@ heading.
 The inspector's Overview shows the familiar's purpose, identity and workspace
 (each path with its own **Copy** control),
 whether their chat is active, archived or not yet started, and its last
-activity. Activity reports the run state and counts the messages you sent, the
-replies and the tool calls (with failures) in the loaded transcript; tokens,
+activity. Activity reports the run state, how the most recent run in this window
+ended and how long it took, and counts the messages you sent, the
+replies and the tool calls (with failures, and a breakdown by tool) in the
+loaded transcript; tokens,
 cost and timing are not reported by this CLI integration.
 
 Chat and Cave are separate applications. There is no Cave import action or
@@ -141,7 +145,10 @@ turns were replayed and whether older ones were left out. That notice is a
 quiet line between messages, not a reply from anyone. The saved transcript
 keeps only your original message, not the replayed prompt.
 
-**Archive chat** keeps the saved history and hides the familiar from the active list.
+The chat's actions live behind the **Chat actions** control (the ⋯ in the
+thread header). **Archive chat** keeps the saved history and hides the
+familiar from the active list; an archived chat shows **Restore chat** in the
+header itself, since restoring is what lets you send again.
 This interface only shows active familiar chats: it has no User settings or
 archived-chat browser. Archived history is preserved, and archive state survives
 refreshes and app restarts.
@@ -195,7 +202,7 @@ own **Copy** control. When the runtime reports a call as data rather than as a
 `⚒ Name(args)` line — a `tool_start` frame from the bundled engine, a
 `tool_use` block in an assistant message, or a `tool_result` frame — the row
 also shows the input (cut at 16 KiB with a note saying so) and, once
-reported, the result, and the run status
+reported, the result (a collapsed row says how many lines it holds), and the run status
 names the tool that is executing while its row is marked as running. A run of
 more than ten consecutive calls folds to its newest six, behind a control that
 says how many earlier calls it hides and how many of those failed. The bundled engine's Claude CLI provider

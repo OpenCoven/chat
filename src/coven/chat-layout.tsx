@@ -41,10 +41,12 @@ import {
 import {
   activityTime,
   formatAbsoluteTime,
+  formatElapsed,
   formatRelativeTime,
   formatUpdatedCaption,
 } from './relative-time';
 import { type LoadRfb, ScreenViewer } from './screen-viewer';
+import { useNow } from './use-now';
 import { useViewportTier } from './viewport';
 import '../design/familiars-shell.css';
 import './chat-app.css';
@@ -96,6 +98,10 @@ export type ChatLayoutProps = Readonly<{
    * live; absent, the run is credited to the shown familiar.
    */
   runFamiliarId?: string;
+  /** When the active run started (epoch ms); the status shows how long it has run. */
+  runStartedAt?: number;
+  /** How the shown familiar's most recent run in this window ended, and how long it took. */
+  lastRun?: Readonly<{ ms: number; outcome: 'reply' | 'error' | 'stopped' }>;
   /**
    * Familiars whose run ended while another was shown, by outcome, until they
    * are opened again. Their rows say so.
@@ -231,20 +237,35 @@ export function matchesFamiliar(
   );
 }
 
+/** The Activity tab's account of the most recent run: how it ended, and how long it took. */
+export function lastRunText(run: Readonly<{ ms: number; outcome: 'reply' | 'error' | 'stopped' }>) {
+  const took = formatElapsed(run.ms);
+  if (run.outcome === 'reply') return `Replied in ${took}`;
+  if (run.outcome === 'error') return `Failed after ${took}`;
+  return `Stopped after ${took}`;
+}
+
 /** Counts for the inspector's Activity tab, from the loaded transcript alone. */
 export function activityCounts(messages: readonly ChatMessage[]) {
   let sent = 0;
   let replies = 0;
   let tools = 0;
   let failed = 0;
+  const byName = new Map<string, number>();
   for (const message of messages) {
     if (message.tool) {
       tools += 1;
       if (message.tool.isError) failed += 1;
+      byName.set(message.tool.name, (byName.get(message.tool.name) ?? 0) + 1);
     } else if (message.role === 'user') sent += 1;
     else if (message.role === 'assistant' && message.text) replies += 1;
   }
-  return { sent, replies, tools, failed };
+  // Most-used first, then by name, so the hint reads the same on every render.
+  const breakdown = [...byName.entries()]
+    .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+    .map(([name, count]) => `${name} ${count}`)
+    .join(' · ');
+  return { sent, replies, tools, failed, breakdown };
 }
 
 /** The shell's keys, listed in the sidebar footer. Every entry is wired above. */
@@ -355,7 +376,10 @@ export function ChatLayout(props: ChatLayoutProps) {
   const runName =
     props.familiars.find((item) => item.id === runFamiliarId)?.name ?? 'Another familiar';
   const composer = composerCopy(props.connected, familiar?.name);
-  const updated = formatUpdatedCaption(session?.updatedAt);
+  // Captions age while the window sits open; a live run counts by the second.
+  const now = useNow(props.busy ? 1000 : 60_000);
+  const updated = formatUpdatedCaption(session?.updatedAt, now);
+  const elapsed = props.busy && props.runStartedAt ? formatElapsed(now - props.runStartedAt) : '';
   const workspace = session?.projectRoot || familiar?.workspace;
   const workspaceLabel = session?.projectRoot ? 'Chat project' : 'Familiar workspace';
   const composerDisabled =
@@ -581,7 +605,7 @@ export function ChatLayout(props: ChatLayoutProps) {
             <div className="fr-conv-list" ref={listRef}>
               {agents.map((item, index) => {
                 const thread = headOf(item.id);
-                const when = formatRelativeTime(thread?.updatedAt);
+                const when = formatRelativeTime(thread?.updatedAt, now);
                 const live = props.busy && item.id === runFamiliarId;
                 const draft = props.drafts?.[item.id]?.trim() ?? '';
                 const done = live ? undefined : props.finished?.[item.id];
@@ -746,6 +770,7 @@ export function ChatLayout(props: ChatLayoutProps) {
             <FamIconButton
               icon="arrow-clockwise"
               label="Refresh Coven"
+              className={props.loading ? 'coven-refreshing' : undefined}
               disabled={props.busy || props.loading || props.lifecycleBusy}
               onClick={props.onRefresh}
             />
@@ -821,6 +846,12 @@ export function ChatLayout(props: ChatLayoutProps) {
                     </div>
                   </div>
                 </div>
+              ) : block.message.role === 'output' ? (
+                // Raw engine output: text the runtime printed outside the
+                // protocol. Shown as it came, attributed to no one.
+                <section className="coven-output" key={block.message.id} aria-label="Engine output">
+                  <pre>{block.message.text}</pre>
+                </section>
               ) : block.message.role === 'notice' ? (
                 // Chat's own disclosure (a replayed-history notice): a quiet
                 // line between messages, not a reply from anyone.
@@ -953,6 +984,7 @@ export function ChatLayout(props: ChatLayoutProps) {
             {props.busy && (
               <output className="coven-run-status">
                 {runStatusText(name, runName, runHere, props.cancelling, runningTool)}
+                {elapsed ? <span className="coven-run-elapsed"> · {elapsed}</span> : null}
               </output>
             )}
             {props.readOnly && (
@@ -1021,11 +1053,13 @@ export function ChatLayout(props: ChatLayoutProps) {
                       event.target.value = '';
                     }}
                   />
-                  <p className="coven-attachment-note">
-                    {props.attaching
-                      ? 'Reading files…'
-                      : 'Text/code · 4 files max · 64 KiB each · Shift+Enter for a new line'}
-                  </p>
+                  {/* The limits matter once a file is in play; until then the
+                      line was permanent noise under the composer. */}
+                  {props.attaching ? (
+                    <p className="coven-attachment-note">Reading files…</p>
+                  ) : props.attachments?.length ? (
+                    <p className="coven-attachment-note">Text/code · 4 files max · 64 KiB each</p>
+                  ) : null}
                 </>
               ) : null}
             </fieldset>
@@ -1184,6 +1218,12 @@ export function ChatLayout(props: ChatLayoutProps) {
                               : `${name} is responding`}
                     </span>
                   </div>
+                  {props.lastRun ? (
+                    <div className="fr-row">
+                      <span className="fr-row-label">Last run</span>
+                      <span className="fr-row-value">{lastRunText(props.lastRun)}</span>
+                    </div>
+                  ) : null}
                   <div className="fr-row">
                     <span className="fr-row-label">Your messages</span>
                     <span className="fr-row-value">{counts.sent}</span>
@@ -1193,7 +1233,14 @@ export function ChatLayout(props: ChatLayoutProps) {
                     <span className="fr-row-value">{counts.replies}</span>
                   </div>
                   <div className="fr-row">
-                    <span className="fr-row-label">Tool calls</span>
+                    <span className="fr-row-copy">
+                      <span className="fr-row-label">Tool calls</span>
+                      {counts.breakdown ? (
+                        <span className="fr-row-hint" title={counts.breakdown}>
+                          {counts.breakdown}
+                        </span>
+                      ) : null}
+                    </span>
                     <span className="fr-row-value">
                       {counts.failed ? `${counts.tools} · ${counts.failed} failed` : counts.tools}
                     </span>

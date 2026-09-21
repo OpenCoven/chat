@@ -164,6 +164,11 @@
   font-size: 12px;
 }
 
+.coven-run-elapsed {
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
 .coven-jump-latest {
   display: flex;
   align-items: center;
@@ -709,6 +714,39 @@
   line-height: 1.5;
   text-align: center;
   text-wrap: balance;
+}
+
+/* Raw engine output: a quiet mono block, addressed by no one. */
+.coven-chat .coven-output {
+  padding: 8px 12px;
+  border-left: 2px solid var(--border-hairline);
+  color: var(--text-secondary);
+}
+
+.coven-chat .coven-output pre {
+  margin: 0;
+  font-family: var(--font-jetbrains-mono);
+  font-size: 11.5px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* The refresh control turns while the CLI is being read. */
+.coven-refreshing svg {
+  animation: coven-refresh-spin 1s linear infinite;
+}
+
+@keyframes coven-refresh-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .coven-refreshing svg {
+    animation: none;
+  }
 }
 
 /* The footer's shortcut reference, folded until asked for. */

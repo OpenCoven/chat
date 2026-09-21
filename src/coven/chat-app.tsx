@@ -17,6 +17,7 @@ const STORAGE_KEY = 'opencoven.chat.navigation.v1';
 /** One transcript update per frame keeps long streams smooth. */
 const STREAM_FLUSH_MS = 16;
 type Navigation = { familiarId: string; sessionId: string; drafts: Record<string, string> };
+type LastRun = { ms: number; outcome: 'reply' | 'error' | 'stopped' };
 function errorText(error: unknown) {
   return error instanceof Error ? error.message : String(error);
 }
@@ -118,6 +119,9 @@ export function ChatApp({
   // The familiar the active run addresses. Selection may move while a run is
   // live, and the layout must not credit the run to whichever familiar is shown.
   const [runFamiliarId, setRunFamiliarId] = useState('');
+  const [runStartedAt, setRunStartedAt] = useState(0);
+  // How each familiar's most recent run in this window ended, and how long it took.
+  const [lastRuns, setLastRuns] = useState<Record<string, LastRun>>({});
   // Runs that ended while another familiar was shown, until that familiar is
   // opened again: the sidebar row says a reply arrived or the run failed.
   const [finished, setFinished] = useState<Record<string, 'reply' | 'error'>>({});
@@ -158,6 +162,8 @@ export function ChatApp({
     setChangingLifecycle(false);
     setBusy(false);
     setRunFamiliarId('');
+    setRunStartedAt(0);
+    // lastRuns survives a refresh: it describes this window, not this load.
     setFinished({});
     setCancelling(false);
     setLoading(true);
@@ -285,6 +291,8 @@ export function ChatApp({
     const life = lifetime.current;
     setBusy(true);
     setRunFamiliarId(current.familiarId);
+    const startedAt = Date.now();
+    setRunStartedAt(startedAt);
     setError('');
     const previousOutput = runOutputs[key]?.events ?? [];
     let streamed: CovenRunEvent[] = [];
@@ -349,6 +357,8 @@ export function ChatApp({
       publish(streamed.slice(), errorText(failure));
       if (!run.cancelRequested) outcome = 'error';
     } finally {
+      // The run is over here; the session reload below is not part of it.
+      const finishedAt = Date.now();
       if (lifetime.current === life) {
         if (!completed) {
           const latest = navigationRef.current;
@@ -382,7 +392,12 @@ export function ChatApp({
       if (lifetime.current === life) {
         setBusy(false);
         setRunFamiliarId('');
+        setRunStartedAt(0);
         setCancelling(false);
+        setLastRuns((previous) => ({
+          ...previous,
+          [current.familiarId]: { ms: finishedAt - startedAt, outcome: outcome || 'stopped' },
+        }));
         if (outcome && navigationRef.current.familiarId !== current.familiarId) {
           const result = outcome;
           setFinished((previous) => ({ ...previous, [current.familiarId]: result }));
@@ -571,6 +586,8 @@ export function ChatApp({
       }
       busy={busy}
       runFamiliarId={runFamiliarId}
+      runStartedAt={runStartedAt}
+      {...(lastRuns[navigation.familiarId] ? { lastRun: lastRuns[navigation.familiarId] } : {})}
       finished={finished}
       loading={loading}
       cancelling={cancelling}
