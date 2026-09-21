@@ -7,6 +7,7 @@ import {
   type CovenSession,
   createCovenRuntime,
 } from '../lib/coven-runtime';
+import { defaultScreenRelay, type ScreenRelay } from '../lib/screen-relay';
 import { type ChatAttachment, MAX_ATTACHMENTS, readAttachments } from './attachments';
 import { ChatLayout } from './chat-layout';
 import { projectEvents } from './events';
@@ -93,7 +94,13 @@ function selectCanonical(
   return next;
 }
 
-export function ChatApp({ runtime = defaultRuntime }: { runtime?: CovenRuntime }) {
+export function ChatApp({
+  runtime = defaultRuntime,
+  screen = defaultScreenRelay,
+}: {
+  runtime?: CovenRuntime;
+  screen?: ScreenRelay;
+}) {
   const [saved] = useState(readNavigation);
   const [navigation, setNavigation] = useState(saved.navigation);
   const navigationRef = useRef(navigation);
@@ -108,6 +115,9 @@ export function ChatApp({ runtime = defaultRuntime }: { runtime?: CovenRuntime }
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(saved.error);
   const [busy, setBusy] = useState(false);
+  // The familiar the active run addresses. Selection may move while a run is
+  // live, and the layout must not credit the run to whichever familiar is shown.
+  const [runFamiliarId, setRunFamiliarId] = useState('');
   const draftVersions = useRef<Record<string, number>>({});
   const [cancelling, setCancelling] = useState(false);
   const [archived, setArchived] = useState(false);
@@ -141,6 +151,7 @@ export function ChatApp({ runtime = defaultRuntime }: { runtime?: CovenRuntime }
     lifecyclePending.current = null;
     setChangingLifecycle(false);
     setBusy(false);
+    setRunFamiliarId('');
     setCancelling(false);
     setLoading(true);
     setAvailable(false);
@@ -265,6 +276,7 @@ export function ChatApp({ runtime = defaultRuntime }: { runtime?: CovenRuntime }
     setAttachments(attachmentRef.current);
     const life = lifetime.current;
     setBusy(true);
+    setRunFamiliarId(current.familiarId);
     setError('');
     const previousOutput = runOutputs[key]?.events ?? [];
     let streamed: CovenRunEvent[] = [];
@@ -355,6 +367,7 @@ export function ChatApp({ runtime = defaultRuntime }: { runtime?: CovenRuntime }
       if (activeRun.current === run) activeRun.current = null;
       if (lifetime.current === life) {
         setBusy(false);
+        setRunFamiliarId('');
         setCancelling(false);
       }
     }
@@ -509,6 +522,7 @@ export function ChatApp({ runtime = defaultRuntime }: { runtime?: CovenRuntime }
           'avatarUrl' in item && typeof item.avatarUrl === 'string' ? item.avatarUrl : undefined,
       }))}
       sessions={sessions}
+      screen={screen}
       messages={messages}
       familiarId={navigation.familiarId}
       sessionId={navigation.sessionId}
@@ -526,9 +540,18 @@ export function ChatApp({ runtime = defaultRuntime }: { runtime?: CovenRuntime }
         !sessions.some((item) => item.id === navigation.sessionId && item.archived)
       }
       busy={busy}
+      runFamiliarId={runFamiliarId}
       loading={loading}
       cancelling={cancelling}
       error={error || runOutputs[draftKey(navigation)]?.error || ''}
+      onDismissError={() => {
+        setError('');
+        const key = draftKey(navigationRef.current);
+        setRunOutputs((previous) => {
+          const output = previous[key];
+          return output?.error ? { ...previous, [key]: { ...output, error: '' } } : previous;
+        });
+      }}
       onFamiliar={(id) => {
         if (lifecyclePending.current) return;
         setError('');

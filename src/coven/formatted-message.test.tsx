@@ -180,3 +180,43 @@ test('structured rows show the full input and the result once reported, and mark
   expect(failed[0]).toHaveTextContent('failed');
   expect(failed[0]?.querySelector('.coven-tool-result')).toHaveTextContent('exit 1');
 });
+
+test('fenced code names its language and copies the block without the trailing newline', async () => {
+  const writeText = vi.fn().mockResolvedValue(undefined);
+  const original = Object.getOwnPropertyDescriptor(navigator, 'clipboard');
+  Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } });
+  try {
+    const { container } = render(
+      <FormattedMessage text={'Run:\n\n```sh\necho "hi"\nls\n```\n\n```\nplain\n```'} />,
+    );
+    expect(container.querySelectorAll('.coven-code')).toHaveLength(2);
+    expect(container.querySelector('.coven-code-lang')).toHaveTextContent('sh');
+    expect(container.querySelectorAll('.coven-code-lang')[1]).toHaveTextContent('code');
+    fireEvent.click(screen.getByRole('button', { name: 'Copy sh code' }));
+    expect(writeText).toHaveBeenCalledWith('echo "hi"\nls');
+    await screen.findByText('Copied');
+    fireEvent.click(screen.getByRole('button', { name: 'Copy code' }));
+    expect(writeText).toHaveBeenLastCalledWith('plain');
+    // The copy control never becomes part of the code a reader selects.
+    expect(container.querySelector('pre')?.textContent).toBe('echo "hi"\nls\n');
+  } finally {
+    if (original) Object.defineProperty(navigator, 'clipboard', original);
+    else Reflect.deleteProperty(navigator, 'clipboard');
+  }
+});
+
+test('marks the call a live run is executing as running', () => {
+  render(
+    <ToolActivity
+      rows={[
+        { name: 'Read', args: 'a.ts', result: 'ok' },
+        { name: 'Bash', args: 'ls', running: true },
+      ]}
+    />,
+  );
+  const rows = screen.getAllByRole('listitem');
+  expect(rows[0]).not.toHaveAttribute('data-running');
+  expect(rows[1]).toHaveAttribute('data-running', 'true');
+  expect(rows[1]).toHaveTextContent('running');
+  expect(screen.queryByText('failed')).not.toBeInTheDocument();
+});

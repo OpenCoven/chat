@@ -182,8 +182,14 @@
   outline-offset: 2px;
 }
 
-.coven-tool-chevron {
+.coven-tool-tail {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
   align-self: center;
+}
+
+.coven-tool-chevron {
   color: var(--text-muted);
 }
 
@@ -230,7 +236,6 @@
 }
 
 .coven-tool-state {
-  margin-inline-start: 0.5em;
   font-size: 0.75em;
   letter-spacing: 0.04em;
   text-transform: uppercase;
@@ -243,4 +248,112 @@
 
 .coven-formatted .coven-tool-result {
   border-top: 1px solid var(--border-hairline);
+}
+
+.coven-tool-state--running {
+  color: var(--accent-presence);
+}
+
+.coven-tool[data-running] .coven-tool-glyph {
+  animation: coven-tool-pulse 1.2s ease-in-out infinite;
+}
+
+@keyframes coven-tool-pulse {
+  0%,
+  100% {
+    box-shadow: 0 0 0 3px color-mix(in oklch, var(--accent-presence) 18%, transparent);
+  }
+  50% {
+    box-shadow: 0 0 0 5px color-mix(in oklch, var(--accent-presence) 30%, transparent);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .coven-tool[data-running] .coven-tool-glyph {
+    animation: none;
+  }
+}
+
+/*
+ * Fenced code. The bar names the language and offers a copy control; the
+ * block below keeps its own horizontal scroll so a long line never widens
+ * the reply.
+ */
+.coven-formatted .coven-code {
+  margin: 0.75em 0;
+  min-width: 0;
+  max-width: 100%;
+  border: 1px solid var(--border-hairline);
+  border-radius: 8px;
+  background: var(--bg-sunken);
+  overflow: hidden;
+}
+
+.coven-code-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 4px 6px 4px 12px;
+  border-bottom: 1px solid var(--border-hairline);
+  background: color-mix(in oklch, var(--bg-elevated) 60%, transparent);
+}
+
+.coven-code-lang {
+  font-family: var(--font-jetbrains-mono);
+  font-size: 10.5px;
+  letter-spacing: 0.04em;
+  text-transform: lowercase;
+  color: var(--text-muted);
+}
+
+.coven-formatted .coven-code pre {
+  margin: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+
+/*
+ * The copy control. Quiet until pointed at; the label carries the outcome so
+ * a reader who cannot see the icon change still knows whether it worked.
+ */
+.coven-copy {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-height: 22px;
+  padding: 2px 7px;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--text-muted);
+  font: inherit;
+  font-size: 11px;
+  line-height: 1;
+  cursor: pointer;
+  transition:
+    color 120ms,
+    background-color 120ms,
+    border-color 120ms;
+}
+
+.coven-copy:hover {
+  border-color: var(--border-hairline);
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.coven-copy:focus-visible {
+  outline: 2px solid var(--ring-focus);
+  outline-offset: 1px;
+  color: var(--text-primary);
+}
+
+.coven-copy[data-state="copied"] {
+  color: var(--accent-presence);
+}
+
+.coven-copy[data-state="failed"] {
+  color: var(--color-danger);
 }

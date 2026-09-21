@@ -55,8 +55,16 @@ switch or permission grant. The reference picker opens above the app on modern
 desktop webviews so long paths do not push the composer out of view.
 
 Connection diagnostics are collapsed during normal use. Run status and Stop
-stay beside the composer; **Jump to latest** returns to new output after you
-scroll back. Replies and the composer share a responsive reading column up to
+stay beside the composer, and the end of the thread shows the familiar's
+avatar with what the run is doing right now (waiting for the familiar, running
+a named tool, or stopping) until reply text starts to stream. A run belongs to
+the familiar it was sent to: if you switch to another familiar while it is
+live, that familiar's sidebar row reads **Responding…**, the status beside the
+composer names them and says the composer is free once their run finishes or
+is stopped, and the thread you are viewing does not claim the run. **Jump to
+latest** returns to new output after you scroll back and counts the messages
+that arrived while you were reading. Error notices carry a dismiss control; a
+notice also clears on the next send, familiar switch, or refresh. Replies and the composer share a responsive reading column up to
 1200px wide (36% wider than the previous 880px limit), while
 the application frame remains stationary.
 The window can shrink to 480×520: above 1100px every rail stays in the grid,
@@ -93,7 +101,18 @@ runtime does not fall back to Cave.
 
 The sidebar is an agent list: each familiar has one canonical, persistent Chat
 conversation. Select a familiar to return to that thread. There is no separate
-familiar selector or new-conversation chooser.
+familiar selector or new-conversation chooser. Rows are ordered by the most
+recent activity Coven reports, each captioned with how long ago that was
+(hover for the full timestamp); familiars whose chats carry no readable
+timestamp keep the CLI's order after them. From the search box, **Enter**
+opens the first match, **Escape** clears the filter, and the arrow keys move
+into and along the list. A search that matches nothing offers **Clear search**.
+
+The inspector's Overview shows the familiar's purpose, identity and workspace,
+whether their chat is active, archived or not yet started, and its last
+activity. Activity reports the run state and counts the messages you sent, the
+replies and the tool calls (with failures) in the loaded transcript; tokens,
+cost and timing are not reported by this CLI integration.
 
 Chat and Cave are separate applications. There is no Cave import action or
 runtime import command, and Cave history does not appear in Chat. Previously
@@ -149,6 +168,10 @@ edited the new draft; later edits are never overwritten.
 Assistant replies render Markdown headings, lists, emphasis, quotes, code,
 tables, and task lists. Wide code and tables scroll inside the message.
 Raw HTML is disabled and remote Markdown images are not fetched automatically.
+Each reply has a **Copy** control that copies its Markdown source, and each
+fenced code block names its language with its own **Copy** control for the
+code alone. The control reports "Copied" only after the clipboard accepted
+the text and "Copy failed" when it did not.
 
 Tool calls appear as activity rows between the prose, each expanding to the
 call's arguments. When the runtime reports a call as data rather than as a
@@ -156,8 +179,35 @@ call's arguments. When the runtime reports a call as data rather than as a
 `tool_use` block in an assistant message, or a `tool_result` frame — the row
 also shows the input (cut at 16 KiB with a note saying so) and, once
 reported, the result, and the run status
-names the tool that is executing. The bundled engine's Claude CLI provider
+names the tool that is executing while its row is marked as running. The bundled engine's Claude CLI provider
 reports calls as text only, so those rows carry the one-line summary alone.
+
+## Remote screen (VNC)
+
+The **Show screen** button in the thread header opens a viewer pane above the
+transcript. Enter the WebSocket address of a VNC server that speaks the noVNC
+transport (for example the `websockify` endpoint of a Daytona sandbox, with its
+access token in the query string), an optional password, and choose
+**Connect**. The desktop appears scaled to fit and starts **view only**; clear
+that toggle to send mouse and keyboard input. The status line names the
+desktop reported by the server, and a failure names the reason the host saw:
+an HTTP status instead of a WebSocket upgrade, a refused or timed-out
+connection, a handshake that did not complete, or a server that rejected the
+password.
+
+The window never opens the connection itself. The desktop host performs the
+WebSocket upgrade, forwards opaque frames both ways, and reports the close;
+it adds no credentials or headers, follows no redirects, refuses anything but
+`ws://` and `wss://`, caps a message at 64 KiB upstream and 16 MiB
+downstream, and holds at most two screens per window. Its error messages
+never repeat the address, because the address may carry a token. The address
+and password live only in the pane while it is open; closing the pane,
+switching away, or closing the window drops the connection, and nothing is
+written to browser storage. In the browser (`pnpm dev`) the pane says that
+screen viewing needs the desktop app.
+
+The VNC client is [noVNC](https://github.com/novnc/noVNC) 1.7.0, vendored
+under `src/vendor/novnc` (MPL-2.0); see its `README.md` for provenance.
 
 ## Familiar avatars
 

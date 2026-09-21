@@ -15,6 +15,7 @@ mod hpke_bound;
 mod keyring;
 mod metadata;
 mod operation;
+mod screen_relay;
 mod transport;
 
 use std::sync::{Arc, Mutex, MutexGuard};
@@ -259,6 +260,7 @@ fn builder() -> tauri::Builder<tauri::Wry> {
     tauri::Builder::default()
         .manage(NativeConnectionState::default())
         .manage(coven_runtime::CovenRuntimeState::default())
+        .manage(screen_relay::ScreenRelayState::default())
         .invoke_handler(tauri::generate_handler![
             coven_runtime::coven_runtime_status,
             coven_runtime::coven_runtime_familiars,
@@ -267,6 +269,9 @@ fn builder() -> tauri::Builder<tauri::Wry> {
             coven_runtime::coven_runtime_read,
             coven_runtime::coven_runtime_send,
             coven_runtime::coven_runtime_cancel,
+            screen_relay::coven_screen_connect,
+            screen_relay::coven_screen_send,
+            screen_relay::coven_screen_disconnect,
             app_identity,
             app_installation_id,
             cave_read_discovery,

@@ -1,0 +1,126 @@
+/*
+ * The screen viewer. A pane above the transcript: one bar for the address,
+ * password and controls, a status line, then the remote desktop scaled to
+ * fit. It never claims more than half the thread so the conversation stays
+ * in view underneath.
+ */
+.coven-screen {
+  display: grid;
+  grid-template-rows: auto auto auto minmax(0, 1fr);
+  gap: 6px;
+  min-height: 0;
+  max-height: min(52dvh, 620px);
+  margin: 10px 12px 0;
+  padding: 8px 10px 10px;
+  border: 1px solid var(--border-hairline);
+  border-radius: 10px;
+  background: var(--bg-panel);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.35);
+}
+
+.coven-screen-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.coven-screen-form {
+  display: flex;
+  flex: 1 1 auto;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.coven-screen-label {
+  flex: none;
+  color: var(--text-secondary);
+  font-size: 11px;
+}
+
+.coven-screen-input {
+  flex: 1 1 160px;
+  min-width: 0;
+  padding: 6px 9px;
+  border: 1px solid var(--border-hairline);
+  border-radius: 7px;
+  background: var(--bg-sunken);
+  color: var(--text-primary);
+  font: inherit;
+  font-size: 12px;
+}
+
+.coven-screen-input--password {
+  flex: 0 1 120px;
+}
+
+.coven-screen-input:focus-visible {
+  outline: none;
+  border-color: var(--ring-focus);
+  box-shadow: 0 0 0 2px color-mix(in oklch, var(--ring-focus) 15%, transparent);
+}
+
+.coven-screen-input:disabled {
+  opacity: 0.6;
+}
+
+.coven-screen-toggle {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 6px;
+  color: var(--text-secondary);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.coven-screen-status {
+  display: block;
+  min-height: 1.2em;
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.coven-screen[data-phase="connected"] .coven-screen-status {
+  color: var(--accent-presence);
+}
+
+.coven-screen[data-phase="ended"] .coven-screen-status {
+  color: color-mix(in oklch, var(--color-danger) 70%, var(--text-primary));
+}
+
+.coven-screen-password {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.coven-screen-surface {
+  position: relative;
+  min-height: 220px;
+  overflow: hidden;
+  border-radius: 8px;
+  background: var(--bg-sunken);
+}
+
+.coven-screen-surface[hidden] {
+  display: none;
+}
+
+/* noVNC sizes its own screen div; let it fill the surface. */
+.coven-screen-surface > div {
+  width: 100% !important;
+  height: 100% !important;
+}
+
+.coven-chat[data-tier="compact"] .coven-screen {
+  margin: 8px 10px 0;
+}
+
+.coven-chat[data-tier="compact"] .coven-screen-form {
+  flex-wrap: wrap;
+}

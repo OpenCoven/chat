@@ -1,8 +1,34 @@
 import { memo, type ReactNode } from 'react';
 import Markdown, { type Components, defaultUrlTransform } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import { CopyButton } from './copy-button';
 import './formatted-message.css';
 import { segmentToolCalls } from './tool-activity';
+
+/**
+ * The shape of the syntax-tree node react-markdown hands a component. Typed
+ * structurally so this file needs no `hast` dependency of its own.
+ */
+type TreeNode = Readonly<{
+  type: string;
+  value?: string | undefined;
+  tagName?: string | undefined;
+  properties?: Readonly<Record<string, unknown>> | undefined;
+  children?: readonly TreeNode[] | undefined;
+}>;
+
+/** The text a fenced block would copy: its nodes' text, exactly as written. */
+function treeText(node: TreeNode | undefined): string {
+  if (!node) return '';
+  if (node.type === 'text') return node.value ?? '';
+  return (node.children ?? []).map(treeText).join('');
+}
+
+function codeLanguage(code: TreeNode | undefined): string | undefined {
+  const classes = code?.properties?.className;
+  const list = Array.isArray(classes) ? classes.map(String) : [];
+  return list.find((name) => name.startsWith('language-'))?.slice('language-'.length);
+}
 
 const components: Components = {
   a({ href, children, title }) {
@@ -19,6 +45,23 @@ const components: Components = {
   },
   img({ alt }) {
     return <span className="coven-markdown-image">{alt ? `[Image: ${alt}]` : '[Image]'}</span>;
+  },
+  pre({ children, node }) {
+    const tree: TreeNode | undefined = node;
+    const code = tree?.children?.find(
+      (child) => child.type === 'element' && child.tagName === 'code',
+    );
+    const language = codeLanguage(code);
+    const text = treeText(code).replace(/\n$/, '');
+    return (
+      <div className="coven-code" data-language={language}>
+        <div className="coven-code-bar">
+          <span className="coven-code-lang">{language ?? 'code'}</span>
+          <CopyButton text={text} label={language ? `Copy ${language} code` : 'Copy code'} />
+        </div>
+        <pre>{children}</pre>
+      </div>
+    );
   },
   table({ children }) {
     return (
@@ -57,6 +100,8 @@ export type ToolRow = Readonly<{
   raw?: string | undefined;
   result?: string | undefined;
   isError?: boolean | undefined;
+  /** The call the live run is executing right now. */
+  running?: boolean | undefined;
 }>;
 
 export function ToolActivity({ rows }: { rows: readonly ToolRow[] }) {
@@ -67,15 +112,22 @@ export function ToolActivity({ rows }: { rows: readonly ToolRow[] }) {
           className="coven-tool"
           key={`${index}-${row.name}`}
           data-error={row.isError || undefined}
+          data-running={row.running || undefined}
         >
           <details className="coven-tool-details">
             <summary className="coven-tool-summary" aria-label={`${row.name} tool arguments`}>
               <span className="coven-tool-glyph" aria-hidden="true" />
               <code className="coven-tool-name">{row.name}</code>
               <span className="coven-tool-args">{row.args}</span>
-              {row.isError ? <span className="coven-tool-state">failed</span> : null}
-              <span className="coven-tool-chevron" aria-hidden="true">
-                &#8250;
+              <span className="coven-tool-tail">
+                {row.running ? (
+                  <span className="coven-tool-state coven-tool-state--running">running</span>
+                ) : row.isError ? (
+                  <span className="coven-tool-state">failed</span>
+                ) : null}
+                <span className="coven-tool-chevron" aria-hidden="true">
+                  &#8250;
+                </span>
               </span>
             </summary>
             <section aria-label={`${row.name} raw arguments`}>

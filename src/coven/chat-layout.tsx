@@ -1,4 +1,11 @@
-import { type CSSProperties, type RefObject, useEffect, useRef, useState } from 'react';
+import {
+  type CSSProperties,
+  type KeyboardEvent as ReactKeyboardEvent,
+  type RefObject,
+  useEffect,
+  useRef,
+  useState,
+} from 'react';
 import {
   FamButton,
   FamIconButton,
@@ -10,11 +17,13 @@ import {
 } from '../design/familiars-ui';
 import { Icon } from '../design/minimal-icons';
 import type { ChatLifecycle, CovenProjectAccess } from '../lib/coven-runtime';
+import type { ScreenRelay } from '../lib/screen-relay';
 import { AttachmentChip } from '../ui/attachment-chip';
 import { Composer } from '../ui/composer';
 import { ATTACHMENT_ACCEPT, type ChatAttachment } from './attachments';
 import { ChatLifecycleControls } from './chat-lifecycle';
 import { ContextPicker } from './context-picker';
+import { CopyButton } from './copy-button';
 import type { ChatMessage } from './events';
 import { FamiliarAvatar } from './familiar-avatar';
 import { FormattedMessage, ToolActivity, type ToolRow } from './formatted-message';
@@ -26,6 +35,8 @@ import {
   RIGHT_RAIL_SHORTCUT,
   useRailShortcuts,
 } from './rail-shortcuts';
+import { activityTime, formatAbsoluteTime, formatRelativeTime } from './relative-time';
+import { type LoadRfb, ScreenViewer } from './screen-viewer';
 import { useViewportTier } from './viewport';
 import '../design/familiars-shell.css';
 import './chat-app.css';
@@ -70,9 +81,20 @@ export type ChatLayoutProps = Readonly<{
   lifecycleLocked?: boolean;
   onLifecycle?: (next: ChatLifecycle) => void;
   busy: boolean;
+  /**
+   * The familiar whose run `busy` reports. Selection can move while a run is
+   * live; absent, the run is credited to the shown familiar.
+   */
+  runFamiliarId?: string;
   loading: boolean;
   cancelling: boolean;
   error: string;
+  /** Clears the error notice; absent when the host cannot clear it. */
+  onDismissError?: () => void;
+  /** The host-side VNC relay; absent in the browser, where the pane says so. */
+  screen?: ScreenRelay | undefined;
+  /** Test seam for the screen viewer's VNC client. */
+  screenLoadRfb?: LoadRfb | undefined;
   onFamiliar: (id: string) => void;
   onDraft: (value: string) => void;
   onSend: () => void;
@@ -144,6 +166,58 @@ export function composerCopy(connected: boolean, familiarName?: string) {
   };
 }
 
+/**
+ * What the end of the transcript says while a run is active and no prose is
+ * arriving. Streaming prose is its own sign of life, so this stays off then.
+ */
+export function liveRowText(
+  familiarName: string,
+  cancelling: boolean,
+  runningTool: string | undefined,
+): string {
+  if (cancelling) return 'Stopping…';
+  if (runningTool) return `Running ${runningTool}…`;
+  return `Waiting for ${familiarName}…`;
+}
+
+/**
+ * The composer's run status. A run started from another familiar's chat keeps
+ * the composer locked here too (the runtime allows one run at a time), so the
+ * line names that familiar and says what frees the composer.
+ */
+export function runStatusText(
+  name: string,
+  runName: string,
+  runHere: boolean,
+  cancelling: boolean,
+  runningTool: string | undefined,
+): string {
+  if (!runHere) {
+    return cancelling
+      ? `Stopping ${runName}'s run in another chat…`
+      : `${runName} is still responding in another chat. Wait for that run to finish or stop it before messaging ${name}.`;
+  }
+  if (cancelling) return 'Stopping; waiting for Coven…';
+  if (runningTool) return `${name} is running ${runningTool}…`;
+  return `${name} is responding…`;
+}
+
+/** Counts for the inspector's Activity tab, from the loaded transcript alone. */
+export function activityCounts(messages: readonly ChatMessage[]) {
+  let sent = 0;
+  let replies = 0;
+  let tools = 0;
+  let failed = 0;
+  for (const message of messages) {
+    if (message.tool) {
+      tools += 1;
+      if (message.tool.isError) failed += 1;
+    } else if (message.role === 'user') sent += 1;
+    else if (message.role === 'assistant' && message.text) replies += 1;
+  }
+  return { sent, replies, tools, failed };
+}
+
 function activeControl(): HTMLElement | null {
   return document.activeElement instanceof HTMLElement ? document.activeElement : null;
 }
@@ -154,6 +228,7 @@ export function ChatLayout(props: ChatLayoutProps) {
   const [inspector, setInspector] = useState(() => tier === 'wide');
   const [query, setQuery] = useState('');
   const [tab, setTab] = useState<InspectorTab>('overview');
+  const [screenOpen, setScreenOpen] = useState(false);
   const drawers = tier === 'compact';
   const inspectorOverlay = tier !== 'wide';
   const shellRef = useRef<HTMLDivElement>(null);
@@ -207,6 +282,11 @@ export function ChatLayout(props: ChatLayoutProps) {
   const familiar = props.familiars.find((item) => item.id === props.familiarId);
   const session = props.sessions.find((item) => item.id === props.sessionId);
   const name = familiar?.name ?? 'Coven';
+  // A run belongs to the familiar it was sent to, not to whichever is shown.
+  const runFamiliarId = props.busy ? props.runFamiliarId || props.familiarId : '';
+  const runHere = props.busy && runFamiliarId === props.familiarId;
+  const runName =
+    props.familiars.find((item) => item.id === runFamiliarId)?.name ?? 'Another familiar';
   const composer = composerCopy(props.connected, familiar?.name);
   const workspace = session?.projectRoot || familiar?.workspace;
   const workspaceLabel = session?.projectRoot ? 'Chat project' : 'Familiar workspace';
@@ -225,17 +305,22 @@ export function ChatLayout(props: ChatLayoutProps) {
   });
   const nearBottom = useRef(true);
   const [showLatest, setShowLatest] = useState(false);
+  // How many messages the reader had when they last sat at the bottom, so the
+  // jump control can say how many arrived while they were reading back.
+  const seenCount = useRef(props.messages.length);
   const previousSession = useRef(props.sessionId);
-  // biome-ignore lint/correctness/useExhaustiveDependencies: new messages change the transcript's scroll height.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: new messages and the live row change the transcript's scroll height.
   useEffect(() => {
     if (previousSession.current !== props.sessionId) {
       nearBottom.current = true;
       setShowLatest(false);
       previousSession.current = props.sessionId;
     }
+    if (nearBottom.current) seenCount.current = props.messages.length;
     const transcript = transcriptRef.current;
     if (transcript && nearBottom.current) transcript.scrollTop = transcript.scrollHeight;
-  }, [props.messages, props.sessionId]);
+  }, [props.messages, props.sessionId, props.busy]);
+  const unseen = showLatest ? Math.max(0, props.messages.length - seenCount.current) : 0;
   // Consecutive tool rows render as one activity list; the transcript is
   // otherwise one element per message.
   const blocks: (
@@ -259,18 +344,53 @@ export function ChatLayout(props: ChatLayoutProps) {
     }
   }
   const lastMessage = props.messages[props.messages.length - 1];
+  const counts = activityCounts(props.messages);
   // A run whose newest event is an unfinished tool call is running that tool,
   // and the status says so instead of "responding".
   const runningTool =
-    props.busy && lastMessage?.tool && lastMessage.tool.result === undefined
+    runHere && lastMessage?.tool && lastMessage.tool.result === undefined
       ? lastMessage.tool.name
       : undefined;
-  const agents = props.familiars.filter(
-    (item) =>
-      item.name.toLowerCase().includes(query.toLowerCase()) &&
-      props.sessions.some((session) => session.familiarId === item.id && session.archived) ===
-        Boolean(props.archivedFilter),
-  );
+  const tail = blocks[blocks.length - 1];
+  if (runningTool && tail?.kind === 'tools') {
+    const row = tail.rows[tail.rows.length - 1];
+    if (row) tail.rows[tail.rows.length - 1] = { ...row, running: true };
+  }
+  // Streaming prose is its own sign of life; the live row covers every other
+  // moment of a run, from the send until the first token or tool.
+  const liveRow =
+    runHere && !(lastMessage?.role === 'assistant' && lastMessage.text)
+      ? liveRowText(name, props.cancelling, runningTool)
+      : '';
+  const headOf = (familiarId: string) =>
+    props.sessions.find((session) => session.familiarId === familiarId);
+  // Most recent activity first; familiars without a dated thread keep the
+  // CLI's own order after them.
+  const agents = props.familiars
+    .filter(
+      (item) =>
+        item.name.toLowerCase().includes(query.toLowerCase()) &&
+        Boolean(headOf(item.id)?.archived) === Boolean(props.archivedFilter),
+    )
+    .sort((a, b) => activityTime(headOf(b.id)?.updatedAt) - activityTime(headOf(a.id)?.updatedAt));
+  const listRef = useRef<HTMLDivElement>(null);
+  function rowButtons() {
+    return Array.from(
+      listRef.current?.querySelectorAll<HTMLButtonElement>('button.coven-agent-row') ?? [],
+    );
+  }
+  function moveRowFocus(event: ReactKeyboardEvent, from: number) {
+    const rows = rowButtons();
+    if (!rows.length) return;
+    let next: number;
+    if (event.key === 'ArrowDown') next = Math.min(from + 1, rows.length - 1);
+    else if (event.key === 'ArrowUp') next = Math.max(from - 1, 0);
+    else if (event.key === 'Home') next = 0;
+    else if (event.key === 'End') next = rows.length - 1;
+    else return;
+    event.preventDefault();
+    rows[next]?.focus();
+  }
   return (
     <div
       ref={shellRef}
@@ -359,12 +479,30 @@ export function ChatLayout(props: ChatLayoutProps) {
               placeholder="Search"
               value={query}
               onChange={(event) => setQuery(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.nativeEvent.isComposing) return;
+                if (event.key === 'ArrowDown') {
+                  event.preventDefault();
+                  rowButtons()[0]?.focus();
+                } else if (event.key === 'Enter') {
+                  const first = agents[0];
+                  if (!first || props.lifecycleBusy) return;
+                  event.preventDefault();
+                  props.onFamiliar(first.id);
+                  if (drawers) setSidebar(false);
+                } else if (event.key === 'Escape' && query) {
+                  event.preventDefault();
+                  setQuery('');
+                }
+              }}
             />
           </label>
           <div className="fr-conv-scroll">
-            <div className="fr-conv-list">
-              {agents.map((item) => {
-                const thread = props.sessions.find((session) => session.familiarId === item.id);
+            <div className="fr-conv-list" ref={listRef}>
+              {agents.map((item, index) => {
+                const thread = headOf(item.id);
+                const when = formatRelativeTime(thread?.updatedAt);
+                const live = props.busy && item.id === runFamiliarId;
                 return (
                   <button
                     type="button"
@@ -373,6 +511,7 @@ export function ChatLayout(props: ChatLayoutProps) {
                     aria-label={item.name}
                     aria-current={item.id === props.familiarId || undefined}
                     disabled={props.lifecycleBusy}
+                    onKeyDown={(event) => moveRowFocus(event, index)}
                     onClick={() => {
                       props.onFamiliar(item.id);
                       if (drawers) setSidebar(false);
@@ -380,7 +519,22 @@ export function ChatLayout(props: ChatLayoutProps) {
                   >
                     <FamiliarAvatar name={item.name} avatarUrl={item.avatarUrl} size={36} />
                     <span className="coven-agent-copy">
-                      <span className="fr-conv-title">{item.name}</span>
+                      <span className="fr-conv-top">
+                        <span className="fr-conv-title">{item.name}</span>
+                        {live ? (
+                          <span className="fr-conv-time coven-agent-live">
+                            {props.cancelling ? 'Stopping…' : 'Responding…'}
+                          </span>
+                        ) : when ? (
+                          <time
+                            className="fr-conv-time"
+                            dateTime={thread?.updatedAt}
+                            title={formatAbsoluteTime(thread?.updatedAt)}
+                          >
+                            {when}
+                          </time>
+                        ) : null}
+                      </span>
                       <span className="fr-conv-preview">
                         {thread?.preview ||
                           (thread ? 'Continue your conversation' : 'Start a conversation')}
@@ -402,6 +556,11 @@ export function ChatLayout(props: ChatLayoutProps) {
                       ? 'No archived familiars.'
                       : 'No active familiars available. Configure a familiar in Coven, then refresh.'}
                 </span>
+                {query ? (
+                  <FamButton size="sm" onClick={() => setQuery('')}>
+                    Clear search
+                  </FamButton>
+                ) : null}
               </div>
             ) : null}
           </div>
@@ -461,6 +620,14 @@ export function ChatLayout(props: ChatLayoutProps) {
           )}
           <div className="fr-thread-header-actions">
             <FamIconButton
+              icon="squares-four"
+              label={screenOpen ? 'Hide screen' : 'Show screen'}
+              title={screenOpen ? 'Hide the remote screen' : 'View a remote screen over VNC'}
+              aria-pressed={screenOpen}
+              aria-controls="coven-screen-viewer"
+              onClick={() => setScreenOpen((open) => !open)}
+            />
+            <FamIconButton
               icon="arrow-clockwise"
               label="Refresh Coven"
               disabled={props.busy || props.loading || props.lifecycleBusy}
@@ -468,6 +635,19 @@ export function ChatLayout(props: ChatLayoutProps) {
             />
           </div>
         </header>
+        {screenOpen ? (
+          <div id="coven-screen-viewer">
+            {/* Keyed by familiar: switching threads unmounts the pane, and its
+                teardown closes the host connection and forgets the address. */}
+            <ScreenViewer
+              key={props.familiarId}
+              relay={props.screen}
+              familiarName={familiar?.name}
+              onClose={() => setScreenOpen(false)}
+              {...(props.screenLoadRfb ? { loadRfb: props.screenLoadRfb } : {})}
+            />
+          </div>
+        ) : null}
         <div
           className="fr-transcript"
           ref={transcriptRef}
@@ -490,7 +670,18 @@ export function ChatLayout(props: ChatLayoutProps) {
             ) : null}
             {props.error ? (
               <div className="coven-error" role="alert">
-                {props.error}
+                <span className="coven-error-text">{props.error}</span>
+                {props.onDismissError ? (
+                  <button
+                    type="button"
+                    className="coven-error-dismiss"
+                    aria-label="Dismiss error"
+                    title="Dismiss"
+                    onClick={props.onDismissError}
+                  >
+                    <Icon name="x" size={12} />
+                  </button>
+                ) : null}
               </div>
             ) : null}
             {props.loading ? <ThinkingIndicator label="Loading conversation" /> : null}
@@ -560,6 +751,13 @@ export function ChatLayout(props: ChatLayoutProps) {
                             : titleCase(block.message.role)}
                         </span>
                       )}
+                      {block.message.role === 'assistant' && block.message.text ? (
+                        <CopyButton
+                          className="coven-message-copy"
+                          text={block.message.text}
+                          label="Copy reply"
+                        />
+                      ) : null}
                     </span>
                     <div className="fr-bubble fr-bubble--familiar coven-message">
                       {block.message.role === 'assistant' ? (
@@ -572,7 +770,13 @@ export function ChatLayout(props: ChatLayoutProps) {
                 </div>
               ),
             )}
-            {!props.messages.length && !props.loading && !props.busy ? (
+            {liveRow ? (
+              <div className="fr-thinking-row coven-live-row">
+                <FamiliarAvatar name={name} avatarUrl={familiar?.avatarUrl} size={22} />
+                <ThinkingIndicator label={liveRow} />
+              </div>
+            ) : null}
+            {!props.messages.length && !props.loading && !runHere ? (
               <div className="fr-thread-empty">
                 {familiar ? (
                   <FamiliarAvatar name={name} avatarUrl={familiar.avatarUrl} size={36} ring />
@@ -601,6 +805,11 @@ export function ChatLayout(props: ChatLayoutProps) {
                 }}
               >
                 Jump to latest
+                {unseen ? (
+                  <span className="coven-jump-count">
+                    {unseen} new {unseen === 1 ? 'message' : 'messages'}
+                  </span>
+                ) : null}
               </button>
             )}
             <div className="coven-composer-context" title={workspace}>
@@ -608,11 +817,7 @@ export function ChatLayout(props: ChatLayoutProps) {
             </div>
             {props.busy && (
               <output className="coven-run-status">
-                {props.cancelling
-                  ? 'Stopping; waiting for Coven…'
-                  : runningTool
-                    ? `${name} is running ${runningTool}…`
-                    : `${name} is responding…`}
+                {runStatusText(name, runName, runHere, props.cancelling, runningTool)}
               </output>
             )}
             {props.readOnly && (
@@ -768,8 +973,24 @@ export function ChatLayout(props: ChatLayoutProps) {
                       )}
                     </div>
                     <div className="fr-row">
-                      <span className="fr-row-label">Conversations</span>
-                      <span className="fr-row-value">{props.sessions.length}</span>
+                      <span className="fr-row-label">Chat</span>
+                      <span className="fr-row-value">
+                        {session ? (session.archived ? 'Archived' : 'Active') : 'Not started'}
+                      </span>
+                    </div>
+                    <div className="fr-row">
+                      <span className="fr-row-label">Last activity</span>
+                      {formatAbsoluteTime(session?.updatedAt) ? (
+                        <time
+                          className="fr-row-value"
+                          dateTime={session?.updatedAt}
+                          title={formatAbsoluteTime(session?.updatedAt)}
+                        >
+                          {formatAbsoluteTime(session?.updatedAt)}
+                        </time>
+                      ) : (
+                        <span className="fr-row-value">Not reported</span>
+                      )}
                     </div>
                   </div>
                 ) : null}
@@ -791,19 +1012,50 @@ export function ChatLayout(props: ChatLayoutProps) {
                   additional permission boundary.
                 </p>
                 <p>
-                  Text and code attachments are sent with your message. Screen sharing and tool
-                  approval controls are unavailable here.
+                  Text and code attachments are sent with your message. Show screen in the thread
+                  header opens a remote desktop over VNC; it starts view only. Tool approval
+                  controls are unavailable here.
                 </p>
               </div>
             ) : null}
             {tab === 'activity' ? (
-              <div className="coven-details fr-card fr-card--lift">
-                <h2>Activity</h2>
-                <p>
-                  {props.busy ? 'A run is active in this app.' : 'No run is active in this app.'}
-                </p>
-                <p>{props.messages.length} messages loaded in this conversation.</p>
-                <p>Tool activity appears in the conversation. Run metrics are unavailable here.</p>
+              <div className="fr-stack">
+                <div className="fr-card fr-card--lift fr-rows">
+                  <div className="fr-row">
+                    <span className="fr-row-label">Run</span>
+                    <span className="fr-row-value">
+                      {!props.busy
+                        ? 'Idle'
+                        : !runHere
+                          ? `${runName} is responding in another chat`
+                          : props.cancelling
+                            ? 'Stopping'
+                            : runningTool
+                              ? `Running ${runningTool}`
+                              : `${name} is responding`}
+                    </span>
+                  </div>
+                  <div className="fr-row">
+                    <span className="fr-row-label">Your messages</span>
+                    <span className="fr-row-value">{counts.sent}</span>
+                  </div>
+                  <div className="fr-row">
+                    <span className="fr-row-label">Replies</span>
+                    <span className="fr-row-value">{counts.replies}</span>
+                  </div>
+                  <div className="fr-row">
+                    <span className="fr-row-label">Tool calls</span>
+                    <span className="fr-row-value">
+                      {counts.failed ? `${counts.tools} · ${counts.failed} failed` : counts.tools}
+                    </span>
+                  </div>
+                </div>
+                <div className="coven-details fr-card fr-card--lift">
+                  <p>
+                    Counts cover the loaded transcript. Tool activity appears in the conversation;
+                    tokens, cost and timing are not reported by this CLI integration.
+                  </p>
+                </div>
               </div>
             ) : null}
           </section>
