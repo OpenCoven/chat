@@ -580,6 +580,7 @@ export function ChatLayout(props: ChatLayoutProps) {
                     key={item.id}
                     className="fr-conv coven-agent-row"
                     aria-label={done ? `${item.name} (${doneLabel.toLowerCase()})` : item.name}
+                    title={item.description}
                     aria-current={item.id === props.familiarId || undefined}
                     disabled={props.lifecycleBusy}
                     onKeyDown={(event) => moveRowFocus(event, index)}
@@ -1050,18 +1051,32 @@ export function ChatLayout(props: ChatLayoutProps) {
                   <div className="fr-card fr-card--lift fr-rows">
                     <div className="fr-row">
                       <span className="fr-row-label">Identity</span>
-                      <code className="fr-row-value coven-row-value--path" title={familiar.id}>
-                        {familiar.id}
-                      </code>
+                      <span className="coven-row-path">
+                        <code className="fr-row-value coven-row-value--path" title={familiar.id}>
+                          {familiar.id}
+                        </code>
+                        <CopyButton
+                          className="coven-row-copy"
+                          text={familiar.id}
+                          label="Copy identity"
+                        />
+                      </span>
                     </div>
                     <div className="fr-row">
                       <span className="fr-row-label">Workspace</span>
                       {familiar.workspace ? (
-                        <span
-                          className="fr-row-value coven-row-value--path"
-                          title={familiar.workspace}
-                        >
-                          {familiar.workspace}
+                        <span className="coven-row-path">
+                          <span
+                            className="fr-row-value coven-row-value--path"
+                            title={familiar.workspace}
+                          >
+                            {familiar.workspace}
+                          </span>
+                          <CopyButton
+                            className="coven-row-copy"
+                            text={familiar.workspace}
+                            label="Copy workspace path"
+                          />
                         </span>
                       ) : (
                         <span className="fr-row-value">Not reported</span>

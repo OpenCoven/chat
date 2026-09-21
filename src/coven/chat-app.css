@@ -672,6 +672,29 @@
   unicode-bidi: plaintext;
 }
 
+/* A path row keeps its copy control beside the truncated value. */
+.coven-row-path {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 2px;
+  min-width: 0;
+}
+
+.coven-row-path > .fr-row-value {
+  flex: 0 1 auto;
+}
+
+.coven-row-copy {
+  flex: none;
+  opacity: 0.7;
+}
+
+.coven-row-copy:hover,
+.coven-row-copy:focus-visible {
+  opacity: 1;
+}
+
 /* ------------------------------------------------------------- composer */
 
 .coven-composer-note {

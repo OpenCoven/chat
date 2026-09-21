@@ -108,8 +108,8 @@ conversation. Select a familiar to return to that thread. There is no separate
 familiar selector or new-conversation chooser. Rows are ordered by the most
 recent activity Coven reports, each captioned with how long ago that was
 (hover for the full timestamp); familiars whose chats carry no readable
-timestamp keep the CLI's order after them. The search box matches a
-familiar's name, identity, or purpose. From the search box, **Enter**
+timestamp keep the CLI's order after them; hovering a row shows the familiar's
+purpose. The search box matches a familiar's name, identity, or purpose. From the search box, **Enter**
 opens the first match, **Escape** clears the filter, and the arrow keys move
 into and along the list. A search that matches nothing offers **Clear search**.
 Choosing a familiar, by click or by Enter, puts the cursor in the composer as
@@ -119,7 +119,8 @@ familiar's name with when their chat last moved (hover for the full
 timestamp), and an empty thread shows the familiar's purpose under its
 heading.
 
-The inspector's Overview shows the familiar's purpose, identity and workspace,
+The inspector's Overview shows the familiar's purpose, identity and workspace
+(each path with its own **Copy** control),
 whether their chat is active, archived or not yet started, and its last
 activity. Activity reports the run state and counts the messages you sent, the
 replies and the tool calls (with failures) in the loaded transcript; tokens,
@@ -190,7 +191,9 @@ call's arguments. When the runtime reports a call as data rather than as a
 `tool_use` block in an assistant message, or a `tool_result` frame — the row
 also shows the input (cut at 16 KiB with a note saying so) and, once
 reported, the result, and the run status
-names the tool that is executing while its row is marked as running. The bundled engine's Claude CLI provider
+names the tool that is executing while its row is marked as running. A run of
+more than ten consecutive calls folds to its newest six, behind a control that
+says how many earlier calls it hides and how many of those failed. The bundled engine's Claude CLI provider
 reports calls as text only, so those rows carry the one-line summary alone.
 
 ## Remote screen (VNC)

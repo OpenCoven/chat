@@ -152,6 +152,33 @@
   list-style: none;
 }
 
+/* A long run of calls folds to its newest; the control says what it hides. */
+.coven-tools-fold {
+  display: flex;
+  padding: 2px 0 4px;
+}
+
+.coven-tools-fold-button {
+  padding: 3px 9px;
+  border: 1px solid var(--border-hairline);
+  border-radius: 12px;
+  background: transparent;
+  color: var(--text-secondary);
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.coven-tools-fold-button:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.coven-tools-fold-button:focus-visible {
+  outline: 2px solid var(--ring-focus);
+  outline-offset: 1px;
+}
+
 .coven-tool {
   min-width: 0;
   border: 1px solid var(--border-hairline);

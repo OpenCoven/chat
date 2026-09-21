@@ -1420,3 +1420,33 @@ describe('sidebar filter', () => {
     expect(screen.getByText(/Configure a familiar in Coven/)).toBeInTheDocument();
   });
 });
+
+describe('inspector copy controls and row tooltips', () => {
+  it('offers to copy the identity and the workspace path', () => {
+    const { rerender } = render(
+      <ChatLayout
+        {...layoutProps()}
+        connected
+        ready
+        familiars={[
+          { id: 'fam-astra-01', name: 'Astra', workspace: '/w/astra', description: 'Reviews PRs.' },
+        ]}
+        familiarId="fam-astra-01"
+      />,
+    );
+    expect(screen.getByRole('button', { name: 'Copy identity' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Copy workspace path' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Astra' })).toHaveAttribute('title', 'Reviews PRs.');
+    rerender(
+      <ChatLayout
+        {...layoutProps()}
+        connected
+        ready
+        familiars={[{ id: 'fam-astra-01', name: 'Astra' }]}
+        familiarId="fam-astra-01"
+      />,
+    );
+    expect(screen.queryByRole('button', { name: 'Copy workspace path' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Astra' })).not.toHaveAttribute('title');
+  });
+});

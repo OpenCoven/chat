@@ -1,4 +1,4 @@
-import { memo, type ReactNode } from 'react';
+import { memo, type ReactNode, useState } from 'react';
 import Markdown, { type Components, defaultUrlTransform } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { CopyButton } from './copy-button';
@@ -104,47 +104,77 @@ export type ToolRow = Readonly<{
   running?: boolean | undefined;
 }>;
 
+/** A run of more than this many consecutive calls folds to its newest ones. */
+export const TOOL_FOLD_AT = 10;
+/** How many of the newest calls a folded run keeps in view. */
+export const TOOL_FOLD_KEEP = 6;
+
+/** The fold control's label, naming what it hides and how much of it failed. */
+export function toolFoldLabel(hidden: number, failed: number): string {
+  const calls = `${hidden} earlier tool ${hidden === 1 ? 'call' : 'calls'}`;
+  return failed ? `Show ${calls} (${failed} failed)` : `Show ${calls}`;
+}
+
 export function ToolActivity({ rows }: { rows: readonly ToolRow[] }) {
+  const [expanded, setExpanded] = useState(false);
+  const folded = !expanded && rows.length > TOOL_FOLD_AT;
+  const first = folded ? rows.length - TOOL_FOLD_KEEP : 0;
+  const hiddenFailed = folded ? rows.slice(0, first).filter((row) => row.isError).length : 0;
   return (
     <ul className="coven-tools" aria-label="Tool activity">
-      {rows.map((row, index) => (
-        <li
-          className="coven-tool"
-          key={`${index}-${row.name}`}
-          data-error={row.isError || undefined}
-          data-running={row.running || undefined}
-        >
-          <details className="coven-tool-details">
-            <summary className="coven-tool-summary" aria-label={`${row.name} tool arguments`}>
-              <span className="coven-tool-glyph" aria-hidden="true" />
-              <code className="coven-tool-name">{row.name}</code>
-              <span className="coven-tool-args">{row.args}</span>
-              <span className="coven-tool-tail">
-                {row.running ? (
-                  <span className="coven-tool-state coven-tool-state--running">running</span>
-                ) : row.isError ? (
-                  <span className="coven-tool-state">failed</span>
-                ) : null}
-                <span className="coven-tool-chevron" aria-hidden="true">
-                  &#8250;
+      {rows.length > TOOL_FOLD_AT ? (
+        <li className="coven-tools-fold">
+          <button
+            type="button"
+            className="coven-tools-fold-button"
+            aria-expanded={expanded}
+            onClick={() => setExpanded((open) => !open)}
+          >
+            {folded ? toolFoldLabel(first, hiddenFailed) : `Show only the latest ${TOOL_FOLD_KEEP}`}
+          </button>
+        </li>
+      ) : null}
+      {rows.slice(first).map((row, offset) => {
+        const index = first + offset;
+        return (
+          <li
+            className="coven-tool"
+            key={`${index}-${row.name}`}
+            data-error={row.isError || undefined}
+            data-running={row.running || undefined}
+          >
+            <details className="coven-tool-details">
+              <summary className="coven-tool-summary" aria-label={`${row.name} tool arguments`}>
+                <span className="coven-tool-glyph" aria-hidden="true" />
+                <code className="coven-tool-name">{row.name}</code>
+                <span className="coven-tool-args">{row.args}</span>
+                <span className="coven-tool-tail">
+                  {row.running ? (
+                    <span className="coven-tool-state coven-tool-state--running">running</span>
+                  ) : row.isError ? (
+                    <span className="coven-tool-state">failed</span>
+                  ) : null}
+                  <span className="coven-tool-chevron" aria-hidden="true">
+                    &#8250;
+                  </span>
                 </span>
-              </span>
-            </summary>
-            <section aria-label={`${row.name} raw arguments`}>
-              <pre className="coven-tool-raw">
-                <code>{row.raw ?? row.args}</code>
-              </pre>
-            </section>
-            {row.result !== undefined ? (
-              <section aria-label={`${row.name} result`}>
-                <pre className="coven-tool-raw coven-tool-result">
-                  <code>{row.result}</code>
+              </summary>
+              <section aria-label={`${row.name} raw arguments`}>
+                <pre className="coven-tool-raw">
+                  <code>{row.raw ?? row.args}</code>
                 </pre>
               </section>
-            ) : null}
-          </details>
-        </li>
-      ))}
+              {row.result !== undefined ? (
+                <section aria-label={`${row.name} result`}>
+                  <pre className="coven-tool-raw coven-tool-result">
+                    <code>{row.result}</code>
+                  </pre>
+                </section>
+              ) : null}
+            </details>
+          </li>
+        );
+      })}
     </ul>
   );
 }
