@@ -111,7 +111,9 @@ export function ChatApp({
   // The host holds only the newest part of this chat's history; nothing failed.
   const [partial, setPartial] = useState(false);
   // A history read that failed can be asked for again without a full refresh.
-  const [readFailed, setReadFailed] = useState(false);
+  // The offer is tied to that failure's own text, so dismissing it or any
+  // later, unrelated error withdraws the offer.
+  const [readError, setReadError] = useState('');
   const [reads, setReads] = useState(0);
   const [runOutputs, setRunOutputs] = useState<
     Record<string, { events: CovenRunEvent[]; error: string; sessionId: string }>
@@ -231,7 +233,7 @@ export function ChatApp({
     const request = ++readId.current;
     setEvents([]);
     setPartial(false);
-    setReadFailed(false);
+    setReadError('');
     if (!available || !navigation.sessionId) {
       if (available) setLoading(false);
       return;
@@ -254,8 +256,9 @@ export function ChatApp({
       })
       .catch((failure: unknown) => {
         if (readId.current !== request) return;
-        setError(errorText(failure));
-        setReadFailed(true);
+        const text = errorText(failure);
+        setError(text);
+        setReadError(text);
       })
       .finally(() => {
         if (readId.current === request) setLoading(false);
@@ -594,7 +597,7 @@ export function ChatApp({
       busy={busy}
       runFamiliarId={runFamiliarId}
       partialHistory={partial}
-      {...(readFailed && !busy
+      {...(readError && error === readError && !busy
         ? {
             onReloadChat: () => {
               setError('');
