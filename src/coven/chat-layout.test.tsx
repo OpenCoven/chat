@@ -2028,3 +2028,25 @@ describe('actionable empty states', () => {
     expect(screen.queryByRole('button', { name: 'Check for familiars' })).toBeNull();
   });
 });
+
+describe('partial history', () => {
+  it('says so in a quiet line at the top, not in an alert', () => {
+    render(
+      <ChatLayout
+        {...layoutProps()}
+        connected
+        ready
+        familiars={[{ id: 'a', name: 'Astra' }]}
+        familiarId="a"
+        partialHistory
+        messages={[{ id: 'a1', role: 'assistant', text: 'the newest reply' }]}
+      />,
+    );
+    const note = screen.getByRole('note');
+    expect(note).toHaveTextContent('Only the most recent part of this chat is shown here');
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    expect(note.compareDocumentPosition(screen.getByText('the newest reply'))).toBe(
+      Node.DOCUMENT_POSITION_FOLLOWING,
+    );
+  });
+});
