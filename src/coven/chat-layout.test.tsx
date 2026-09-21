@@ -11,6 +11,7 @@ import {
   lastRunText,
   liveRowText,
   matchesFamiliar,
+  PROMPT_LIMIT_BYTES,
   runStatusText,
   SHORTCUTS,
   toolTurnSummary,
@@ -497,7 +498,9 @@ describe('production Familiars layout', () => {
     // `connected` is what makes this the healthy/no-selection state. Rendering
     // `ready` alone left the assertion below satisfied by the inspector's
     // unrelated prose while the composer named the runtime instead.
-    render(<ChatLayout {...layoutProps()} connected ready />);
+    render(
+      <ChatLayout {...layoutProps()} familiars={[{ id: 'f', name: 'Other' }]} connected ready />,
+    );
     expect(screen.getByRole('button', { name: 'Send' })).toBeDisabled();
     expect(screen.queryByText(/optional/i)).not.toBeInTheDocument();
     expect(screen.getAllByText(/select a familiar/i).length).toBeGreaterThan(0);
@@ -1949,5 +1952,35 @@ describe('type to compose and message copy', () => {
     );
     expect(screen.getByRole('button', { name: 'Copy message' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Copy reply' })).toBeInTheDocument();
+  });
+});
+
+describe('no familiars yet, and oversize drafts', () => {
+  it('does not ask to select from an empty list', () => {
+    expect(emptyThreadText(true, undefined, false)).toContain('No familiars are configured');
+    expect(composerCopy(true, undefined, false).placeholder).toContain('Configure a familiar');
+    render(<ChatLayout {...layoutProps()} connected />);
+    expect(screen.getByText(/No familiars are configured in Coven yet/)).toBeInTheDocument();
+    expect(screen.queryByText(/Select a familiar from the sidebar/)).not.toBeInTheDocument();
+    expect(
+      screen.getByPlaceholderText('Configure a familiar in Coven to send a message.'),
+    ).toBeInTheDocument();
+  });
+
+  it('warns before sending a message the host would refuse', () => {
+    const base = {
+      ...layoutProps(),
+      connected: true,
+      ready: true,
+      familiars: [{ id: 'a', name: 'Astra' }],
+      familiarId: 'a',
+    };
+    const { rerender } = render(<ChatLayout {...base} draft={'x'.repeat(PROMPT_LIMIT_BYTES)} />);
+    expect(screen.queryByText(/Coven accepts up to 32 KiB/)).not.toBeInTheDocument();
+    rerender(<ChatLayout {...base} draft={'x'.repeat(PROMPT_LIMIT_BYTES + 1)} />);
+    expect(screen.getByText(/Message is 32 KiB; Coven accepts up to 32 KiB/)).toBeInTheDocument();
+    // Bytes, not characters: a two-byte letter counts twice.
+    rerender(<ChatLayout {...base} draft={'é'.repeat(PROMPT_LIMIT_BYTES / 2 + 1)} />);
+    expect(screen.getByText(/Coven accepts up to 32 KiB/)).toBeInTheDocument();
   });
 });

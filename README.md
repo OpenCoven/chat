@@ -94,6 +94,9 @@ familiars but not closing the window: conversation content never reaches
 browser storage (see `SECURITY.md`), and only the selected familiar is
 remembered across restarts.
 
+With a connected CLI but no familiars configured, the empty thread and the
+composer say so, rather than asking you to select from an empty list.
+
 ## Local runtime
 
 The desktop host owns access to Coven. The browser does not execute commands,
@@ -183,7 +186,9 @@ Use the compact **+** attachment button beside the message field. Selected files
 appear as cards with their filename, size (in KiB above a kibibyte), and a
 remove control; sent messages retain file cards in the transcript.
 
-The composer accepts up to four UTF-8 text/code files, each at most 64 KiB.
+A message itself may be up to 32 KiB; past that the composer warns before
+you send, since Coven would refuse it. The composer accepts up to four UTF-8
+text/code files, each at most 64 KiB.
 Selected bytes are validated and passed to Coven as actual file contents, not
 just filenames. You can send files with or without an accompanying message.
 The installed `coven-code` 0.7.0 engine does not support genuine image/PDF input

@@ -495,9 +495,12 @@ test.describe('empty transcript states', () => {
   }) => {
     await installRuntimeFixture(page, true, 'unused', 0);
     await page.goto('/');
+    // With no familiars at all there is nothing to select, so the copy says
+    // to configure one rather than pointing at an empty list.
     await expect(
-      page.getByText('Select a familiar from the sidebar to start a conversation.'),
+      page.getByText('No familiars are configured in Coven yet. Configure one, then refresh.'),
     ).toBeVisible();
+    await expect(page.getByText(/Select a familiar from the sidebar/)).toHaveCount(0);
     // The regression this guards: `ready` is false here because nothing is
     // selected, so keying the copy on it claimed a healthy CLI was unreachable.
     await expect(page.getByText(/Connect to your local Coven CLI/)).toHaveCount(0);
