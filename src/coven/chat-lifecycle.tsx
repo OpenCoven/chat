@@ -27,6 +27,9 @@ export function ChatLifecycleControls({
   onChange: (next: ChatLifecycle) => void;
 }) {
   const dialog = useRef<HTMLDialogElement>(null);
+  // The menu item that opens the dialog is gone by the time it closes, so
+  // focus goes back to the control that opened the menu.
+  const trigger = useRef<HTMLButtonElement>(null);
   const [confirming, setConfirming] = useState(false);
   useEffect(() => {
     if (confirming) dialog.current?.showModal();
@@ -53,6 +56,7 @@ export function ChatLifecycleControls({
       )}
       <DropdownMenu>
         <DropdownMenuTrigger
+          ref={trigger}
           className="fr-icon-btn fr-icon-btn--sm coven-lifecycle-trigger"
           aria-label="Chat actions"
           title="Chat actions"
@@ -74,7 +78,10 @@ export function ChatLifecycleControls({
         className="coven-delete-dialog"
         aria-labelledby="coven-delete-title"
         aria-describedby="coven-delete-description"
-        onClose={() => setConfirming(false)}
+        onClose={() => {
+          setConfirming(false);
+          trigger.current?.focus();
+        }}
         onCancel={(event) => {
           if (pending) event.preventDefault();
         }}
