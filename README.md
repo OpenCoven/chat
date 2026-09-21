@@ -248,7 +248,10 @@ successful protected conformance run.
 
 See the [delivery roadmap](docs/roadmap.md) for PR dependencies and
 consolidation history. CI runs frontend, browser, Rust, packed-artifact,
-and native lifecycle coverage.
+and native lifecycle coverage. The heavy Phase 1 Vitest suites test the
+conformance scripts rather than the app, so a pull request runs them only
+when it changes something outside the chat UI, the browser suite, or prose;
+every push to `main` runs them regardless.
 
 Releases are cut from signed `v*` tags through
 [`.github/workflows/release.yml`](.github/workflows/release.yml). The
