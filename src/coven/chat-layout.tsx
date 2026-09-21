@@ -38,6 +38,7 @@ import {
   SEARCH_SHORTCUT,
   useRailShortcuts,
   useSearchShortcut,
+  useTypeToCompose,
 } from './rail-shortcuts';
 import {
   activityTime,
@@ -288,6 +289,7 @@ export const SHORTCUTS: readonly (readonly [keys: string, action: string])[] = [
   ['↑ ↓ Home End', 'Move through the list; Enter opens, Escape clears the search'],
   ['Enter', 'Send the message; Shift+Enter starts a new line'],
   ['@ or #', 'Mention a familiar or project; Tab confirms, Escape dismisses'],
+  ['Any letter', 'Start typing anywhere to message the familiar'],
 ];
 
 function activeControl(): HTMLElement | null {
@@ -437,6 +439,12 @@ export function ChatLayout(props: ChatLayoutProps) {
   const transcriptRef = useRef<HTMLDivElement>(null);
   const fileInput = useRef<HTMLInputElement>(null);
   const composerRef = useRef<HTMLTextAreaElement>(null);
+  // Start typing anywhere in the shell and the words go to the familiar.
+  useTypeToCompose(() => {
+    if (composerDisabled || !composerRef.current) return false;
+    composerRef.current.focus();
+    return true;
+  });
   useEffect(() => {
     if (!composerFocus) return;
     if (composerFocus.id !== props.familiarId) {
@@ -935,6 +943,13 @@ export function ChatLayout(props: ChatLayoutProps) {
                     <div className="fr-bubble fr-bubble--user coven-message">
                       {block.message.text}
                     </div>
+                    {block.message.text ? (
+                      <CopyButton
+                        className="coven-message-copy coven-message-copy--user"
+                        text={block.message.text}
+                        label="Copy message"
+                      />
+                    ) : null}
                     {block.message.attachments?.length ? (
                       <ul className="coven-history-attachments" aria-label="Message attachments">
                         {block.message.attachments.map((file, index) => (

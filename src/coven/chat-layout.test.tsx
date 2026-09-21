@@ -1891,3 +1891,57 @@ describe('long waits and tool turn headers', () => {
     );
   });
 });
+
+describe('type to compose and message copy', () => {
+  const props = () => ({
+    ...layoutProps(),
+    connected: true,
+    ready: true,
+    familiars: [{ id: 'a', name: 'Astra' }],
+    familiarId: 'a',
+  });
+
+  it('moves a plain keystroke to the composer from the transcript or the body', () => {
+    render(<ChatLayout {...props()} />);
+    const composer = screen.getByRole('textbox', { name: 'Message Astra' });
+    screen.getByRole('log', { name: 'Messages' }).focus();
+    fireEvent.keyDown(window, { key: 'h' });
+    expect(composer).toHaveFocus();
+    (document.activeElement as HTMLElement).blur();
+    fireEvent.keyDown(window, { key: 'H', shiftKey: true });
+    expect(composer).toHaveFocus();
+  });
+
+  it('leaves chords, editable fields, menus and a disabled composer alone', () => {
+    const { rerender } = render(<ChatLayout {...props()} />);
+    const composer = screen.getByRole('textbox', { name: 'Message Astra' });
+    const search = screen.getByRole('searchbox');
+    search.focus();
+    fireEvent.keyDown(window, { key: 'h' });
+    expect(search).toHaveFocus();
+    search.blur();
+    fireEvent.keyDown(window, { key: 'h', metaKey: true });
+    fireEvent.keyDown(window, { key: 'h', ctrlKey: true });
+    fireEvent.keyDown(window, { key: 'h', altKey: true });
+    fireEvent.keyDown(window, { key: 'Enter' });
+    fireEvent.keyDown(window, { key: ' ' });
+    expect(composer).not.toHaveFocus();
+    rerender(<ChatLayout {...props()} loading />);
+    fireEvent.keyDown(window, { key: 'h' });
+    expect(composer).not.toHaveFocus();
+  });
+
+  it('offers to copy your own messages', () => {
+    render(
+      <ChatLayout
+        {...props()}
+        messages={[
+          { id: 'u', role: 'user', text: 'what I said' },
+          { id: 'a1', role: 'assistant', text: 'a reply' },
+        ]}
+      />,
+    );
+    expect(screen.getByRole('button', { name: 'Copy message' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Copy reply' })).toBeInTheDocument();
+  });
+});

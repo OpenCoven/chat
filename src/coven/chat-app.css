@@ -258,6 +258,11 @@
   transition: opacity 120ms;
 }
 
+.coven-message-copy--user {
+  margin: -2px 0 0;
+}
+
+.fr-user:hover .coven-message-copy,
 .fr-familiar:hover .coven-message-copy,
 .coven-message-copy:focus-visible,
 .coven-message-copy[data-state="copied"],

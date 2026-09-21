@@ -33,6 +33,39 @@ export function useRailShortcuts(toggleLeft: () => void, toggleRight: () => void
   }, [toggleLeft, toggleRight]);
 }
 
+/**
+ * Typing while nothing editable has focus starts a message: the keystroke
+ * moves focus to the composer and lands there. Chords, function keys, and
+ * anything inside a dialog or menu are left alone.
+ */
+export function useTypeToCompose(focusComposer: () => boolean) {
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (
+        event.defaultPrevented ||
+        event.isComposing ||
+        event.metaKey ||
+        event.ctrlKey ||
+        event.altKey ||
+        event.key.length !== 1 ||
+        event.key === ' '
+      )
+        return;
+      const active = document.activeElement;
+      if (
+        active instanceof HTMLElement &&
+        (active.isContentEditable ||
+          ['INPUT', 'TEXTAREA', 'SELECT'].includes(active.tagName) ||
+          active.closest('dialog[open], [role="dialog"], [role="menu"], [role="listbox"]'))
+      )
+        return;
+      focusComposer();
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [focusComposer]);
+}
+
 /** Cmd/Ctrl+K reaches the familiar search from anywhere in the shell. */
 export function useSearchShortcut(focusSearch: () => void) {
   useEffect(() => {
