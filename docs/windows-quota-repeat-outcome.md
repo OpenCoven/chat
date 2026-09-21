@@ -82,9 +82,10 @@ permission change, or change to `MaximumQuotaEntries` or any other ceiling.
 Managed regression coverage exercises both missing exception types, a successful
 metadata follow-up, repeated access denial, and a different second error. Both
 production seams are then driven through one injected second failure at a time:
-a second denial, an entry-bound exception, generic and HRESULT-classified I/O
-errors, both missing types, and an unexpected exception, each of which must keep
-its own label after exactly two calls. A real directory read over a spent entry
+every normalized repeat label: a second denial, an entry-bound exception,
+generic I/O and each classified I/O HRESULT, arithmetic overflow, both missing
+types, and an unexpected exception, each of which must keep its own label after
+exactly two calls. A real directory read over a spent entry
 budget must report `entry-bound` with `repeat=persistent-entry-bound` through
 the production enumeration path without any injection. A
 separate snapshot regression requires exactly two calls and verifies that the
@@ -99,9 +100,15 @@ enforces the byte quota.
 
 Status: the `readable`/`missing` split passed local diagnostic tests after a
 demonstrated failing regression. The `persistent-<category>` split is in the
-frozen supervisor source; the per-seam repeat-outcome matrix and the spent-budget
-check were added without an execution on the authoring host, and the
-`windows-supervisor-behavior` job is their first run. Native Windows validation,
-reviewed frozen-source binding, SDK rebinding and fresh protected evidence are
-still required before claiming deployed coverage. Tracks Chat #219 and
-`cave-k0aqq.2`. Preserve chat and active worktrees.
+frozen supervisor source. The managed diagnostic file, including the per-seam
+repeat-outcome matrix and the spent-budget check, passed on macOS under
+PowerShell 7.6.6 on .NET 10, and the `windows-supervisor-behavior` job passed on
+`windows-2025` for PR #338 in run
+[35561671518](https://github.com/OpenCoven/chat/actions/runs/35561671518).
+Which cause fired in protected run 35146928092 remains unproven: that record
+says only `persistent`, and this change does not repair the underlying denial.
+A fresh protected run will instead report `persistent-entry-bound`,
+`persistent-access-denied`, or a `persistent-io-*` label, which is the evidence
+still required. Reviewed frozen-source binding and SDK rebinding are unchanged
+by this diagnostic. Tracks Chat #219 and `cave-k0aqq.2`. Preserve chat and
+active worktrees.

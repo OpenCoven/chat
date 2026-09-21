@@ -484,8 +484,17 @@ $repeatOutcomeCases = @(
   @($bound, 'persistent-entry-bound'),
   @([UnauthorizedAccessException]::new('private-second-denial'), 'persistent-access-denied'),
   @([IO.IOException]::new('private-second-io'), 'persistent-io'),
+  # A plain IOException carrying the file- or path-not-found HRESULT is not a
+  # FileNotFoundException or DirectoryNotFoundException, so it must reach the
+  # classifier rather than the missing catch.
+  @([IO.IOException]::new('private-second-file-hresult', -2147024894), 'persistent-io-file-not-found'),
+  @([IO.IOException]::new('private-second-path-hresult', -2147024893), 'persistent-io-path-not-found'),
   @([IO.IOException]::new('private-second-sharing', -2147024864), 'persistent-io-sharing-violation'),
+  @([IO.IOException]::new('private-second-lock', -2147024863), 'persistent-io-lock-violation'),
+  @([IO.IOException]::new('private-second-name', -2147024690), 'persistent-io-name-too-long'),
+  @([IO.IOException]::new('private-second-directory-hresult', -2147024629), 'persistent-io-invalid-directory'),
   @([IO.IOException]::new('private-second-delete', -2147024593), 'persistent-io-delete-pending'),
+  @([OverflowException]::new('private-second-overflow'), 'persistent-arithmetic-overflow'),
   @([IO.FileNotFoundException]::new('private-second-file'), 'missing'),
   @([IO.DirectoryNotFoundException]::new('private-second-directory'), 'missing'),
   @([InvalidOperationException]::new('private-second-unexpected'), 'persistent-unexpected')
