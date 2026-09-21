@@ -38,6 +38,7 @@ import {
   SEARCH_SHORTCUT,
   useRailShortcuts,
   useSearchShortcut,
+  useTypeToCompose,
 } from './rail-shortcuts';
 import {
   activityTime,
@@ -288,6 +289,7 @@ export const SHORTCUTS: readonly (readonly [keys: string, action: string])[] = [
   ['↑ ↓ Home End', 'Move through the list; Enter opens, Escape clears the search'],
   ['Enter', 'Send the message; Shift+Enter starts a new line'],
   ['@ or #', 'Mention a familiar or project; Tab confirms, Escape dismisses'],
+  ['Any letter', 'Start typing anywhere to message the familiar'],
 ];
 
 function activeControl(): HTMLElement | null {
@@ -437,6 +439,18 @@ export function ChatLayout(props: ChatLayoutProps) {
   const transcriptRef = useRef<HTMLDivElement>(null);
   const fileInput = useRef<HTMLInputElement>(null);
   const composerRef = useRef<HTMLTextAreaElement>(null);
+  // Start typing anywhere in the shell and the words go to the familiar. The
+  // first letter is appended here rather than left to the browser, so it is
+  // neither lost to a controlled field nor delivered twice.
+  useTypeToCompose((key) => {
+    const field = composerRef.current;
+    if (composerDisabled || !field) return false;
+    props.onDraft(props.draft + key);
+    field.focus();
+    const end = props.draft.length + key.length;
+    field.setSelectionRange(end, end);
+    return true;
+  });
   useEffect(() => {
     if (!composerFocus) return;
     if (composerFocus.id !== props.familiarId) {
@@ -935,6 +949,13 @@ export function ChatLayout(props: ChatLayoutProps) {
                     <div className="fr-bubble fr-bubble--user coven-message">
                       {block.message.text}
                     </div>
+                    {block.message.text ? (
+                      <CopyButton
+                        className="coven-message-copy coven-message-copy--user"
+                        text={block.message.text}
+                        label="Copy message"
+                      />
+                    ) : null}
                     {block.message.attachments?.length ? (
                       <ul className="coven-history-attachments" aria-label="Message attachments">
                         {block.message.attachments.map((file, index) => (

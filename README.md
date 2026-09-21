@@ -24,7 +24,9 @@ Toggle the familiar list with **Cmd/Ctrl+\\** and the inspector with
 **Cmd/Ctrl+Shift+\\**, and reach the familiar search with **Cmd/Ctrl+K**
 (it opens the list if it is closed). These shortcuts work while composing
 without changing your text, and **Keyboard shortcuts** at the foot of the
-familiar list lists them all. Rail buttons include shortcut hints; modal dialogs and input-method
+familiar list lists them all. Typing a letter while nothing editable has
+focus starts a message: the keystroke moves to the composer and lands there,
+unless the composer cannot send or a dialog or menu is open. Rail buttons include shortcut hints; modal dialogs and input-method
 composition do not trigger the shortcuts.
 
 Closed rails remain as 28px full-height tabs: **Familiars** on the left and the
@@ -203,7 +205,8 @@ Assistant replies render Markdown headings, lists, emphasis, quotes, code,
 tables, and task lists. Wide code and tables scroll inside the message.
 Raw HTML is disabled and remote Markdown images are not fetched automatically.
 Links open outside the window, so hovering one shows its address first.
-Each reply has a **Copy** control that copies its Markdown source, and each
+Each reply has a **Copy** control that copies its Markdown source, your own
+messages have one too, and each
 fenced code block names its language with its own **Copy** control for the
 code alone. The control reports "Copied" only after the clipboard accepted
 the text and "Copy failed" when it did not.
