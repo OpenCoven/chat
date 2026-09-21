@@ -57,4 +57,39 @@ describe('ChatLifecycleControls', () => {
     expect(screen.getByRole('menu')).not.toHaveTextContent('Archive chat');
     expect(screen.getByRole('menuitem', { name: 'Delete chat' })).toBeInTheDocument();
   });
+
+  it('returns focus to Chat actions when the delete dialog closes', () => {
+    const showModal = vi.fn();
+    const close = vi.fn();
+    Object.defineProperty(HTMLDialogElement.prototype, 'showModal', {
+      configurable: true,
+      value: showModal,
+    });
+    Object.defineProperty(HTMLDialogElement.prototype, 'close', {
+      configurable: true,
+      value: close,
+    });
+    try {
+      render(
+        <ChatLifecycleControls
+          id="one"
+          title="First head"
+          archived={false}
+          disabled={false}
+          pending={false}
+          error=""
+          onChange={() => {}}
+        />,
+      );
+      fireEvent.click(screen.getByRole('button', { name: 'Chat actions' }));
+      fireEvent.click(screen.getByRole('menuitem', { name: 'Delete chat' }));
+      expect(showModal).toHaveBeenCalledOnce();
+      const dialog = screen.getByRole('dialog', { hidden: true });
+      fireEvent(dialog, new Event('close'));
+      expect(screen.getByRole('button', { name: 'Chat actions' })).toHaveFocus();
+    } finally {
+      Reflect.deleteProperty(HTMLDialogElement.prototype, 'showModal');
+      Reflect.deleteProperty(HTMLDialogElement.prototype, 'close');
+    }
+  });
 });

@@ -387,6 +387,34 @@ export function ChatLayout(props: ChatLayoutProps) {
     (a, b) =>
       Number(b.access === 'write') - Number(a.access === 'write') || a.name.localeCompare(b.name),
   );
+  // A run's end is announced to assistive technology, since the status line
+  // that reported it simply disappears. Only the busy-to-idle edge speaks.
+  // Each completion remounts the text node, so two identical results still
+  // mutate the live region; a bare string would be deduplicated by React.
+  const [announcement, setAnnouncement] = useState({ text: '', n: 0 });
+  const previousRun = useRef({ busy: props.busy, id: runFamiliarId, name: runName });
+  useEffect(() => {
+    const announce = (text: string) => setAnnouncement((prev) => ({ text, n: prev.n + 1 }));
+    const previous = previousRun.current;
+    previousRun.current = { busy: props.busy, id: runFamiliarId, name: runName };
+    if (!previous.busy || props.busy) return;
+    if (previous.id === props.familiarId) {
+      announce(
+        props.lastRun
+          ? `${previous.name}: ${lastRunText(props.lastRun)}`
+          : `${previous.name}'s run ended`,
+      );
+      return;
+    }
+    const outcome = props.finished?.[previous.id];
+    announce(
+      outcome === 'reply'
+        ? `${previous.name} replied in another chat`
+        : outcome === 'error'
+          ? `${previous.name}'s run failed in another chat`
+          : `${previous.name}'s run ended in another chat`,
+    );
+  }, [props.busy, runFamiliarId, runName, props.familiarId, props.lastRun, props.finished]);
   // Captions age while the window sits open; a live run counts by the second.
   const now = useNow(props.busy ? 1000 : 60_000);
   const updated = formatUpdatedCaption(session?.updatedAt, now);
@@ -736,6 +764,9 @@ export function ChatLayout(props: ChatLayoutProps) {
         </div>
       </aside>
       <main className="fr-thread">
+        <output className="coven-sr-only" aria-live="polite" aria-label="Run announcements">
+          {announcement.n ? <span key={announcement.n}>{announcement.text}</span> : null}
+        </output>
         <header className="fr-thread-header">
           <div className="fr-thread-header-lead">
             {familiar ? (

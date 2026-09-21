@@ -103,6 +103,7 @@ test('confirms app-local delete and never lists tombstones', async ({ page }) =>
   await expect(dialog.getByRole('button', { name: 'Delete from Chat' })).toBeFocused();
   await page.keyboard.press('Escape');
   await expect(dialog).not.toBeVisible();
+  await expect(page.getByRole('button', { name: 'Chat actions' })).toBeFocused();
   expect(await page.evaluate(() => localStorage.getItem('fixture-lifecycle'))).toBeNull();
   await openDelete();
   await dialog.getByRole('button', { name: 'Delete from Chat' }).click();

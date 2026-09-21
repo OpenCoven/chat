@@ -66,7 +66,9 @@ Connection diagnostics are collapsed during normal use. Run status and Stop
 stay beside the composer, and the end of the thread shows the familiar's
 avatar with what the run is doing right now (waiting for the familiar, running
 a named tool, or stopping) until reply text starts to stream, and the status
-counts how long the run has been going. A run belongs to
+counts how long the run has been going. When a run ends, assistive
+technology hears how: the familiar's outcome and duration, or that a
+familiar replied or failed in another chat. A run belongs to
 the familiar it was sent to: if you switch to another familiar while it is
 live, that familiar's sidebar row reads **Responding…**, the status beside the
 composer names them and says the composer is free once their run finishes or
@@ -153,7 +155,8 @@ quiet line between messages, not a reply from anyone. The saved transcript
 keeps only your original message, not the replayed prompt.
 
 The chat's actions live behind the **Chat actions** control (the ⋯ in the
-thread header). **Archive chat** keeps the saved history and hides the
+thread header; focus returns there after the delete dialog closes).
+**Archive chat** keeps the saved history and hides the
 familiar from the active list; an archived chat shows **Restore chat** in the
 header itself, since restoring is what lets you send again.
 This interface only shows active familiar chats: it has no User settings or

@@ -1771,3 +1771,65 @@ describe('collapsed list badge and transcript focus', () => {
     expect(screen.getByRole('log', { name: 'Messages' })).toHaveAttribute('tabindex', '0');
   });
 });
+
+describe('run-end announcements', () => {
+  const props = () => ({
+    ...layoutProps(),
+    connected: true,
+    ready: true,
+    familiars: [
+      { id: 'a', name: 'Astra' },
+      { id: 'c', name: 'Cass' },
+    ],
+  });
+  const region = () => screen.getByRole('status', { name: 'Run announcements' });
+
+  it("announces the outcome and duration when the shown familiar's run ends", () => {
+    const { rerender } = render(
+      <ChatLayout {...props()} familiarId="a" busy runFamiliarId="a" runStartedAt={Date.now()} />,
+    );
+    expect(region()).toHaveTextContent('');
+    rerender(<ChatLayout {...props()} familiarId="a" lastRun={{ ms: 12_000, outcome: 'reply' }} />);
+    expect(region()).toHaveTextContent('Astra: Replied in 12s');
+    // Idle renders after that say nothing new.
+    rerender(<ChatLayout {...props()} familiarId="c" lastRun={{ ms: 12_000, outcome: 'reply' }} />);
+    expect(region()).toHaveTextContent('Astra: Replied in 12s');
+  });
+
+  it('speaks again when a later run ends with the very same words', () => {
+    const idle = () => (
+      <ChatLayout {...props()} familiarId="a" lastRun={{ ms: 12_000, outcome: 'reply' }} />
+    );
+    const busy = () => (
+      <ChatLayout
+        {...props()}
+        familiarId="a"
+        busy
+        runFamiliarId="a"
+        lastRun={{ ms: 12_000, outcome: 'reply' }}
+      />
+    );
+    const { rerender } = render(busy());
+    rerender(idle());
+    const first = region().firstElementChild;
+    expect(first).toHaveTextContent('Astra: Replied in 12s');
+    rerender(busy());
+    expect(region().firstElementChild).toBe(first);
+    rerender(idle());
+    const second = region().firstElementChild;
+    expect(second).toHaveTextContent('Astra: Replied in 12s');
+    // A fresh node, so the live region saw a mutation for the second run.
+    expect(second).not.toBe(first);
+  });
+
+  it('says which familiar replied or failed in another chat', () => {
+    const { rerender } = render(<ChatLayout {...props()} familiarId="c" busy runFamiliarId="a" />);
+    rerender(<ChatLayout {...props()} familiarId="c" finished={{ a: 'error' }} />);
+    expect(region()).toHaveTextContent("Astra's run failed in another chat");
+    rerender(
+      <ChatLayout {...props()} familiarId="c" finished={{ a: 'error' }} busy runFamiliarId="a" />,
+    );
+    rerender(<ChatLayout {...props()} familiarId="c" finished={{ a: 'reply' }} />);
+    expect(region()).toHaveTextContent('Astra replied in another chat');
+  });
+});
