@@ -1706,7 +1706,7 @@ describe('declared access and error copying', () => {
     expect(access).toHaveTextContent(/Access rules and approvals are not exposed/);
   });
 
-  it('says so when no access is declared', () => {
+  it('does not assert absence when no access was found', () => {
     render(
       <ChatLayout
         {...layoutProps()}
@@ -1718,7 +1718,7 @@ describe('declared access and error copying', () => {
     );
     fireEvent.click(screen.getByRole('button', { name: 'Access' }));
     expect(screen.getByRole('region', { name: 'Access' })).toHaveTextContent(
-      'No project access is declared for Bram',
+      'No declared project access was found for Bram',
     );
   });
 

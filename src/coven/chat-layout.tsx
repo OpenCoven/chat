@@ -1221,7 +1221,11 @@ export function ChatLayout(props: ChatLayoutProps) {
                       </div>
                     ) : (
                       <span className="fr-purpose">
-                        No project access is declared for {name} in the local registry or grants.
+                        {/* The host hands back an empty list both when nothing is
+                            declared and when the registry could not be read, so
+                            this must not assert absence. */}
+                        No declared project access was found for {name}. Coven's local registry and
+                        grants may list none, or Chat could not read them.
                       </span>
                     )}
                   </div>

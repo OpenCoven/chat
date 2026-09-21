@@ -36,7 +36,9 @@ workspaces). Suggestions come from known familiars and the selected familiar's
 declared read/write project access,
 with full identities and paths to distinguish similar names. The inspector's
 Access tab lists that same declared access, write grants first, and says
-plainly that Chat neither enforces nor extends it. Selection inserts
+plainly that Chat neither enforces nor extends it. When none was found it
+says so without claiming none exists, since an unreadable registry looks
+the same to Chat as an empty one. Selection inserts
 visible reference text at your cursor; it does not switch the recipient,
 delegate work, or grant file access.
 
