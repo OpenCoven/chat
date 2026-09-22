@@ -117,7 +117,9 @@ pub(crate) fn change(data: &Path, id: &str, next: Lifecycle) -> Result<(), Strin
 
 pub(crate) fn persist(data: &Path, name: &str, bytes: &[u8]) -> Result<(), String> {
     if bytes.len() > LIMIT {
-        return Err("Chat state exceeds 2 MiB; no change was saved.".into());
+        return Err(
+            "This change would make Chat's records larger than 2 MiB, so nothing was saved.".into(),
+        );
     }
     fs::create_dir_all(data)
         .map_err(|_| "Chat's archive and delete records could not be created.")?;

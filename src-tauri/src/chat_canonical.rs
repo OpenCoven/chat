@@ -95,7 +95,7 @@ pub(crate) fn project(data: &Path, sessions: &[Value]) -> Result<Vec<Value>, Str
         if !heads.contains_key(familiar) {
             let id = session["id"]
                 .as_str()
-                .ok_or("Invalid canonical session identifier.")?;
+                .ok_or("Coven listed a chat without a usable identifier.")?;
             heads.insert(familiar.to_owned(), Some(id.to_owned()));
         }
     }
@@ -112,7 +112,7 @@ pub(crate) fn project(data: &Path, sessions: &[Value]) -> Result<Vec<Value>, Str
         let session = sessions.iter().find(|session|
             session["id"].as_str() == Some(&id) &&
             session["familiarId"].as_str() == Some(&familiar))
-            .ok_or("A canonical Chat session is missing from the owned CLI listing. Existing mapping was preserved; no older chat was selected.")?;
+            .ok_or("A chat Chat recorded for a familiar is no longer in Coven's list. The record was left unchanged and no older chat was opened. Refresh Coven and open the familiar again.")?;
         let mut session = session.clone();
         session["archived"] = Value::Bool(states.get(&id) == Some(&Lifecycle::Archived));
         result.push(session);
@@ -218,7 +218,9 @@ mod tests {
         );
         assert_eq!(project(&data, &all).unwrap()[0]["id"], "newer-unrelated");
         assert!(require_current(&data, "current").is_err());
-        assert!(project(&data, &[current]).unwrap_err().contains("missing"));
+        assert!(project(&data, &[current])
+            .unwrap_err()
+            .contains("no longer in Coven's list"));
         cleanup(&data, &["old", "current", "newer-unrelated"]);
     }
 
