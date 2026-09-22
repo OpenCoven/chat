@@ -442,6 +442,25 @@ const primaryReportAssertionDiagnostics = Object.freeze([
   'phase1.stage.evidence-authority.report.assertions.unknown',
 ]);
 
+// The non-schema-v2 runner already tracks this scenario by stage, and
+// `runtimeScenarioFailureDiagnostic` already prefers a stage-specific
+// `phase1.coven-identity.<stage>` when the assertion carries one. The schema-v2
+// scenario recorded only the flat `phase1.integration.coven-identity-failed`,
+// so protected run 35752778995 named the failing assertion but not the step of
+// the daemon handshake that failed (OpenCoven/chat#219). These are the stages
+// this scenario can reach; a test pins them to the runner's classifier.
+const covenIdentityScenarioStages = Object.freeze([
+  'daemon-ready',
+  'rpc-start',
+  'unavailable-health',
+  'result',
+]);
+const covenIdentityScenarioStageSet = new Set(covenIdentityScenarioStages);
+export const covenIdentityScenarioDiagnostic = (stage) =>
+  covenIdentityScenarioStageSet.has(stage)
+    ? `phase1.coven-identity.${stage}`
+    : 'phase1.coven-identity.unknown';
+
 const publicFailureDiagnosticSet = new Set([
   ...SCHEMA_V2_FINALIZATION_OPERATIONS.map(finalizationDiagnostic),
   'phase1.stage.schema-v2-production.operation.invalid',
@@ -5627,6 +5646,7 @@ async function runCovenIdentityScenario(
       executableTrustFailure: false,
       trustProviderUnavailable: false,
     };
+    let identityStage = 'daemon-ready';
     try {
       let running = false;
       for (let attempt = 0; attempt < 80; attempt += 1) {
@@ -5657,6 +5677,7 @@ async function runCovenIdentityScenario(
       if (!running) {
         throw new Error('Coven daemon did not authenticate its same-user transport');
       }
+      identityStage = 'rpc-start';
       rpc = await startNativeRpc(
         artifactRoot,
         nativeRpcPath,
@@ -5667,6 +5688,7 @@ async function runCovenIdentityScenario(
         },
         covenHome,
       );
+      identityStage = 'unavailable-health';
       const health = await rpc.ok('coven_health', {
         operation: rpc.operation(),
       });
@@ -5678,6 +5700,7 @@ async function runCovenIdentityScenario(
       observations.connectedIdentity = true;
       observations.executableTrusted = true;
       observations.executableTrustFailure = true;
+      identityStage = 'result';
       await triggerAndWaitForChildClose(child, () =>
         runCommand(
           artifactRoot,
@@ -5699,7 +5722,7 @@ async function runCovenIdentityScenario(
         results,
         'phase1.coven.same-user-identity',
         'failed',
-        'phase1.integration.coven-identity-failed',
+        covenIdentityScenarioDiagnostic(identityStage),
       );
     } finally {
       if (rpc !== undefined) {
