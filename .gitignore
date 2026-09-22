@@ -1,6 +1,11 @@
 /.worktrees
 .artifacts/
+# Trailing slash matches only a directory. Worktrees under .worktrees/ carry
+# `node_modules` as a symlink to the primary checkout, which the slash form
+# misses, so `git add -A` there commits an 18-byte symlink and CI then fails
+# `pnpm install` with ENOTDIR. Match both spellings.
 node_modules/
+node_modules
 dist/
 release-staging/
 coverage/
