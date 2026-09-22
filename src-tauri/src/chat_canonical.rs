@@ -18,29 +18,36 @@ pub(crate) fn load(data: &Path) -> Result<Heads, String> {
     let metadata = match fs::symlink_metadata(&path) {
         Ok(metadata) => metadata,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Heads::new()),
-        Err(_) => return Err("Cannot inspect canonical Chat state.".into()),
+        Err(_) => {
+            return Err(
+                "Chat's record of which chat belongs to each familiar could not be checked.".into(),
+            )
+        }
     };
     if !metadata.is_file() || metadata.len() > LIMIT as u64 {
-        return Err("Canonical Chat state is invalid or exceeds 2 MiB.".into());
+        return Err("Chat's record of which chat belongs to each familiar is unreadable or larger than 2 MiB; it was left unchanged.".into());
     }
     let mut bytes = Vec::new();
     File::open(path)
-        .map_err(|_| "Cannot open canonical Chat state.")?
+        .map_err(|_| "Chat's record of which chat belongs to each familiar could not be opened.")?
         .take((LIMIT + 1) as u64)
         .read_to_end(&mut bytes)
-        .map_err(|_| "Cannot read canonical Chat state.")?;
+        .map_err(|_| "Chat's record of which chat belongs to each familiar could not be read.")?;
     if bytes.len() > LIMIT {
-        return Err("Canonical Chat state exceeds 2 MiB.".into());
+        return Err(
+            "Chat's record of which chat belongs to each familiar is larger than 2 MiB.".into(),
+        );
     }
-    let heads: Heads = serde_json::from_slice(&bytes)
-        .map_err(|_| "Canonical Chat state is invalid; existing state was preserved.")?;
+    let heads: Heads = serde_json::from_slice(&bytes).map_err(|_| {
+        "Chat's record of which chat belongs to each familiar is unreadable; it was left unchanged."
+    })?;
     validate(&heads)?;
     Ok(heads)
 }
 
 fn validate(heads: &Heads) -> Result<(), String> {
     if heads.len() > ENTRY_LIMIT {
-        return Err("Canonical Chat state exceeds 10,000 familiars.".into());
+        return Err("Chat's record of which chat belongs to each familiar lists more than 10,000 familiars.".into());
     }
     for (familiar, head) in heads {
         crate::coven_runtime::validate_id(familiar)?;
@@ -53,7 +60,8 @@ fn validate(heads: &Heads) -> Result<(), String> {
 
 fn save(data: &Path, heads: &Heads) -> Result<(), String> {
     validate(heads)?;
-    let bytes = serde_json::to_vec(heads).map_err(|_| "Cannot encode canonical Chat state.")?;
+    let bytes = serde_json::to_vec(heads)
+        .map_err(|_| "Chat's record of which chat belongs to each familiar could not be saved.")?;
     chat_lifecycle::persist(data, FILE, &bytes)
 }
 

@@ -25,24 +25,24 @@ pub(crate) fn load(data: &Path) -> Result<BTreeMap<String, Lifecycle>, String> {
     let metadata = match fs::symlink_metadata(&path) {
         Ok(metadata) => metadata,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(BTreeMap::new()),
-        Err(_) => return Err("Cannot inspect Chat lifecycle storage.".into()),
+        Err(_) => return Err("Chat's archive and delete records could not be checked.".into()),
     };
     if !metadata.is_file() || metadata.len() > LIMIT as u64 {
-        return Err("Chat lifecycle storage is invalid or exceeds 2 MiB.".into());
+        return Err("Chat's archive and delete records are unreadable or larger than 2 MiB; they were left unchanged.".into());
     }
     let mut bytes = Vec::new();
     File::open(path)
-        .map_err(|_| "Cannot open Chat lifecycle storage.")?
+        .map_err(|_| "Chat's archive and delete records could not be opened.")?
         .take((LIMIT + 1) as u64)
         .read_to_end(&mut bytes)
-        .map_err(|_| "Cannot read Chat lifecycle storage.")?;
+        .map_err(|_| "Chat's archive and delete records could not be read.")?;
     if bytes.len() > LIMIT {
-        return Err("Chat lifecycle storage exceeds 2 MiB.".into());
+        return Err("Chat's archive and delete records are larger than 2 MiB.".into());
     }
-    let entries: BTreeMap<String, Lifecycle> =
-        serde_json::from_slice(&bytes).map_err(|_| "Chat lifecycle storage is invalid.")?;
+    let entries: BTreeMap<String, Lifecycle> = serde_json::from_slice(&bytes)
+        .map_err(|_| "Chat's archive and delete records are unreadable.")?;
     if entries.len() > ENTRY_LIMIT {
-        return Err("Chat lifecycle storage exceeds 10,000 entries.".into());
+        return Err("Chat's archive and delete records hold more than 10,000 entries.".into());
     }
     for id in entries.keys() {
         crate::coven_runtime::validate_id(id)?;
@@ -91,11 +91,16 @@ pub(crate) fn change(data: &Path, id: &str, next: Lifecycle) -> Result<(), Strin
         entries.insert(id.to_owned(), next);
     }
     if entries.len() > ENTRY_LIMIT {
-        return Err("Chat lifecycle storage is full (10,000 entries); no change was saved.".into());
+        return Err(
+            "Chat's archive and delete records are full (10,000 entries); nothing was changed."
+                .into(),
+        );
     }
     let bytes = serde_json::to_vec(&entries).map_err(|_| "Cannot encode Chat lifecycle.")?;
     if bytes.len() > LIMIT {
-        return Err("Chat lifecycle storage is full (2 MiB); no change was saved.".into());
+        return Err(
+            "Chat's archive and delete records are full (2 MiB); nothing was changed.".into(),
+        );
     }
     persist(data, "chat-lifecycle-v1.json", &bytes)?;
     if next == Lifecycle::Deleted {
@@ -114,7 +119,8 @@ pub(crate) fn persist(data: &Path, name: &str, bytes: &[u8]) -> Result<(), Strin
     if bytes.len() > LIMIT {
         return Err("Chat state exceeds 2 MiB; no change was saved.".into());
     }
-    fs::create_dir_all(data).map_err(|_| "Cannot create Chat lifecycle storage.")?;
+    fs::create_dir_all(data)
+        .map_err(|_| "Chat's archive and delete records could not be created.")?;
     let temporary = data.join(format!("chat-lifecycle-{}.tmp", uuid::Uuid::new_v4()));
     let write = (|| {
         let mut options = OpenOptions::new();

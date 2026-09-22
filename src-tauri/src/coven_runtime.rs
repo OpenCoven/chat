@@ -814,7 +814,7 @@ pub(crate) async fn coven_runtime_sessions(app: AppHandle) -> Result<Value, Stri
     blocking(move || {
         let _storage = crate::chat_lifecycle::STORAGE_LOCK
             .lock()
-            .map_err(|_| "Chat lifecycle storage is unavailable.")?;
+            .map_err(|_| "Chat's archive and delete records are unavailable.")?;
         let value = cli_json(&["sessions", "--all", "--json"])?;
         visible_sessions(&data, &value)
     })
@@ -871,7 +871,7 @@ fn change_chat_lifecycle(
     }
     let _storage = crate::chat_lifecycle::STORAGE_LOCK
         .lock()
-        .map_err(|_| "Chat lifecycle storage is unavailable.")?;
+        .map_err(|_| "Chat's archive and delete records are unavailable.")?;
     crate::chat_canonical::require_current(data, id)?;
     crate::chat_lifecycle::change(data, id, lifecycle)?;
     if lifecycle == crate::chat_lifecycle::Lifecycle::Deleted {
@@ -889,7 +889,7 @@ pub(crate) async fn coven_runtime_read(app: AppHandle, id: String) -> Result<Val
     blocking(move || {
         let _storage = crate::chat_lifecycle::STORAGE_LOCK
             .lock()
-            .map_err(|_| "Chat lifecycle storage is unavailable.")?;
+            .map_err(|_| "Chat's archive and delete records are unavailable.")?;
         read_session(&data, &id)
     })
     .await
@@ -902,7 +902,7 @@ fn read_session(data: &Path, id: &str) -> Result<Value, String> {
     let deadline = Instant::now() + Duration::from_secs(60);
     let selected = get_session(id)?;
     if selected.get("familiar_id").and_then(Value::as_str) != Some(familiar.as_str()) {
-        return Err("The canonical Chat session no longer belongs to its mapped familiar.".into());
+        return Err("This chat is no longer recorded as belonging to the familiar you selected. Refresh Coven and open the familiar again.".into());
     }
     if let Some((events, has_more)) = read_captured_history(data, &selected, get_session)? {
         return Ok(
@@ -1470,7 +1470,7 @@ fn send_local(
     {
         let _storage = crate::chat_lifecycle::STORAGE_LOCK
             .lock()
-            .map_err(|_| "Chat lifecycle storage is unavailable.")?;
+            .map_err(|_| "Chat's archive and delete records are unavailable.")?;
         if !crate::chat_canonical::load(data)?.contains_key(&selected_familiar) {
             visible_sessions(data, &cli_json(&["sessions", "--all", "--json"])?)?;
             crate::chat_canonical::ensure_empty(data, &selected_familiar)?;
@@ -1657,7 +1657,7 @@ fn send_local(
                 .map_err(|_| "Cannot persist the new Chat transcript directory.")?;
             let _storage = crate::chat_lifecycle::STORAGE_LOCK
                 .lock()
-                .map_err(|_| "Chat lifecycle storage is unavailable.")?;
+                .map_err(|_| "Chat's archive and delete records are unavailable.")?;
             crate::chat_canonical::advance(
                 data,
                 &selected_familiar,
