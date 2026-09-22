@@ -28,7 +28,10 @@ import {
   normalizeWindowsRealPathForProcess,
   quoteWindowsBatchCommand,
 } from '../scripts/executable-resolution.mjs';
-import { REQUIRED_PHASE1_ASSERTION_IDS } from '../scripts/phase1-artifact-secret-scan.mjs';
+import {
+  APPROVED_PHASE1_DIAGNOSTIC_IDS,
+  REQUIRED_PHASE1_ASSERTION_IDS,
+} from '../scripts/phase1-artifact-secret-scan.mjs';
 import {
   adoptNativeCleanupReservation,
   assertExecutingHarnessAuthority,
@@ -1861,6 +1864,26 @@ describe('Phase 1 real-authority conformance harness', () => {
         assertions: [{ id: 'phase1.pairing.denial', status: 'skipped' }],
       }),
     ).toThrow('phase1.stage.evidence-authority.report.assertions.unknown');
+  });
+
+  test('classifies the Coven same-user identity failure by handshake stage', () => {
+    const { covenIdentityScenarioDiagnostic } = schemaV2Producer;
+    expect(covenIdentityScenarioDiagnostic).toBeTypeOf('function');
+    for (const stage of ['daemon-ready', 'rpc-start', 'unavailable-health', 'result']) {
+      // The runner's own classifier is the reference; the producer must not drift.
+      expect(covenIdentityScenarioDiagnostic(stage)).toBe(covenIdentityFailureDiagnostic(stage));
+      expect(covenIdentityScenarioDiagnostic(stage)).toBe(`phase1.coven-identity.${stage}`);
+    }
+    for (const stage of ['', 'socket-mode', 'not-a-stage', undefined]) {
+      // Stages this scenario cannot reach must not widen the recorded category.
+      expect(covenIdentityScenarioDiagnostic(stage)).toBe('phase1.coven-identity.unknown');
+    }
+  });
+
+  test('accepts every stage-specific identity diagnostic in a primary report', () => {
+    for (const stage of ['daemon-ready', 'rpc-start', 'unavailable-health', 'result', 'unknown']) {
+      expect(APPROVED_PHASE1_DIAGNOSTIC_IDS).toContain(`phase1.coven-identity.${stage}`);
+    }
   });
 
   test('publishes a bounded report-assertion category for every required assertion', () => {
