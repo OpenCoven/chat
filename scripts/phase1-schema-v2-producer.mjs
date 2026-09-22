@@ -917,7 +917,7 @@ export function windowsJobBindingEnvironment(
   requireDescendant(canonicalBootstrapRoot, canonicalTemporaryDirectory);
   requireDescendant(canonicalBootstrapRoot, canonicalPnpmCli);
   if (
-    windowsPath.basename(canonicalBootstrapRoot).toLowerCase() !== `opencoven-win32-${nonce}` ||
+    windowsPath.basename(canonicalBootstrapRoot).toLowerCase() !== `oc${nonce.slice(0, 8)}` ||
     canonicalCaveConformanceTemp.toLowerCase() !==
       windowsPath.join(canonicalBootstrapRoot, 'cave-conformance-temp').toLowerCase() ||
     canonicalStatusStagingDirectory.toLowerCase() !==
