@@ -456,6 +456,13 @@ const covenIdentityScenarioStages = Object.freeze([
   'result',
 ]);
 const covenIdentityScenarioStageSet = new Set(covenIdentityScenarioStages);
+// Recorded assertion diagnostics specific enough to name instead of the
+// assertion. Generic ones such as `phase1.assertion.failed` stay out: they say
+// less than the assertion name does.
+const preferredAssertionDiagnostics = new Set([
+  ...covenIdentityScenarioStages.map((stage) => `phase1.coven-identity.${stage}`),
+  'phase1.coven-identity.unknown',
+]);
 export const covenIdentityScenarioDiagnostic = (stage) =>
   covenIdentityScenarioStageSet.has(stage)
     ? `phase1.coven-identity.${stage}`
@@ -6214,6 +6221,17 @@ export function requirePassingPrimaryAssertions(report) {
   for (const assertion of report.assertions) {
     if (assertion.status === 'passed') {
       continue;
+    }
+    // A scenario that classified its own failure has already recorded the more
+    // specific identifier, so prefer it over the identifier built from the
+    // assertion name. `runtimeScenarioFailureDiagnostic` in the non-schema-v2
+    // runner makes the same choice. Without this, protected run 35774072327
+    // reported the assertion and dropped the Coven handshake stage that #363
+    // had just recorded, because the report is not retained on Windows
+    // (OpenCoven/chat#219).
+    const recorded = assertion.diagnosticIds?.[0];
+    if (typeof recorded === 'string' && preferredAssertionDiagnostics.has(recorded)) {
+      throw new Error(recorded);
     }
     const key = primaryReportAssertionKeys.get(assertion.id);
     throw new Error(

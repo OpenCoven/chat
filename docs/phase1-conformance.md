@@ -2020,7 +2020,7 @@ revision authorities can therefore have different workflow hashes:
 
 | File | Bytes | SHA-256 |
 | --- | ---: | --- |
-| `.github/workflows/client-v1-conformance.yml` | 180,718 | `3bf4a605d497cf72313f7d325e53a957488a0a311cae54eb37e17d1cba211d62` |
+| `.github/workflows/client-v1-conformance.yml` | 180,718 | `c33edc4815f3ac1bbe0a9a532aada13f132f9406e7c6fa88e840e8c632db7694` |
 | `scripts/contract-canary.mjs` | 40,618 | `a4c2fe0a5eb6a5ff4653de5374c34c0fb46907c6806a5d23b86d8b37206ef958` |
 | `scripts/executable-resolution.mjs` | 9,154 | `31e3c412ff8c835f14522f36a59e91f4a4ba82913210ae8e3b4455217503f430` |
 | `scripts/owned-temp-directory.mjs` | 7,762 | `95f546ef9ed614f2a0f55d356ddfc54c943fc53b595b4eebebfcbd4db68e5c0b` |
@@ -2033,7 +2033,7 @@ revision authorities can therefore have different workflow hashes:
 | `scripts/phase1-macos-keychain.mjs` | 5,091 | `ab0c2dd08cf606d9502f5da206175707d471d99f484e8c8c79b5b08a5772b9a4` |
 | `scripts/phase1-process-supervisor.mjs` | 3,820 | `16b51fb1a33b4bfef98daca549aacf5dc2d2c098cfbd664753b69c940d1e6f6c` |
 | `scripts/phase1-schema-v2-evidence.mjs` | 52,505 | `0aede2ab3abd76fabf5ac61d64d2dbaaffa497c8647b82236403de16a47751c8` |
-| `scripts/phase1-schema-v2-producer.mjs` | 236,794 | `6b2f58e223fea1381efb912782ba4e58b6a4e67ed97f0682dd52a1f137323dfa` |
+| `scripts/phase1-schema-v2-producer.mjs` | 237,823 | `21f6a3aa36478d1dcee824b7e4f2b0420b8b8b330e2b6f16e46af2eb4ddbf994` |
 | `scripts/process-owned-artifact-root.mjs` | 13,061 | `103cc789f12a6bbde16b2414aecf05813d9d28a2c40c7d6eaa2073b86e8e5d77` |
 | `scripts/supervised-exec.mjs` | 2,875 | `a5edfd985b934d3b46247a0da3141682c411d30bb582edf87ae7b29791dad65b` |
 | `scripts/supervisor-status.mjs` | 854 | `ac332ca7b6b040ecc846088bb3a6ad5e7112a0454eb3ea71d2a819d55e64254e` |
