@@ -1866,6 +1866,50 @@ describe('Phase 1 real-authority conformance harness', () => {
     ).toThrow('phase1.stage.evidence-authority.report.assertions.unknown');
   });
 
+  test('prefers a recorded stage diagnostic over the assertion name', () => {
+    const { requirePassingPrimaryAssertions } = schemaV2Producer;
+    // What the Coven identity scenario records once it classified its own
+    // failure. The stage is what a protected run needs, so it wins.
+    expect(() =>
+      requirePassingPrimaryAssertions({
+        assertions: [
+          {
+            id: 'phase1.coven.same-user-identity',
+            status: 'failed',
+            diagnosticIds: ['phase1.coven-identity.daemon-ready'],
+          },
+        ],
+      }),
+    ).toThrow('phase1.coven-identity.daemon-ready');
+
+    // A generic recorded diagnostic says less than the assertion name, so the
+    // assertion-derived category is kept.
+    expect(() =>
+      requirePassingPrimaryAssertions({
+        assertions: [
+          {
+            id: 'phase1.coven.same-user-identity',
+            status: 'failed',
+            diagnosticIds: ['phase1.assertion.failed'],
+          },
+        ],
+      }),
+    ).toThrow('phase1.stage.evidence-authority.report.assertions.failed.coven.same-user-identity');
+
+    // An unapproved identifier must never reach the category.
+    expect(() =>
+      requirePassingPrimaryAssertions({
+        assertions: [
+          {
+            id: 'phase1.coven.same-user-identity',
+            status: 'failed',
+            diagnosticIds: ['whatever the scenario felt like writing'],
+          },
+        ],
+      }),
+    ).toThrow('phase1.stage.evidence-authority.report.assertions.failed.coven.same-user-identity');
+  });
+
   test('classifies the Coven same-user identity failure by handshake stage', () => {
     const { covenIdentityScenarioDiagnostic } = schemaV2Producer;
     expect(covenIdentityScenarioDiagnostic).toBeTypeOf('function');
