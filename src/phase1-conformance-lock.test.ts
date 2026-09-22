@@ -109,6 +109,11 @@ const expectedBehaviorAuthority = {
       sha256: '6b2f58e223fea1381efb912782ba4e58b6a4e67ed97f0682dd52a1f137323dfa',
     },
     {
+      path: 'scripts/phase1-artifact-secret-scan.mjs',
+      blob: '94365a87156a54d1202e8d6e7f8fac33d1278ad0',
+      sha256: '8b3c85cb8461fd520892a53a6169201e1db1bf50fe1457ed6315ba9fcd2fd658',
+    },
+    {
       path: 'scripts/unix-producer-supervisor.sh',
       blob: '0a27a5be4d2eb4981d35d7e3c178424c851697c5',
       sha256: 'b73036415744c80ed27d5667f255ceea149096ca517b47c93a154299802206ff',
