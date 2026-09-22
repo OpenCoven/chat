@@ -20,7 +20,10 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { isDeepStrictEqual, stripVTControlCharacters } from 'node:util';
 import { FROZEN_PACKED_CONSUMER_STAGES } from './contract-canary.mjs';
 import { resolveExecutableInvocation } from './executable-resolution.mjs';
-import { scanPhase1Artifacts } from './phase1-artifact-secret-scan.mjs';
+import {
+  REQUIRED_PHASE1_ASSERTION_IDS,
+  scanPhase1Artifacts,
+} from './phase1-artifact-secret-scan.mjs';
 import {
   assertCleanPhase1Checkout,
   assertCleanPhase1Checkouts,
@@ -382,6 +385,15 @@ const publicPhase1DiagnosticIds = new Set([
   'phase1.stage.evidence-authority.isolation.operator.projects.path',
   'phase1.stage.evidence-authority.isolation.operator.projects.changed',
   'phase1.stage.evidence-authority.assertions.failed',
+  // Mirrors the producer's bounded report-assertion categories so the outer
+  // runner recognises one when a supervised child prints it (#219).
+  ...['failed', 'blocked'].flatMap((status) =>
+    REQUIRED_PHASE1_ASSERTION_IDS.map(
+      (id) =>
+        `phase1.stage.evidence-authority.report.assertions.${status}.${id.slice('phase1.'.length)}`,
+    ),
+  ),
+  'phase1.stage.evidence-authority.report.assertions.unknown',
   'phase1.stage.evidence-authority.build.failed',
   'phase1.stage.evidence-authority.build.environment',
   'phase1.stage.evidence-authority.build.cave-record',

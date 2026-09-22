@@ -28,6 +28,7 @@ import {
   normalizeWindowsRealPathForProcess,
   quoteWindowsBatchCommand,
 } from '../scripts/executable-resolution.mjs';
+import { REQUIRED_PHASE1_ASSERTION_IDS } from '../scripts/phase1-artifact-secret-scan.mjs';
 import {
   adoptNativeCleanupReservation,
   assertExecutingHarnessAuthority,
@@ -1810,6 +1811,72 @@ describe('Phase 1 real-authority conformance harness', () => {
         }),
       ).rejects.toMatchObject({ message: stage });
     }
+  });
+
+  test('names the required assertion that left the primary report non-passing', () => {
+    const { requirePassingPrimaryAssertions } = schemaV2Producer;
+    expect(requirePassingPrimaryAssertions).toBeTypeOf('function');
+    const report = (
+      statuses: Record<string, 'passed' | 'failed' | 'blocked'>,
+    ): { assertions: { id: string; status: string }[] } => ({
+      assertions: Object.entries(statuses).map(([id, status]) => ({ id, status })),
+    });
+
+    expect(() =>
+      requirePassingPrimaryAssertions(
+        report({
+          'phase1.pairing.denial': 'passed',
+          'phase1.native.missing-keychain-trust': 'passed',
+        }),
+      ),
+    ).not.toThrow();
+
+    // A blocked assertion is how an unrecorded scenario reaches the report, and
+    // the opaque build.failed category is what protected run 35704479061 showed
+    // on Windows instead of this (#219).
+    expect(() =>
+      requirePassingPrimaryAssertions(
+        report({
+          'phase1.pairing.denial': 'passed',
+          'phase1.native.missing-keychain-trust': 'blocked',
+        }),
+      ),
+    ).toThrow(
+      'phase1.stage.evidence-authority.report.assertions.blocked.native.missing-keychain-trust',
+    );
+
+    expect(() =>
+      requirePassingPrimaryAssertions(report({ 'phase1.compat.api-major-min-client': 'failed' })),
+    ).toThrow(
+      'phase1.stage.evidence-authority.report.assertions.failed.compat.api-major-min-client',
+    );
+
+    // An identifier outside the frozen required set, or a status outside the
+    // report's two non-passing ones, must not widen the category.
+    expect(() =>
+      requirePassingPrimaryAssertions(report({ 'phase1.not.a-required-assertion': 'failed' })),
+    ).toThrow('phase1.stage.evidence-authority.report.assertions.unknown');
+    expect(() =>
+      requirePassingPrimaryAssertions({
+        assertions: [{ id: 'phase1.pairing.denial', status: 'skipped' }],
+      }),
+    ).toThrow('phase1.stage.evidence-authority.report.assertions.unknown');
+  });
+
+  test('publishes a bounded report-assertion category for every required assertion', () => {
+    for (const id of REQUIRED_PHASE1_ASSERTION_IDS) {
+      for (const status of ['failed', 'blocked']) {
+        const category = `phase1.stage.evidence-authority.report.assertions.${status}.${id.slice(
+          'phase1.'.length,
+        )}`;
+        expect(publicPhase1FailureDiagnostic(new Error(category))).toBe(category);
+      }
+    }
+    expect(
+      publicPhase1FailureDiagnostic(
+        new Error('phase1.stage.evidence-authority.report.assertions.unknown'),
+      ),
+    ).toBe('phase1.stage.evidence-authority.report.assertions.unknown');
   });
 
   test('assigns bounded diagnostics to checkout and evidence-finalization boundaries', () => {

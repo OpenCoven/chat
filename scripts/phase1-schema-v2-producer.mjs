@@ -423,6 +423,25 @@ export const SCHEMA_V2_FINALIZATION_OPERATIONS = Object.freeze([
 const finalizationOperationSet = new Set(SCHEMA_V2_FINALIZATION_OPERATIONS);
 const finalizationDiagnostic = (operation) =>
   `phase1.stage.schema-v2-production.operation.${operation}`;
+// A required Phase 1 assertion that does not pass leaves the primary report in a
+// non-passing state, which the evidence builder rejects only as the opaque
+// `phase1.stage.evidence-authority.build.failed`. Windows reached that stage for
+// the first time in protected run 35704479061 and the category named no cause
+// (OpenCoven/chat#219). Name the assertion instead. Both halves come from frozen
+// sets - the required assertion IDs and the report's two non-passing statuses -
+// so the category stays bounded and carries no free text.
+const primaryReportAssertionKeys = new Map(
+  REQUIRED_PHASE1_ASSERTION_IDS.map((id) => [id, id.slice('phase1.'.length)]),
+);
+const primaryReportAssertionDiagnostics = Object.freeze([
+  ...['failed', 'blocked'].flatMap((status) =>
+    [...primaryReportAssertionKeys.values()].map(
+      (key) => `phase1.stage.evidence-authority.report.assertions.${status}.${key}`,
+    ),
+  ),
+  'phase1.stage.evidence-authority.report.assertions.unknown',
+]);
+
 const publicFailureDiagnosticSet = new Set([
   ...SCHEMA_V2_FINALIZATION_OPERATIONS.map(finalizationDiagnostic),
   'phase1.stage.schema-v2-production.operation.invalid',
@@ -469,6 +488,7 @@ const publicFailureDiagnosticSet = new Set([
   'phase1.stage.evidence-authority.isolation.operator.projects.path',
   'phase1.stage.evidence-authority.isolation.operator.projects.changed',
   'phase1.stage.evidence-authority.assertions.failed',
+  ...primaryReportAssertionDiagnostics,
   'phase1.stage.evidence-authority.build.failed',
   'phase1.stage.evidence-authority.build.environment',
   'phase1.stage.evidence-authority.build.cave-record',
@@ -6167,6 +6187,20 @@ export function wrapInfrastructureFailure(error, report) {
   return new CommandExecutionError('Phase 1 conformance infrastructure', { report }, error);
 }
 
+export function requirePassingPrimaryAssertions(report) {
+  for (const assertion of report.assertions) {
+    if (assertion.status === 'passed') {
+      continue;
+    }
+    const key = primaryReportAssertionKeys.get(assertion.id);
+    throw new Error(
+      key === undefined || (assertion.status !== 'failed' && assertion.status !== 'blocked')
+        ? 'phase1.stage.evidence-authority.report.assertions.unknown'
+        : `phase1.stage.evidence-authority.report.assertions.${assertion.status}.${key}`,
+    );
+  }
+}
+
 function fillMissingAssertions(results, status, diagnosticId) {
   for (const id of REQUIRED_PHASE1_ASSERTION_IDS) {
     if (!results.has(id)) {
@@ -6531,6 +6565,10 @@ export async function runSchemaV2Conformance(options, lock, harnessAuthorityVeri
             completedReport,
           );
         }
+        // Placed after the infrastructure guard above so a genuine
+        // infrastructure failure keeps its own attribution instead of surfacing
+        // as the assertions its cleanup flipped to failed.
+        requirePassingPrimaryAssertions(completedReport);
         const operatorAfter = runSchemaV2PreflightStage(
           'phase1.stage.evidence-authority.operator-state.failed',
           () => captureOperatorFilesystemState(operatorHomes),
