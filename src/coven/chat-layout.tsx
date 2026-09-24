@@ -19,6 +19,7 @@ import {
 import { Icon } from '../design/minimal-icons';
 import type { ChatLifecycle, CovenProjectAccess } from '../lib/coven-runtime';
 import type { ScreenRelay } from '../lib/screen-relay';
+import { type SetWindowTitle, windowTitle } from '../lib/window-title';
 import { AttachmentChip } from '../ui/attachment-chip';
 import { Composer } from '../ui/composer';
 import { ATTACHMENT_ACCEPT, type ChatAttachment, formatAttachmentSize } from './attachments';
@@ -123,6 +124,8 @@ export type ChatLayoutProps = Readonly<{
   onReloadChat?: () => void;
   /** The host-side VNC relay; absent in the browser, where the pane says so. */
   screen?: ScreenRelay | undefined;
+  /** Names the window after the shown familiar; absent, the title is left alone. */
+  onWindowTitle?: SetWindowTitle | undefined;
   /** Test seam for the screen viewer's VNC client. */
   screenLoadRfb?: LoadRfb | undefined;
   onFamiliar: (id: string) => void;
@@ -448,6 +451,11 @@ export function ChatLayout(props: ChatLayoutProps) {
           : `${previous.name}'s run ended in another chat`,
     );
   }, [props.busy, runFamiliarId, runName, props.familiarId, props.lastRun, props.finished]);
+  const title = windowTitle(familiar?.name, pendingRuns);
+  const onWindowTitle = props.onWindowTitle;
+  useEffect(() => {
+    onWindowTitle?.(title);
+  }, [title, onWindowTitle]);
   // Captions age while the window sits open; a live run counts by the second.
   const now = useNow(props.busy ? 1000 : 60_000);
   const updated = formatUpdatedCaption(session?.updatedAt, now);

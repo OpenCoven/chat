@@ -20,6 +20,11 @@ so a long reply or a short window does not push the composer off the page.
 The conversation region can take keyboard focus, so it scrolls with the
 arrow and page keys without a control inside it being focused.
 
+The window is titled after the familiar you are viewing, such as
+"Astra — OpenCoven Chat", and leads with a count when runs have ended in
+other chats you have not opened yet, so a window in the background shows
+that a reply is waiting.
+
 Toggle the familiar list with **Cmd/Ctrl+\\** and the inspector with
 **Cmd/Ctrl+Shift+\\**, and reach the familiar search with **Cmd/Ctrl+K**
 (it opens the list if it is closed), and step to the previous or next
@@ -331,9 +336,10 @@ Runtime operations cross typed, narrowly scoped Tauri commands. There is no
 generic shell, filesystem, or HTTP command exposed to the webview, and no
 Tauri shell, filesystem, opener, or network plugin permission is granted.
 The main window is allowed to invoke only the seven `coven_runtime_*`
-commands the chat interface uses; the Cave adapter and app-identity commands
-remain registered for native and conformance coverage but are not reachable
-from the webview.
+commands the chat interface uses, the three `coven_screen_*` commands of the
+screen relay, and Tauri's permission to set its own window title; the Cave
+adapter and app-identity commands remain registered for native and
+conformance coverage but are not reachable from the webview.
 
 The reviewed Cave adapter remains in the repository for its independent
 native and conformance coverage. The single Chat entrypoint does not start

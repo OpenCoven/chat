@@ -8,6 +8,7 @@ import {
   createCovenRuntime,
 } from '../lib/coven-runtime';
 import { defaultScreenRelay, type ScreenRelay } from '../lib/screen-relay';
+import { type SetWindowTitle, setWindowTitle } from '../lib/window-title';
 import { type ChatAttachment, MAX_ATTACHMENTS, readAttachments } from './attachments';
 import { ChatLayout } from './chat-layout';
 import { projectEvents } from './events';
@@ -98,9 +99,11 @@ function selectCanonical(
 export function ChatApp({
   runtime = defaultRuntime,
   screen = defaultScreenRelay,
+  onWindowTitle = setWindowTitle,
 }: {
   runtime?: CovenRuntime;
   screen?: ScreenRelay;
+  onWindowTitle?: SetWindowTitle;
 }) {
   const [saved] = useState(readNavigation);
   const [navigation, setNavigation] = useState(saved.navigation);
@@ -577,6 +580,7 @@ export function ChatApp({
       }))}
       sessions={sessions}
       screen={screen}
+      onWindowTitle={onWindowTitle}
       messages={messages}
       familiarId={navigation.familiarId}
       sessionId={navigation.sessionId}
