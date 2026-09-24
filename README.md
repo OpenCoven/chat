@@ -199,7 +199,10 @@ cancellation cleanup, have finished; deleting a chat never cancels an agent.
 
 ## Attachments and formatted replies
 
-Use the compact **+** attachment button beside the message field. Selected files
+Use the compact **+** attachment button beside the message field, or drag
+files onto the conversation. A drop goes through the same checks as the
+picker, and a file dropped anywhere else in the window is ignored rather
+than opened. Selected files
 appear as cards with their filename, size (in KiB above a kibibyte), and a
 remove control; sent messages retain file cards in the transcript.
 

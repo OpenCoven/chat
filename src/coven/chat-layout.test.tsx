@@ -2169,3 +2169,50 @@ describe('window title', () => {
     expect(onWindowTitle).toHaveBeenCalledTimes(calls);
   });
 });
+
+describe('dropping files onto the thread', () => {
+  const file = new File(['abc'], 'notes.md', { type: 'text/markdown' });
+  const transfer = (files: File[]) => ({ files, types: ['Files'], dropEffect: 'none' });
+  const base = () => ({
+    ...layoutProps(),
+    connected: true,
+    ready: true,
+    familiars: [{ id: 'a', name: 'Astra' }],
+    familiarId: 'a',
+    onAttach: vi.fn(),
+  });
+
+  it('attaches dropped files and says what a drop will do while dragging', () => {
+    const p = base();
+    const { container } = render(<ChatLayout {...p} />);
+    const thread = container.querySelector('main.fr-thread') as HTMLElement;
+    fireEvent.dragEnter(thread, { dataTransfer: transfer([file]) });
+    expect(screen.getByText('Drop text or code files to attach them')).toBeInTheDocument();
+    fireEvent.drop(thread, { dataTransfer: transfer([file]) });
+    expect(p.onAttach).toHaveBeenCalledWith([file]);
+    expect(screen.queryByText('Drop text or code files to attach them')).toBeNull();
+  });
+
+  it('refuses a drop while the composer cannot take files, and ignores drags without files', () => {
+    const p = base();
+    const { container, rerender } = render(<ChatLayout {...p} busy />);
+    const thread = container.querySelector('main.fr-thread') as HTMLElement;
+    fireEvent.dragEnter(thread, { dataTransfer: transfer([file]) });
+    expect(
+      screen.getByText('Files can be attached once the composer is ready'),
+    ).toBeInTheDocument();
+    fireEvent.drop(thread, { dataTransfer: transfer([file]) });
+    expect(p.onAttach).not.toHaveBeenCalled();
+    rerender(<ChatLayout {...p} />);
+    fireEvent.dragEnter(thread, { dataTransfer: { files: [], types: ['text/plain'] } });
+    expect(screen.queryByText(/Drop text or code files/)).toBeNull();
+  });
+
+  it('keeps a stray file drop from navigating the window', () => {
+    render(<ChatLayout {...base()} />);
+    const stray = new Event('drop', { bubbles: true, cancelable: true });
+    Object.defineProperty(stray, 'dataTransfer', { value: { types: ['Files'] } });
+    window.dispatchEvent(stray);
+    expect(stray.defaultPrevented).toBe(true);
+  });
+});

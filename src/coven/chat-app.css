@@ -781,6 +781,25 @@
   opacity: 1;
 }
 
+/* Files dragged over the thread: a quiet overlay saying what a drop will do. */
+.coven-chat .fr-thread {
+  position: relative;
+}
+
+.coven-drop-zone {
+  position: absolute;
+  inset: 8px;
+  z-index: 30;
+  display: grid;
+  place-items: center;
+  border: 1.5px dashed var(--accent-presence);
+  border-radius: 12px;
+  background: color-mix(in oklch, var(--bg-panel, #1b1b1e) 82%, transparent);
+  color: var(--text-primary);
+  font-size: 13px;
+  pointer-events: none;
+}
+
 /* A replayed-history notice: a quiet line between messages, addressed by no one. */
 .coven-chat .coven-notice {
   margin: 0 auto;

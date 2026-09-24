@@ -1,5 +1,6 @@
 import {
   type CSSProperties,
+  type DragEvent as ReactDragEvent,
   type KeyboardEvent as ReactKeyboardEvent,
   type RefObject,
   useEffect,
@@ -468,6 +469,48 @@ export function ChatLayout(props: ChatLayoutProps) {
   const refreshBlocked = Boolean(props.busy || props.loading || props.lifecycleBusy);
   const transcriptRef = useRef<HTMLDivElement>(null);
   const fileInput = useRef<HTMLInputElement>(null);
+  // Files dragged onto the thread attach as if picked. The native host hands
+  // drops to the webview (dragDropEnabled is off), so they arrive as File
+  // objects and go through the same checks as the picker.
+  const canDrop = Boolean(props.onAttach) && !props.busy && !props.attaching && !composerDisabled;
+  const [dragDepth, setDragDepth] = useState(0);
+  const dragging = dragDepth > 0;
+  // A drop the thread does not take must never navigate the window to the file.
+  useEffect(() => {
+    const block = (event: DragEvent) => {
+      if (event.dataTransfer?.types.includes('Files')) event.preventDefault();
+    };
+    window.addEventListener('dragover', block);
+    window.addEventListener('drop', block);
+    return () => {
+      window.removeEventListener('dragover', block);
+      window.removeEventListener('drop', block);
+    };
+  }, []);
+  const hasFiles = (event: ReactDragEvent) => event.dataTransfer.types.includes('Files');
+  const dropProps = {
+    onDragEnter: (event: ReactDragEvent) => {
+      if (!hasFiles(event)) return;
+      event.preventDefault();
+      setDragDepth((depth) => depth + 1);
+    },
+    onDragOver: (event: ReactDragEvent) => {
+      if (!hasFiles(event)) return;
+      event.preventDefault();
+      event.dataTransfer.dropEffect = canDrop ? 'copy' : 'none';
+    },
+    onDragLeave: (event: ReactDragEvent) => {
+      if (!hasFiles(event)) return;
+      setDragDepth((depth) => Math.max(0, depth - 1));
+    },
+    onDrop: (event: ReactDragEvent) => {
+      if (!hasFiles(event)) return;
+      event.preventDefault();
+      setDragDepth(0);
+      const files = Array.from(event.dataTransfer.files);
+      if (canDrop && files.length) props.onAttach?.(files);
+    },
+  };
   const composerRef = useRef<HTMLTextAreaElement>(null);
   // Start typing anywhere in the shell and the words go to the familiar. The
   // first letter is appended here rather than left to the browser, so it is
@@ -836,7 +879,16 @@ export function ChatLayout(props: ChatLayoutProps) {
           </div>
         </div>
       </aside>
-      <main className="fr-thread">
+      <main className="fr-thread" {...dropProps} data-dragging={dragging || undefined}>
+        {dragging ? (
+          <div className="coven-drop-zone" aria-hidden="true">
+            <span>
+              {canDrop
+                ? 'Drop text or code files to attach them'
+                : 'Files can be attached once the composer is ready'}
+            </span>
+          </div>
+        ) : null}
         <output className="coven-sr-only" aria-live="polite" aria-label="Run announcements">
           {announcement.n ? <span key={announcement.n}>{announcement.text}</span> : null}
         </output>
