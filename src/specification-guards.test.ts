@@ -1644,7 +1644,9 @@ describe('Phase 1 specification guards', () => {
     expect(guide).toContain('darwin-arm64');
     expect(guide).toContain('win32-x64');
     expect(guide).toContain('completed');
-    expect(guide).toMatch(/VC\.14\.44\.17\.14\.x86\.x64` component version\s+`18\.9\.12009\.81/u);
+    expect(guide).toMatch(
+      /VC\.14\.44\.17\.14\.x86\.x64` component version is\s+`18\.9\.12009\.81` on `20260907\.229\.1` and\s+`18\.10\.12020\.329` on `20260922\.246\.2`/u,
+    );
     expect(guide).toMatch(/compiler toolset directory version remains\s+`14\.44\.35207/u);
     expect(guide).not.toContain('VC\\Tools\\MSVC\\14.50.35717');
     expect(guide).not.toContain('VC\\Tools\\MSVC\\14.44.35211');

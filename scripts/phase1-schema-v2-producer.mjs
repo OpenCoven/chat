@@ -4194,7 +4194,12 @@ function writeNativeFixture(caveHome, covenHome, daemonUrl) {
   }
 }
 
-export async function triggerAndWaitForChildClose(child, trigger, timeoutMs = rpcTimeoutMs) {
+export async function triggerAndWaitForChildClose(
+  child,
+  trigger,
+  timeoutMs = rpcTimeoutMs,
+  acceptedExitCode = 0,
+) {
   const closed = once(child, 'close');
   await trigger();
   let timer;
@@ -4205,7 +4210,7 @@ export async function triggerAndWaitForChildClose(child, trigger, timeoutMs = rp
         timer = setTimeout(() => rejectTimeout(new Error('child shutdown timed out')), timeoutMs);
       }),
     ]);
-    assertSuccessfulChildExit(code, signal);
+    assertSuccessfulChildExit(code, signal, acceptedExitCode);
   } finally {
     if (timer !== undefined) {
       clearTimeout(timer);
@@ -4213,8 +4218,18 @@ export async function triggerAndWaitForChildClose(child, trigger, timeoutMs = rp
   }
 }
 
-function assertSuccessfulChildExit(code, signal) {
-  if (code !== 0 || signal !== null) {
+// On Windows, `coven daemon stop` verifies the daemon's identity and then ends
+// it with TerminateProcess(handle, 1) (coven-client transport/windows.rs at the
+// frozen Coven revision), so a daemon stopped that way always exits with 1. On
+// Unix the same command performs an authenticated graceful shutdown and the
+// daemon exits with 0. Requiring 0 everywhere failed the Coven same-user
+// identity assertion on every Windows run at its `result` stage
+// (OpenCoven/chat#219). The code is accepted only as the result of that
+// command having succeeded, and no other nonzero code is.
+export const covenVerifiedStopExitCode = process.platform === 'win32' ? 1 : 0;
+
+function assertSuccessfulChildExit(code, signal, acceptedExitCode = 0) {
+  if (code !== acceptedExitCode || signal !== null) {
     throw new Error(
       signal === null
         ? `child shutdown failed with exit code ${code}`
@@ -5708,17 +5723,21 @@ async function runCovenIdentityScenario(
       observations.executableTrusted = true;
       observations.executableTrustFailure = true;
       identityStage = 'result';
-      await triggerAndWaitForChildClose(child, () =>
-        runCommand(
-          artifactRoot,
-          'Coven daemon authenticated stop',
-          covenBinaryPath,
-          ['daemon', 'stop'],
-          {
-            env: { ...environment, COVEN_HOME: covenHome },
-            timeoutMs: 10_000,
-          },
-        ),
+      await triggerAndWaitForChildClose(
+        child,
+        () =>
+          runCommand(
+            artifactRoot,
+            'Coven daemon authenticated stop',
+            covenBinaryPath,
+            ['daemon', 'stop'],
+            {
+              env: { ...environment, COVEN_HOME: covenHome },
+              timeoutMs: 10_000,
+            },
+          ),
+        rpcTimeoutMs,
+        covenVerifiedStopExitCode,
       );
       addAssertion(results, 'phase1.coven.same-user-identity', 'passed', 'phase1.assertion.passed');
     } catch (error) {
