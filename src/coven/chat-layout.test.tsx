@@ -2144,3 +2144,28 @@ describe('stepping between familiars', () => {
     expect(p.onFamiliar).toHaveBeenCalledWith('c');
   });
 });
+
+describe('window title', () => {
+  it('names the window after the shown familiar and counts finished runs', () => {
+    const onWindowTitle = vi.fn();
+    const base = {
+      ...layoutProps(),
+      connected: true,
+      ready: true,
+      familiars: [
+        { id: 'a', name: 'Astra' },
+        { id: 'b', name: 'Bram' },
+      ],
+      onWindowTitle,
+    };
+    const { rerender } = render(<ChatLayout {...base} />);
+    expect(onWindowTitle).toHaveBeenLastCalledWith('OpenCoven Chat');
+    rerender(<ChatLayout {...base} familiarId="a" />);
+    expect(onWindowTitle).toHaveBeenLastCalledWith('Astra — OpenCoven Chat');
+    rerender(<ChatLayout {...base} familiarId="a" finished={{ b: 'reply' }} />);
+    expect(onWindowTitle).toHaveBeenLastCalledWith('(1) Astra — OpenCoven Chat');
+    const calls = onWindowTitle.mock.calls.length;
+    rerender(<ChatLayout {...base} familiarId="a" finished={{ b: 'reply' }} draft="typing" />);
+    expect(onWindowTitle).toHaveBeenCalledTimes(calls);
+  });
+});

@@ -1,7 +1,7 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Capability for the OpenCoven Chat main window: the Coven CLI runtime commands the chat UI invokes plus the screen relay (a host-side WebSocket for the VNC viewer), and nothing else. The Cave adapter and identity commands stay registered for their native and conformance coverage but are not reachable from the webview.",
+  "description": "Capability for the OpenCoven Chat main window: the Coven CLI runtime commands the chat UI invokes plus the screen relay (a host-side WebSocket for the VNC viewer), plus setting its own window title, and nothing else. The Cave adapter and identity commands stay registered for their native and conformance coverage but are not reachable from the webview.",
   "windows": ["main"],
   "permissions": [
     "allow-coven-runtime-status",
@@ -13,6 +13,7 @@
     "allow-coven-runtime-cancel",
     "allow-coven-screen-connect",
     "allow-coven-screen-send",
-    "allow-coven-screen-disconnect"
+    "allow-coven-screen-disconnect",
+    "core:window:allow-set-title"
   ]
 }

@@ -239,11 +239,14 @@ describe('Phase 1 specification guards', () => {
     // The chat UI invokes only the coven_runtime_* commands. The Cave adapter
     // and identity commands remain registered for their native and conformance
     // coverage, but the webview must not be able to reach them.
-    expect(capability.permissions).toEqual(
-      [...covenRuntimeCommands, ...screenRelayCommands].map(
+    // Beyond the app's own commands, the window may set its own title and
+    // nothing else from Tauri core: no other window, webview or app control.
+    expect(capability.permissions).toEqual([
+      ...[...covenRuntimeCommands, ...screenRelayCommands].map(
         (command) => `allow-${command.replaceAll('_', '-')}`,
       ),
-    );
+      'core:window:allow-set-title',
+    ]);
     for (const command of registeredCommandNames(readText('src-tauri/src/commands.rs'))) {
       expect(capability.permissions).not.toContain(`allow-${command.replaceAll('_', '-')}`);
     }

@@ -50,6 +50,8 @@ async function installRuntimeFixture(
       window.__covenFixture = { calls: state.calls, inputs: state.inputs };
       Object.defineProperty(window, '__TAURI_INTERNALS__', {
         value: {
+          // What the host describes about the window; setTitle needs its label.
+          metadata: { currentWindow: { label: 'main' } },
           transformCallback(callback: (data: unknown) => void) {
             callbacks.set(++callbackId, callback);
             return callbackId;
@@ -198,6 +200,10 @@ async function installRuntimeFixture(
               case 'coven_runtime_cancel':
                 rejectRun?.(new Error('Coven run was cancelled.'));
                 return null;
+              // The one Tauri core permission the window holds: its own title.
+              case 'plugin:window|set_title':
+                document.documentElement.dataset.nativeTitle = String(args.value);
+                return null;
               default:
                 throw new Error(`Unexpected native command: ${command}`);
             }
@@ -238,6 +244,17 @@ test('keeps the familiar list and inspector scrollable inside a short window', a
   await expect(page.locator('.coven-agent-row')).toHaveCount(1);
   await expect(lastFamiliar).toBeVisible();
   expect(await page.evaluate(() => [window.scrollX, window.scrollY])).toEqual([0, 0]);
+});
+
+test('names the native window after the familiar being shown', async ({ page }) => {
+  await installRuntimeFixture(page);
+  await page.goto('/');
+  await expect(page.getByRole('textbox', { name: 'Message Local familiar' })).toBeEnabled();
+  await expect(page).toHaveTitle('Local familiar — OpenCoven Chat');
+  await expect(page.locator('html')).toHaveAttribute(
+    'data-native-title',
+    'Local familiar — OpenCoven Chat',
+  );
 });
 
 test('typing anywhere starts a message with that very letter', async ({ page }) => {
@@ -331,7 +348,11 @@ test('streams and reloads CLI chat without any Cave or pairing invocation', asyn
   );
   const commands = await page.evaluate(() => window.__covenFixture.calls);
   expect(commands).toContain('coven_runtime_read');
-  expect(commands.every((command) => command.startsWith('coven_runtime_'))).toBe(true);
+  expect(
+    commands.every(
+      (command) => command.startsWith('coven_runtime_') || command === 'plugin:window|set_title',
+    ),
+  ).toBe(true);
   expect(commands.some((command) => /cave|import|pair/.test(command))).toBe(false);
 });
 
@@ -552,7 +573,11 @@ test('missing CLI shows actionable setup in the same interface', async ({ page }
     'placeholder',
     'Connect to your local Coven CLI to send a message.',
   );
-  expect(await page.evaluate(() => window.__covenFixture.calls)).toEqual(['coven_runtime_status']);
+  expect(
+    (await page.evaluate(() => window.__covenFixture.calls)).filter(
+      (command) => command !== 'plugin:window|set_title',
+    ),
+  ).toEqual(['coven_runtime_status']);
 });
 
 test('renders native PNG avatars in the familiar list, conversation, and inspector', async ({
@@ -1057,7 +1082,11 @@ test('renders runtime-reported tool calls as rows with input, result and a runni
   await expect(page.getByText(/is running Read/)).toHaveCount(0);
   await expect(page.getByRole('list', { name: 'Tool activity' })).toHaveCount(2);
   const commands = await page.evaluate(() => window.__covenFixture.calls);
-  expect(commands.every((invoked) => invoked.startsWith('coven_runtime_'))).toBe(true);
+  expect(
+    commands.every(
+      (invoked) => invoked.startsWith('coven_runtime_') || invoked === 'plugin:window|set_title',
+    ),
+  ).toBe(true);
 });
 
 for (const viewport of [
