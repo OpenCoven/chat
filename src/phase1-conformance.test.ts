@@ -1866,6 +1866,63 @@ describe('Phase 1 real-authority conformance harness', () => {
     ).toThrow('phase1.stage.evidence-authority.report.assertions.unknown');
   });
 
+  test('accepts only the Windows verified-stop exit code, and only when asked', async () => {
+    const { triggerAndWaitForChildClose, covenVerifiedStopExitCode } = schemaV2Producer;
+    const closing = (code: number | null, signal: string | null) => {
+      const child = new EventEmitter();
+      return {
+        child,
+        trigger: async () => {
+          queueMicrotask(() => child.emit('close', code, signal));
+        },
+      };
+    };
+
+    // The default stays strict for every other caller.
+    const strict = closing(1, null);
+    await expect(triggerAndWaitForChildClose(strict.child, strict.trigger, 1_000)).rejects.toThrow(
+      'child shutdown failed with exit code 1',
+    );
+
+    // Coven's Windows `daemon stop` ends the daemon with TerminateProcess(handle, 1).
+    const terminated = closing(1, null);
+    await expect(
+      triggerAndWaitForChildClose(terminated.child, terminated.trigger, 1_000, 1),
+    ).resolves.toBeUndefined();
+
+    // Accepting 1 does not accept any other failure.
+    for (const [code, signal] of [
+      [0, null],
+      [2, null],
+      [null, 'SIGKILL'],
+    ] as const) {
+      const other = closing(code, signal);
+      await expect(
+        triggerAndWaitForChildClose(other.child, other.trigger, 1_000, 1),
+      ).rejects.toThrow(/child shutdown failed/u);
+    }
+
+    expect(covenVerifiedStopExitCode).toBe(process.platform === 'win32' ? 1 : 0);
+  });
+
+  test('passes the verified-stop exit code only to the Coven daemon stop', () => {
+    const source = readFileSync(
+      resolve(process.cwd(), 'scripts', 'phase1-schema-v2-producer.mjs'),
+      'utf8',
+    );
+    expect(source).toContain(
+      "export const covenVerifiedStopExitCode = process.platform === 'win32' ? 1 : 0;",
+    );
+    const uses = source.match(/covenVerifiedStopExitCode/gu) ?? [];
+    // One declaration and exactly one use, at the authenticated stop.
+    expect(uses).toHaveLength(2);
+    const stop = source.indexOf("'Coven daemon authenticated stop'");
+    const use = source.indexOf('covenVerifiedStopExitCode,', stop);
+    expect(stop).toBeGreaterThan(-1);
+    expect(use).toBeGreaterThan(stop);
+    expect(source.slice(stop, use)).not.toContain('addAssertion');
+  });
+
   test('prefers a recorded stage diagnostic over the assertion name', () => {
     const { requirePassingPrimaryAssertions } = schemaV2Producer;
     // What the Coven identity scenario records once it classified its own

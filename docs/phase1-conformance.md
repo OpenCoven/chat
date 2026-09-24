@@ -1159,26 +1159,29 @@ explicitly skip, and must not claim, the privileged UID/cgroup runtime results.
 The `win32-x64` matrix expansion does not begin with checkout or a setup
 action. Its first step is inline `pwsh` reviewed as part of the workflow
 itself. Before network access or repository mutation, that step requires the
-GitHub `windows-2025-vs2026` x64 image with one of two reviewed image and
-Visual Studio Enterprise 2026 pairs:
+GitHub `windows-2025-vs2026` x64 image with one of two reviewed image
+profiles:
 
-| Image version | Visual Studio version |
-| --- | --- |
-| `20260824.214.3` | `18.9.12112.369` |
-| `20260907.229.1` | `18.9.12120.119` |
+| Image version | Visual Studio | Windows build | PowerShell | .NET runtime |
+| --- | --- | --- | --- | --- |
+| `20260907.229.1` | `18.9.12120.119` | `26100.33296` | `7.6.5` | `10.0.11` |
+| `20260922.246.2` | `18.10.12210.168` | `26100.33438` | `7.6.6` | `10.0.12` |
 
-The image selects its exact Visual Studio version. Unknown images and crossed
-pairs are rejected. This accommodates GitHub's gradual image deployment without
-accepting version ranges or changing the other trust checks.
+The image selects its whole profile. Unknown images and any crossed value are
+rejected. GitHub deploys a new image gradually, so for a while runners serve
+both, and consecutive images differ in more than Visual Studio: the
+`20260922.246.2` rollout changed the OS build, PowerShell and .NET too. Until
+that rollout only Visual Studio varied per image, so every run on the new image
+failed the single OS, PowerShell and .NET pin before any conformance work.
 
-Both profiles require Windows build `26100.33296`, `kernel32.dll` file version
-`10.0.26100.33296`, PowerShell `7.6.5` at
-`C:\Program Files\PowerShell\7\pwsh.exe` with its bundled .NET runtime
-`10.0.11`, and Visual Studio Enterprise 2026 at
-`C:\Program Files\Microsoft Visual Studio\18\Enterprise`, and its legacy v143
-`Microsoft.VisualStudio.Component.VC.14.44.17.14.x86.x64` component version
-`18.9.12009.81`. The v143 compiler toolset directory version remains
-`14.44.35207` at
+Both profiles require `kernel32.dll` file version `10.0.26100.33296`,
+PowerShell at `C:\Program Files\PowerShell\7\pwsh.exe` with its bundled .NET
+runtime, and Visual Studio Enterprise 2026 at
+`C:\Program Files\Microsoft Visual Studio\18\Enterprise`. The legacy v143
+`Microsoft.VisualStudio.Component.VC.14.44.17.14.x86.x64` component version is
+`18.9.12009.81` on `20260907.229.1` and `18.10.12020.329` on `20260922.246.2`,
+as reported by `vswhere` on the hosted runner; it is recorded, not enforced.
+The v143 compiler toolset directory version remains `14.44.35207` at
 `C:\Program Files\Microsoft Visual Studio\18\Enterprise\VC\Tools\MSVC\14.44.35207`.
 The compiler and linker are pinned respectively to that toolset's
 `bin\Hostx64\x64\cl.exe` and `bin\Hostx64\x64\link.exe`. Windows SDK
@@ -1610,7 +1613,7 @@ OIDC bearer variables are never projected. The restricted bootstrap constructs
 each `PATH` directory as a distinct array entry so pnpm-generated command shims
 can resolve the pinned Node executable without consulting ambient runner paths.
 
-The Windows Job membership probe uses pinned PowerShell 7.6.5
+The Windows Job membership probe uses the pinned PowerShell
 `-CommandWithArgs`, so the nonce-bound Job name and decimal process ID arrive
 as exactly two literal arguments. It does not use `-Command` positional
 parsing, a shell command line, or caller-controlled interpolation.
@@ -2020,7 +2023,7 @@ revision authorities can therefore have different workflow hashes:
 
 | File | Bytes | SHA-256 |
 | --- | ---: | --- |
-| `.github/workflows/client-v1-conformance.yml` | 180,718 | `c33edc4815f3ac1bbe0a9a532aada13f132f9406e7c6fa88e840e8c632db7694` |
+| `.github/workflows/client-v1-conformance.yml` | 181,684 | `6fca13d310f4635e215020971c52f1696887fba897a1ca7dc0d2a573a2a50efd` |
 | `scripts/contract-canary.mjs` | 40,618 | `a4c2fe0a5eb6a5ff4653de5374c34c0fb46907c6806a5d23b86d8b37206ef958` |
 | `scripts/executable-resolution.mjs` | 9,154 | `31e3c412ff8c835f14522f36a59e91f4a4ba82913210ae8e3b4455217503f430` |
 | `scripts/owned-temp-directory.mjs` | 7,762 | `95f546ef9ed614f2a0f55d356ddfc54c943fc53b595b4eebebfcbd4db68e5c0b` |
@@ -2033,7 +2036,7 @@ revision authorities can therefore have different workflow hashes:
 | `scripts/phase1-macos-keychain.mjs` | 5,091 | `ab0c2dd08cf606d9502f5da206175707d471d99f484e8c8c79b5b08a5772b9a4` |
 | `scripts/phase1-process-supervisor.mjs` | 3,820 | `16b51fb1a33b4bfef98daca549aacf5dc2d2c098cfbd664753b69c940d1e6f6c` |
 | `scripts/phase1-schema-v2-evidence.mjs` | 52,505 | `0aede2ab3abd76fabf5ac61d64d2dbaaffa497c8647b82236403de16a47751c8` |
-| `scripts/phase1-schema-v2-producer.mjs` | 237,823 | `21f6a3aa36478d1dcee824b7e4f2b0420b8b8b330e2b6f16e46af2eb4ddbf994` |
+| `scripts/phase1-schema-v2-producer.mjs` | 238,674 | `41ed77c9f391f825325ba97f62fbc9ae4f1775f07b090410a5a70ab43501f5b3` |
 | `scripts/process-owned-artifact-root.mjs` | 13,061 | `103cc789f12a6bbde16b2414aecf05813d9d28a2c40c7d6eaa2073b86e8e5d77` |
 | `scripts/supervised-exec.mjs` | 2,875 | `a5edfd985b934d3b46247a0da3141682c411d30bb582edf87ae7b29791dad65b` |
 | `scripts/supervisor-status.mjs` | 854 | `ac332ca7b6b040ecc846088bb3a6ad5e7112a0454eb3ea71d2a819d55e64254e` |

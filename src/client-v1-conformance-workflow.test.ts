@@ -49,15 +49,18 @@ const attestBuildProvenanceAction =
   'actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8';
 const reviewedWindowsPins = {
   OPENCOVEN_WINDOWS_IMAGE_OS: 'win25-vs2026',
-  OPENCOVEN_WINDOWS_IMAGE_VERSION: '20260907.229.1',
-  OPENCOVEN_WINDOWS_PREVIOUS_IMAGE_VERSION: '20260824.214.3',
-  OPENCOVEN_WINDOWS_BUILD: '26100.33296',
+  OPENCOVEN_WINDOWS_IMAGE_VERSION: '20260922.246.2',
+  OPENCOVEN_WINDOWS_PREVIOUS_IMAGE_VERSION: '20260907.229.1',
+  OPENCOVEN_WINDOWS_BUILD: '26100.33438',
   OPENCOVEN_WINDOWS_KERNEL32_VERSION: '10.0.26100.33296',
-  OPENCOVEN_WINDOWS_POWERSHELL_VERSION: '7.6.5',
+  OPENCOVEN_WINDOWS_POWERSHELL_VERSION: '7.6.6',
   OPENCOVEN_WINDOWS_POWERSHELL_PATH: 'C:\\Program Files\\PowerShell\\7\\pwsh.exe',
-  OPENCOVEN_WINDOWS_DOTNET_VERSION: '10.0.11',
-  OPENCOVEN_WINDOWS_VS_VERSION: '18.9.12120.119',
-  OPENCOVEN_WINDOWS_PREVIOUS_VS_VERSION: '18.9.12112.369',
+  OPENCOVEN_WINDOWS_DOTNET_VERSION: '10.0.12',
+  OPENCOVEN_WINDOWS_VS_VERSION: '18.10.12210.168',
+  OPENCOVEN_WINDOWS_PREVIOUS_VS_VERSION: '18.9.12120.119',
+  OPENCOVEN_WINDOWS_PREVIOUS_BUILD: '26100.33296',
+  OPENCOVEN_WINDOWS_PREVIOUS_POWERSHELL_VERSION: '7.6.5',
+  OPENCOVEN_WINDOWS_PREVIOUS_DOTNET_VERSION: '10.0.11',
   OPENCOVEN_WINDOWS_VS_PATH: 'C:\\Program Files\\Microsoft Visual Studio\\18\\Enterprise',
   OPENCOVEN_WINDOWS_MSVC_VERSION: '14.44.35207',
   OPENCOVEN_WINDOWS_MSVC_PATH:
@@ -986,33 +989,86 @@ describe.skipIf(!validatorAvailable)('protected client-v1 conformance workflow',
 });
 
 describe('Chat-local protected Windows conformance workflow', () => {
+  const reviewedImageEnvironment = {
+    OPENCOVEN_WINDOWS_IMAGE_VERSION: '20260922.246.2',
+    OPENCOVEN_WINDOWS_VS_VERSION: '18.10.12210.168',
+    OPENCOVEN_WINDOWS_BUILD: '26100.33438',
+    OPENCOVEN_WINDOWS_POWERSHELL_VERSION: '7.6.6',
+    OPENCOVEN_WINDOWS_DOTNET_VERSION: '10.0.12',
+    OPENCOVEN_WINDOWS_PREVIOUS_IMAGE_VERSION: '20260907.229.1',
+    OPENCOVEN_WINDOWS_PREVIOUS_VS_VERSION: '18.9.12120.119',
+    OPENCOVEN_WINDOWS_PREVIOUS_BUILD: '26100.33296',
+    OPENCOVEN_WINDOWS_PREVIOUS_POWERSHELL_VERSION: '7.6.5',
+    OPENCOVEN_WINDOWS_PREVIOUS_DOTNET_VERSION: '10.0.11',
+  };
+
+  function bootstrapSource(): string {
+    return workflowRunBody(
+      workflowStep(readFileSync(workflowPath, 'utf8'), 'Bootstrap supervised Windows conformance'),
+    ).replace(/^ {10}/gmu, '');
+  }
+
   test.each([
-    ['20260824.214.3', '18.9.12112.369', true],
-    ['20260907.229.1', '18.9.12120.119', true],
-    ['20260824.214.3', '18.9.12120.119', false],
-    ['20260907.229.1', '18.9.12112.369', false],
-    ['20260908.230.1', '18.9.12120.119', false],
-    ['20260907.229.1', '18.9.99999.999', false],
+    ['20260922.246.2', '18.10.12210.168|26100.33438|7.6.6|10.0.12'],
+    ['20260907.229.1', '18.9.12120.119|26100.33296|7.6.5|10.0.11'],
+    ['20260824.214.3', null],
+    ['20260923.247.1', null],
   ])(
-    'validates the reviewed Windows image/VS pair %s / %s',
-    (imageVersion, vsVersion, accepted) => {
-      const workflow = readFileSync(workflowPath, 'utf8');
-      const source = workflowRunBody(
-        workflowStep(workflow, 'Bootstrap supervised Windows conformance'),
-      ).replace(/^ {10}/gmu, '');
-      const selector = extractPowerShellFunction(source, 'Get-ReviewedWindowsVisualStudioVersion');
-      const start = source.indexOf('if ($visualStudioVersion -cne $reviewedVisualStudioVersion)');
-      const end = source.indexOf('Assert-NoReparsePath -Path $visualStudioRoot', start);
-      expect(start).toBeGreaterThan(-1);
-      expect(end).toBeGreaterThan(start);
-      expect(source).toContain(
-        '$reviewedVisualStudioVersion = Get-ReviewedWindowsVisualStudioVersion',
+    'selects the whole reviewed profile for Windows image %s',
+    (imageVersion, expected) => {
+      const selector = extractPowerShellFunction(
+        bootstrapSource(),
+        'Get-ReviewedWindowsImageProfile',
       );
       const harness = `
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 ${selector}
-$reviewedVisualStudioVersion = Get-ReviewedWindowsVisualStudioVersion
+$p = Get-ReviewedWindowsImageProfile
+[Console]::Out.Write("$($p.VisualStudio)|$($p.Build)|$($p.PowerShell)|$($p.DotNet)")
+`;
+      const result = spawnSync(
+        'pwsh',
+        ['-NoLogo', '-NoProfile', '-NonInteractive', '-Command', harness],
+        {
+          encoding: 'utf8',
+          timeout: 15_000,
+          env: { ...process.env, ...reviewedImageEnvironment, ImageVersion: imageVersion },
+        },
+      );
+      expect(result.error).toBeUndefined();
+      if (expected === null) {
+        expect(result.status).toBe(1);
+        expect(result.stderr).toMatch(/reviewed image profile/u);
+      } else {
+        expect(result.status).toBe(0);
+        expect(result.stdout).toBe(expected);
+      }
+    },
+    30_000,
+  );
+
+  test.each([
+    ['20260922.246.2', '18.10.12210.168', true],
+    ['20260907.229.1', '18.9.12120.119', true],
+    ['20260922.246.2', '18.9.12120.119', false],
+    ['20260907.229.1', '18.10.12210.168', false],
+    ['20260922.246.2', '18.10.99999.999', false],
+  ])(
+    'validates the reviewed Windows image/VS pair %s / %s',
+    (imageVersion, vsVersion, accepted) => {
+      const source = bootstrapSource();
+      const selector = extractPowerShellFunction(source, 'Get-ReviewedWindowsImageProfile');
+      const start = source.indexOf('if ($visualStudioVersion -cne $reviewedVisualStudioVersion)');
+      const end = source.indexOf('Assert-NoReparsePath -Path $visualStudioRoot', start);
+      expect(start).toBeGreaterThan(-1);
+      expect(end).toBeGreaterThan(start);
+      const harness = `
+$ErrorActionPreference = 'Stop'
+Set-StrictMode -Version Latest
+${selector}
+$reviewedImageProfile = Get-ReviewedWindowsImageProfile
+$reviewedVisualStudioVersion = $reviewedImageProfile.VisualStudio
 $visualStudioVersion = $env:TEST_VISUAL_STUDIO_VERSION
 ${source.slice(start, end)}
 [Console]::Out.Write('accepted')
@@ -1025,12 +1081,9 @@ ${source.slice(start, end)}
           timeout: 15_000,
           env: {
             ...process.env,
-            ImageVersion: String(imageVersion),
-            TEST_VISUAL_STUDIO_VERSION: String(vsVersion),
-            OPENCOVEN_WINDOWS_IMAGE_VERSION: '20260907.229.1',
-            OPENCOVEN_WINDOWS_VS_VERSION: '18.9.12120.119',
-            OPENCOVEN_WINDOWS_PREVIOUS_IMAGE_VERSION: '20260824.214.3',
-            OPENCOVEN_WINDOWS_PREVIOUS_VS_VERSION: '18.9.12112.369',
+            ...reviewedImageEnvironment,
+            ImageVersion: imageVersion,
+            TEST_VISUAL_STUDIO_VERSION: vsVersion,
           },
         },
       );
@@ -1041,6 +1094,22 @@ ${source.slice(start, end)}
     },
     30_000,
   );
+
+  test('checks OS build, PowerShell and .NET against the selected image profile', () => {
+    const source = bootstrapSource();
+    const profile = source.indexOf('$reviewedImageProfile = Get-ReviewedWindowsImageProfile');
+    const check = source.indexOf('$reviewedImageProfile.Build');
+    expect(profile).toBeGreaterThan(-1);
+    // The profile must be selected before the OS/PowerShell/.NET check reads it.
+    expect(check).toBeGreaterThan(profile);
+    for (const field of ['Build', 'PowerShell', 'DotNet']) {
+      expect(source).toMatch(new RegExp(`-cne\\s+\\$reviewedImageProfile\\.${field}\\b`, 'u'));
+    }
+    // A single image-independent pin would reject one side of every rollout.
+    expect(source).not.toMatch(
+      /-ne\s+\$env:OPENCOVEN_WINDOWS_(?:BUILD|POWERSHELL_VERSION|DOTNET_VERSION)\b/u,
+    );
+  });
 
   test('isolates unprivileged production and exact fresh validation from OIDC attestation', () => {
     const workflow = readFileSync(workflowPath, 'utf8');
