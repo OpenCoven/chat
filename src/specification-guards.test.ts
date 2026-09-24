@@ -1,5 +1,4 @@
 import { execFileSync } from 'node:child_process';
-import { createHash } from 'node:crypto';
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { runInNewContext } from 'node:vm';
@@ -458,11 +457,7 @@ describe('Phase 1 specification guards', () => {
       expect(attributes).toContain(`${path}: eol: lf`);
       const authority = lock.harnessAuthority.files.find((file) => file.path === path);
       expect(authority, `${path} must be bound by harness authority.`).toBeDefined();
-      expect(
-        createHash('sha256')
-          .update(readFileSync(resolve(projectRoot, path)))
-          .digest('hex'),
-      ).toBe(authority?.sha256);
+      // Binding, not freshness: see the note in the next test.
     }
   });
 
@@ -478,6 +473,14 @@ describe('Phase 1 specification guards', () => {
       lock.harnessAuthority.productionDeltas.map((entry) => [entry.path, entry]),
     );
 
+    // These assert that each helper is bound by harness authority. They do not
+    // compare working-tree bytes to the lock's digest, and must not: under the
+    // two-PR rule in docs/phase1-conformance.md a content PR changes a governed
+    // file and leaves the lock alone, so a working-tree comparison fails every
+    // content PR for these four files and makes the supervisor unrepairable
+    // (OpenCoven/chat#219). The lock test checks each digest against the
+    // authority's own tree, and scripts/phase1-authority-freshness.mjs turns
+    // `main` red when shipped bytes leave the authority behind.
     for (const path of [
       'scripts/unix-artifact-handoff.c',
       'scripts/unix-producer-command.sh',
@@ -486,11 +489,6 @@ describe('Phase 1 specification guards', () => {
     ]) {
       const authority = harnessFiles.get(path);
       expect(authority, `${path} must be bound by harness authority.`).toBeDefined();
-      expect(
-        createHash('sha256')
-          .update(readFileSync(resolve(projectRoot, path)))
-          .digest('hex'),
-      ).toBe(authority?.sha256);
     }
 
     for (const path of [
