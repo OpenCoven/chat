@@ -214,8 +214,8 @@ assignment, RPC decoder and primary/secondary exception pipeline. This fixture
 correction does not establish the protected installation failure's cause or
 relax the round-trip assertions.
 
-The lock now selects reviewed source `97803d0ab42b21e7aa1f33fffb3824df3a16a765`,
-tree `23edb8111ba78d67cb716af505a6a8a9dabf1cfc`, including all 25 governed files
+The lock now selects reviewed source `4e19c176491eeabb4e0b06421f77e28e68a30c18`,
+tree `9d23c6fef99fe8b2966370e3adfaaa9156e3ef5d`, including all 25 governed files
 and ten production deltas. The checkout regression exercises all five labels
 from that immutable revision. SDK rebinding, both scope rotations and fresh
 protected validation remain required; this binding alone is not acceptance.
