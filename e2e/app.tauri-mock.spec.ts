@@ -257,6 +257,24 @@ test('names the native window after the familiar being shown', async ({ page }) 
   );
 });
 
+test('attaches a text file dropped onto the conversation', async ({ page }) => {
+  await installRuntimeFixture(page);
+  await page.goto('/');
+  await expect(page.getByRole('textbox', { name: 'Message Local familiar' })).toBeEnabled();
+  const transfer = await page.evaluateHandle(() => {
+    const data = new DataTransfer();
+    data.items.add(new File(['dropped notes'], 'dropped.md', { type: 'text/markdown' }));
+    return data;
+  });
+  const thread = page.locator('main.fr-thread');
+  await thread.dispatchEvent('dragenter', { dataTransfer: transfer });
+  await expect(page.getByText('Drop text or code files to attach them')).toBeVisible();
+  await thread.dispatchEvent('drop', { dataTransfer: transfer });
+  await expect(page.getByText('dropped.md')).toBeVisible();
+  await expect(page.getByText('Drop text or code files to attach them')).toHaveCount(0);
+  expect(page.url()).not.toContain('dropped.md');
+});
+
 test('typing anywhere starts a message with that very letter', async ({ page }) => {
   await installRuntimeFixture(page);
   await page.goto('/');
