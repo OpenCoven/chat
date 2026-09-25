@@ -368,9 +368,7 @@
  * The copy control. Quiet until pointed at; the label carries the outcome so
  * a reader who cannot see the icon change still knows whether it worked.
  */
-/* Above `.fr-shell button`, which would otherwise make every copy control
-   inherit its surroundings: 13px and primary under your own messages. */
-.fr-shell .coven-copy {
+.coven-copy {
   display: inline-flex;
   align-items: center;
   gap: 5px;

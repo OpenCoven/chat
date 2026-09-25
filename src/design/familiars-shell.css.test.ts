@@ -54,6 +54,7 @@ describe('familiars-shell.css', () => {
         (selector) =>
           selector.length > 0 &&
           !selector.startsWith('.fr-') &&
+          !selector.startsWith(':where(.fr-shell)') &&
           !selector.startsWith('.rc-') &&
           !selector.startsWith('from') &&
           !selector.startsWith('to') &&
@@ -87,5 +88,15 @@ describe('familiars-shell.css', () => {
   it('bundles the design faces rather than pretending to', () => {
     expect(tokens().get('--font-inter')).toMatch(/^"Inter Variable"/);
     expect(tokens().get('--font-jetbrains-mono')).toMatch(/^"JetBrains Mono Variable"/);
+  });
+});
+
+describe('control resets', () => {
+  it('carry no class weight, so component button styles win over them', () => {
+    // `.fr-shell button` outranked every single-class rule such as
+    // `.fr-btn` or `.coven-copy`, so buttons took their surroundings' size
+    // and colour. The resets must stay inside :where().
+    expect(stylesheet).not.toMatch(/^\.fr-shell (button|input|textarea)\b/m);
+    expect(stylesheet).toMatch(/^:where\(\.fr-shell\) button \{\n {2}color: inherit;/m);
   });
 });
