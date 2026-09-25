@@ -17,6 +17,8 @@ export type CovenFamiliar = {
   workspace?: string;
   avatarUrl?: string;
   projectAccess?: readonly CovenProjectAccess[];
+  /** The host could not read the project registry or grants; access is unknown. */
+  projectAccessUnavailable?: boolean;
 };
 export type CovenProjectAccess = {
   name: string;
@@ -117,6 +119,7 @@ function familiar(value: unknown): value is CovenFamiliar {
             project.path.length <= 4096 &&
             (project.access === 'read' || project.access === 'write'),
         ))) &&
+    (value.projectAccessUnavailable === undefined || value.projectAccessUnavailable === true) &&
     (value.avatarUrl === undefined ||
       (typeof value.avatarUrl === 'string' &&
         value.avatarUrl.length <= 256 * 1024 &&

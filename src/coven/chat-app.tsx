@@ -575,6 +575,7 @@ export function ChatApp({
         description: item.description,
         workspace: item.workspace,
         projectAccess: item.projectAccess,
+        projectAccessUnavailable: item.projectAccessUnavailable,
         avatarUrl:
           'avatarUrl' in item && typeof item.avatarUrl === 'string' ? item.avatarUrl : undefined,
       }))}

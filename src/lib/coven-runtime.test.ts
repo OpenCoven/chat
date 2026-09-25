@@ -32,6 +32,17 @@ describe('Coven runtime', () => {
     }
   });
 
+  it('accepts the host saying project access could not be read, and nothing else in its place', async () => {
+    const entry = { id: 'nova', name: 'nova', displayName: 'Nova', projectAccess: [] };
+    const invoke = vi.fn().mockResolvedValue([{ ...entry, projectAccessUnavailable: true }]);
+    const runtime = createCovenRuntime({ available: () => true, invoke });
+    expect(await runtime.listFamiliars()).toEqual([{ ...entry, projectAccessUnavailable: true }]);
+    for (const projectAccessUnavailable of [false, 'yes', 1, null]) {
+      invoke.mockResolvedValue([{ ...entry, projectAccessUnavailable }]);
+      await expect(runtime.listFamiliars()).rejects.toThrow('invalid native result');
+    }
+  });
+
   it('requires unique familiar-owned canonical heads and rejects standalone/import metadata', async () => {
     const head = {
       id: 'one',
