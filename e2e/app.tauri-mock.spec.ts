@@ -299,41 +299,21 @@ test('keeps the transcript and composer in their tracks with the screen and find
 test('keeps every visible text at or above the design contrast floor', async ({ page }) => {
   await installRuntimeFixture(page);
   await page.goto('/');
-  await expect(page.getByRole('textbox', { name: 'Message Local familiar' })).toBeEnabled();
-  await page.getByRole('textbox', { name: 'Message Local familiar' }).fill('hello');
+  const composer = page.getByRole('textbox', { name: 'Message Local familiar' });
+  await expect(composer).toBeEnabled();
+  // A real exchange, so the message and reply controls are on the page.
+  await composer.fill('hello');
+  await page.getByRole('button', { name: 'Send', exact: true }).click();
+  await expect(page.getByRole('button', { name: 'Copy message' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Copy reply' })).toBeVisible();
   await page.mouse.move(2, 2);
   // The palette tests check tokens in isolation; this measures the rendered
-  // page, where opacity and layered surfaces change the real contrast. 3:1 is
-  // the floor the design accepts for its quietest (muted) text.
-  const failures = await page.evaluate(() => {
-    const canvas = document.createElement('canvas');
-    canvas.width = canvas.height = 1;
-    const context = canvas.getContext('2d', { willReadFrequently: true });
-    if (!context) throw new Error('No 2D context.');
-    const rgba = (color: string): number[] => {
-      context.clearRect(0, 0, 1, 1);
-      context.fillStyle = '#000';
-      context.fillStyle = color;
-      context.fillRect(0, 0, 1, 1);
-      const [r = 0, g = 0, b = 0] = context.getImageData(0, 0, 1, 1).data;
-      const alpha = /rgba|\/ /.test(color)
-        ? Number.parseFloat(color.match(/[\d.]+(?=\)$)/)?.[0] ?? '1')
-        : 1;
-      return [r, g, b, alpha];
-    };
-    const over = (top: number[], bottom: number[]) =>
-      [0, 1, 2].map((i) => (top[i] ?? 0) * (top[3] ?? 1) + (bottom[i] ?? 0) * (1 - (top[3] ?? 1)));
-    const luminance = (color: number[]) =>
-      color
-        .slice(0, 3)
-        .map((v) => v / 255)
-        .map((v) => (v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4))
-        .reduce((sum, v, i) => sum + v * ([0.2126, 0.7152, 0.0722][i] ?? 0), 0);
-    const ratio = (a: number[], b: number[]) => {
-      const [light = 0, dark = 0] = [luminance(a), luminance(b)].sort((x, y) => y - x);
-      return (light + 0.05) / (dark + 0.05);
-    };
-    const found: string[] = [];
+  // page. Every text is made transparent and the viewport captured, so each
+  // text box is compared with the pixels actually behind it, gradients and
+  // layered surfaces included. 3:1 is the floor the design accepts for its
+  // quietest (muted) text.
+  const texts = await page.evaluate(() => {
+    const found: { label: string; color: string; opacity: number; box: number[] }[] = [];
     const seen = new Set<Element>();
     const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
     for (let node = walker.nextNode(); node; node = walker.nextNode()) {
@@ -343,30 +323,86 @@ test('keeps every visible text at or above the design contrast floor', async ({ 
       const style = getComputedStyle(element);
       if (
         style.visibility === 'hidden' ||
-        element.getBoundingClientRect().width === 0 ||
         element.closest('[aria-hidden="true"], [inert], .coven-sr-only') ||
         (element.closest('details:not([open])') && !element.closest('summary'))
       )
         continue;
-      const chain: Element[] = [];
-      for (let e: Element | null = element; e; e = e.parentElement) chain.unshift(e);
-      let background = [0, 0, 0];
+      const range = document.createRange();
+      range.selectNodeContents(node);
+      const rect = range.getBoundingClientRect();
+      if (rect.width < 2 || rect.height < 2 || rect.bottom <= 0 || rect.top >= innerHeight)
+        continue;
       let opacity = 1;
-      for (const e of chain) {
-        const layer = rgba(getComputedStyle(e).backgroundColor);
-        if ((layer[3] ?? 0) > 0) background = over(layer, background);
+      for (let e: Element | null = element; e; e = e.parentElement)
         opacity *= Number.parseFloat(getComputedStyle(e).opacity);
-      }
-      const text = rgba(style.color);
-      const shown = over(
-        [text[0] ?? 0, text[1] ?? 0, text[2] ?? 0, (text[3] ?? 1) * opacity],
-        background,
-      );
-      const value = ratio(shown, background);
-      if (value < 3) found.push(`${value.toFixed(2)} "${node.textContent.trim().slice(0, 30)}"`);
+      found.push({
+        label: node.textContent.trim().slice(0, 30),
+        color: style.color,
+        opacity,
+        box: [rect.left, rect.top, rect.width, rect.height],
+      });
     }
     return found;
   });
+  expect(texts.length).toBeGreaterThan(20);
+  const hide = await page.addStyleTag({
+    content:
+      '*, *::placeholder { color: transparent !important; -webkit-text-fill-color: transparent !important; text-shadow: none !important; caret-color: transparent !important; }',
+  });
+  const backdrop = (await page.screenshot()).toString('base64');
+  await hide.evaluate((element) => (element as HTMLElement).remove());
+  const failures = await page.evaluate(
+    async ({ image, texts }) => {
+      const picture = new Image();
+      picture.src = `data:image/png;base64,${image}`;
+      await picture.decode();
+      const canvas = document.createElement('canvas');
+      canvas.width = picture.width;
+      canvas.height = picture.height;
+      const context = canvas.getContext('2d', { willReadFrequently: true });
+      if (!context) throw new Error('No 2D context.');
+      context.drawImage(picture, 0, 0);
+      const scale = picture.width / innerWidth;
+      const pixel = (x: number, y: number) =>
+        Array.from(context.getImageData(Math.round(x * scale), Math.round(y * scale), 1, 1).data);
+      const probe = document.createElement('canvas').getContext('2d', { willReadFrequently: true });
+      if (!probe) throw new Error('No 2D context.');
+      const parse = (color: string): number[] => {
+        probe.clearRect(0, 0, 1, 1);
+        probe.fillStyle = color;
+        probe.fillRect(0, 0, 1, 1);
+        const [r = 0, g = 0, b = 0, a = 255] = probe.getImageData(0, 0, 1, 1).data;
+        return [r, g, b, a / 255];
+      };
+      const luminance = (c: number[]) =>
+        c
+          .slice(0, 3)
+          .map((v) => v / 255)
+          .map((v) => (v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4))
+          .reduce((sum, v, i) => sum + v * ([0.2126, 0.7152, 0.0722][i] ?? 0), 0);
+      const ratio = (a: number[], b: number[]) => {
+        const [light = 0, dark = 0] = [luminance(a), luminance(b)].sort((x, y) => y - x);
+        return (light + 0.05) / (dark + 0.05);
+      };
+      const found: string[] = [];
+      for (const text of texts) {
+        const [left = 0, top = 0, width = 0, height = 0] = text.box;
+        // The darkest-to-lightest spread of a few points inside the box; the
+        // worst of them is the backdrop the text must stand out from.
+        const points = [0.25, 0.5, 0.75].map((f) => pixel(left + width * f, top + height / 2));
+        const [r, g, b, a] = parse(text.color);
+        let worst = Number.POSITIVE_INFINITY;
+        for (const back of points) {
+          const alpha = (a ?? 1) * text.opacity;
+          const shown = [r, g, b].map((v, i) => (v ?? 0) * alpha + (back[i] ?? 0) * (1 - alpha));
+          worst = Math.min(worst, ratio(shown, back));
+        }
+        if (worst < 3) found.push(`${worst.toFixed(2)} "${text.label}"`);
+      }
+      return found;
+    },
+    { image: backdrop, texts },
+  );
   expect(failures).toEqual([]);
 });
 
