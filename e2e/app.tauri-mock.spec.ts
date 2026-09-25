@@ -296,6 +296,80 @@ test('keeps the transcript and composer in their tracks with the screen and find
   expect(input?.y ?? 0).toBeGreaterThan((transcript?.y ?? 0) + (transcript?.height ?? 0) - 1);
 });
 
+test('keeps every visible text at or above the design contrast floor', async ({ page }) => {
+  await installRuntimeFixture(page);
+  await page.goto('/');
+  await expect(page.getByRole('textbox', { name: 'Message Local familiar' })).toBeEnabled();
+  await page.getByRole('textbox', { name: 'Message Local familiar' }).fill('hello');
+  await page.mouse.move(2, 2);
+  // The palette tests check tokens in isolation; this measures the rendered
+  // page, where opacity and layered surfaces change the real contrast. 3:1 is
+  // the floor the design accepts for its quietest (muted) text.
+  const failures = await page.evaluate(() => {
+    const canvas = document.createElement('canvas');
+    canvas.width = canvas.height = 1;
+    const context = canvas.getContext('2d', { willReadFrequently: true });
+    if (!context) throw new Error('No 2D context.');
+    const rgba = (color: string): number[] => {
+      context.clearRect(0, 0, 1, 1);
+      context.fillStyle = '#000';
+      context.fillStyle = color;
+      context.fillRect(0, 0, 1, 1);
+      const [r = 0, g = 0, b = 0] = context.getImageData(0, 0, 1, 1).data;
+      const alpha = /rgba|\/ /.test(color)
+        ? Number.parseFloat(color.match(/[\d.]+(?=\)$)/)?.[0] ?? '1')
+        : 1;
+      return [r, g, b, alpha];
+    };
+    const over = (top: number[], bottom: number[]) =>
+      [0, 1, 2].map((i) => (top[i] ?? 0) * (top[3] ?? 1) + (bottom[i] ?? 0) * (1 - (top[3] ?? 1)));
+    const luminance = (color: number[]) =>
+      color
+        .slice(0, 3)
+        .map((v) => v / 255)
+        .map((v) => (v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4))
+        .reduce((sum, v, i) => sum + v * ([0.2126, 0.7152, 0.0722][i] ?? 0), 0);
+    const ratio = (a: number[], b: number[]) => {
+      const [light = 0, dark = 0] = [luminance(a), luminance(b)].sort((x, y) => y - x);
+      return (light + 0.05) / (dark + 0.05);
+    };
+    const found: string[] = [];
+    const seen = new Set<Element>();
+    const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+    for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+      const element = node.parentElement;
+      if (!element || !node.textContent?.trim() || seen.has(element)) continue;
+      seen.add(element);
+      const style = getComputedStyle(element);
+      if (
+        style.visibility === 'hidden' ||
+        element.getBoundingClientRect().width === 0 ||
+        element.closest('[aria-hidden="true"], [inert], .coven-sr-only') ||
+        (element.closest('details:not([open])') && !element.closest('summary'))
+      )
+        continue;
+      const chain: Element[] = [];
+      for (let e: Element | null = element; e; e = e.parentElement) chain.unshift(e);
+      let background = [0, 0, 0];
+      let opacity = 1;
+      for (const e of chain) {
+        const layer = rgba(getComputedStyle(e).backgroundColor);
+        if ((layer[3] ?? 0) > 0) background = over(layer, background);
+        opacity *= Number.parseFloat(getComputedStyle(e).opacity);
+      }
+      const text = rgba(style.color);
+      const shown = over(
+        [text[0] ?? 0, text[1] ?? 0, text[2] ?? 0, (text[3] ?? 1) * opacity],
+        background,
+      );
+      const value = ratio(shown, background);
+      if (value < 3) found.push(`${value.toFixed(2)} "${node.textContent.trim().slice(0, 30)}"`);
+    }
+    return found;
+  });
+  expect(failures).toEqual([]);
+});
+
 test('typing anywhere starts a message with that very letter', async ({ page }) => {
   await installRuntimeFixture(page);
   await page.goto('/');
