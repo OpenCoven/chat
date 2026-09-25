@@ -406,6 +406,19 @@ test('keeps every visible text at or above the design contrast floor', async ({ 
   expect(failures).toEqual([]);
 });
 
+test('keeps the composer placeholder on one line in a narrow window', async ({ page }) => {
+  await page.setViewportSize({ width: 480, height: 520 });
+  await installRuntimeFixture(page);
+  await page.goto('/');
+  const composer = page.getByRole('textbox', { name: 'Message Local familiar' });
+  await expect(composer).toBeEnabled();
+  // The field is one line tall until the draft grows; a wrapped placeholder's
+  // second line was clipped under the composer's own controls.
+  expect(
+    await composer.evaluate((field) => getComputedStyle(field, '::placeholder').whiteSpace),
+  ).toBe('nowrap');
+});
+
 test('typing anywhere starts a message with that very letter', async ({ page }) => {
   await installRuntimeFixture(page);
   await page.goto('/');
