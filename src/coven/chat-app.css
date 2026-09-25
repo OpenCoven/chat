@@ -256,22 +256,22 @@
   align-items: center;
 }
 
+/*
+ * Quiet by colour, not opacity: muted is the design's floor (3:1), and
+ * dimming it further put these labels near 2:1. Hovering the message lifts
+ * the control a step; :where keeps that below the control's own hover and
+ * Copied/Copy failed colours.
+ */
 .coven-message-copy {
   margin-inline-start: auto;
-  opacity: 0.55;
-  transition: opacity 120ms;
 }
 
 .coven-message-copy--user {
   margin: -2px 0 0;
 }
 
-.fr-user:hover .coven-message-copy,
-.fr-familiar:hover .coven-message-copy,
-.coven-message-copy:focus-visible,
-.coven-message-copy[data-state="copied"],
-.coven-message-copy[data-state="failed"] {
-  opacity: 1;
+:where(.fr-user:hover, .fr-familiar:hover) .coven-message-copy {
+  color: var(--text-secondary);
 }
 
 .coven-chat :is(.fr-sidebar, .fr-inspector)[aria-hidden="true"] {
@@ -773,12 +773,6 @@
 
 .coven-row-copy {
   flex: none;
-  opacity: 0.7;
-}
-
-.coven-row-copy:hover,
-.coven-row-copy:focus-visible {
-  opacity: 1;
 }
 
 /*
