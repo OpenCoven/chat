@@ -781,6 +781,33 @@
   opacity: 1;
 }
 
+/*
+ * The thread's rows are explicit: header, optional panels (screen viewer and
+ * find bar share one), transcript, composer. Auto-placement let an open panel
+ * take the transcript's flexible track and push the composer off-screen.
+ */
+.coven-chat .fr-thread,
+.coven-chat .fr-thread:has(.coven-lifecycle) {
+  grid-template-rows: minmax(44px, auto) auto minmax(0, 1fr) auto;
+}
+
+.coven-chat .fr-thread > .fr-thread-header {
+  grid-row: 1;
+}
+
+.coven-chat .fr-thread > .coven-thread-panels {
+  grid-row: 2;
+  min-width: 0;
+}
+
+.coven-chat .fr-thread > .fr-transcript {
+  grid-row: 3;
+}
+
+.coven-chat .fr-thread > .fr-composer-wrap {
+  grid-row: 4;
+}
+
 /* Find in the conversation: a slim bar over the transcript, and the match it is on. */
 .coven-find {
   display: flex;

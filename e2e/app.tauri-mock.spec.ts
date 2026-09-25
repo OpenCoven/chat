@@ -275,6 +275,27 @@ test('attaches a text file dropped onto the conversation', async ({ page }) => {
   expect(page.url()).not.toContain('dropped.md');
 });
 
+test('keeps the transcript and composer in their tracks with the screen and find panels open', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1100, height: 640 });
+  await installRuntimeFixture(page);
+  await page.goto('/');
+  const composer = page.getByRole('textbox', { name: 'Message Local familiar' });
+  await expect(composer).toBeEnabled();
+  await page.getByRole('button', { name: 'Show screen' }).click();
+  await page.getByRole('log', { name: 'Messages' }).focus();
+  await page.keyboard.press('Control+f');
+  await expect(page.getByRole('searchbox', { name: 'Find in conversation' })).toBeVisible();
+  await expect(composer).toBeInViewport();
+  const transcript = await page.getByRole('log', { name: 'Messages' }).boundingBox();
+  const input = await composer.boundingBox();
+  expect(transcript?.height ?? 0).toBeGreaterThan(40);
+  // The composer sits below the transcript, inside the window.
+  expect((input?.y ?? 0) + (input?.height ?? 0)).toBeLessThanOrEqual(640);
+  expect(input?.y ?? 0).toBeGreaterThan((transcript?.y ?? 0) + (transcript?.height ?? 0) - 1);
+});
+
 test('typing anywhere starts a message with that very letter', async ({ page }) => {
   await installRuntimeFixture(page);
   await page.goto('/');

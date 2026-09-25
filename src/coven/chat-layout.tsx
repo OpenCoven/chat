@@ -339,6 +339,7 @@ type TranscriptBlockProps = Readonly<{
 /** Two tool rows show the same thing. */
 function sameRow(a: ToolRow, b: ToolRow) {
   return (
+    a.id === b.id &&
     a.name === b.name &&
     a.args === b.args &&
     a.raw === b.raw &&
@@ -505,19 +506,34 @@ const TranscriptBlock = memo(
     sameBlock(previous.block, next.block),
 );
 
-/** The text a block can be found by: its message, or its tools' names, inputs and results. */
-function blockText(block: TranscriptBlockData): string {
-  if (block.kind === 'message') return block.message.text;
-  return block.rows.map((row) => `${row.name} ${row.args} ${row.result ?? ''}`).join('\n');
-}
+/** One find hit: the message or tool call, and the transcript entry holding it. */
+export type FindMatch = Readonly<{ id: string; group: string }>;
 
-/** The ids of the blocks that contain the query, case-insensitively, oldest first. */
-export function findMatches(blocks: readonly TranscriptBlockData[], query: string): string[] {
+/**
+ * Every message and every tool call containing the query, case-insensitively,
+ * oldest first. Tool calls are matched one by one even though consecutive
+ * calls share an entry, so each is counted and can be stepped to.
+ */
+export function findMatches(
+  blocks: readonly TranscriptBlockData[],
+  query: string,
+): readonly FindMatch[] {
   const needle = query.trim().toLowerCase();
   if (!needle) return [];
-  return blocks
-    .filter((block) => blockText(block).toLowerCase().includes(needle))
-    .map((block) => (block.kind === 'tools' ? block.id : block.message.id));
+  const hits: FindMatch[] = [];
+  for (const block of blocks) {
+    if (block.kind === 'message') {
+      if (block.message.text.toLowerCase().includes(needle))
+        hits.push({ id: block.message.id, group: block.message.id });
+      continue;
+    }
+    for (const [index, row] of block.rows.entries()) {
+      const text = `${row.name} ${row.args} ${row.result ?? ''}`.toLowerCase();
+      if (text.includes(needle))
+        hits.push({ id: row.id ?? `${block.id}#${index}`, group: block.id });
+    }
+  }
+  return hits;
 }
 
 /**
@@ -806,6 +822,7 @@ export function ChatLayout(props: ChatLayoutProps) {
       const last = built[built.length - 1];
       if (message.tool) {
         const row: ToolRow = {
+          id: message.id,
           name: message.tool.name,
           args: message.tool.args,
           raw: message.tool.raw,
@@ -833,7 +850,7 @@ export function ChatLayout(props: ChatLayoutProps) {
   const findRef = useRef<HTMLInputElement>(null);
   const matches = useMemo(() => findMatches(blocks, findQuery), [blocks, findQuery]);
   const activeMatch =
-    findOpen && matches.length ? matches[Math.min(findAt, matches.length - 1)] : '';
+    findOpen && matches.length ? matches[Math.min(findAt, matches.length - 1)] : undefined;
   const openFind = useCallback(() => {
     setFindOpen(true);
     requestAnimationFrame(() => {
@@ -855,9 +872,10 @@ export function ChatLayout(props: ChatLayoutProps) {
   useEffect(() => {
     const transcript = transcriptRef.current;
     if (!transcript || !activeMatch) return;
-    const element = transcript.querySelector<HTMLElement>(
-      `[data-block-id="${CSS.escape(activeMatch)}"]`,
-    );
+    // The call's own row, or its entry when the row is folded out of view.
+    const element =
+      transcript.querySelector<HTMLElement>(`[data-find-id="${CSS.escape(activeMatch.id)}"]`) ??
+      transcript.querySelector<HTMLElement>(`[data-block-id="${CSS.escape(activeMatch.group)}"]`);
     if (!element) return;
     element.dataset.findHit = 'true';
     element.scrollIntoView?.({ block: 'center' });
@@ -1229,64 +1247,68 @@ export function ChatLayout(props: ChatLayoutProps) {
             />
           </div>
         </header>
-        {screenOpen ? (
-          <div id="coven-screen-viewer">
-            {/* Keyed by familiar: switching threads unmounts the pane, and its
-                teardown closes the host connection and forgets the address. */}
-            <ScreenViewer
-              key={props.familiarId}
-              relay={props.screen}
-              familiarName={familiar?.name}
-              onClose={() => setScreenOpen(false)}
-              {...(props.screenLoadRfb ? { loadRfb: props.screenLoadRfb } : {})}
-            />
-          </div>
-        ) : null}
-        {findOpen ? (
-          <search className="coven-find" aria-label="Find in conversation">
-            <input
-              ref={findRef}
-              type="search"
-              aria-label="Find in conversation"
-              placeholder="Find in conversation"
-              value={findQuery}
-              onChange={(event) => {
-                setFindQuery(event.target.value);
-                setFindAt(0);
-              }}
-              onKeyDown={(event) => {
-                if (event.nativeEvent.isComposing) return;
-                if (event.key === 'Enter') {
-                  event.preventDefault();
-                  stepFind(event.shiftKey ? -1 : 1);
-                } else if (event.key === 'Escape') {
-                  event.preventDefault();
-                  closeFind();
-                }
-              }}
-            />
-            <output className="coven-find-count" aria-live="polite">
-              {!findQuery.trim()
-                ? ''
-                : matches.length
-                  ? `${Math.min(findAt, matches.length - 1) + 1} of ${matches.length}`
-                  : 'No matches'}
-            </output>
-            <FamIconButton
-              icon="caret-up"
-              label="Previous match"
-              disabled={!matches.length}
-              onClick={() => stepFind(-1)}
-            />
-            <FamIconButton
-              icon="caret-down"
-              label="Next match"
-              disabled={!matches.length}
-              onClick={() => stepFind(1)}
-            />
-            <FamIconButton icon="x" label="Close find" onClick={closeFind} />
-          </search>
-        ) : null}
+        {/* Optional panels share one grid row, so opening them can never push
+            the transcript or the composer out of their tracks. */}
+        <div className="coven-thread-panels">
+          {screenOpen ? (
+            <div id="coven-screen-viewer">
+              {/* Keyed by familiar: switching threads unmounts the pane, and its
+                  teardown closes the host connection and forgets the address. */}
+              <ScreenViewer
+                key={props.familiarId}
+                relay={props.screen}
+                familiarName={familiar?.name}
+                onClose={() => setScreenOpen(false)}
+                {...(props.screenLoadRfb ? { loadRfb: props.screenLoadRfb } : {})}
+              />
+            </div>
+          ) : null}
+          {findOpen ? (
+            <search className="coven-find" aria-label="Find in conversation">
+              <input
+                ref={findRef}
+                type="search"
+                aria-label="Find in conversation"
+                placeholder="Find in conversation"
+                value={findQuery}
+                onChange={(event) => {
+                  setFindQuery(event.target.value);
+                  setFindAt(0);
+                }}
+                onKeyDown={(event) => {
+                  if (event.nativeEvent.isComposing) return;
+                  if (event.key === 'Enter') {
+                    event.preventDefault();
+                    stepFind(event.shiftKey ? -1 : 1);
+                  } else if (event.key === 'Escape') {
+                    event.preventDefault();
+                    closeFind();
+                  }
+                }}
+              />
+              <output className="coven-find-count" aria-live="polite">
+                {!findQuery.trim()
+                  ? ''
+                  : matches.length
+                    ? `${Math.min(findAt, matches.length - 1) + 1} of ${matches.length}`
+                    : 'No matches'}
+              </output>
+              <FamIconButton
+                icon="caret-up"
+                label="Previous match"
+                disabled={!matches.length}
+                onClick={() => stepFind(-1)}
+              />
+              <FamIconButton
+                icon="caret-down"
+                label="Next match"
+                disabled={!matches.length}
+                onClick={() => stepFind(1)}
+              />
+              <FamIconButton icon="x" label="Close find" onClick={closeFind} />
+            </search>
+          ) : null}
+        </div>
         <div
           className="fr-transcript"
           ref={transcriptRef}
