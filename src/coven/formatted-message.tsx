@@ -96,6 +96,8 @@ function Prose({ text }: { text: string }) {
  * harness reports it, the outcome.
  */
 export type ToolRow = Readonly<{
+  /** The message this call came from, when the runtime reported it as data. */
+  id?: string | undefined;
   name: string;
   args: string;
   raw?: string | undefined;
@@ -148,6 +150,7 @@ export function ToolActivity({ rows }: { rows: readonly ToolRow[] }) {
           <li
             className="coven-tool"
             key={`${index}-${row.name}`}
+            data-find-id={row.id}
             data-error={row.isError || undefined}
             data-running={row.running || undefined}
           >
