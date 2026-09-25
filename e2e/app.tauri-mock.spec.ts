@@ -3,6 +3,8 @@ import { expect, type Page, test } from '@playwright/test';
 declare global {
   interface Window {
     __covenFixture: { calls: string[]; inputs?: unknown[]; finish?: () => void };
+    /** Overrides the first familiar's name, for layout tests with long names. */
+    __fixtureFamiliarName?: string;
   }
 }
 
@@ -78,8 +80,12 @@ async function installRuntimeFixture(
               case 'coven_runtime_familiars':
                 return Array.from({ length: population }, (_, index) => ({
                   id: index ? `fixture-familiar-${index}` : 'fixture-familiar',
-                  name: index ? `Familiar ${index}` : 'Local familiar',
-                  displayName: index ? `Familiar ${index}` : 'Local familiar',
+                  name: index
+                    ? `Familiar ${index}`
+                    : (window.__fixtureFamiliarName ?? 'Local familiar'),
+                  displayName: index
+                    ? `Familiar ${index}`
+                    : (window.__fixtureFamiliarName ?? 'Local familiar'),
                   workspace: `/fixture/familiars/${index}/workspace`,
                   projectAccess: index
                     ? [{ name: 'private', path: `/fixture/private/${index}`, access: 'read' }]
@@ -406,17 +412,44 @@ test('keeps every visible text at or above the design contrast floor', async ({ 
   expect(failures).toEqual([]);
 });
 
-test('keeps the composer placeholder on one line in a narrow window', async ({ page }) => {
+test('keeps a long composer placeholder on one line in a narrow window', async ({ page }) => {
   await page.setViewportSize({ width: 480, height: 520 });
+  const name = 'Astra the Remarkably Long Named Familiar of the Northern Reach';
+  await page.addInitScript((familiar) => {
+    window.__fixtureFamiliarName = familiar;
+  }, name);
   await installRuntimeFixture(page);
   await page.goto('/');
-  const composer = page.getByRole('textbox', { name: 'Message Local familiar' });
+  const composer = page.getByRole('textbox', { name: `Message ${name}` });
   await expect(composer).toBeEnabled();
-  // The field is one line tall until the draft grows; a wrapped placeholder's
-  // second line was clipped under the composer's own controls.
-  expect(
-    await composer.evaluate((field) => getComputedStyle(field, '::placeholder').whiteSpace),
-  ).toBe('nowrap');
+  const field = await composer.evaluate((element) => {
+    const textarea = element as HTMLTextAreaElement;
+    const placeholder = getComputedStyle(textarea, '::placeholder');
+    const probe = document.createElement('span');
+    probe.style.cssText = `position:absolute;visibility:hidden;white-space:nowrap;font:${getComputedStyle(textarea).font}`;
+    probe.textContent = textarea.placeholder;
+    document.body.append(probe);
+    const textWidth = probe.getBoundingClientRect().width;
+    probe.remove();
+    return {
+      placeholder: textarea.placeholder,
+      textWidth,
+      fieldWidth: textarea.clientWidth,
+      height: textarea.clientHeight,
+      lineHeight: Number.parseFloat(getComputedStyle(textarea).lineHeight),
+      whiteSpace: placeholder.whiteSpace,
+      overflow: placeholder.overflow,
+    };
+  });
+  // The case this guards: a placeholder wider than the one-line field.
+  expect(field.placeholder).toContain(name);
+  expect(field.textWidth).toBeGreaterThan(field.fieldWidth);
+  // The field stays one line tall, and the placeholder does not wrap into it.
+  expect(field.height).toBeLessThan(field.lineHeight * 2);
+  // No wrap and no spill. Chromium ignores text-overflow on textarea
+  // placeholders and cuts at the edge; WebKit, the macOS webview, adds an
+  // ellipsis. Both keep it to one line.
+  expect(field).toMatchObject({ whiteSpace: 'nowrap', overflow: 'hidden' });
 });
 
 test('typing anywhere starts a message with that very letter', async ({ page }) => {
