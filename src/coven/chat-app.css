@@ -867,6 +867,18 @@
   pointer-events: none;
 }
 
+/*
+ * The composer is one line tall until the draft grows, but its placeholder
+ * names the familiar and can be long; wrapped, its second line was clipped
+ * under the composer's own controls. It stays on one line and is cut at the
+ * field's edge; the field's label still carries the whole text.
+ */
+.coven-chat .oc-composer-field::placeholder {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 /* A replayed-history notice: a quiet line between messages, addressed by no one. */
 .coven-chat .coven-notice {
   margin: 0 auto;
