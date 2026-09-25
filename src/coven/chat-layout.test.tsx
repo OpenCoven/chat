@@ -1713,8 +1713,8 @@ describe('declared access and error copying', () => {
     expect(access).toHaveTextContent(/Access rules and approvals are not exposed/);
   });
 
-  it('does not assert absence when no access was found', () => {
-    render(
+  it('tells "none declared" apart from "could not read"', () => {
+    const { rerender } = render(
       <ChatLayout
         {...layoutProps()}
         connected
@@ -1724,9 +1724,22 @@ describe('declared access and error copying', () => {
       />,
     );
     fireEvent.click(screen.getByRole('button', { name: 'Access' }));
-    expect(screen.getByRole('region', { name: 'Access' })).toHaveTextContent(
-      'No declared project access was found for Bram',
+    const access = () => screen.getByRole('region', { name: 'Access' });
+    expect(access()).toHaveTextContent('No project access is declared for Bram');
+    expect(access()).not.toHaveTextContent('could not read');
+    rerender(
+      <ChatLayout
+        {...layoutProps()}
+        connected
+        ready
+        familiars={[{ id: 'b', name: 'Bram', projectAccessUnavailable: true }]}
+        familiarId="b"
+      />,
     );
+    expect(access()).toHaveTextContent(
+      "Chat could not read Coven's project registry or grants, so Bram's declared access is unknown.",
+    );
+    expect(access()).not.toHaveTextContent('No project access is declared');
   });
 
   it('offers to copy an error notice', async () => {

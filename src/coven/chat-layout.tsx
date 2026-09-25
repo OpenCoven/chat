@@ -67,6 +67,7 @@ export type ChatLayoutProps = Readonly<{
     description?: string | undefined;
     workspace?: string | undefined;
     projectAccess?: readonly CovenProjectAccess[] | undefined;
+    projectAccessUnavailable?: boolean | undefined;
     avatarUrl?: string | undefined;
   }[];
   sessions: readonly {
@@ -1541,11 +1542,9 @@ export function ChatLayout(props: ChatLayoutProps) {
                       </div>
                     ) : (
                       <span className="fr-purpose">
-                        {/* The host hands back an empty list both when nothing is
-                            declared and when the registry could not be read, so
-                            this must not assert absence. */}
-                        No declared project access was found for {name}. Coven's local registry and
-                        grants may list none, or Chat could not read them.
+                        {familiar.projectAccessUnavailable
+                          ? `Chat could not read Coven's project registry or grants, so ${name}'s declared access is unknown. Check them in Coven, then refresh.`
+                          : `No project access is declared for ${name} in Coven's project registry or grants.`}
                       </span>
                     )}
                   </div>

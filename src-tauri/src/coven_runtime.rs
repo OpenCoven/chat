@@ -742,6 +742,23 @@ pub(crate) async fn coven_runtime_status() -> Result<Value, String> {
     .await
 }
 
+/// Sets a familiar's declared project access. When the metadata could not be
+/// read, the list is empty and `projectAccessUnavailable` says so, so the
+/// window never presents "could not read" as "none declared".
+fn attach_project_access(
+    familiar: &mut Value,
+    projects: Option<&familiar_projects::ProjectAccess>,
+    id: &str,
+) {
+    match projects.map(|projects| projects.for_familiar(id)) {
+        Some(Ok(access)) => familiar["projectAccess"] = access,
+        _ => {
+            familiar["projectAccess"] = Value::Array(Vec::new());
+            familiar["projectAccessUnavailable"] = Value::Bool(true);
+        }
+    }
+}
+
 #[tauri::command]
 pub(crate) async fn coven_runtime_familiars() -> Result<Value, String> {
     blocking(|| {
@@ -753,19 +770,17 @@ pub(crate) async fn coven_runtime_familiars() -> Result<Value, String> {
         // that is unreadable, malformed, or newer than this build must cost
         // the suggestions, never the familiar list itself.
         let projects = match familiar_projects::ProjectAccess::load() {
-            Ok(projects) => projects,
+            Ok(projects) => Some(projects),
             Err(error) => {
                 eprintln!("Coven Chat: project access unavailable ({error}).");
-                familiar_projects::ProjectAccess::default()
+                None
             }
         };
         familiars
             .iter()
             .map(|f| {
                 let mut familiar = normalize_familiar(f, crate::familiar_avatar::read_avatar)?;
-                familiar["projectAccess"] = projects
-                    .for_familiar(string(f, "id")?)
-                    .unwrap_or_else(|_| Value::Array(Vec::new()));
+                attach_project_access(&mut familiar, projects.as_ref(), string(f, "id")?);
                 Ok(familiar)
             })
             .collect::<Result<Vec<_>, String>>()
@@ -2429,6 +2444,20 @@ mod tests {
         assert!(!permissions.contains(&json!("allow-coven-runtime-import-cave")));
         assert!(!include_str!("lib.rs").contains("coven_runtime_import_cave"));
         assert!(!include_str!("../build.rs").contains("coven_runtime_import_cave"));
+    }
+
+    #[test]
+    fn project_access_says_when_it_could_not_be_read() {
+        let mut read = json!({ "id": "astra" });
+        let empty = familiar_projects::ProjectAccess::default();
+        attach_project_access(&mut read, Some(&empty), "astra");
+        assert_eq!(read["projectAccess"], json!([]));
+        assert!(read.get("projectAccessUnavailable").is_none());
+
+        let mut unread = json!({ "id": "astra" });
+        attach_project_access(&mut unread, None, "astra");
+        assert_eq!(unread["projectAccess"], json!([]));
+        assert_eq!(unread["projectAccessUnavailable"], json!(true));
     }
 
     #[test]
