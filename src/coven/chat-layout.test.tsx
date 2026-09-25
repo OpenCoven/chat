@@ -2429,3 +2429,28 @@ describe('find in the conversation', () => {
     expect(screen.queryByRole('searchbox', { name: 'Find in conversation' })).toBeNull();
   });
 });
+
+describe('loading earlier turns', () => {
+  const base = () => ({
+    ...layoutProps(),
+    connected: true,
+    ready: true,
+    familiars: [{ id: 'a', name: 'Astra' }],
+    familiarId: 'a',
+    partialHistory: true,
+    messages: [{ id: 'a1', role: 'assistant', text: 'the newest reply' }],
+  });
+
+  it('offers to load earlier turns, and names the CLI once none can be loaded', () => {
+    const onLoadEarlier = vi.fn();
+    const { rerender } = render(<ChatLayout {...base()} onLoadEarlier={onLoadEarlier} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Load earlier turns' }));
+    expect(onLoadEarlier).toHaveBeenCalledOnce();
+    expect(screen.getByRole('note')).not.toHaveTextContent('Coven CLI');
+    rerender(<ChatLayout {...base()} />);
+    expect(screen.queryByRole('button', { name: 'Load earlier turns' })).toBeNull();
+    expect(screen.getByRole('note')).toHaveTextContent(
+      'Use the Coven CLI to read the full history.',
+    );
+  });
+});

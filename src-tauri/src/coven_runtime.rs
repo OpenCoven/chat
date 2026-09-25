@@ -34,6 +34,39 @@ const RUN_TIMEOUT: Duration = Duration::from_secs(600);
 const SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(25);
 const HISTORY_SESSION_LIMIT: usize = 64;
 const HISTORY_PAGE_LIMIT: usize = 16;
+/// How far back "Load earlier turns" may reach: this many times the base
+/// history budget, and no further.
+const MAX_HISTORY_DEPTH: u32 = 4;
+
+/// The limits one history read works within. The base budget is what a chat
+/// opens with; each depth step reads that much again, so asking for earlier
+/// turns re-reads the chat newest first with more room, never stitching.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct Budget {
+    sessions: usize,
+    bytes: usize,
+    pages: usize,
+}
+
+impl Budget {
+    const BASE: Budget = Budget {
+        sessions: HISTORY_SESSION_LIMIT,
+        bytes: OUTPUT_LIMIT,
+        pages: HISTORY_PAGE_LIMIT,
+    };
+
+    fn at_depth(depth: u32) -> Result<Budget, String> {
+        if !(1..=MAX_HISTORY_DEPTH).contains(&depth) {
+            return Err("Chat can load at most four times its usual history.".into());
+        }
+        let scale = depth as usize;
+        Ok(Budget {
+            sessions: HISTORY_SESSION_LIMIT * scale,
+            bytes: OUTPUT_LIMIT * scale,
+            pages: HISTORY_PAGE_LIMIT * scale,
+        })
+    }
+}
 /// Harnesses whose own session store cannot reopen a Chat thread. The bundled
 /// engine treats `--session-id` as a tracking tag and never saves print-mode
 /// turns, so `coven run coven-code --continue <id>` launches a context-free
@@ -896,7 +929,12 @@ fn change_chat_lifecycle(
 }
 
 #[tauri::command]
-pub(crate) async fn coven_runtime_read(app: AppHandle, id: String) -> Result<Value, String> {
+pub(crate) async fn coven_runtime_read(
+    app: AppHandle,
+    id: String,
+    depth: Option<u32>,
+) -> Result<Value, String> {
+    let budget = Budget::at_depth(depth.unwrap_or(1))?;
     let data = app
         .path()
         .app_local_data_dir()
@@ -905,12 +943,12 @@ pub(crate) async fn coven_runtime_read(app: AppHandle, id: String) -> Result<Val
         let _storage = crate::chat_lifecycle::STORAGE_LOCK
             .lock()
             .map_err(|_| "Chat's archive and delete records are unavailable.")?;
-        read_session(&data, &id)
+        read_session(&data, &id, budget)
     })
     .await
 }
 
-fn read_session(data: &Path, id: &str) -> Result<Value, String> {
+fn read_session(data: &Path, id: &str, budget: Budget) -> Result<Value, String> {
     crate::chat_lifecycle::require_visible(data, id)?;
     crate::chat_origin::require_chat_origin(data, id)?;
     let familiar = crate::chat_canonical::require_current(data, id)?;
@@ -919,7 +957,7 @@ fn read_session(data: &Path, id: &str) -> Result<Value, String> {
     if selected.get("familiar_id").and_then(Value::as_str) != Some(familiar.as_str()) {
         return Err("This chat is no longer recorded as belonging to the familiar you selected. Refresh Coven and open the familiar again.".into());
     }
-    if let Some((events, has_more)) = read_captured_history(data, &selected, get_session)? {
+    if let Some((events, has_more)) = read_captured_history(data, &selected, budget, get_session)? {
         return Ok(
             json!({"session": normalize_session(&selected)?, "events": events, "hasMore": has_more}),
         );
@@ -940,7 +978,7 @@ fn read_session(data: &Path, id: &str) -> Result<Value, String> {
     } else {
         vec![selected.clone()]
     };
-    let (events, has_more) = assemble_history(&siblings, |sibling| {
+    let (events, has_more) = assemble_history(&siblings, budget, |sibling| {
         let id = string(sibling, "id")?;
         if crate::chat_lifecycle::state(data, id)? == crate::chat_lifecycle::Lifecycle::Deleted {
             return Ok(None);
@@ -948,7 +986,7 @@ fn read_session(data: &Path, id: &str) -> Result<Value, String> {
         if Instant::now() >= deadline {
             return Err(HISTORY_DEADLINE.into());
         }
-        read_single_session(data, id).map(Some)
+        read_single_session(data, id, budget).map(Some)
     })?;
     Ok(json!({"session": normalize_session(&selected)?, "events": events, "hasMore": has_more}))
 }
@@ -969,13 +1007,14 @@ fn event_bytes(event: &Value) -> Result<usize, String> {
 /// deadline error, which ends the walk as a partial read.
 fn assemble_history(
     siblings: &[Value],
+    budget: Budget,
     mut read: impl FnMut(&Value) -> Result<Option<(Vec<Value>, bool)>, String>,
 ) -> Result<(Vec<Value>, bool), String> {
     let mut turns: Vec<Vec<Value>> = Vec::new();
     let mut bytes = 0;
     let mut has_more = false;
     for (index, sibling) in siblings.iter().rev().enumerate() {
-        if index >= HISTORY_SESSION_LIMIT {
+        if index >= budget.sessions {
             has_more = true;
             break;
         }
@@ -990,13 +1029,13 @@ fn assemble_history(
         };
         has_more |= partial;
         let mut turn_bytes = turn.iter().map(event_bytes).sum::<Result<usize, _>>()?;
-        if bytes + turn_bytes > OUTPUT_LIMIT {
+        if bytes + turn_bytes > budget.bytes {
             has_more = true;
             if !turns.is_empty() {
                 break;
             }
             // A single turn larger than the budget keeps its newest events.
-            while turn_bytes > OUTPUT_LIMIT && !turn.is_empty() {
+            while turn_bytes > budget.bytes && !turn.is_empty() {
                 turn_bytes -= event_bytes(&turn.remove(0))?;
             }
         }
@@ -1044,12 +1083,16 @@ fn history_sessions(selected: &Value, sessions: &[Value]) -> Result<Vec<Value>, 
     Ok(result)
 }
 
-fn read_single_session(data: &Path, id: &str) -> Result<(Vec<Value>, bool), String> {
+fn read_single_session(
+    data: &Path,
+    id: &str,
+    budget: Budget,
+) -> Result<(Vec<Value>, bool), String> {
     crate::chat_origin::require_chat_origin(data, id)?;
     if let Some(events) = read_local_events(data, id)? {
         return Ok((events, false));
     }
-    read_cli_history(id, |after| {
+    read_cli_history(id, budget, |after| {
         let cursor = after.map(|seq| seq.to_string());
         let mut args = vec!["sessions", "events", id, "--json", "--limit", "1000"];
         if let Some(cursor) = cursor.as_deref() {
@@ -1062,6 +1105,7 @@ fn read_single_session(data: &Path, id: &str) -> Result<(Vec<Value>, bool), Stri
 fn read_captured_history(
     data: &Path,
     selected: &Value,
+    budget: Budget,
     mut resolve: impl FnMut(&str) -> Result<Value, String>,
 ) -> Result<Option<(Vec<Value>, bool)>, String> {
     let selected_id = string(selected, "id")?;
@@ -1112,18 +1156,18 @@ fn read_captured_history(
                 .map(|encoded| bytes + encoded.len() + 1)
                 .map_err(|_| "Cannot measure saved history.".to_string())
         })?;
-        if buffered_bytes + turn_bytes > OUTPUT_LIMIT && !turns.is_empty() {
+        if buffered_bytes + turn_bytes > budget.bytes && !turns.is_empty() {
             partial = true;
             break;
         }
         buffered_bytes += turn_bytes;
         turns.push(events);
-        if buffered_bytes > OUTPUT_LIMIT {
+        if buffered_bytes > budget.bytes {
             partial = true;
             break;
         }
         let Some(parent) = parent else { break };
-        if turns.len() >= HISTORY_SESSION_LIMIT || Instant::now() >= deadline {
+        if turns.len() >= budget.sessions || Instant::now() >= deadline {
             partial = true;
             break;
         }
@@ -1147,7 +1191,7 @@ fn read_captured_history(
                 "Saved Coven lineage does not match the actual conversation workspace.".into(),
             );
         }
-        let (parent_events, truncated) = read_single_session(data, &parent)?;
+        let (parent_events, truncated) = read_single_session(data, &parent, budget)?;
         events = parent_events;
         partial |= truncated;
     }
@@ -1158,7 +1202,7 @@ fn read_captured_history(
             .map_err(|_| "Cannot measure saved history.")?
             .len()
             + 1;
-        if bytes > OUTPUT_LIMIT {
+        if bytes > budget.bytes {
             partial = true;
             break;
         }
@@ -1403,6 +1447,7 @@ pub(crate) fn read_local_events(data: &Path, id: &str) -> Result<Option<Vec<Valu
 
 fn read_cli_history(
     id: &str,
+    budget: Budget,
     mut fetch: impl FnMut(Option<u64>) -> Result<Value, String>,
 ) -> Result<(Vec<Value>, bool), String> {
     let deadline = Instant::now() + READ_TIMEOUT;
@@ -1420,7 +1465,7 @@ fn read_cli_history(
             partial,
         ))
     };
-    for _ in 0..HISTORY_PAGE_LIMIT {
+    for _ in 0..budget.pages {
         if Instant::now() >= deadline {
             return finish(events, true);
         }
@@ -1453,7 +1498,7 @@ fn read_cli_history(
                 + 1;
             bytes += size;
             events.push_back((event, size));
-            while bytes > OUTPUT_LIMIT {
+            while bytes > budget.bytes {
                 let Some((_, dropped)) = events.pop_front() else {
                     break;
                 };
@@ -1604,9 +1649,9 @@ fn send_local(
     // history replayed into this turn; the saved input stays the user's text.
     let replay = match &resumed {
         Some(session) if REPLAY_HARNESSES.contains(&harness.as_str()) => {
-            read_captured_history(data, session, get_session)?.and_then(|(events, partial)| {
-                build_replay(&input.prompt, &replay_turns(&events), partial)
-            })
+            read_captured_history(data, session, Budget::BASE, get_session)?.and_then(
+                |(events, partial)| build_replay(&input.prompt, &replay_turns(&events), partial),
+            )
         }
         _ => None,
     };
@@ -1946,7 +1991,7 @@ mod tests {
                 .join("\n");
             fs::write(transcripts.join(format!("{id}.jsonl")), lines).unwrap();
         }
-        let (history, partial) = read_captured_history(&data, &second, |id| {
+        let (history, partial) = read_captured_history(&data, &second, Budget::BASE, |id| {
             assert_eq!(id, "first");
             Ok(first.clone())
         })
@@ -1960,14 +2005,14 @@ mod tests {
                 .chain(second_events)
                 .collect::<Vec<_>>()
         );
-        assert!(read_captured_history(&data, &second, |_| {
+        assert!(read_captured_history(&data, &second, Budget::BASE, |_| {
             let mut mismatched = first.clone();
             mismatched["project_root"] = json!("/unrelated");
             Ok(mismatched)
         })
         .is_err());
         fs::remove_file(transcripts.join("first.jsonl")).unwrap();
-        let (history, partial) = read_captured_history(&data, &second, |_| {
+        let (history, partial) = read_captured_history(&data, &second, Budget::BASE, |_| {
             panic!("External parent must not trigger CLI history access")
         })
         .unwrap()
@@ -1983,17 +2028,17 @@ mod tests {
             .unwrap();
         // Even a stale/recreated local transcript cannot bypass the tombstone.
         fs::write(transcripts.join("first.jsonl"), "{}").unwrap();
-        let (history, partial) = read_captured_history(&data, &second, |_| {
+        let (history, partial) = read_captured_history(&data, &second, Budget::BASE, |_| {
             panic!("Deleted ancestors must not be resolved or replayed")
         })
         .unwrap()
         .unwrap();
         assert!(!partial);
         assert_eq!(history.len(), 2);
-        assert!(read_session(&data, "first")
+        assert!(read_session(&data, "first", Budget::BASE)
             .unwrap_err()
             .contains("deleted"));
-        assert!(read_session(&data, "external-session")
+        assert!(read_session(&data, "external-session", Budget::BASE)
             .unwrap_err()
             .contains("not created in Chat"));
         fs::remove_file(transcripts.join("second.jsonl")).unwrap();
@@ -2017,9 +2062,38 @@ mod tests {
     }
 
     #[test]
+    fn deeper_reads_scale_every_budget_and_stop_at_the_cap() {
+        assert_eq!(Budget::at_depth(1).unwrap(), Budget::BASE);
+        let deepest = Budget::at_depth(MAX_HISTORY_DEPTH).unwrap();
+        assert_eq!(deepest.sessions, HISTORY_SESSION_LIMIT * 4);
+        assert_eq!(deepest.bytes, OUTPUT_LIMIT * 4);
+        assert_eq!(deepest.pages, HISTORY_PAGE_LIMIT * 4);
+        assert!(Budget::at_depth(0).is_err());
+        assert!(Budget::at_depth(MAX_HISTORY_DEPTH + 1).is_err());
+    }
+
+    #[test]
+    fn a_deeper_read_reaches_sessions_the_base_budget_left_out() {
+        let siblings: Vec<Value> = (0..HISTORY_SESSION_LIMIT + 10)
+            .map(|index| json!({"id": format!("s{index:03}")}))
+            .collect();
+        let read = |sibling: &Value| Ok(Some((turn(sibling["id"].as_str().unwrap(), 1), false)));
+        let (base, more) = assemble_history(&siblings, Budget::BASE, read).unwrap();
+        assert!(more);
+        assert_eq!(base.len(), HISTORY_SESSION_LIMIT);
+        let (deeper, more) =
+            assemble_history(&siblings, Budget::at_depth(2).unwrap(), read).unwrap();
+        assert!(!more);
+        assert_eq!(deeper.len(), siblings.len());
+        // The deeper read is the base read with older turns in front of it.
+        assert!(texts(&deeper).ends_with(&texts(&base)));
+        assert_eq!(texts(&deeper).first().unwrap(), "s000-0");
+    }
+
+    #[test]
     fn history_keeps_every_turn_in_order_when_within_budget() {
         let siblings: Vec<Value> = ["a", "b", "c"].iter().map(|id| json!({"id": id})).collect();
-        let (events, has_more) = assemble_history(&siblings, |sibling| {
+        let (events, has_more) = assemble_history(&siblings, Budget::BASE, |sibling| {
             Ok(Some((turn(sibling["id"].as_str().unwrap(), 2), false)))
         })
         .unwrap();
@@ -2032,7 +2106,7 @@ mod tests {
         let siblings: Vec<Value> = (0..HISTORY_SESSION_LIMIT + 3)
             .map(|index| json!({"id": format!("s{index:03}")}))
             .collect();
-        let (events, has_more) = assemble_history(&siblings, |sibling| {
+        let (events, has_more) = assemble_history(&siblings, Budget::BASE, |sibling| {
             Ok(Some((turn(sibling["id"].as_str().unwrap(), 1), false)))
         })
         .unwrap();
@@ -2053,7 +2127,7 @@ mod tests {
             .map(|id| json!({"id": id}))
             .collect();
         let big = "x".repeat(OUTPUT_LIMIT / 3);
-        let (events, has_more) = assemble_history(&siblings, |sibling| {
+        let (events, has_more) = assemble_history(&siblings, Budget::BASE, |sibling| {
             let id = sibling["id"].as_str().unwrap();
             Ok(Some((
                 vec![json!({"type": "output", "text": format!("{id}-0"), "pad": big})],
@@ -2069,7 +2143,7 @@ mod tests {
     fn history_keeps_the_newest_events_of_a_turn_larger_than_the_budget() {
         let siblings = vec![json!({"id": "only"})];
         let pad = "x".repeat(OUTPUT_LIMIT / 3);
-        let (events, has_more) = assemble_history(&siblings, |_| {
+        let (events, has_more) = assemble_history(&siblings, Budget::BASE, |_| {
             Ok(Some((
                 (0..5)
                     .map(|index| json!({"type": "output", "text": format!("only-{index}"), "pad": pad}))
@@ -2085,7 +2159,7 @@ mod tests {
     #[test]
     fn history_stops_at_a_session_read_only_in_part() {
         let siblings: Vec<Value> = ["a", "b", "c"].iter().map(|id| json!({"id": id})).collect();
-        let (events, has_more) = assemble_history(&siblings, |sibling| {
+        let (events, has_more) = assemble_history(&siblings, Budget::BASE, |sibling| {
             let id = sibling["id"].as_str().unwrap();
             Ok(Some((turn(id, 1), id == "b")))
         })
@@ -2101,22 +2175,25 @@ mod tests {
             .map(|id| json!({"id": id}))
             .collect();
         let (events, has_more) =
-            assemble_history(&siblings, |sibling| match sibling["id"].as_str().unwrap() {
-                "gone" => Ok(None),
-                "a" => Err(HISTORY_DEADLINE.into()),
-                id => Ok(Some((turn(id, 1), false))),
+            assemble_history(&siblings, Budget::BASE, |sibling| {
+                match sibling["id"].as_str().unwrap() {
+                    "gone" => Ok(None),
+                    "a" => Err(HISTORY_DEADLINE.into()),
+                    id => Ok(Some((turn(id, 1), false))),
+                }
             })
             .unwrap();
         assert!(has_more);
         assert_eq!(texts(&events), ["b-0", "c-0"]);
-        let failure = assemble_history(&siblings, |_| Err("boom".into())).unwrap_err();
+        let failure =
+            assemble_history(&siblings, Budget::BASE, |_| Err("boom".into())).unwrap_err();
         assert_eq!(failure, "boom");
     }
 
     #[test]
     fn cli_history_follows_cursors_beyond_one_thousand_events() {
         let mut requests = Vec::new();
-        let (events, more) = read_cli_history("session-1", |after| {
+        let (events, more) = read_cli_history("session-1", Budget::BASE, |after| {
             requests.push(after);
             Ok(match after {
                 None => json!({"events": (1..=1000).map(|seq| json!({"seq":seq,"kind":"output","payload_json":"{\"data\":\"x\"}"})).collect::<Vec<_>>(),
@@ -2133,7 +2210,7 @@ mod tests {
 
     #[test]
     fn cli_history_rejects_non_advancing_cursors() {
-        let result = read_cli_history("session-1", |_| {
+        let result = read_cli_history("session-1", Budget::BASE, |_| {
             Ok(json!({
                 "events":[],"hasMore":true,"nextCursor":{"afterSeq":0}
             }))
@@ -2144,7 +2221,7 @@ mod tests {
     #[test]
     fn cli_history_keeps_a_sessions_newest_events_past_the_byte_budget() {
         let data = "x".repeat(OUTPUT_LIMIT / 3);
-        let (events, more) = read_cli_history("session-1", |after| {
+        let (events, more) = read_cli_history("session-1", Budget::BASE, |after| {
             let seq = after.unwrap_or(0) + 1;
             let payload = json!({ "data": format!("{seq}-{data}") }).to_string();
             Ok(json!({
@@ -2165,7 +2242,7 @@ mod tests {
     #[test]
     fn cli_history_reports_partial_at_its_explicit_page_budget() {
         let mut count = 0;
-        let (events, more) = read_cli_history("session-1", |after| {
+        let (events, more) = read_cli_history("session-1", Budget::BASE, |after| {
             count += 1;
             let next = after.unwrap_or(0) + 1;
             Ok(
@@ -2822,7 +2899,7 @@ mod tests {
                 .filter_map(|event| event.pointer("/message/content").and_then(Value::as_array))
                 .flatten()
                 .any(|block| block["type"] == "tool_use"));
-            let saved = read_session(&data, &id).expect("Persisted native readback failed");
+            let saved = read_session(&data, &id, Budget::BASE).expect("Persisted native readback failed");
             assert_eq!(saved["events"], json!(complete_transcript));
             assert_eq!(saved["hasMore"], false);
             assert_eq!(saved["session"]["id"], id);
@@ -2849,7 +2926,7 @@ mod tests {
             ids.push(id.clone());
             previous = Some(id);
         }
-        let reopened = read_session(&data, previous.as_deref().unwrap()).unwrap();
+        let reopened = read_session(&data, previous.as_deref().unwrap(), Budget::BASE).unwrap();
         assert_eq!(reopened["events"], json!(complete_transcript));
         assert_eq!(
             complete_transcript
@@ -2873,7 +2950,7 @@ mod tests {
             .expect("Provide the retained resumed ledger ID.");
         assert!(data.is_absolute());
         validate_id(&id).unwrap();
-        let saved = read_session(&data, &id).unwrap();
+        let saved = read_session(&data, &id, Budget::BASE).unwrap();
         let events = saved["events"].as_array().unwrap();
         assert_eq!(saved["session"]["id"], id);
         assert_eq!(saved["hasMore"], false);

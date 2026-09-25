@@ -17,6 +17,8 @@ const defaultRuntime = createCovenRuntime();
 const STORAGE_KEY = 'opencoven.chat.navigation.v1';
 /** One transcript update per frame keeps long streams smooth. */
 const STREAM_FLUSH_MS = 16;
+/** The host's cap on how far back one chat can be read (see `MAX_HISTORY_DEPTH`). */
+const MAX_HISTORY_DEPTH = 4;
 type Navigation = { familiarId: string; sessionId: string; drafts: Record<string, string> };
 type LastRun = { ms: number; outcome: 'reply' | 'error' | 'stopped' };
 function errorText(error: unknown) {
@@ -113,6 +115,10 @@ export function ChatApp({
   const [events, setEvents] = useState<CovenRunEvent[]>([]);
   // The host holds only the newest part of this chat's history; nothing failed.
   const [partial, setPartial] = useState(false);
+  // How far back the open chat has been read. Tied to the chat, so opening
+  // another one starts from the usual budget again.
+  const [history, setHistory] = useState({ session: '', depth: 1 });
+  const depth = history.session === navigation.sessionId ? history.depth : 1;
   // A history read that failed can be asked for again without a full refresh.
   // The offer is tied to that failure's own text, so dismissing it or any
   // later, unrelated error withdraws the offer.
@@ -234,16 +240,23 @@ export function ChatApp({
   // biome-ignore lint/correctness/useExhaustiveDependencies: `reads` explicitly asks for the history again.
   useEffect(() => {
     const request = ++readId.current;
-    setEvents([]);
-    setPartial(false);
+    // Reading further back keeps what is on screen until the longer history
+    // arrives; a different chat starts empty.
+    if (depth === 1) {
+      setEvents([]);
+      setPartial(false);
+    }
     setReadError('');
     if (!available || !navigation.sessionId) {
       if (available) setLoading(false);
       return;
     }
     setLoading(true);
-    void runtime
-      .readSession(navigation.sessionId)
+    const reading =
+      depth > 1
+        ? runtime.readSession(navigation.sessionId, depth)
+        : runtime.readSession(navigation.sessionId);
+    void reading
       .then((result) => {
         if (readId.current !== request) return;
         setEvents(result.events);
@@ -269,7 +282,7 @@ export function ChatApp({
     return () => {
       ++readId.current;
     };
-  }, [runtime, available, navigation.sessionId, reads]);
+  }, [runtime, available, navigation.sessionId, reads, depth]);
 
   async function send() {
     const current = navigationRef.current;
@@ -602,6 +615,12 @@ export function ChatApp({
       busy={busy}
       runFamiliarId={runFamiliarId}
       partialHistory={partial}
+      {...(partial && depth < MAX_HISTORY_DEPTH && !busy && !loading
+        ? {
+            onLoadEarlier: () =>
+              setHistory({ session: navigationRef.current.sessionId, depth: depth + 1 }),
+          }
+        : {})}
       {...(readError && error === readError && !busy
         ? {
             onReloadChat: () => {

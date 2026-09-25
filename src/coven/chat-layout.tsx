@@ -110,6 +110,8 @@ export type ChatLayoutProps = Readonly<{
   runFamiliarId?: string;
   /** Only the newest part of this chat's history is loaded; said as a notice, not an error. */
   partialHistory?: boolean;
+  /** Reads further back; present while more history can be loaded. */
+  onLoadEarlier?: () => void;
   /** When the active run started (epoch ms); the status shows how long it has run. */
   runStartedAt?: number;
   /** How the shown familiar's most recent run in this window ended, and how long it took. */
@@ -788,6 +790,8 @@ export function ChatLayout(props: ChatLayoutProps) {
     disabled: Boolean(composerDisabled || props.busy),
   });
   const nearBottom = useRef(true);
+  // Distance from the bottom to hold while older turns load above the reader.
+  const keepFromBottom = useRef<number | null>(null);
   const [showLatest, setShowLatest] = useState(false);
   // How many messages the reader had when they last sat at the bottom, so the
   // jump control can say how many arrived while they were reading back.
@@ -802,8 +806,13 @@ export function ChatLayout(props: ChatLayoutProps) {
     }
     if (nearBottom.current) seenCount.current = props.messages.length;
     const transcript = transcriptRef.current;
+    if (transcript && keepFromBottom.current !== null && !props.loading) {
+      transcript.scrollTop = transcript.scrollHeight - keepFromBottom.current;
+      keepFromBottom.current = null;
+      return;
+    }
     if (transcript && nearBottom.current) transcript.scrollTop = transcript.scrollHeight;
-  }, [props.messages, props.sessionId, props.busy]);
+  }, [props.messages, props.sessionId, props.busy, props.loading]);
   const unseen = showLatest ? Math.max(0, props.messages.length - seenCount.current) : 0;
   const lastMessage = props.messages[props.messages.length - 1];
   const counts = useMemo(() => activityCounts(props.messages), [props.messages]);
@@ -1337,10 +1346,30 @@ export function ChatLayout(props: ChatLayoutProps) {
               </details>
             ) : null}
             {props.partialHistory ? (
-              <p className="coven-notice" role="note">
-                Only the most recent part of this chat is shown here. Use the Coven CLI to read the
-                full history.
-              </p>
+              <div className="coven-notice coven-history-notice" role="note">
+                {props.onLoadEarlier ? (
+                  <>
+                    <span>Only the most recent part of this chat is shown here.</span>
+                    <FamButton
+                      size="sm"
+                      onClick={() => {
+                        // Older turns arrive above the reader; keep them where they are.
+                        const transcript = transcriptRef.current;
+                        if (transcript)
+                          keepFromBottom.current = transcript.scrollHeight - transcript.scrollTop;
+                        props.onLoadEarlier?.();
+                      }}
+                    >
+                      Load earlier turns
+                    </FamButton>
+                  </>
+                ) : (
+                  <span>
+                    Only the most recent part of this chat is shown here. Use the Coven CLI to read
+                    the full history.
+                  </span>
+                )}
+              </div>
             ) : null}
             {props.error ? (
               <div className="coven-error" role="alert">

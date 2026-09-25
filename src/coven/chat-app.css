@@ -879,6 +879,15 @@
   white-space: nowrap;
 }
 
+/* A partial history says so, with the control that reads further back. */
+.coven-chat .coven-history-notice {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+
 /* A replayed-history notice: a quiet line between messages, addressed by no one. */
 .coven-chat .coven-notice {
   margin: 0 auto;
