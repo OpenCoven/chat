@@ -66,14 +66,19 @@
   text-decoration: underline;
 }
 
-.fr-shell button,
-.fr-shell input,
-.fr-shell textarea {
+/*
+ * Form-control resets. The whole selector sits in :where(), so they carry
+ * no weight at all: any component class (.fr-btn, .coven-copy, ...) and even
+ * the weightless :where([data-slot]) rules of the vendored UI win over them. At `.fr-shell button` weight they outranked every single-class
+ * button rule, so buttons took their surroundings' size and colour instead
+ * of their own.
+ */
+:where(.fr-shell button, .fr-shell input, .fr-shell textarea) {
   font: inherit;
   letter-spacing: inherit;
 }
 
-.fr-shell button {
+:where(.fr-shell button) {
   color: inherit;
 }
 
@@ -86,9 +91,7 @@
   border-radius: 8px;
 }
 
-.fr-shell button,
-.fr-shell a,
-.fr-shell textarea {
+:where(.fr-shell button, .fr-shell a, .fr-shell textarea) {
   transition:
     background-color 160ms cubic-bezier(0.3, 0, 0, 1),
     border-color 160ms,
@@ -98,7 +101,7 @@
     opacity 160ms;
 }
 
-.fr-shell button:active {
+:where(.fr-shell button:active) {
   transform: translateY(0.5px) scale(0.995);
 }
 
