@@ -14,6 +14,7 @@ import {
   PROMPT_LIMIT_BYTES,
   runStatusText,
   SHORTCUTS,
+  sameBlock,
   toolTurnSummary,
 } from './chat-layout';
 import type { RfbClass } from './screen-viewer';
@@ -2214,5 +2215,93 @@ describe('dropping files onto the thread', () => {
     Object.defineProperty(stray, 'dataTransfer', { value: { types: ['Files'] } });
     window.dispatchEvent(stray);
     expect(stray.defaultPrevented).toBe(true);
+  });
+});
+
+describe('transcript memoisation', () => {
+  const message = (extra: Record<string, unknown> = {}) => ({
+    kind: 'message' as const,
+    message: { id: 'm', role: 'assistant', text: 'hello', ...extra },
+  });
+  const tools = (rows: Record<string, unknown>[]) => ({
+    kind: 'tools' as const,
+    id: 't',
+    rows: rows.map((row) => ({ name: 'Bash', args: 'ls', ...row })),
+  });
+
+  it('treats a re-projected but identical block as unchanged', () => {
+    expect(sameBlock(message(), message())).toBe(true);
+    expect(sameBlock(tools([{ result: 'ok' }]), tools([{ result: 'ok' }]))).toBe(true);
+    expect(
+      sameBlock(
+        message({ role: 'user', attachments: [{ name: 'a.txt', size: 3 }] }),
+        message({ role: 'user', attachments: [{ name: 'a.txt', size: 3 }] }),
+      ),
+    ).toBe(true);
+  });
+
+  it('sees every change a block renders, so nothing goes stale', () => {
+    expect(sameBlock(message(), message({ text: 'hello there' }))).toBe(false);
+    expect(sameBlock(message(), message({ role: 'user' }))).toBe(false);
+    expect(sameBlock(message(), message({ id: 'n' }))).toBe(false);
+    expect(sameBlock(message(), message({ attachments: [{ name: 'a.txt', size: 3 }] }))).toBe(
+      false,
+    );
+    expect(
+      sameBlock(
+        message({ attachments: [{ name: 'a.txt', size: 3 }] }),
+        message({ attachments: [{ name: 'a.txt', size: 4 }] }),
+      ),
+    ).toBe(false);
+    for (const change of [
+      { name: 'Read' },
+      { args: 'pwd' },
+      { raw: '{}' },
+      { result: 'ok' },
+      { isError: true },
+      { running: true },
+    ]) {
+      expect(sameBlock(tools([{}]), tools([change]))).toBe(false);
+    }
+    expect(sameBlock(tools([{}]), tools([{}, {}]))).toBe(false);
+    expect(sameBlock(tools([{}]), message())).toBe(false);
+  });
+
+  it('still shows a streamed reply growing and a tool finishing', () => {
+    const base = {
+      ...layoutProps(),
+      connected: true,
+      ready: true,
+      familiars: [{ id: 'a', name: 'Astra' }],
+      familiarId: 'a',
+    };
+    const { rerender } = render(
+      <ChatLayout
+        {...base}
+        busy
+        runFamiliarId="a"
+        messages={[
+          { id: 't', role: 'tool', text: 'Bash', tool: { name: 'Bash', args: 'ls' } },
+          { id: 'a1', role: 'assistant', text: 'Hel' },
+        ]}
+      />,
+    );
+    expect(screen.getByText('Hel')).toBeInTheDocument();
+    rerender(
+      <ChatLayout
+        {...base}
+        messages={[
+          {
+            id: 't',
+            role: 'tool',
+            text: 'Bash',
+            tool: { name: 'Bash', args: 'ls', result: 'ok', isError: true },
+          },
+          { id: 'a1', role: 'assistant', text: 'Hello there' },
+        ]}
+      />,
+    );
+    expect(screen.getByText('Hello there')).toBeInTheDocument();
+    expect(screen.getByRole('listitem')).toHaveAttribute('data-error', 'true');
   });
 });

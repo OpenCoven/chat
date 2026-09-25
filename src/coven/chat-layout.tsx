@@ -1,9 +1,12 @@
 import {
   type CSSProperties,
+  memo,
   type DragEvent as ReactDragEvent,
   type KeyboardEvent as ReactKeyboardEvent,
   type RefObject,
+  useCallback,
   useEffect,
+  useMemo,
   useRef,
   useState,
 } from 'react';
@@ -317,6 +320,208 @@ function activeControl(): HTMLElement | null {
   return document.activeElement instanceof HTMLElement ? document.activeElement : null;
 }
 
+type TranscriptBlockData =
+  | Readonly<{ kind: 'message'; message: ChatMessage }>
+  | Readonly<{ kind: 'tools'; id: string; rows: ToolRow[] }>;
+
+type TranscriptBlockProps = Readonly<{
+  block: TranscriptBlockData;
+  name: string;
+  avatarUrl: string | undefined;
+  withCard: boolean;
+  cardOpen: boolean;
+  onShowCard: () => void;
+}>;
+
+/** Two tool rows show the same thing. */
+function sameRow(a: ToolRow, b: ToolRow) {
+  return (
+    a.name === b.name &&
+    a.args === b.args &&
+    a.raw === b.raw &&
+    a.result === b.result &&
+    a.isError === b.isError &&
+    a.running === b.running
+  );
+}
+
+/**
+ * Two blocks render alike. Compared by content, not identity: the runtime
+ * re-projects every message on each streamed chunk, so identity alone would
+ * re-render the whole history for every token.
+ */
+export function sameBlock(a: TranscriptBlockData, b: TranscriptBlockData): boolean {
+  if (a.kind === 'tools' || b.kind === 'tools') {
+    return (
+      a.kind === 'tools' &&
+      b.kind === 'tools' &&
+      a.id === b.id &&
+      a.rows.length === b.rows.length &&
+      a.rows.every((row, index) => {
+        const other = b.rows[index];
+        return other !== undefined && sameRow(row, other);
+      })
+    );
+  }
+  const x = a.message;
+  const y = b.message;
+  const xs = x.attachments ?? [];
+  const ys = y.attachments ?? [];
+  return (
+    x.id === y.id &&
+    x.role === y.role &&
+    x.text === y.text &&
+    xs.length === ys.length &&
+    xs.every((file, index) => {
+      const other = ys[index];
+      return other !== undefined && other.name === file.name && other.size === file.size;
+    })
+  );
+}
+
+/**
+ * One transcript entry. Memoised so that typing in the composer, which
+ * re-renders the layout on every keystroke, does not re-render the history.
+ */
+const TranscriptBlock = memo(
+  function TranscriptBlock({
+    block,
+    name,
+    avatarUrl,
+    withCard,
+    cardOpen,
+    onShowCard,
+  }: TranscriptBlockProps) {
+    return block.kind === 'tools' ? (
+      <div className="fr-familiar fr-msg coven-tool-turn">
+        <FamiliarAvatar name={name} avatarUrl={avatarUrl} size={22} />
+        <div className="fr-familiar-body">
+          <span className="fr-familiar-meta">
+            <span className="fr-familiar-name">Tool activity</span>
+            <span className="coven-tool-turn-count">{toolTurnSummary(block.rows)}</span>
+          </span>
+          <div className="coven-formatted">
+            <ToolActivity rows={block.rows} />
+          </div>
+        </div>
+      </div>
+    ) : block.message.role === 'output' ? (
+      // Raw engine output: text the runtime printed outside the
+      // protocol. Shown as it came, attributed to no one.
+      <section className="coven-output" aria-label="Engine output">
+        <pre>{block.message.text}</pre>
+      </section>
+    ) : block.message.role === 'notice' ? (
+      // Chat's own disclosure (a replayed-history notice): a quiet
+      // line between messages, not a reply from anyone.
+      <p className="coven-notice" role="note">
+        {block.message.text}
+      </p>
+    ) : block.message.role === 'user' ? (
+      <div className="fr-user fr-msg">
+        <div className="fr-user-body">
+          <div className="fr-bubble fr-bubble--user coven-message">{block.message.text}</div>
+          {block.message.text ? (
+            <CopyButton
+              className="coven-message-copy coven-message-copy--user"
+              text={block.message.text}
+              label="Copy message"
+            />
+          ) : null}
+          {block.message.attachments?.length ? (
+            <ul className="coven-history-attachments" aria-label="Message attachments">
+              {block.message.attachments.map((file, index) => (
+                <li key={`${index}-${file.name}`}>
+                  <AttachmentChip name={file.name} meta={formatAttachmentSize(file.size)} />
+                </li>
+              ))}
+            </ul>
+          ) : null}
+        </div>
+      </div>
+    ) : (
+      <div className="fr-familiar fr-msg">
+        {block.message.role === 'assistant' && withCard ? (
+          <button
+            type="button"
+            className="coven-familiar-card-trigger"
+            aria-label={`Show ${name}'s familiar card`}
+            aria-controls="coven-familiar-inspector"
+            aria-expanded={cardOpen}
+            onClick={onShowCard}
+          >
+            <FamiliarAvatar name={name} avatarUrl={avatarUrl} size={22} />
+          </button>
+        ) : (
+          <FamiliarAvatar name={name} avatarUrl={avatarUrl} size={22} />
+        )}
+        <div className="fr-familiar-body">
+          <span className="fr-familiar-meta">
+            {block.message.role === 'assistant' && withCard ? (
+              <button
+                type="button"
+                className="fr-familiar-name coven-familiar-card-trigger"
+                aria-label={`Show ${name}'s familiar card`}
+                aria-controls="coven-familiar-inspector"
+                aria-expanded={cardOpen}
+                onClick={onShowCard}
+              >
+                {name}
+              </button>
+            ) : (
+              <span className="fr-familiar-name">
+                {block.message.role === 'assistant' ? name : titleCase(block.message.role)}
+              </span>
+            )}
+            {block.message.role === 'assistant' && block.message.text ? (
+              <CopyButton
+                className="coven-message-copy"
+                text={block.message.text}
+                label="Copy reply"
+              />
+            ) : null}
+          </span>
+          <div className="fr-bubble fr-bubble--familiar coven-message">
+            {block.message.role === 'assistant' ? (
+              <FormattedMessage text={block.message.text} />
+            ) : (
+              block.message.text
+            )}
+          </div>
+        </div>
+      </div>
+    );
+  },
+  (previous, next) =>
+    previous.name === next.name &&
+    previous.avatarUrl === next.avatarUrl &&
+    previous.withCard === next.withCard &&
+    previous.cardOpen === next.cardOpen &&
+    previous.onShowCard === next.onShowCard &&
+    sameBlock(previous.block, next.block),
+);
+
+/**
+ * The whole history. Its props do not change while the reader types, so a
+ * keystroke does not even walk the list, however long the chat is.
+ */
+const TranscriptBlocks = memo(function TranscriptBlocks({
+  blocks,
+  ...shared
+}: Omit<TranscriptBlockProps, 'block'> & Readonly<{ blocks: readonly TranscriptBlockData[] }>) {
+  return (
+    <>
+      {blocks.map((block) => (
+        <TranscriptBlock
+          key={block.kind === 'tools' ? block.id : block.message.id}
+          block={block}
+          {...shared}
+        />
+      ))}
+    </>
+  );
+});
+
 export function ChatLayout(props: ChatLayoutProps) {
   const tier = useViewportTier();
   const [sidebar, setSidebar] = useState(() => tier !== 'compact');
@@ -381,10 +586,15 @@ export function ChatLayout(props: ChatLayoutProps) {
     if (drawers) setSidebar(false);
     setInspector(false);
   }
+  // A stable handle for transcript entries, so the memoised history is not
+  // re-rendered just because this function was re-created.
+  const showCard = useRef(() => {});
+  const onShowCard = useCallback(() => showCard.current(), []);
   function showFamiliarCard() {
     setTab('overview');
     openInspector();
   }
+  showCard.current = showFamiliarCard;
   useRailShortcuts(
     () => (sidebar ? setSidebar(false) : openSidebar()),
     () => (inspector ? setInspector(false) : openInspector()),
@@ -560,41 +770,42 @@ export function ChatLayout(props: ChatLayoutProps) {
     if (transcript && nearBottom.current) transcript.scrollTop = transcript.scrollHeight;
   }, [props.messages, props.sessionId, props.busy]);
   const unseen = showLatest ? Math.max(0, props.messages.length - seenCount.current) : 0;
-  // Consecutive tool rows render as one activity list; the transcript is
-  // otherwise one element per message.
-  const blocks: (
-    | Readonly<{ kind: 'message'; message: ChatMessage }>
-    | Readonly<{ kind: 'tools'; id: string; rows: ToolRow[] }>
-  )[] = [];
-  for (const message of props.messages) {
-    const last = blocks[blocks.length - 1];
-    if (message.tool) {
-      const row: ToolRow = {
-        name: message.tool.name,
-        args: message.tool.args,
-        raw: message.tool.raw,
-        result: message.tool.result,
-        isError: message.tool.isError,
-      };
-      if (last?.kind === 'tools') last.rows.push(row);
-      else blocks.push({ kind: 'tools', id: message.id, rows: [row] });
-    } else {
-      blocks.push({ kind: 'message', message });
-    }
-  }
   const lastMessage = props.messages[props.messages.length - 1];
-  const counts = activityCounts(props.messages);
+  const counts = useMemo(() => activityCounts(props.messages), [props.messages]);
   // A run whose newest event is an unfinished tool call is running that tool,
   // and the status says so instead of "responding".
   const runningTool =
     runHere && lastMessage?.tool && lastMessage.tool.result === undefined
       ? lastMessage.tool.name
       : undefined;
-  const tail = blocks[blocks.length - 1];
-  if (runningTool && tail?.kind === 'tools') {
-    const row = tail.rows[tail.rows.length - 1];
-    if (row) tail.rows[tail.rows.length - 1] = { ...row, running: true };
-  }
+  // Consecutive tool rows render as one activity list; the transcript is
+  // otherwise one element per message. Derived per transcript, not per
+  // keystroke.
+  const blocks = useMemo(() => {
+    const built: TranscriptBlockData[] = [];
+    for (const message of props.messages) {
+      const last = built[built.length - 1];
+      if (message.tool) {
+        const row: ToolRow = {
+          name: message.tool.name,
+          args: message.tool.args,
+          raw: message.tool.raw,
+          result: message.tool.result,
+          isError: message.tool.isError,
+        };
+        if (last?.kind === 'tools') last.rows.push(row);
+        else built.push({ kind: 'tools', id: message.id, rows: [row] });
+      } else {
+        built.push({ kind: 'message', message });
+      }
+    }
+    const tail = built[built.length - 1];
+    if (runningTool && tail?.kind === 'tools') {
+      const row = tail.rows[tail.rows.length - 1];
+      if (row) tail.rows[tail.rows.length - 1] = { ...row, running: true };
+    }
+    return built;
+  }, [props.messages, runningTool]);
   // Streaming prose is its own sign of life; the live row covers every other
   // moment of a run, from the send until the first token or tool.
   const liveRow =
@@ -1028,114 +1239,14 @@ export function ChatLayout(props: ChatLayoutProps) {
               </div>
             ) : null}
             {props.loading ? <ThinkingIndicator label="Loading conversation" /> : null}
-            {blocks.map((block) =>
-              block.kind === 'tools' ? (
-                <div className="fr-familiar fr-msg coven-tool-turn" key={block.id}>
-                  <FamiliarAvatar name={name} avatarUrl={familiar?.avatarUrl} size={22} />
-                  <div className="fr-familiar-body">
-                    <span className="fr-familiar-meta">
-                      <span className="fr-familiar-name">Tool activity</span>
-                      <span className="coven-tool-turn-count">{toolTurnSummary(block.rows)}</span>
-                    </span>
-                    <div className="coven-formatted">
-                      <ToolActivity rows={block.rows} />
-                    </div>
-                  </div>
-                </div>
-              ) : block.message.role === 'output' ? (
-                // Raw engine output: text the runtime printed outside the
-                // protocol. Shown as it came, attributed to no one.
-                <section className="coven-output" key={block.message.id} aria-label="Engine output">
-                  <pre>{block.message.text}</pre>
-                </section>
-              ) : block.message.role === 'notice' ? (
-                // Chat's own disclosure (a replayed-history notice): a quiet
-                // line between messages, not a reply from anyone.
-                <p className="coven-notice" key={block.message.id} role="note">
-                  {block.message.text}
-                </p>
-              ) : block.message.role === 'user' ? (
-                <div className="fr-user fr-msg" key={block.message.id}>
-                  <div className="fr-user-body">
-                    <div className="fr-bubble fr-bubble--user coven-message">
-                      {block.message.text}
-                    </div>
-                    {block.message.text ? (
-                      <CopyButton
-                        className="coven-message-copy coven-message-copy--user"
-                        text={block.message.text}
-                        label="Copy message"
-                      />
-                    ) : null}
-                    {block.message.attachments?.length ? (
-                      <ul className="coven-history-attachments" aria-label="Message attachments">
-                        {block.message.attachments.map((file, index) => (
-                          <li key={`${index}-${file.name}`}>
-                            <AttachmentChip
-                              name={file.name}
-                              meta={formatAttachmentSize(file.size)}
-                            />
-                          </li>
-                        ))}
-                      </ul>
-                    ) : null}
-                  </div>
-                </div>
-              ) : (
-                <div className="fr-familiar fr-msg" key={block.message.id}>
-                  {block.message.role === 'assistant' && familiar ? (
-                    <button
-                      type="button"
-                      className="coven-familiar-card-trigger"
-                      aria-label={`Show ${name}'s familiar card`}
-                      aria-controls="coven-familiar-inspector"
-                      aria-expanded={inspector && tab === 'overview'}
-                      onClick={showFamiliarCard}
-                    >
-                      <FamiliarAvatar name={name} avatarUrl={familiar.avatarUrl} size={22} />
-                    </button>
-                  ) : (
-                    <FamiliarAvatar name={name} avatarUrl={familiar?.avatarUrl} size={22} />
-                  )}
-                  <div className="fr-familiar-body">
-                    <span className="fr-familiar-meta">
-                      {block.message.role === 'assistant' && familiar ? (
-                        <button
-                          type="button"
-                          className="fr-familiar-name coven-familiar-card-trigger"
-                          aria-label={`Show ${name}'s familiar card`}
-                          aria-controls="coven-familiar-inspector"
-                          aria-expanded={inspector && tab === 'overview'}
-                          onClick={showFamiliarCard}
-                        >
-                          {name}
-                        </button>
-                      ) : (
-                        <span className="fr-familiar-name">
-                          {block.message.role === 'assistant'
-                            ? name
-                            : titleCase(block.message.role)}
-                        </span>
-                      )}
-                      {block.message.role === 'assistant' && block.message.text ? (
-                        <CopyButton
-                          className="coven-message-copy"
-                          text={block.message.text}
-                          label="Copy reply"
-                        />
-                      ) : null}
-                    </span>
-                    <div className="fr-bubble fr-bubble--familiar coven-message">
-                      {block.message.role === 'assistant' ? (
-                        <FormattedMessage text={block.message.text} />
-                      ) : (
-                        block.message.text
-                      )}
-                    </div>
-                  </div>
-                </div>
-              ),
-            )}
+            <TranscriptBlocks
+              blocks={blocks}
+              name={name}
+              avatarUrl={familiar?.avatarUrl}
+              withCard={Boolean(familiar)}
+              cardOpen={inspector && tab === 'overview'}
+              onShowCard={onShowCard}
+            />
             {liveRow ? (
               <div className="fr-thinking-row coven-live-row">
                 <FamiliarAvatar name={name} avatarUrl={familiar?.avatarUrl} size={22} />
