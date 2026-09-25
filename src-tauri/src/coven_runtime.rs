@@ -1002,6 +1002,11 @@ fn assemble_history(
         }
         bytes += turn_bytes;
         turns.push(turn);
+        // A session read only in part leaves a gap; older sessions would be
+        // stitched on across it, so the walk stops here.
+        if partial {
+            break;
+        }
     }
     Ok((turns.into_iter().rev().flatten().collect(), has_more))
 }
@@ -1401,13 +1406,23 @@ fn read_cli_history(
     mut fetch: impl FnMut(Option<u64>) -> Result<Value, String>,
 ) -> Result<(Vec<Value>, bool), String> {
     let deadline = Instant::now() + READ_TIMEOUT;
-    let mut events = Vec::new();
+    // The CLI pages forward only, so the newest events are reached last. The
+    // byte budget is a sliding window over them: what falls out is always
+    // the oldest part, never the part the reader just added.
+    let mut events: std::collections::VecDeque<(Value, usize)> = std::collections::VecDeque::new();
     let mut after = None;
     let mut last_seq = 0;
     let mut bytes = 0;
+    let mut trimmed = false;
+    let finish = |events: std::collections::VecDeque<(Value, usize)>, partial: bool| {
+        Ok((
+            events.into_iter().map(|(event, _)| event).collect(),
+            partial,
+        ))
+    };
     for _ in 0..HISTORY_PAGE_LIMIT {
         if Instant::now() >= deadline {
-            return Ok((events, true));
+            return finish(events, true);
         }
         let recorded = fetch(after)?;
         let records = recorded
@@ -1432,21 +1447,26 @@ fn read_cli_history(
             } else {
                 json!({"type": "recorded", "kind": string(record, "kind")?, "payload": payload})
             };
-            bytes += serde_json::to_vec(&event)
+            let size = serde_json::to_vec(&event)
                 .map_err(|_| "Cannot measure recorded history.")?
                 .len()
                 + 1;
-            if bytes > OUTPUT_LIMIT {
-                return Ok((events, true));
+            bytes += size;
+            events.push_back((event, size));
+            while bytes > OUTPUT_LIMIT {
+                let Some((_, dropped)) = events.pop_front() else {
+                    break;
+                };
+                bytes -= dropped;
+                trimmed = true;
             }
-            events.push(event);
         }
         let has_more = recorded
             .get("hasMore")
             .and_then(Value::as_bool)
             .ok_or("Coven returned invalid event pagination.")?;
         if !has_more {
-            return Ok((events, false));
+            return finish(events, trimmed);
         }
         let cursor = recorded
             .pointer("/nextCursor/afterSeq")
@@ -1457,7 +1477,7 @@ fn read_cli_history(
         }
         after = Some(cursor);
     }
-    Ok((events, true))
+    finish(events, true)
 }
 
 pub(crate) struct RunRegistration {
@@ -2063,6 +2083,18 @@ mod tests {
     }
 
     #[test]
+    fn history_stops_at_a_session_read_only_in_part() {
+        let siblings: Vec<Value> = ["a", "b", "c"].iter().map(|id| json!({"id": id})).collect();
+        let (events, has_more) = assemble_history(&siblings, |sibling| {
+            let id = sibling["id"].as_str().unwrap();
+            Ok(Some((turn(id, 1), id == "b")))
+        })
+        .unwrap();
+        assert!(has_more);
+        assert_eq!(texts(&events), ["b-0", "c-0"]);
+    }
+
+    #[test]
     fn history_skips_deleted_sessions_and_stops_at_the_deadline() {
         let siblings: Vec<Value> = ["a", "gone", "b", "c"]
             .iter()
@@ -2107,6 +2139,27 @@ mod tests {
             }))
         });
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn cli_history_keeps_a_sessions_newest_events_past_the_byte_budget() {
+        let data = "x".repeat(OUTPUT_LIMIT / 3);
+        let (events, more) = read_cli_history("session-1", |after| {
+            let seq = after.unwrap_or(0) + 1;
+            let payload = json!({ "data": format!("{seq}-{data}") }).to_string();
+            Ok(json!({
+                "events": [{"seq": seq, "kind": "output", "payload_json": payload}],
+                "hasMore": seq < 5,
+                "nextCursor": {"afterSeq": seq},
+            }))
+        })
+        .unwrap();
+        assert!(more, "dropping the oldest events is still a partial read");
+        let first: Vec<&str> = events
+            .iter()
+            .map(|event| event["text"].as_str().unwrap().split('-').next().unwrap())
+            .collect();
+        assert_eq!(first, ["4", "5"]);
     }
 
     #[test]
