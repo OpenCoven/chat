@@ -564,6 +564,7 @@ const publicFailureDiagnosticSet = new Set([
   'phase1.packaging.cave-build.phase.next-build.resource.killed',
   'phase1.packaging.cave-build.phase.next-build.compile',
   'phase1.packaging.cave-build.phase.next-build.compile.permission',
+  'phase1.packaging.cave-build.phase.next-build.compile.font-fetch',
   'phase1.packaging.cave-build.phase.next-build.compile.module-resolution',
   'phase1.packaging.cave-build.phase.next-build.compile.native-module',
   'phase1.packaging.cave-build.phase.next-build.compile.plugin',
@@ -752,6 +753,7 @@ const publicFailureDiagnosticSet = new Set([
 const requiredAssertionSet = new Set(REQUIRED_PHASE1_ASSERTION_IDS);
 const approvedCommandFailureReasons = new Set([
   'compile-failed',
+  'compile-font-fetch',
   'compile-module-resolution',
   'compile-native-module',
   'compile-permission',
@@ -787,6 +789,36 @@ export function scrubEvidenceAuthorizationEnvironment(environment = process.env)
     }
   }
   return environment;
+}
+
+// The frozen Cave loads its fonts through `next/font/google`, so `next build`
+// downloads roughly ninety font files from Google Fonts. When a font file
+// cannot be downloaded after Turbopack's own retries, the build fails with
+// "Module not found: Can't resolve '@vercel/turbopack-next/internal/font/google/font'",
+// and when the stylesheet request fails it reports "Failed to fetch <family>
+// from Google Fonts". Both were reproduced against frozen Cave ecdcdcf8a by
+// refusing the Google Fonts hosts through a proxy. Before this pattern the
+// first read as `compile.module-resolution`, indistinguishable from a real
+// missing module, and was seen intermittently on Windows and macOS.
+export const caveFontFetchFailurePattern =
+  /can't resolve '@vercel\/turbopack-next\/internal\/font\/google\/font'|failed to fetch [^\n]+ from google fonts/iu;
+
+// A font download failure is a network event outside the candidate, so the
+// Cave build is attempted once more when, and only when, the first attempt
+// failed on that signature. Any other failure, and any second failure, is
+// reported exactly as before.
+export async function retryCaveBuildOnceOnFontFetch(build) {
+  try {
+    return await build();
+  } catch (error) {
+    if (
+      !(error instanceof CommandExecutionError) ||
+      error.result?.reason !== 'compile-font-fetch'
+    ) {
+      throw error;
+    }
+    return build();
+  }
 }
 
 export function schemaV2CaveBuildEnvironment(
@@ -1416,6 +1448,7 @@ export function classifyCavePackageFailure(result) {
     [/\b(?:static|build) worker exited\b/iu, 'worker-exited'],
     [/failed to collect page data/iu, 'page-data-failed'],
     [/\b(?:EACCES|EPERM)\b|permission denied|operation not permitted/iu, 'compile-permission'],
+    [caveFontFetchFailurePattern, 'compile-font-fetch'],
     [/module not found|can't resolve|cannot find module/iu, 'compile-module-resolution'],
     [
       /failed to load external module|\bdlopen\(|mach-o.*(?:incompatible|not found)|image not found/iu,
@@ -1436,6 +1469,7 @@ const caveBuildDiagnosticByFailureReason = new Map([
   ['page-data-failed', 'phase1.packaging.cave-build.phase.next-build.page-data'],
   ['compile-failed', 'phase1.packaging.cave-build.phase.next-build.compile'],
   ['compile-permission', 'phase1.packaging.cave-build.phase.next-build.compile.permission'],
+  ['compile-font-fetch', 'phase1.packaging.cave-build.phase.next-build.compile.font-fetch'],
   [
     'compile-module-resolution',
     'phase1.packaging.cave-build.phase.next-build.compile.module-resolution',
@@ -3605,10 +3639,12 @@ async function packageLockedArtifacts(
   onStage('phase1.packaging.cave-install.failed');
   await installPnpm(artifactRoot, roots.caveRoot, environment, 'Cave');
   onStage('phase1.packaging.cave-build.failed');
-  await runCommand(artifactRoot, 'Cave conformance package', 'pnpm', ['build'], {
-    cwd: roots.caveRoot,
-    env: schemaV2CaveBuildEnvironment(environment),
-  });
+  await retryCaveBuildOnceOnFontFetch(() =>
+    runCommand(artifactRoot, 'Cave conformance package', 'pnpm', ['build'], {
+      cwd: roots.caveRoot,
+      env: schemaV2CaveBuildEnvironment(environment),
+    }),
+  );
 
   onStage('phase1.packaging.chat-install.failed');
   await installPnpm(artifactRoot, roots.chatRoot, environment, 'Chat');

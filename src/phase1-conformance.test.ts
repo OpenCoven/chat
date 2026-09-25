@@ -1866,6 +1866,68 @@ describe('Phase 1 real-authority conformance harness', () => {
     ).toThrow('phase1.stage.evidence-authority.report.assertions.unknown');
   });
 
+  test('retries the Cave build once, and only after a Google Fonts download failure', async () => {
+    const { retryCaveBuildOnceOnFontFetch, CommandExecutionError: ProducerError } =
+      schemaV2Producer;
+    const failure = (reason: string | undefined) =>
+      new ProducerError('Cave conformance package', {
+        code: 1,
+        signal: null,
+        stdout: '',
+        stderr: '',
+        ...(reason === undefined ? {} : { reason }),
+      });
+    const sequence = (...outcomes: Array<Error | string>) => {
+      let calls = 0;
+      const build = async () => {
+        const outcome = outcomes[calls];
+        calls += 1;
+        if (outcome instanceof Error) throw outcome;
+        return outcome;
+      };
+      return { build, calls: () => calls };
+    };
+
+    const clean = sequence('built');
+    await expect(retryCaveBuildOnceOnFontFetch(clean.build)).resolves.toBe('built');
+    expect(clean.calls()).toBe(1);
+
+    const recovered = sequence(failure('compile-font-fetch'), 'built');
+    await expect(retryCaveBuildOnceOnFontFetch(recovered.build)).resolves.toBe('built');
+    expect(recovered.calls()).toBe(2);
+
+    // A second failure is reported as it is, and there is no third attempt.
+    const persistent = failure('compile-font-fetch');
+    const twice = sequence(failure('compile-font-fetch'), persistent, 'unreachable');
+    await expect(retryCaveBuildOnceOnFontFetch(twice.build)).rejects.toBe(persistent);
+    expect(twice.calls()).toBe(2);
+
+    // Any other failure, including a genuine missing module, is not retried.
+    for (const reason of ['compile-module-resolution', 'memory-exhausted', 'timeout', undefined]) {
+      const other = failure(reason);
+      const once = sequence(other, 'unreachable');
+      await expect(retryCaveBuildOnceOnFontFetch(once.build)).rejects.toBe(other);
+      expect(once.calls()).toBe(1);
+    }
+    const plain = new Error('compile-font-fetch');
+    const notCommand = sequence(plain, 'unreachable');
+    await expect(retryCaveBuildOnceOnFontFetch(notCommand.build)).rejects.toBe(plain);
+    expect(notCommand.calls()).toBe(1);
+  });
+
+  test('routes the single Cave build through the font-fetch retry', () => {
+    const source = readFileSync(
+      resolve(process.cwd(), 'scripts', 'phase1-schema-v2-producer.mjs'),
+      'utf8',
+    );
+    const builds = source.match(/'Cave conformance package', 'pnpm', \['build'\]/gu) ?? [];
+    expect(builds).toHaveLength(1);
+    const call = source.indexOf("'Cave conformance package', 'pnpm', ['build']");
+    expect(source.lastIndexOf('retryCaveBuildOnceOnFontFetch(() =>', call)).toBeGreaterThan(
+      source.lastIndexOf("onStage('phase1.packaging.cave-build.failed')", call),
+    );
+  });
+
   test('accepts only the Windows verified-stop exit code, and only when asked', async () => {
     const { triggerAndWaitForChildClose, covenVerifiedStopExitCode } = schemaV2Producer;
     const closing = (code: number | null, signal: string | null) => {
@@ -2338,6 +2400,7 @@ describe('Phase 1 real-authority conformance harness', () => {
     'phase1.packaging.cave-install.failed',
     'phase1.packaging.cave-build.failed',
     'phase1.packaging.cave-build.phase.next-build.compile.permission',
+    'phase1.packaging.cave-build.phase.next-build.compile.font-fetch',
     'phase1.packaging.cave-build.phase.next-build.compile.module-resolution',
     'phase1.packaging.cave-build.phase.next-build.compile.native-module',
     'phase1.packaging.cave-build.phase.next-build.compile.plugin',
@@ -4651,6 +4714,18 @@ describe('Phase 1 real-authority conformance harness', () => {
       'phase1.packaging.cave-build.phase.next-build.compile.permission',
     ],
     [
+      'Google Fonts font-file download failure',
+      "Creating an optimized production build\nError: Turbopack build failed with 187 errors:\n[next]/internal/font/google/dm_sans_9ebfb2aa.module.css:7:8\nError: Module not found: Can't resolve '@vercel/turbopack-next/internal/font/google/font'",
+      'compile-font-fetch',
+      'phase1.packaging.cave-build.phase.next-build.compile.font-fetch',
+    ],
+    [
+      'Google Fonts stylesheet failure',
+      'Creating an optimized production build\nError: Turbopack build failed with 25 errors:\nError: next/font: error:\nFailed to fetch DM Sans from Google Fonts.',
+      'compile-font-fetch',
+      'phase1.packaging.cave-build.phase.next-build.compile.font-fetch',
+    ],
+    [
       'module resolution failure',
       "Creating an optimized production build\nModule not found: Can't resolve 'private-module'",
       'compile-module-resolution',
@@ -5081,6 +5156,7 @@ describe('Phase 1 real-authority conformance harness', () => {
     ['page-data-failed', 'phase1.packaging.cave-build.phase.next-build.page-data'],
     ['compile-failed', 'phase1.packaging.cave-build.phase.next-build.compile'],
     ['compile-permission', 'phase1.packaging.cave-build.phase.next-build.compile.permission'],
+    ['compile-font-fetch', 'phase1.packaging.cave-build.phase.next-build.compile.font-fetch'],
     [
       'compile-module-resolution',
       'phase1.packaging.cave-build.phase.next-build.compile.module-resolution',
@@ -6371,8 +6447,9 @@ describe('Phase 1 real-authority conformance harness', () => {
     expect(packagingStart).toBeGreaterThanOrEqual(0);
     expect(packagingEnd).toBeGreaterThan(packagingStart);
     const packaging = source.slice(packagingStart, packagingEnd);
+    expect(packaging).toContain('await retryCaveBuildOnceOnFontFetch(() =>');
     expect(packaging).toContain(
-      "await runCommand(artifactRoot, 'Cave conformance package', 'pnpm', ['build'],",
+      "runCommand(artifactRoot, 'Cave conformance package', 'pnpm', ['build'],",
     );
     expect(packaging).not.toContain("['build:conformance']");
   });
