@@ -41,6 +41,7 @@ import {
   RIGHT_RAIL_SHORTCUT,
   SEARCH_HINT,
   SEARCH_SHORTCUT,
+  useFindShortcut,
   useRailShortcuts,
   useSearchShortcut,
   useStepShortcut,
@@ -310,6 +311,7 @@ export const SHORTCUTS: readonly (readonly [keys: string, action: string])[] = [
   ['Cmd/Ctrl+\\', 'Show or hide the familiar list'],
   ['Cmd/Ctrl+Shift+\\', 'Show or hide the inspector'],
   ['Cmd/Ctrl+K', 'Search familiars'],
+  ['Cmd/Ctrl+F', 'Find in the conversation; Enter and Shift+Enter step through matches'],
   ['Cmd/Ctrl+[ and ]', 'Previous or next familiar in the list'],
   ['↑ ↓ Home End', 'Move through the list; Enter opens, Escape clears the search'],
   ['Enter', 'Send the message; Shift+Enter starts a new line'],
@@ -393,8 +395,9 @@ const TranscriptBlock = memo(
     cardOpen,
     onShowCard,
   }: TranscriptBlockProps) {
+    const blockId = block.kind === 'tools' ? block.id : block.message.id;
     return block.kind === 'tools' ? (
-      <div className="fr-familiar fr-msg coven-tool-turn">
+      <div className="fr-familiar fr-msg coven-tool-turn" data-block-id={blockId}>
         <FamiliarAvatar name={name} avatarUrl={avatarUrl} size={22} />
         <div className="fr-familiar-body">
           <span className="fr-familiar-meta">
@@ -409,17 +412,17 @@ const TranscriptBlock = memo(
     ) : block.message.role === 'output' ? (
       // Raw engine output: text the runtime printed outside the
       // protocol. Shown as it came, attributed to no one.
-      <section className="coven-output" aria-label="Engine output">
+      <section className="coven-output" aria-label="Engine output" data-block-id={blockId}>
         <pre>{block.message.text}</pre>
       </section>
     ) : block.message.role === 'notice' ? (
       // Chat's own disclosure (a replayed-history notice): a quiet
       // line between messages, not a reply from anyone.
-      <p className="coven-notice" role="note">
+      <p className="coven-notice" role="note" data-block-id={blockId}>
         {block.message.text}
       </p>
     ) : block.message.role === 'user' ? (
-      <div className="fr-user fr-msg">
+      <div className="fr-user fr-msg" data-block-id={blockId}>
         <div className="fr-user-body">
           <div className="fr-bubble fr-bubble--user coven-message">{block.message.text}</div>
           {block.message.text ? (
@@ -441,7 +444,7 @@ const TranscriptBlock = memo(
         </div>
       </div>
     ) : (
-      <div className="fr-familiar fr-msg">
+      <div className="fr-familiar fr-msg" data-block-id={blockId}>
         {block.message.role === 'assistant' && withCard ? (
           <button
             type="button"
@@ -501,6 +504,21 @@ const TranscriptBlock = memo(
     previous.onShowCard === next.onShowCard &&
     sameBlock(previous.block, next.block),
 );
+
+/** The text a block can be found by: its message, or its tools' names, inputs and results. */
+function blockText(block: TranscriptBlockData): string {
+  if (block.kind === 'message') return block.message.text;
+  return block.rows.map((row) => `${row.name} ${row.args} ${row.result ?? ''}`).join('\n');
+}
+
+/** The ids of the blocks that contain the query, case-insensitively, oldest first. */
+export function findMatches(blocks: readonly TranscriptBlockData[], query: string): string[] {
+  const needle = query.trim().toLowerCase();
+  if (!needle) return [];
+  return blocks
+    .filter((block) => blockText(block).toLowerCase().includes(needle))
+    .map((block) => (block.kind === 'tools' ? block.id : block.message.id));
+}
 
 /**
  * The whole history. Its props do not change while the reader types, so a
@@ -807,6 +825,53 @@ export function ChatLayout(props: ChatLayoutProps) {
     }
     return built;
   }, [props.messages, runningTool]);
+  // Find in the conversation. Matches are marked on the page element itself,
+  // so stepping through them does not re-render the memoised history.
+  const [findOpen, setFindOpen] = useState(false);
+  const [findQuery, setFindQuery] = useState('');
+  const [findAt, setFindAt] = useState(0);
+  const findRef = useRef<HTMLInputElement>(null);
+  const matches = useMemo(() => findMatches(blocks, findQuery), [blocks, findQuery]);
+  const activeMatch =
+    findOpen && matches.length ? matches[Math.min(findAt, matches.length - 1)] : '';
+  const openFind = useCallback(() => {
+    setFindOpen(true);
+    requestAnimationFrame(() => {
+      findRef.current?.focus();
+      findRef.current?.select();
+    });
+  }, []);
+  useFindShortcut(openFind);
+  function closeFind() {
+    setFindOpen(false);
+    transcriptRef.current?.focus();
+  }
+  function stepFind(direction: 1 | -1) {
+    if (!matches.length) return;
+    setFindAt(
+      (at) => (Math.min(at, matches.length - 1) + direction + matches.length) % matches.length,
+    );
+  }
+  useEffect(() => {
+    const transcript = transcriptRef.current;
+    if (!transcript || !activeMatch) return;
+    const element = transcript.querySelector<HTMLElement>(
+      `[data-block-id="${CSS.escape(activeMatch)}"]`,
+    );
+    if (!element) return;
+    element.dataset.findHit = 'true';
+    element.scrollIntoView?.({ block: 'center' });
+    return () => {
+      delete element.dataset.findHit;
+    };
+  }, [activeMatch]);
+  // A different chat starts without a find in progress.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: the session id is the trigger.
+  useEffect(() => {
+    setFindOpen(false);
+    setFindQuery('');
+    setFindAt(0);
+  }, [props.sessionId, props.familiarId]);
   // Streaming prose is its own sign of life; the live row covers every other
   // moment of a run, from the send until the first token or tool.
   const liveRow =
@@ -1176,6 +1241,51 @@ export function ChatLayout(props: ChatLayoutProps) {
               {...(props.screenLoadRfb ? { loadRfb: props.screenLoadRfb } : {})}
             />
           </div>
+        ) : null}
+        {findOpen ? (
+          <search className="coven-find" aria-label="Find in conversation">
+            <input
+              ref={findRef}
+              type="search"
+              aria-label="Find in conversation"
+              placeholder="Find in conversation"
+              value={findQuery}
+              onChange={(event) => {
+                setFindQuery(event.target.value);
+                setFindAt(0);
+              }}
+              onKeyDown={(event) => {
+                if (event.nativeEvent.isComposing) return;
+                if (event.key === 'Enter') {
+                  event.preventDefault();
+                  stepFind(event.shiftKey ? -1 : 1);
+                } else if (event.key === 'Escape') {
+                  event.preventDefault();
+                  closeFind();
+                }
+              }}
+            />
+            <output className="coven-find-count" aria-live="polite">
+              {!findQuery.trim()
+                ? ''
+                : matches.length
+                  ? `${Math.min(findAt, matches.length - 1) + 1} of ${matches.length}`
+                  : 'No matches'}
+            </output>
+            <FamIconButton
+              icon="caret-up"
+              label="Previous match"
+              disabled={!matches.length}
+              onClick={() => stepFind(-1)}
+            />
+            <FamIconButton
+              icon="caret-down"
+              label="Next match"
+              disabled={!matches.length}
+              onClick={() => stepFind(1)}
+            />
+            <FamIconButton icon="x" label="Close find" onClick={closeFind} />
+          </search>
         ) : null}
         <div
           className="fr-transcript"

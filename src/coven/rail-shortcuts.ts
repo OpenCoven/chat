@@ -92,6 +92,19 @@ export function useStepShortcut(step: (direction: -1 | 1) => void) {
   }, [step]);
 }
 
+/** Cmd/Ctrl+F opens the find bar over the conversation. */
+export function useFindShortcut(open: () => void) {
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.shiftKey || !shellChord(event, 'KeyF', 'f')) return;
+      event.preventDefault();
+      open();
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [open]);
+}
+
 /** Cmd/Ctrl+K reaches the familiar search from anywhere in the shell. */
 export function useSearchShortcut(focusSearch: () => void) {
   useEffect(() => {

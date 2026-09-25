@@ -7,6 +7,7 @@ import {
   type ChatLayoutProps,
   composerCopy,
   emptyThreadText,
+  findMatches,
   LONG_WAIT_MS,
   lastRunText,
   liveRowText,
@@ -2316,5 +2317,81 @@ describe('transcript memoisation', () => {
     );
     expect(screen.getByText('Hello there')).toBeInTheDocument();
     expect(screen.getByRole('listitem')).toHaveAttribute('data-error', 'true');
+  });
+});
+
+describe('find in the conversation', () => {
+  const messages = [
+    { id: 'u1', role: 'user', text: 'Why does the Lint job fail?' },
+    {
+      id: 't1',
+      role: 'tool',
+      text: 'Bash',
+      tool: { name: 'Bash', args: 'pnpm lint', result: 'error: 3 problems' },
+    },
+    { id: 'a1', role: 'assistant', text: 'The lint step fails because biome.json moved.' },
+    { id: 'u2', role: 'user', text: 'Thanks.' },
+  ];
+  const props = () => ({
+    ...layoutProps(),
+    connected: true,
+    ready: true,
+    familiars: [{ id: 'a', name: 'Astra' }],
+    familiarId: 'a',
+    sessionId: 's',
+    messages,
+  });
+
+  it('matches message text and tool calls, case-insensitively, oldest first', () => {
+    const blocks = [
+      { kind: 'message' as const, message: messages[0] as (typeof messages)[0] },
+      {
+        kind: 'tools' as const,
+        id: 't1',
+        rows: [{ name: 'Bash', args: 'pnpm lint', result: 'error: 3 problems' }],
+      },
+      { kind: 'message' as const, message: messages[2] as (typeof messages)[0] },
+    ];
+    expect(findMatches(blocks, 'LINT')).toEqual(['u1', 't1', 'a1']);
+    expect(findMatches(blocks, 'problems')).toEqual(['t1']);
+    expect(findMatches(blocks, '  ')).toEqual([]);
+  });
+
+  it('opens with Cmd/Ctrl+F, counts matches, steps through them and closes with Escape', async () => {
+    const { container } = render(<ChatLayout {...props()} />);
+    fireEvent.keyDown(window, { key: 'f', code: 'KeyF', metaKey: true });
+    const find = await screen.findByRole('searchbox', { name: 'Find in conversation' });
+    fireEvent.change(find, { target: { value: 'lint' } });
+    const count = container.querySelector('.coven-find-count');
+    expect(count).toHaveTextContent('1 of 3');
+    expect(container.querySelector('[data-block-id="u1"]')).toHaveAttribute(
+      'data-find-hit',
+      'true',
+    );
+    fireEvent.keyDown(find, { key: 'Enter' });
+    expect(count).toHaveTextContent('2 of 3');
+    expect(container.querySelector('[data-block-id="u1"]')).not.toHaveAttribute('data-find-hit');
+    expect(container.querySelector('[data-block-id="t1"]')).toHaveAttribute(
+      'data-find-hit',
+      'true',
+    );
+    fireEvent.keyDown(find, { key: 'Enter', shiftKey: true });
+    fireEvent.keyDown(find, { key: 'Enter', shiftKey: true });
+    expect(count).toHaveTextContent('3 of 3');
+    fireEvent.change(find, { target: { value: 'nothing like this' } });
+    expect(count).toHaveTextContent('No matches');
+    expect(screen.getByRole('button', { name: 'Next match' })).toBeDisabled();
+    fireEvent.keyDown(find, { key: 'Escape' });
+    expect(screen.queryByRole('searchbox', { name: 'Find in conversation' })).toBeNull();
+    expect(container.querySelector('[data-find-hit]')).toBeNull();
+    expect(screen.getByRole('log', { name: 'Messages' })).toHaveFocus();
+  });
+
+  it('closes when the chat changes', async () => {
+    const { rerender } = render(<ChatLayout {...props()} />);
+    fireEvent.keyDown(window, { key: 'f', code: 'KeyF', ctrlKey: true });
+    await screen.findByRole('searchbox', { name: 'Find in conversation' });
+    rerender(<ChatLayout {...props()} sessionId="other" />);
+    expect(screen.queryByRole('searchbox', { name: 'Find in conversation' })).toBeNull();
   });
 });

@@ -781,6 +781,52 @@
   opacity: 1;
 }
 
+/* Find in the conversation: a slim bar over the transcript, and the match it is on. */
+.coven-find {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin: 6px 12px 0;
+  padding: 4px 4px 4px 10px;
+  border: 1px solid var(--border-hairline);
+  border-radius: 8px;
+  background: var(--bg-sunken);
+}
+
+.coven-find input {
+  flex: 1 1 auto;
+  min-width: 0;
+  border: 0;
+  background: transparent;
+  color: var(--text-primary);
+}
+
+.coven-find input:focus-visible {
+  outline: none;
+}
+
+/* The bar has its own close control; the field's native clear would be a second ×. */
+.coven-find input::-webkit-search-cancel-button {
+  display: none;
+}
+
+.coven-find:focus-within {
+  border-color: var(--ring-focus);
+}
+
+.coven-find-count {
+  flex: none;
+  color: var(--text-muted);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+.coven-chat [data-find-hit] {
+  border-radius: 8px;
+  outline: 2px solid var(--accent-presence);
+  outline-offset: 4px;
+}
+
 /* Files dragged over the thread: a quiet overlay saying what a drop will do. */
 .coven-chat .fr-thread {
   position: relative;
