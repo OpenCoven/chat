@@ -53,6 +53,7 @@ import {
 import {
   CAVE_DISCOVERY_FAILURE_DIAGNOSTICS,
   CAVE_STARTUP_EXIT_DIAGNOSTICS,
+  caveFontFetchFailurePattern,
   caveLaunchRpcTimeoutForPlatform,
   classifyCavePluginEvaluationFailure,
   NATIVE_LAUNCH_PUBLICATION_DIAGNOSTICS,
@@ -898,6 +899,7 @@ const publicPhase1DiagnosticIds = new Set([
   'phase1.packaging.cave-build.phase.next-build.resource.killed',
   'phase1.packaging.cave-build.phase.next-build.compile',
   'phase1.packaging.cave-build.phase.next-build.compile.permission',
+  'phase1.packaging.cave-build.phase.next-build.compile.font-fetch',
   'phase1.packaging.cave-build.phase.next-build.compile.module-resolution',
   'phase1.packaging.cave-build.phase.next-build.compile.native-module',
   'phase1.packaging.cave-build.phase.next-build.compile.plugin',
@@ -1163,22 +1165,24 @@ export function classifyPackagingCommandFailure(baseId, error) {
                               output,
                             )
                           ? 'next-build.compile.permission'
-                          : /module not found|can't resolve|cannot find module/iu.test(output)
-                            ? 'next-build.compile.module-resolution'
-                            : /failed to load external module|\bdlopen\(|mach-o.*(?:incompatible|not found)|image not found/iu.test(
-                                  output,
-                                )
-                              ? 'next-build.compile.native-module'
-                              : /error evaluating node\.js code|turbopack.*plugin.*(?:failed|error)/iu.test(
+                          : caveFontFetchFailurePattern.test(output)
+                            ? 'next-build.compile.font-fetch'
+                            : /module not found|can't resolve|cannot find module/iu.test(output)
+                              ? 'next-build.compile.module-resolution'
+                              : /failed to load external module|\bdlopen\(|mach-o.*(?:incompatible|not found)|image not found/iu.test(
                                     output,
                                   )
-                                ? [
-                                    'next-build.compile.plugin',
-                                    classifyCavePluginEvaluationFailure(output),
-                                  ]
-                                    .filter((part) => part !== undefined)
-                                    .join('.')
-                                : 'next-build.compile';
+                                ? 'next-build.compile.native-module'
+                                : /error evaluating node\.js code|turbopack.*plugin.*(?:failed|error)/iu.test(
+                                      output,
+                                    )
+                                  ? [
+                                      'next-build.compile.plugin',
+                                      classifyCavePluginEvaluationFailure(output),
+                                    ]
+                                      .filter((part) => part !== undefined)
+                                      .join('.')
+                                  : 'next-build.compile';
       } else if (/^> coven-cave@\d+\.\d+\.\d+ prebuild(?:\s+.+)?$/mu.test(output)) {
         phase = 'prebuild';
       } else if (/^> coven-cave@\d+\.\d+\.\d+ build:conformance(?:\s+.+)?$/mu.test(output)) {
