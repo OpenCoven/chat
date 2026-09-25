@@ -940,37 +940,70 @@ fn read_session(data: &Path, id: &str) -> Result<Value, String> {
     } else {
         vec![selected.clone()]
     };
-    let mut events = Vec::new();
-    let mut bytes = 0;
-    let mut has_more = siblings.len() > HISTORY_SESSION_LIMIT;
-    'history: for sibling in siblings.iter().take(HISTORY_SESSION_LIMIT) {
-        if crate::chat_lifecycle::state(data, string(sibling, "id")?)?
-            == crate::chat_lifecycle::Lifecycle::Deleted
-        {
-            continue;
+    let (events, has_more) = assemble_history(&siblings, |sibling| {
+        let id = string(sibling, "id")?;
+        if crate::chat_lifecycle::state(data, id)? == crate::chat_lifecycle::Lifecycle::Deleted {
+            return Ok(None);
         }
         if Instant::now() >= deadline {
-            has_more = true;
-            break;
+            return Err(HISTORY_DEADLINE.into());
         }
-        let (turn, partial) = read_single_session(data, string(sibling, "id")?)?;
-        for event in turn {
-            bytes += serde_json::to_vec(&event)
-                .map_err(|_| "Cannot measure saved history.")?
-                .len()
-                + 1;
-            if bytes > OUTPUT_LIMIT {
-                has_more = true;
-                break 'history;
-            }
-            events.push(event);
-        }
-        if partial {
-            has_more = true;
-            break;
-        }
-    }
+        read_single_session(data, id).map(Some)
+    })?;
     Ok(json!({"session": normalize_session(&selected)?, "events": events, "hasMore": has_more}))
+}
+
+const HISTORY_DEADLINE: &str = "history deadline";
+
+fn event_bytes(event: &Value) -> Result<usize, String> {
+    Ok(serde_json::to_vec(event)
+        .map_err(|_| "Cannot measure saved history.")?
+        .len()
+        + 1)
+}
+
+/// Joins a conversation's sessions, given oldest first, into one history
+/// that keeps the newest turns when the session or byte budget runs out, so
+/// what is dropped is always the oldest part. `read` yields a session's events
+/// and whether they were cut short, `None` for a deleted session, or the
+/// deadline error, which ends the walk as a partial read.
+fn assemble_history(
+    siblings: &[Value],
+    mut read: impl FnMut(&Value) -> Result<Option<(Vec<Value>, bool)>, String>,
+) -> Result<(Vec<Value>, bool), String> {
+    let mut turns: Vec<Vec<Value>> = Vec::new();
+    let mut bytes = 0;
+    let mut has_more = false;
+    for (index, sibling) in siblings.iter().rev().enumerate() {
+        if index >= HISTORY_SESSION_LIMIT {
+            has_more = true;
+            break;
+        }
+        let (mut turn, partial) = match read(sibling) {
+            Ok(Some(turn)) => turn,
+            Ok(None) => continue,
+            Err(error) if error == HISTORY_DEADLINE => {
+                has_more = true;
+                break;
+            }
+            Err(error) => return Err(error),
+        };
+        has_more |= partial;
+        let mut turn_bytes = turn.iter().map(event_bytes).sum::<Result<usize, _>>()?;
+        if bytes + turn_bytes > OUTPUT_LIMIT {
+            has_more = true;
+            if !turns.is_empty() {
+                break;
+            }
+            // A single turn larger than the budget keeps its newest events.
+            while turn_bytes > OUTPUT_LIMIT && !turn.is_empty() {
+                turn_bytes -= event_bytes(&turn.remove(0))?;
+            }
+        }
+        bytes += turn_bytes;
+        turns.push(turn);
+    }
+    Ok((turns.into_iter().rev().flatten().collect(), has_more))
 }
 
 fn history_sessions(selected: &Value, sessions: &[Value]) -> Result<Vec<Value>, String> {
@@ -1948,6 +1981,104 @@ mod tests {
         fs::remove_file(data.join("chat-lifecycle-v1.json")).unwrap();
         fs::remove_dir(transcripts).unwrap();
         fs::remove_dir(data).unwrap();
+    }
+
+    fn turn(id: &str, count: usize) -> Vec<Value> {
+        (0..count)
+            .map(|index| json!({"type": "output", "text": format!("{id}-{index}")}))
+            .collect()
+    }
+
+    fn texts(events: &[Value]) -> Vec<String> {
+        events
+            .iter()
+            .map(|event| event["text"].as_str().unwrap().to_owned())
+            .collect()
+    }
+
+    #[test]
+    fn history_keeps_every_turn_in_order_when_within_budget() {
+        let siblings: Vec<Value> = ["a", "b", "c"].iter().map(|id| json!({"id": id})).collect();
+        let (events, has_more) = assemble_history(&siblings, |sibling| {
+            Ok(Some((turn(sibling["id"].as_str().unwrap(), 2), false)))
+        })
+        .unwrap();
+        assert_eq!(texts(&events), ["a-0", "a-1", "b-0", "b-1", "c-0", "c-1"]);
+        assert!(!has_more);
+    }
+
+    #[test]
+    fn history_drops_the_oldest_sessions_past_the_session_limit() {
+        let siblings: Vec<Value> = (0..HISTORY_SESSION_LIMIT + 3)
+            .map(|index| json!({"id": format!("s{index:03}")}))
+            .collect();
+        let (events, has_more) = assemble_history(&siblings, |sibling| {
+            Ok(Some((turn(sibling["id"].as_str().unwrap(), 1), false)))
+        })
+        .unwrap();
+        assert!(has_more);
+        assert_eq!(events.len(), HISTORY_SESSION_LIMIT);
+        // The newest session, the one the reader opened, is always kept.
+        assert_eq!(
+            texts(&events).last().unwrap(),
+            &format!("s{:03}-0", HISTORY_SESSION_LIMIT + 2)
+        );
+        assert_eq!(texts(&events).first().unwrap(), "s003-0");
+    }
+
+    #[test]
+    fn history_drops_the_oldest_turns_past_the_byte_budget() {
+        let siblings: Vec<Value> = ["old", "mid", "new"]
+            .iter()
+            .map(|id| json!({"id": id}))
+            .collect();
+        let big = "x".repeat(OUTPUT_LIMIT / 3);
+        let (events, has_more) = assemble_history(&siblings, |sibling| {
+            let id = sibling["id"].as_str().unwrap();
+            Ok(Some((
+                vec![json!({"type": "output", "text": format!("{id}-0"), "pad": big})],
+                false,
+            )))
+        })
+        .unwrap();
+        assert!(has_more);
+        assert_eq!(texts(&events), ["mid-0", "new-0"]);
+    }
+
+    #[test]
+    fn history_keeps_the_newest_events_of_a_turn_larger_than_the_budget() {
+        let siblings = vec![json!({"id": "only"})];
+        let pad = "x".repeat(OUTPUT_LIMIT / 3);
+        let (events, has_more) = assemble_history(&siblings, |_| {
+            Ok(Some((
+                (0..5)
+                    .map(|index| json!({"type": "output", "text": format!("only-{index}"), "pad": pad}))
+                    .collect(),
+                false,
+            )))
+        })
+        .unwrap();
+        assert!(has_more);
+        assert_eq!(texts(&events), ["only-3", "only-4"]);
+    }
+
+    #[test]
+    fn history_skips_deleted_sessions_and_stops_at_the_deadline() {
+        let siblings: Vec<Value> = ["a", "gone", "b", "c"]
+            .iter()
+            .map(|id| json!({"id": id}))
+            .collect();
+        let (events, has_more) =
+            assemble_history(&siblings, |sibling| match sibling["id"].as_str().unwrap() {
+                "gone" => Ok(None),
+                "a" => Err(HISTORY_DEADLINE.into()),
+                id => Ok(Some((turn(id, 1), false))),
+            })
+            .unwrap();
+        assert!(has_more);
+        assert_eq!(texts(&events), ["b-0", "c-0"]);
+        let failure = assemble_history(&siblings, |_| Err("boom".into())).unwrap_err();
+        assert_eq!(failure, "boom");
     }
 
     #[test]
