@@ -54,7 +54,7 @@ describe('familiars-shell.css', () => {
         (selector) =>
           selector.length > 0 &&
           !selector.startsWith('.fr-') &&
-          !selector.startsWith(':where(.fr-shell)') &&
+          !selector.startsWith(':where(.fr-shell') &&
           !selector.startsWith('.rc-') &&
           !selector.startsWith('from') &&
           !selector.startsWith('to') &&
@@ -96,7 +96,9 @@ describe('control resets', () => {
     // `.fr-shell button` outranked every single-class rule such as
     // `.fr-btn` or `.coven-copy`, so buttons took their surroundings' size
     // and colour. The resets must stay inside :where().
+    // Top-level rules only; the reduced-motion block inside @media is not a reset.
     expect(stylesheet).not.toMatch(/^\.fr-shell (button|input|textarea)\b/m);
-    expect(stylesheet).toMatch(/^:where\(\.fr-shell\) button \{\n {2}color: inherit;/m);
+    expect(stylesheet).not.toMatch(/^:where\(\.fr-shell\) (button|input|textarea)\b/m);
+    expect(stylesheet).toMatch(/^:where\(\.fr-shell button\) \{\n {2}color: inherit;/m);
   });
 });

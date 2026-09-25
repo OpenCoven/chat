@@ -101,10 +101,9 @@ body {
     );
 }
 
-button,
-input,
-textarea,
-select {
+/* Weightless, so component rules, including the vendored UI's own
+   :where([data-slot]) rules, set their controls' type without a fight. */
+:where(button, input, textarea, select) {
   font: inherit;
 }
 
