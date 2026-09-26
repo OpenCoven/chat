@@ -1,4 +1,5 @@
 import { Menu as MenuPrimitive } from '@base-ui/react/menu';
+import { createContext, type RefObject, useContext } from 'react';
 
 import { withClass } from './utils';
 
@@ -16,6 +17,13 @@ export function DropdownMenuTrigger(props: MenuPrimitive.Trigger.Props) {
   return <MenuPrimitive.Trigger data-slot="dropdown-menu-trigger" {...props} />;
 }
 
+/**
+ * Where menus render. A host shell provides itself, so a menu inherits the
+ * shell's tokens (its light or dark palette) instead of rendering in the
+ * document body, outside them. Absent, menus render in the body as before.
+ */
+export const MenuPortalContainer = createContext<RefObject<HTMLElement | null> | null>(null);
+
 export function DropdownMenuContent({
   align = 'start',
   side = 'bottom',
@@ -25,7 +33,7 @@ export function DropdownMenuContent({
 }: MenuPrimitive.Popup.Props &
   Pick<MenuPrimitive.Positioner.Props, 'align' | 'side' | 'sideOffset'>) {
   return (
-    <MenuPrimitive.Portal>
+    <MenuPrimitive.Portal container={useContext(MenuPortalContainer) ?? undefined}>
       <MenuPrimitive.Positioner
         className="oc-menu-positioner"
         align={align}

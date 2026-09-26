@@ -51,6 +51,38 @@
   transition: grid-template-columns 200ms cubic-bezier(0.3, 0, 0, 1);
 }
 
+/*
+ * Light scheme, following the system setting. The same roles as the dark
+ * palette above, each text colour at 4.5:1 or better on every surface (see
+ * familiars-shell.css.test.ts). Highlights drawn in translucent white fade
+ * out on these surfaces, which is intended; shadows stay as they are.
+ */
+@media (prefers-color-scheme: light) {
+  .fr-shell {
+    --bg-base: #f7f7f9;
+    --bg-panel: #f0f0f3;
+    --bg-raised: #ffffff;
+    --bg-elevated: #fbfbfc;
+    --bg-hover: #e8e8ee;
+    --bg-sunken: #ebebef;
+    --text-primary: #17171b;
+    --text-secondary: #4a4955;
+    --text-muted: #62616c;
+    --border-hairline: rgba(0, 0, 0, 0.09);
+    --border-strong: rgba(0, 0, 0, 0.18);
+    --accent-presence: #5b45d6;
+    --accent-presence-foreground: #ffffff;
+    --ring-focus: #5b45d6;
+    --color-warning: oklch(0.52 0.12 70);
+    --color-danger: oklch(0.52 0.17 25);
+    --color-success: #4a4955;
+  }
+
+  .fr-shell ::-webkit-scrollbar-thumb {
+    background: rgba(0, 0, 0, 0.18);
+  }
+}
+
 .fr-shell *,
 .fr-shell *::before,
 .fr-shell *::after {
