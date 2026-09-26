@@ -48,7 +48,16 @@ function hex(name: string, scheme: Scheme = 'dark'): HexColor {
   return value as HexColor;
 }
 
-const SURFACES = ['--bg-base', '--bg-panel', '--bg-raised', '--bg-elevated'] as const;
+// Every surface text sits on, including hover (highlighted rows and menu
+// items) and sunken (code chips, the search field).
+const SURFACES = [
+  '--bg-base',
+  '--bg-panel',
+  '--bg-raised',
+  '--bg-elevated',
+  '--bg-hover',
+  '--bg-sunken',
+] as const;
 
 describe('familiars-shell.css', () => {
   it('scopes every rule under the shell', () => {
