@@ -40,6 +40,11 @@ function MockLayout(props: ChatLayoutProps) {
       <output data-testid="finished">{JSON.stringify(props.finished ?? {})}</output>
       <output data-testid="last-run">{props.lastRun ? props.lastRun.outcome : 'none'}</output>
       <output data-testid="partial">{String(props.partialHistory ?? false)}</output>
+      {props.onLoadEarlier && (
+        <button type="button" onClick={props.onLoadEarlier}>
+          Load earlier turns
+        </button>
+      )}
       <output data-testid="last-run-ms">
         {props.lastRun && props.lastRun.ms > 2_000 ? 'slow' : 'quick'}
       </output>
@@ -561,6 +566,50 @@ describe('canonical familiar controller', () => {
     expect(screen.getByRole('alert')).toHaveTextContent('engine exited');
     expect(screen.queryByRole('button', { name: 'Reload chat' })).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Try again' })).toBeInTheDocument();
+  });
+
+  it('reads further back on request, keeping the transcript on screen until it arrives', async () => {
+    const api = runtime();
+    const older = deferred<CovenSessionRead>();
+    const newest = { type: 'output', text: 'newest turn', session_id: 'one' } as CovenRunEvent;
+    const earlier = { type: 'output', text: 'earlier turn', session_id: 'one' } as CovenRunEvent;
+    vi.mocked(api.readSession).mockImplementation(async (id: string, depth?: number) => {
+      if (id === 'two') return { session: second, events: [] };
+      if ((depth ?? 1) === 1) return { session: { ...first, id }, events: [newest], hasMore: true };
+      return older.promise;
+    });
+    await ready(api);
+    expect(screen.getByTestId('partial')).toHaveTextContent('true');
+    click('Load earlier turns');
+    await waitFor(() => expect(api.readSession).toHaveBeenLastCalledWith('one', 2));
+    // Still showing what was there while the longer history loads.
+    expect(screen.getByText('newest turn')).toBeInTheDocument();
+    await act(async () =>
+      older.resolve({ session: first, events: [earlier, newest], hasMore: false }),
+    );
+    expect(screen.getByText('earlier turn')).toBeInTheDocument();
+    expect(screen.getByTestId('partial')).toHaveTextContent('false');
+    expect(screen.queryByRole('button', { name: 'Load earlier turns' })).not.toBeInTheDocument();
+    // Another chat starts from the usual budget.
+    click('Other familiar');
+    await waitFor(() => expect(api.readSession).toHaveBeenLastCalledWith('two'));
+  });
+
+  it('stops offering earlier turns at the deepest read', async () => {
+    const api = runtime();
+    vi.mocked(api.readSession).mockImplementation(async (id: string) => ({
+      session: id === 'two' ? second : { ...first, id },
+      events: [],
+      hasMore: id === 'one',
+    }));
+    await ready(api);
+    for (const depth of [2, 3, 4]) {
+      click('Load earlier turns');
+      await waitFor(() => expect(api.readSession).toHaveBeenLastCalledWith('one', depth));
+      await waitFor(() => expect(screen.getByRole('textbox')).toBeEnabled());
+    }
+    expect(screen.queryByRole('button', { name: 'Load earlier turns' })).not.toBeInTheDocument();
+    expect(screen.getByTestId('partial')).toHaveTextContent('true');
   });
 
   it('marks a failed run as failed and leaves no marker for a run the reader is watching', async () => {

@@ -259,6 +259,9 @@ describe('Coven runtime', () => {
     });
 
     expect(invoke).toHaveBeenCalledWith('coven_runtime_read', { id: 'session-1' });
+    // Reading further back passes the depth; the usual read keeps its old shape.
+    await runtime.readSession('session-1', 3).catch(() => undefined);
+    expect(invoke).toHaveBeenLastCalledWith('coven_runtime_read', { id: 'session-1', depth: 3 });
   });
 
   it('exposes the actual new ledger identity from stream initialization', async () => {

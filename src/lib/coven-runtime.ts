@@ -56,7 +56,8 @@ export interface CovenRuntime {
   status(): Promise<CovenStatus>;
   listFamiliars(): Promise<CovenFamiliar[]>;
   listSessions(): Promise<CovenSession[]>;
-  readSession(id: string): Promise<CovenSessionRead>;
+  /** Depth 2-4 re-reads the chat with that many times the usual history budget. */
+  readSession(id: string, depth?: number): Promise<CovenSessionRead>;
   send(input: CovenSendInput, onEvent?: (event: CovenRunEvent) => void): Promise<CovenRunResult>;
   cancel(runId: string): Promise<void>;
   changeChatLifecycle(id: string, lifecycle: ChatLifecycle): Promise<void>;
@@ -172,9 +173,9 @@ export function createCovenRuntime(
           new Set(v.map((item) => item.familiarId)).size === v.length,
       );
     },
-    async readSession(id) {
+    async readSession(id, depth = 1) {
       return checked(
-        await call('coven_runtime_read', { id }),
+        await call('coven_runtime_read', depth > 1 ? { id, depth } : { id }),
         (v): v is CovenSessionRead =>
           record(v) && session(v.session) && v.session.id === id && events(v.events),
       );
