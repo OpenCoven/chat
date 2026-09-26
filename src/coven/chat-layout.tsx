@@ -1246,7 +1246,9 @@ export function ChatLayout(props: ChatLayoutProps) {
               label={screenOpen ? 'Hide screen' : 'Show screen'}
               title={screenOpen ? 'Hide the remote screen' : 'View a remote screen over VNC'}
               aria-pressed={screenOpen}
-              aria-controls="coven-screen-viewer"
+              // The viewer is only in the page while open; a reference to a missing
+              // id is invalid and cannot be followed.
+              aria-controls={screenOpen ? 'coven-screen-viewer' : undefined}
               onClick={() => setScreenOpen((open) => !open)}
             />
             <FamIconButton

@@ -2454,3 +2454,23 @@ describe('loading earlier turns', () => {
     );
   });
 });
+
+describe('screen toggle', () => {
+  it('names the viewer it controls only while the viewer is in the page', () => {
+    render(
+      <ChatLayout
+        {...layoutProps()}
+        connected
+        ready
+        familiars={[{ id: 'a', name: 'Astra' }]}
+        familiarId="a"
+      />,
+    );
+    const toggle = screen.getByRole('button', { name: 'Show screen' });
+    expect(toggle).not.toHaveAttribute('aria-controls');
+    fireEvent.click(toggle);
+    const open = screen.getByRole('button', { name: 'Hide screen' });
+    expect(open).toHaveAttribute('aria-controls', 'coven-screen-viewer');
+    expect(document.getElementById('coven-screen-viewer')).not.toBeNull();
+  });
+});
