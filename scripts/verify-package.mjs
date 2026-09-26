@@ -1,11 +1,11 @@
 #!/usr/bin/env node
 // Verifies the packaged app's declared contract before a release build.
 //
-// Enforced: what tauri.conf.json, the capability, Cargo.toml and README.md
-// already agree on. Pending: what issue #356 leaves to a product or
-// key-custody decision (updater key, deep-link protocol). Pending items are
-// reported, not enforced, unless --release is passed, so the release path can
-// require them once decided without this check lying in the meantime.
+// It enforces what tauri.conf.json, the capability, Cargo.toml and README.md
+// declare, and the v0.0.1 decisions recorded on issue #356 (2026-09-26):
+// the 480x520 minimum window, no updater, and no deep-link protocol. When a
+// later release enables the updater or a protocol, change the decision here
+// in the same change that configures it.
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -59,11 +59,10 @@ function directives(csp) {
 
 /**
  * @param {{ conf: any, capabilities: Record<string, any>, cargo: string, exists: (path: string) => boolean }} input
- * @returns {{ failures: string[], pending: string[] }}
+ * @returns {{ failures: string[] }}
  */
 export function verifyPackage({ conf, capabilities, cargo, exists }) {
   const failures = [];
-  const pending = [];
   const fail = (message) => failures.push(message);
 
   if (conf.productName !== PRODUCT_NAME)
@@ -165,16 +164,18 @@ export function verifyPackage({ conf, capabilities, cargo, exists }) {
   const plugin = cargo.match(FORBIDDEN_PLUGIN);
   if (plugin) fail(`Cargo.toml depends on ${plugin[0]}.`);
 
-  const updater = conf.plugins?.updater;
-  if (!updater?.pubkey || bundle.createUpdaterArtifacts !== true)
-    pending.push(
-      'Updater: no public key and createUpdaterArtifacts is not true (issue #356, decision 3).',
+  // Issue #356, decision 3: no updater for v0.0.1 (docs/releasing.md section 4).
+  if (bundle.createUpdaterArtifacts !== false || conf.plugins?.updater)
+    fail(
+      'v0.0.1 ships without the updater: createUpdaterArtifacts must be false, with no updater plugin config (issue #356).',
     );
-  const schemes = conf.plugins?.['deep-link']?.desktop?.schemes;
-  if (!Array.isArray(schemes) || !schemes.includes('opencoven-chat'))
-    pending.push('Deep-link protocol opencoven-chat is not registered (issue #356, decision 2).');
+  if (/tauri-plugin-updater\b/.test(cargo))
+    fail('Cargo.toml depends on tauri-plugin-updater; v0.0.1 has no updater (issue #356).');
+  // Issue #356, decision 2: no deep-link protocol for v0.0.1; nothing handles links yet.
+  if (conf.plugins?.['deep-link'] || /tauri-plugin-deep-link\b/.test(cargo))
+    fail('v0.0.1 registers no deep-link protocol (issue #356).');
 
-  return { failures, pending };
+  return { failures };
 }
 
 export function readPackage(root) {
@@ -195,15 +196,8 @@ export function readPackage(root) {
 }
 
 if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
-  const release = process.argv.includes('--release');
-  const { failures, pending } = verifyPackage(readPackage(process.cwd()));
+  const { failures } = verifyPackage(readPackage(process.cwd()));
   for (const failure of failures) console.error(`FAIL  ${failure}`);
-  for (const item of pending) console.error(`${release ? 'FAIL ' : 'PEND '} ${item}`);
-  const failed = failures.length > 0 || (release && pending.length > 0);
-  console.log(
-    failed
-      ? 'Package verification failed.'
-      : `Package verified${pending.length ? `; ${pending.length} decision(s) pending (not enforced without --release)` : ''}.`,
-  );
-  process.exitCode = failed ? 1 : 0;
+  console.log(failures.length ? 'Package verification failed.' : 'Package verified.');
+  process.exitCode = failures.length ? 1 : 0;
 }

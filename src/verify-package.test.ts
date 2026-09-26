@@ -29,11 +29,8 @@ function mutated(change: (input: Input) => void): Input {
 }
 
 describe('verify-package', () => {
-  it('passes the package as declared, with the open decisions only pending', () => {
-    const { failures, pending } = verifyPackage(actual());
-    expect(failures).toEqual([]);
-    expect(pending.join('\n')).toMatch(/Updater/);
-    expect(pending.join('\n')).toMatch(/opencoven-chat/);
+  it('passes the package as declared', () => {
+    expect(verifyPackage(actual()).failures).toEqual([]);
   });
 
   it.each([
@@ -154,25 +151,45 @@ describe('verify-package', () => {
     expect(failures.join('\n')).toMatch(message);
   });
 
-  it('does not count an unrelated mention of the protocol as registering it', () => {
-    const { pending } = verifyPackage(
-      mutated((i) => {
-        i.conf.plugins = { other: { note: 'opencoven-chat' } };
-      }),
+  it.each([
+    [
+      'updater artifacts turned on',
+      (i: Input) => {
+        i.conf.bundle.createUpdaterArtifacts = true;
+      },
+    ],
+    [
+      'an updater plugin config',
+      (i: Input) => {
+        i.conf.plugins = { updater: { pubkey: 'key', endpoints: [] } };
+      },
+    ],
+    [
+      'the updater crate',
+      (i: Input) => {
+        i.cargo += '\ntauri-plugin-updater = "2"\n';
+      },
+    ],
+  ])('holds the v0.0.1 decision of no updater against %s', (_name, change) => {
+    expect(verifyPackage(mutated(change)).failures.join('\n')).toMatch(
+      /without the updater|no updater/,
     );
-    expect(pending.join('\n')).toMatch(/opencoven-chat is not registered/);
   });
 
-  it('treats a decided updater and protocol as no longer pending', () => {
-    const { pending } = verifyPackage(
-      mutated((i) => {
-        i.conf.bundle.createUpdaterArtifacts = true;
-        i.conf.plugins = {
-          updater: { pubkey: 'dW50cnVzdGVkIGNvbW1lbnQ=', endpoints: [] },
-          'deep-link': { desktop: { schemes: ['opencoven-chat'] } },
-        };
-      }),
-    );
-    expect(pending).toEqual([]);
+  it.each([
+    [
+      'a deep-link scheme',
+      (i: Input) => {
+        i.conf.plugins = { 'deep-link': { desktop: { schemes: ['opencoven-chat'] } } };
+      },
+    ],
+    [
+      'the deep-link crate',
+      (i: Input) => {
+        i.cargo += '\ntauri-plugin-deep-link = "2"\n';
+      },
+    ],
+  ])('holds the v0.0.1 decision of no protocol against %s', (_name, change) => {
+    expect(verifyPackage(mutated(change)).failures.join('\n')).toMatch(/no deep-link protocol/);
   });
 });
