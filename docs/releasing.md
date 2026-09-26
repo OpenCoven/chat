@@ -95,6 +95,13 @@ Run through this in order. Every step is runnable as written.
    - build installers on each platform and smoke-test them,
    - generate `SHA256SUMS` and, only when signed updater artifacts exist,
      `latest.json`,
+   - smoke-test the assembled release with `scripts/release-smoke.mjs`: all six
+     installers present once and non-empty, `SHA256SUMS` covering every asset
+     and matching its bytes, the tag, `package.json`, `tauri.conf.json` and
+     `Cargo.toml` versions agreeing, the product name and identifier
+     unchanged, and no updater asset unless `createUpdaterArtifacts` is on. The
+     job summary states the updater and signing state, including an
+     `allow_unsigned` rehearsal,
    - publish the GitHub Release (a **pre-release** if the tag has a suffix such
      as `-rc.1` or `-beta`, or if its major version is `0`).
 
