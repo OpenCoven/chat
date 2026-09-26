@@ -936,8 +936,11 @@ describe('Phase 1 SDK source contract authority', () => {
       readFileSync(resolve(root, 'client-v1-cross-repository-assertions.json.fixture'), 'utf8'),
     );
     const phase1Lock = readPhase1ConformanceLock();
-    expect(frozenLock.candidate.commit).toBe(phase1Lock.sdk.revision);
-    expect(frozenLock.sources.chat.commit).toBe(phase1Lock.chat.revision);
+    // The fixture binds the previous candidate and consumer; Phase 1 has since
+    // adopted the replacement candidate cd10a3f and consumer dabcdd4.
+    expect(frozenLock.candidate.commit).toBe('96804bc483a063e41e9a9738a4ace61970f6c0a4');
+    expect(frozenLock.sources.chat.commit).toBe('ef8c747f1dbae0fd2bc9fcb24d3a0914f9f1cc49');
+    expect(frozenLock.candidate.commit).not.toBe(phase1Lock.sdk.revision);
     expect(frozenLock.sources.coven.commit).toBe(phase1Lock.coven.revision);
     expect(frozenLock.sources.cave.releaseVersion).toBe('0.4.4');
     expect(registry.assertions.cave).toHaveLength(110);
@@ -957,6 +960,16 @@ describe('Phase 1 SDK source contract authority', () => {
       sha256: 'a2600544f609137df465c0350ee38e7ff56c2eb649556440714c2e0ba3b96010',
     });
     expect(() => assertSdkContractMatchesPhase1Lock({ frozenLock }, phase1Lock)).toThrow(
+      'Phase 1 sdk pin does not match the SDK frozen contract.',
+    );
+    // With the fixture's own candidate and consumer, the Cave pin alone still
+    // requires a new SDK binding.
+    const preAdoptionLock = {
+      ...phase1Lock,
+      sdk: { ...phase1Lock.sdk, revision: frozenLock.candidate.commit },
+      chat: { ...phase1Lock.chat, revision: frozenLock.sources.chat.commit },
+    };
+    expect(() => assertSdkContractMatchesPhase1Lock({ frozenLock }, preAdoptionLock)).toThrow(
       'Phase 1 cave pin does not match the SDK frozen contract.',
     );
   });
