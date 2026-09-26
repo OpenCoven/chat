@@ -165,7 +165,7 @@ cost and timing are not reported by this CLI integration.
 When Chat holds only the most recent part of a chat's history, a quiet line at
 the top of the thread says so; nothing has failed, so it is not an error
 notice. **Load earlier turns** reads the chat again with twice, three and then
-four times the usual budget (sessions, bytes and CLI pages), keeping the
+four times the usual budget of sessions and bytes, keeping the
 transcript on screen and your place in it while it loads. Past that the line
 points to the Coven CLI for the rest. Opening another chat starts from the
 usual budget.

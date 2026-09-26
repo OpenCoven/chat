@@ -39,8 +39,10 @@ const HISTORY_PAGE_LIMIT: usize = 16;
 const MAX_HISTORY_DEPTH: u32 = 4;
 
 /// The limits one history read works within. The base budget is what a chat
-/// opens with; each depth step reads that much again, so asking for earlier
-/// turns re-reads the chat newest first with more room, never stitching.
+/// opens with; each depth step allows that many more sessions and bytes, so
+/// asking for earlier turns re-reads the chat newest first with more room,
+/// never stitching. Pages per CLI session stay at the base: scaling both
+/// nested limits would multiply the CLI work by depth squared.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct Budget {
     sessions: usize,
@@ -63,7 +65,7 @@ impl Budget {
         Ok(Budget {
             sessions: HISTORY_SESSION_LIMIT * scale,
             bytes: OUTPUT_LIMIT * scale,
-            pages: HISTORY_PAGE_LIMIT * scale,
+            pages: HISTORY_PAGE_LIMIT,
         })
     }
 }
@@ -1195,19 +1197,20 @@ fn read_captured_history(
         events = parent_events;
         partial |= truncated;
     }
+    // Newest first, so a cut drops the oldest events, never the newest.
     let mut result = Vec::new();
     let mut bytes = 0;
-    for event in turns.into_iter().rev().flatten() {
-        bytes += serde_json::to_vec(&event)
-            .map_err(|_| "Cannot measure saved history.")?
-            .len()
-            + 1;
-        if bytes > budget.bytes {
-            partial = true;
-            break;
+    'newest: for turn in turns {
+        for event in turn.into_iter().rev() {
+            bytes += event_bytes(&event)?;
+            if bytes > budget.bytes {
+                partial = true;
+                break 'newest;
+            }
+            result.push(event);
         }
-        result.push(event);
     }
+    result.reverse();
     Ok(Some((result, partial)))
 }
 
@@ -2002,9 +2005,20 @@ mod tests {
             history,
             first_events
                 .into_iter()
-                .chain(second_events)
+                .chain(second_events.clone())
                 .collect::<Vec<_>>()
         );
+        // A saved turn larger than the budget keeps its newest events.
+        let tight = Budget {
+            sessions: HISTORY_SESSION_LIMIT,
+            bytes: event_bytes(&second_events[1]).unwrap(),
+            pages: HISTORY_PAGE_LIMIT,
+        };
+        let (newest, partial) = read_captured_history(&data, &second, tight, |_| Ok(first.clone()))
+            .unwrap()
+            .unwrap();
+        assert!(partial);
+        assert_eq!(newest, [second_events[1].clone()]);
         assert!(read_captured_history(&data, &second, Budget::BASE, |_| {
             let mut mismatched = first.clone();
             mismatched["project_root"] = json!("/unrelated");
@@ -2067,7 +2081,8 @@ mod tests {
         let deepest = Budget::at_depth(MAX_HISTORY_DEPTH).unwrap();
         assert_eq!(deepest.sessions, HISTORY_SESSION_LIMIT * 4);
         assert_eq!(deepest.bytes, OUTPUT_LIMIT * 4);
-        assert_eq!(deepest.pages, HISTORY_PAGE_LIMIT * 4);
+        // Pages per session do not scale, so CLI work grows with depth, not depth².
+        assert_eq!(deepest.pages, HISTORY_PAGE_LIMIT);
         assert!(Budget::at_depth(0).is_err());
         assert!(Budget::at_depth(MAX_HISTORY_DEPTH + 1).is_err());
     }

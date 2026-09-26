@@ -800,6 +800,8 @@ export function ChatLayout(props: ChatLayoutProps) {
   // biome-ignore lint/correctness/useExhaustiveDependencies: new messages and the live row change the transcript's scroll height.
   useEffect(() => {
     if (previousSession.current !== props.sessionId) {
+      // A position held for an earlier-turns read belongs to the old chat.
+      keepFromBottom.current = null;
       nearBottom.current = true;
       setShowLatest(false);
       previousSession.current = props.sessionId;
