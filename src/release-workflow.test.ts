@@ -85,6 +85,13 @@ describe('release workflow specification', () => {
     expect(smoke).toBeGreaterThan(publish.indexOf('Generate and verify SHA256SUMS'));
     expect(smoke).toBeLessThan(publish.indexOf('Publish GitHub release'));
     expect(publish).toContain('args+=(--allow-unsigned)');
+    // A failing report must still reach the job summary before the step fails.
+    expect(publish).toContain(
+      `node scripts/release-smoke.mjs "\${args[@]}" > release-smoke.json || status=$?`,
+    );
+    expect(publish.indexOf(`exit "\${status}"`)).toBeGreaterThan(
+      publish.indexOf('echo "### Release smoke test"'),
+    );
     expect(workflow).not.toMatch(/^\s*-\s+run:\s+pnpm\b/m);
     expect(workflow).not.toMatch(/^\s*pnpm exec tauri build/m);
   });

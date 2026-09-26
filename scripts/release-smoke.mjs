@@ -137,6 +137,16 @@ export function smokeTestRelease({ releaseDir, root, version, tag, allowUnsigned
   } else {
     if (presentArchives.length === 0)
       fail('createUpdaterArtifacts is on but no updater archive was produced.');
+    // latest.json carries one entry per platform, and the manifest step
+    // refuses two archives for one platform, so neither may this check.
+    const byPlatform = new Map();
+    for (const name of presentArchives) {
+      const key = archives.get(name);
+      if (byPlatform.has(key)) {
+        fail(`Updater archives ${byPlatform.get(key)} and ${name} both map to ${key}.`);
+      }
+      byPlatform.set(key, name);
+    }
     for (const name of presentArchives) {
       if (!files.has(`${name}.sig`)) fail(`Updater archive ${name} has no signature.`);
       else if (files.get(`${name}.sig`) === 0) fail(`Updater signature ${name}.sig is empty.`);

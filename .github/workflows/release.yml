@@ -980,7 +980,10 @@ jobs:
           if [ "${ALLOW_UNSIGNED:-false}" = "true" ]; then
             args+=(--allow-unsigned)
           fi
-          node scripts/release-smoke.mjs "${args[@]}" | tee release-smoke.json
+          # Capture the status so a failing report still reaches the summary.
+          status=0
+          node scripts/release-smoke.mjs "${args[@]}" > release-smoke.json || status=$?
+          cat release-smoke.json
           {
             echo "### Release smoke test"
             echo
@@ -988,6 +991,7 @@ jobs:
             cat release-smoke.json
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
+          exit "${status}"
 
       # Publish with the gh CLI (pre-installed on the runner) so no additional
       # third-party action needs pinning. --verify-tag makes gh refuse a tag

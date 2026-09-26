@@ -202,10 +202,17 @@ describe('release smoke test', () => {
       rootWith((conf) => {
         (conf.bundle as Record<string, unknown>).createUpdaterArtifacts = true;
       });
-    function updaterRelease(options: { dropSig?: string; platforms?: string[] } = {}) {
+    function updaterRelease(
+      options: { dropSig?: string; platforms?: string[]; bothWindows?: boolean } = {},
+    ) {
       const archives = expectedUpdaterArchives(VERSION);
       const extra: Record<string, string> = {};
-      for (const name of archives.keys()) {
+      // The manifest step accepts one archive per platform, so a producible
+      // release carries the MSI updater archive and not the NSIS one as well.
+      const names = [...archives.keys()].filter(
+        (name) => options.bothWindows === true || !name.endsWith('.nsis.zip'),
+      );
+      for (const name of names) {
         extra[name] = `archive ${name}`;
         if (options.dropSig !== name) extra[`${name}.sig`] = `signature ${name}`;
       }
@@ -221,6 +228,15 @@ describe('release smoke test', () => {
       const report = smoke(updaterRelease(), { root: on() });
       expect(report.failures).toEqual([]);
       expect(report.updater).toMatchObject({ state: 'enabled', manifest: true });
+    });
+
+    it('fails two updater archives for the same platform', () => {
+      const [msi, nsis] = [...expectedUpdaterArchives(VERSION).keys()].filter((name) =>
+        /\.(msi|nsis)\.zip$/.test(name),
+      );
+      expect(smoke(updaterRelease({ bothWindows: true }), { root: on() }).failures).toContain(
+        `Updater archives ${msi} and ${nsis} both map to windows-x86_64.`,
+      );
     });
 
     it('fails an updater archive without its signature', () => {
