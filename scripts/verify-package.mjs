@@ -6,7 +6,7 @@
 // key-custody decision (updater key, deep-link protocol). Pending items are
 // reported, not enforced, unless --release is passed, so the release path can
 // require them once decided without this check lying in the meantime.
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
@@ -45,18 +45,23 @@ const FORBIDDEN_PLUGIN = /tauri-plugin-(shell|fs|http|opener|process)\b/;
 
 function directives(csp) {
   const map = new Map();
+  const duplicates = [];
   for (const part of csp.split(';')) {
     const [name, ...sources] = part.trim().split(/\s+/);
-    if (name) map.set(name, sources);
+    if (!name) continue;
+    // A repeated directive is not replaced by the later one; the first stays
+    // in force, so checking only one copy could pass a permissive policy.
+    if (map.has(name)) duplicates.push(name);
+    else map.set(name, sources);
   }
-  return map;
+  return { map, duplicates };
 }
 
 /**
- * @param {{ conf: any, capability: any, cargo: string, exists: (path: string) => boolean }} input
+ * @param {{ conf: any, capabilities: Record<string, any>, cargo: string, exists: (path: string) => boolean }} input
  * @returns {{ failures: string[], pending: string[] }}
  */
-export function verifyPackage({ conf, capability, cargo, exists }) {
+export function verifyPackage({ conf, capabilities, cargo, exists }) {
   const failures = [];
   const pending = [];
   const fail = (message) => failures.push(message);
@@ -84,7 +89,9 @@ export function verifyPackage({ conf, capability, cargo, exists }) {
   const csp = conf.app?.security?.csp;
   if (typeof csp !== 'string') fail('A content security policy must be declared.');
   else {
-    const policy = directives(csp);
+    const { map: policy, duplicates } = directives(csp);
+    for (const name of duplicates)
+      fail(`CSP repeats ${name}; only one copy is checked, the first applies.`);
     const expect = (name, sources) => {
       const actual = policy.get(name);
       if (!actual || actual.join(' ') !== sources.join(' '))
@@ -108,8 +115,13 @@ export function verifyPackage({ conf, capability, cargo, exists }) {
       )
         fail(`CSP ${name} allows ${sources.join(' ')}.`);
     }
-    const connect = policy.get('connect-src') ?? [];
-    for (const source of connect)
+    const connect = policy.get('connect-src');
+    // Without it, default-src 'self' leaves the webview unable to reach the
+    // host over IPC, so the built app could not run its own commands.
+    if (!connect) fail('CSP must declare connect-src with the IPC origins.');
+    else if (!connect.includes('ipc:') || !connect.includes('http://ipc.localhost'))
+      fail('CSP connect-src must allow ipc: and http://ipc.localhost.');
+    for (const source of connect ?? [])
       if (!["'self'", 'ipc:', 'http://ipc.localhost'].includes(source))
         fail(
           `CSP connect-src allows ${source}; the webview reaches the network only through the host.`,
@@ -128,6 +140,14 @@ export function verifyPackage({ conf, capability, cargo, exists }) {
     else if (!exists(icon)) fail(`Icon ${icon} is declared but missing.`);
   }
 
+  // Tauri loads every capability file in the directory, so an extra file
+  // could grant the window anything; only the reviewed one may exist.
+  const files = Object.keys(capabilities);
+  for (const file of files)
+    if (file !== 'default.json')
+      fail(`Unexpected capability file ${file}; only default.json is reviewed.`);
+  const capability = capabilities['default.json'] ?? {};
+  if (!capabilities['default.json']) fail('Capability default.json is missing.');
   if (JSON.stringify(capability.windows) !== JSON.stringify(['main']))
     fail('The capability must apply to the main window only.');
   const permissions = Array.isArray(capability.permissions) ? capability.permissions : [];
@@ -150,7 +170,8 @@ export function verifyPackage({ conf, capability, cargo, exists }) {
     pending.push(
       'Updater: no public key and createUpdaterArtifacts is not true (issue #356, decision 3).',
     );
-  if (!JSON.stringify(conf.plugins ?? {}).includes('"opencoven-chat"'))
+  const schemes = conf.plugins?.['deep-link']?.desktop?.schemes;
+  if (!Array.isArray(schemes) || !schemes.includes('opencoven-chat'))
     pending.push('Deep-link protocol opencoven-chat is not registered (issue #356, decision 2).');
 
   return { failures, pending };
@@ -160,7 +181,14 @@ export function readPackage(root) {
   const read = (path) => readFileSync(resolve(root, path), 'utf8');
   return {
     conf: JSON.parse(read('src-tauri/tauri.conf.json')),
-    capability: JSON.parse(read('src-tauri/capabilities/default.json')),
+    capabilities: Object.fromEntries(
+      readdirSync(resolve(root, 'src-tauri/capabilities'))
+        .filter((file) => file.endsWith('.json') || file.endsWith('.toml'))
+        .map((file) => [
+          file,
+          file.endsWith('.json') ? JSON.parse(read(`src-tauri/capabilities/${file}`)) : {},
+        ]),
+    ),
     cargo: read('src-tauri/Cargo.toml'),
     exists: (path) => existsSync(resolve(root, 'src-tauri', path)),
   };

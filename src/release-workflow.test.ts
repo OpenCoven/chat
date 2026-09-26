@@ -149,6 +149,19 @@ describe('release workflow specification', () => {
     expect(build).toMatch(/\[ -n "\$\{WINDOWS_CERTIFICATE_PASSWORD:-\}" \]/);
   });
 
+  test('verifies the package contract before the tag check and every platform build', () => {
+    const verify = job('verify-tag', 'build');
+    const step = verify.indexOf('run: node scripts/verify-package.mjs');
+    expect(step).toBeGreaterThan(-1);
+    // After checkout (it reads the tagged tree), before the tag check and so
+    // before the build job, which needs verify-tag.
+    expect(step).toBeGreaterThan(verify.indexOf('uses: actions/checkout@'));
+    expect(step).toBeLessThan(
+      verify.indexOf('Verify tag is annotated, signed, and version-consistent'),
+    );
+    expect(job('build', 'publish')).toContain('needs: verify-tag');
+  });
+
   test('refuses to release without platform signing material', () => {
     const verify = job('verify-tag', 'build');
 

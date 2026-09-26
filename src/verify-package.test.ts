@@ -5,7 +5,12 @@ import { readPackage, verifyPackage } from '../scripts/verify-package.mjs';
 
 // biome-ignore lint/suspicious/noExplicitAny: the fixture mutates arbitrary parts of real config JSON.
 type Json = any;
-type Input = { conf: Json; capability: Json; cargo: string; exists: (path: string) => boolean };
+type Input = {
+  conf: Json;
+  capabilities: Record<string, Json>;
+  cargo: string;
+  exists: (path: string) => boolean;
+};
 
 function actual(): Input {
   return readPackage(process.cwd());
@@ -15,7 +20,7 @@ function mutated(change: (input: Input) => void): Input {
   const input = actual();
   const copy: Input = {
     conf: structuredClone(input.conf),
-    capability: structuredClone(input.capability),
+    capabilities: structuredClone(input.capabilities),
     cargo: input.cargo,
     exists: input.exists,
   };
@@ -86,6 +91,27 @@ describe('verify-package', () => {
       /connect-src allows https:\/\/example.com/,
     ],
     [
+      'a repeated, permissive connect-src ahead of a strict one',
+      (i: Input) => {
+        i.conf.app.security.csp = `connect-src https://example.com; ${i.conf.app.security.csp}`;
+      },
+      /repeats connect-src/,
+    ],
+    [
+      'no connect-src at all',
+      (i: Input) => {
+        i.conf.app.security.csp = i.conf.app.security.csp.replace(/connect-src[^;]*;\s*/, '');
+      },
+      /must declare connect-src/,
+    ],
+    [
+      'an extra capability file',
+      (i: Input) => {
+        i.capabilities['extra.json'] = { windows: ['main'], permissions: ['shell:default'] };
+      },
+      /Unexpected capability file extra.json/,
+    ],
+    [
       'a dropped installer target',
       (i: Input) => {
         i.conf.bundle.targets = ['app'];
@@ -101,18 +127,18 @@ describe('verify-package', () => {
     ],
     [
       'a shell permission',
-      (i: Input) => i.capability.permissions.push('shell:allow-execute'),
+      (i: Input) => i.capabilities['default.json'].permissions.push('shell:allow-execute'),
       /grants shell:allow-execute/,
     ],
     [
       'an unreviewed core permission',
-      (i: Input) => i.capability.permissions.push('core:window:allow-close'),
+      (i: Input) => i.capabilities['default.json'].permissions.push('core:window:allow-close'),
       /unreviewed core:window:allow-close/,
     ],
     [
       'a remote origin',
       (i: Input) => {
-        i.capability.remote = { urls: ['https://example.com'] };
+        i.capabilities['default.json'].remote = { urls: ['https://example.com'] };
       },
       /remote origins/,
     ],
@@ -126,6 +152,15 @@ describe('verify-package', () => {
   ])('fails on %s', (_name, change, message) => {
     const { failures } = verifyPackage(mutated(change));
     expect(failures.join('\n')).toMatch(message);
+  });
+
+  it('does not count an unrelated mention of the protocol as registering it', () => {
+    const { pending } = verifyPackage(
+      mutated((i) => {
+        i.conf.plugins = { other: { note: 'opencoven-chat' } };
+      }),
+    );
+    expect(pending.join('\n')).toMatch(/opencoven-chat is not registered/);
   });
 
   it('treats a decided updater and protocol as no longer pending', () => {
