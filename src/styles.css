@@ -17,7 +17,9 @@
  */
 
 :root {
-  color-scheme: dark;
+  /* The shell sets its own light and dark palettes; native controls and
+     scrollbars follow the same system setting. */
+  color-scheme: light dark;
 
   /* Surfaces: near-black, separated by depth rather than by borders alone. */
   --surface-void: #07060b;

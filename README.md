@@ -20,6 +20,10 @@ so a long reply or a short window does not push the composer off the page.
 The conversation region can take keyboard focus, so it scrolls with the
 arrow and page keys without a control inside it being focused.
 
+The interface follows your system's light or dark appearance. Both palettes
+hold every visible text to WCAG AA contrast, checked on the rendered app in
+each scheme.
+
 The window is titled after the familiar you are viewing, such as
 "Astra — OpenCoven Chat", and leads with a count when runs have ended in
 other chats you have not opened yet, so a window in the background shows

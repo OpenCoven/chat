@@ -14,6 +14,10 @@
 
 .coven-chat {
   --coven-rail-tab-w: 28px;
+  /* The rail tabs' own fills, so each scheme can set them. */
+  --coven-rail-tab-bg: rgba(27, 27, 30, 0.97);
+  --coven-rail-tab-hover: #303035;
+  --coven-rail-tab-active: #38383e;
   --fr-sidebar-w: var(--coven-sidebar-w);
   --fr-inspector-w: var(--coven-inspector-w);
   min-width: 0;
@@ -61,7 +65,7 @@
   border-radius: 0;
   background:
     linear-gradient(90deg, rgba(255, 255, 255, 0.045), transparent 55%),
-    linear-gradient(180deg, rgba(255, 255, 255, 0.035), transparent 45%), rgba(27, 27, 30, 0.97);
+    linear-gradient(180deg, rgba(255, 255, 255, 0.035), transparent 45%), var(--coven-rail-tab-bg);
   box-shadow:
     inset 1px 0 rgba(255, 255, 255, 0.07),
     inset -1px 0 rgba(0, 0, 0, 0.5);
@@ -123,13 +127,13 @@
 }
 
 .coven-chat .coven-rail-tab:hover {
-  background-color: #303035;
+  background-color: var(--coven-rail-tab-hover);
   color: var(--text-primary);
 }
 
 .coven-chat .coven-rail-tab:active {
   transform: none;
-  background-color: #38383e;
+  background-color: var(--coven-rail-tab-active);
 }
 
 .coven-chat .coven-rail-tab:focus-visible {
@@ -861,10 +865,18 @@
   place-items: center;
   border: 1.5px dashed var(--accent-presence);
   border-radius: 12px;
-  background: color-mix(in oklch, var(--bg-panel, #1b1b1e) 82%, transparent);
+  background: color-mix(in srgb, var(--bg-panel, #1b1b1e) 82%, transparent);
   color: var(--text-primary);
   font-size: 13px;
   pointer-events: none;
+}
+
+@media (prefers-color-scheme: light) {
+  .coven-chat {
+    --coven-rail-tab-bg: #ececf0;
+    --coven-rail-tab-hover: #e2e2e8;
+    --coven-rail-tab-active: #d9d9e0;
+  }
 }
 
 /*

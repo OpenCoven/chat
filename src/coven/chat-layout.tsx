@@ -26,6 +26,7 @@ import type { ScreenRelay } from '../lib/screen-relay';
 import { type SetWindowTitle, windowTitle } from '../lib/window-title';
 import { AttachmentChip } from '../ui/attachment-chip';
 import { Composer } from '../ui/composer';
+import { MenuPortalContainer } from '../ui/dropdown-menu';
 import { ATTACHMENT_ACCEPT, type ChatAttachment, formatAttachmentSize } from './attachments';
 import { ChatLifecycleControls } from './chat-lifecycle';
 import { ContextPicker } from './context-picker';
@@ -950,845 +951,847 @@ export function ChatLayout(props: ChatLayoutProps) {
     rows[next]?.focus();
   }
   return (
-    <div
-      ref={shellRef}
-      className="fr-shell coven-chat"
-      data-tier={tier}
-      data-sidebar={sidebar ? 'open' : 'closed'}
-      data-inspector={inspector ? 'open' : 'closed'}
-      style={
-        {
-          '--coven-sidebar-w': sidebar && !drawers ? '300px' : 'var(--coven-rail-tab-w)',
-          '--coven-inspector-w':
-            inspector && !inspectorOverlay ? '360px' : 'var(--coven-rail-tab-w)',
-        } as CSSProperties
-      }
-    >
-      <div className="fr-grain" aria-hidden="true" />
-      {scrim ? (
-        <button
-          type="button"
-          className="coven-scrim"
-          aria-label="Close panels"
-          onClick={closeDrawers}
-        />
-      ) : null}
-      <button
-        type="button"
-        className="coven-rail-tab coven-rail-tab--left"
-        // While the scrim is up it owns the surface; a reserved tab sitting
-        // over it would swallow the dismiss click.
-        hidden={sidebar || scrim}
-        aria-label={
-          pendingRuns
-            ? `Show familiars (${pendingRuns} finished ${pendingRuns === 1 ? 'run' : 'runs'})`
-            : 'Show familiars'
+    <MenuPortalContainer.Provider value={shellRef}>
+      <div
+        ref={shellRef}
+        className="fr-shell coven-chat"
+        data-tier={tier}
+        data-sidebar={sidebar ? 'open' : 'closed'}
+        data-inspector={inspector ? 'open' : 'closed'}
+        style={
+          {
+            '--coven-sidebar-w': sidebar && !drawers ? '300px' : 'var(--coven-rail-tab-w)',
+            '--coven-inspector-w':
+              inspector && !inspectorOverlay ? '360px' : 'var(--coven-rail-tab-w)',
+          } as CSSProperties
         }
-        aria-controls="coven-familiars-sidebar"
-        aria-expanded={false}
-        aria-keyshortcuts={LEFT_RAIL_SHORTCUT}
-        title={LEFT_RAIL_HINT}
-        data-opens="sidebar"
-        onClick={openSidebar}
       >
-        {pendingRuns ? (
-          <span className="coven-rail-tab-badge" aria-hidden="true">
-            {pendingRuns}
-          </span>
-        ) : null}
-        <span className="coven-rail-tab-label">Familiars</span>
-        <span className="coven-rail-tab-cue" aria-hidden="true">
-          ›
-        </span>
-      </button>
-      <button
-        type="button"
-        className="coven-rail-tab coven-rail-tab--right"
-        hidden={inspector || scrim}
-        aria-label="Show inspector"
-        aria-controls="coven-familiar-inspector"
-        aria-expanded={false}
-        aria-keyshortcuts={RIGHT_RAIL_SHORTCUT}
-        title={RIGHT_RAIL_HINT}
-        data-opens="inspector"
-        onClick={openInspector}
-      >
-        <span className="coven-rail-tab-label">{familiar?.name || 'Details'}</span>
-        <span className="coven-rail-tab-cue" aria-hidden="true">
-          ‹
-        </span>
-      </button>
-      <aside
-        ref={sidebarRef}
-        id="coven-familiars-sidebar"
-        className="fr-sidebar"
-        aria-label="Familiars sidebar"
-        aria-hidden={!sidebar || undefined}
-        inert={!sidebar}
-      >
-        <div className="fr-sidebar-inner">
+        <div className="fr-grain" aria-hidden="true" />
+        {scrim ? (
           <button
             type="button"
-            className="fr-rail-toggle"
-            aria-label="Hide familiars"
-            aria-keyshortcuts={LEFT_RAIL_SHORTCUT}
-            title={LEFT_RAIL_HINT}
-            onClick={() => setSidebar(false)}
-          >
-            <span className="fr-rail-toggle-label">Familiars</span>
-            <Icon name="sidebar-simple" size={15} />
-          </button>
-          <label className="coven-agent-search">
-            <Icon name="magnifying-glass" size={14} />
-            <input
-              ref={searchRef}
-              type="search"
-              aria-label="Search familiars"
-              aria-keyshortcuts={SEARCH_SHORTCUT}
-              title={SEARCH_HINT}
-              placeholder="Search"
-              value={query}
-              onChange={(event) => setQuery(event.target.value)}
-              onKeyDown={(event) => {
-                if (event.nativeEvent.isComposing) return;
-                if (event.key === 'ArrowDown') {
-                  event.preventDefault();
-                  rowButtons()[0]?.focus();
-                } else if (event.key === 'Enter') {
-                  const first = agents[0];
-                  if (!first || props.lifecycleBusy) return;
-                  event.preventDefault();
-                  chooseFamiliar(first.id);
-                } else if (event.key === 'Escape' && query) {
-                  event.preventDefault();
-                  setQuery('');
-                }
-              }}
-            />
-          </label>
-          <div className="fr-conv-scroll">
-            <div className="fr-conv-list" ref={listRef}>
-              {agents.map((item, index) => {
-                const thread = headOf(item.id);
-                const when = formatRelativeTime(thread?.updatedAt, now);
-                const live = props.busy && item.id === runFamiliarId;
-                const draft = props.drafts?.[item.id]?.trim() ?? '';
-                const done = live ? undefined : props.finished?.[item.id];
-                const doneLabel = done === 'error' ? 'Run failed' : 'New reply';
-                return (
-                  <button
-                    type="button"
-                    key={item.id}
-                    className="fr-conv coven-agent-row"
-                    aria-label={done ? `${item.name} (${doneLabel.toLowerCase()})` : item.name}
-                    title={item.description}
-                    aria-current={item.id === props.familiarId || undefined}
-                    disabled={props.lifecycleBusy}
-                    onKeyDown={(event) => moveRowFocus(event, index)}
-                    onClick={() => chooseFamiliar(item.id)}
-                  >
-                    <FamiliarAvatar name={item.name} avatarUrl={item.avatarUrl} size={36} />
-                    <span className="coven-agent-copy">
-                      <span className="fr-conv-top">
-                        <span className="fr-conv-title">{item.name}</span>
-                        {live ? (
-                          <span className="fr-conv-time coven-agent-live">
-                            {props.cancelling ? 'Stopping…' : 'Responding…'}
-                          </span>
-                        ) : done ? (
-                          <span
-                            className={`fr-conv-time coven-agent-done${done === 'error' ? ' coven-agent-done--error' : ''}`}
-                          >
-                            {doneLabel}
-                          </span>
-                        ) : when ? (
-                          <time
-                            className="fr-conv-time"
-                            dateTime={thread?.updatedAt}
-                            title={formatAbsoluteTime(thread?.updatedAt)}
-                          >
-                            {when}
-                          </time>
-                        ) : null}
-                      </span>
-                      <span className="fr-conv-preview">
-                        {draft ? (
-                          <>
-                            <span className="coven-agent-draft">Draft:</span>
-                            <span className="fr-conv-preview-text">{draft}</span>
-                          </>
-                        ) : (
-                          thread?.preview ||
-                          (thread ? 'Continue your conversation' : 'Start a conversation')
-                        )}
-                      </span>
-                    </span>
-                  </button>
-                );
-              })}
-            </div>
-            {!agents.length ? (
-              <div className="fr-sidebar-empty">
-                <span className="fr-empty-glyph">
-                  <Icon name="chats-circle" size={16} />
-                </span>
-                <span className="fr-empty-text">
-                  {!props.connected
-                    ? 'Connect to your local Coven CLI to see your familiars.'
-                    : query
-                      ? 'No matching familiars.'
-                      : props.archivedFilter
-                        ? 'No archived familiars.'
-                        : 'No active familiars available. Configure a familiar in Coven, then refresh.'}
-                </span>
-                {query ? (
-                  <FamButton size="sm" onClick={() => setQuery('')}>
-                    Clear search
-                  </FamButton>
-                ) : !props.archivedFilter ? (
-                  // The copy says to refresh; the control to do it is right here.
-                  <FamButton size="sm" disabled={refreshBlocked} onClick={props.onRefresh}>
-                    {props.connected ? 'Check for familiars' : 'Check again'}
-                  </FamButton>
-                ) : null}
-              </div>
-            ) : null}
-          </div>
-          <div className="fr-sidebar-foot coven-user-settings">
-            {props.onArchivedFilter ? (
-              <details>
-                <summary>User settings</summary>
-                <label>
-                  <input
-                    type="checkbox"
-                    checked={Boolean(props.archivedFilter)}
-                    disabled={props.lifecycleBusy}
-                    onChange={(event) => props.onArchivedFilter?.(event.target.checked)}
-                  />
-                  Show archived chats
-                </label>
-              </details>
-            ) : null}
-            <details className="coven-shortcuts">
-              <summary>Keyboard shortcuts</summary>
-              <dl>
-                {SHORTCUTS.map(([keys, action]) => (
-                  <div key={keys}>
-                    <dt>
-                      <kbd>{keys}</kbd>
-                    </dt>
-                    <dd>{action}</dd>
-                  </div>
-                ))}
-              </dl>
-            </details>
-          </div>
-        </div>
-      </aside>
-      <main className="fr-thread" {...dropProps} data-dragging={dragging || undefined}>
-        {dragging ? (
-          <div className="coven-drop-zone" aria-hidden="true">
-            <span>
-              {canDrop
-                ? 'Drop text or code files to attach them'
-                : 'Files can be attached once the composer is ready'}
-            </span>
-          </div>
+            className="coven-scrim"
+            aria-label="Close panels"
+            onClick={closeDrawers}
+          />
         ) : null}
-        <output className="coven-sr-only" aria-live="polite" aria-label="Run announcements">
-          {announcement.n ? <span key={announcement.n}>{announcement.text}</span> : null}
-        </output>
-        <header className="fr-thread-header">
-          <div className="fr-thread-header-lead">
-            {familiar ? (
-              <FamiliarAvatar name={name} avatarUrl={familiar.avatarUrl} size={24} />
-            ) : null}
+        <button
+          type="button"
+          className="coven-rail-tab coven-rail-tab--left"
+          // While the scrim is up it owns the surface; a reserved tab sitting
+          // over it would swallow the dismiss click.
+          hidden={sidebar || scrim}
+          aria-label={
+            pendingRuns
+              ? `Show familiars (${pendingRuns} finished ${pendingRuns === 1 ? 'run' : 'runs'})`
+              : 'Show familiars'
+          }
+          aria-controls="coven-familiars-sidebar"
+          aria-expanded={false}
+          aria-keyshortcuts={LEFT_RAIL_SHORTCUT}
+          title={LEFT_RAIL_HINT}
+          data-opens="sidebar"
+          onClick={openSidebar}
+        >
+          {pendingRuns ? (
+            <span className="coven-rail-tab-badge" aria-hidden="true">
+              {pendingRuns}
+            </span>
+          ) : null}
+          <span className="coven-rail-tab-label">Familiars</span>
+          <span className="coven-rail-tab-cue" aria-hidden="true">
+            ›
+          </span>
+        </button>
+        <button
+          type="button"
+          className="coven-rail-tab coven-rail-tab--right"
+          hidden={inspector || scrim}
+          aria-label="Show inspector"
+          aria-controls="coven-familiar-inspector"
+          aria-expanded={false}
+          aria-keyshortcuts={RIGHT_RAIL_SHORTCUT}
+          title={RIGHT_RAIL_HINT}
+          data-opens="inspector"
+          onClick={openInspector}
+        >
+          <span className="coven-rail-tab-label">{familiar?.name || 'Details'}</span>
+          <span className="coven-rail-tab-cue" aria-hidden="true">
+            ‹
+          </span>
+        </button>
+        <aside
+          ref={sidebarRef}
+          id="coven-familiars-sidebar"
+          className="fr-sidebar"
+          aria-label="Familiars sidebar"
+          aria-hidden={!sidebar || undefined}
+          inert={!sidebar}
+        >
+          <div className="fr-sidebar-inner">
             <button
               type="button"
-              className="fr-thread-title coven-familiar-card-trigger"
-              disabled={!familiar}
-              onClick={showFamiliarCard}
-              aria-label={familiar ? `Open ${name}'s familiar card` : 'No familiar selected'}
+              className="fr-rail-toggle"
+              aria-label="Hide familiars"
+              aria-keyshortcuts={LEFT_RAIL_SHORTCUT}
+              title={LEFT_RAIL_HINT}
+              onClick={() => setSidebar(false)}
             >
-              {familiar ? name : 'No familiar selected'}
+              <span className="fr-rail-toggle-label">Familiars</span>
+              <Icon name="sidebar-simple" size={15} />
             </button>
-            {familiar && updated ? (
-              <time
-                className="fr-thread-familiar coven-thread-updated"
-                dateTime={session?.updatedAt}
-                title={formatAbsoluteTime(session?.updatedAt)}
-              >
-                {updated}
-              </time>
-            ) : null}
-          </div>
-          {session && props.onLifecycle && (
-            <ChatLifecycleControls
-              key={session.id}
-              id={session.id}
-              title={session.title}
-              archived={Boolean(props.selectedArchived)}
-              disabled={
-                props.busy ||
-                props.loading ||
-                Boolean(props.attaching) ||
-                Boolean(props.lifecycleBusy) ||
-                Boolean(props.lifecycleLocked)
-              }
-              pending={Boolean(props.lifecycleBusy)}
-              error={props.error}
-              onChange={props.onLifecycle}
-            />
-          )}
-          <div className="fr-thread-header-actions">
-            <FamIconButton
-              icon="squares-four"
-              label={screenOpen ? 'Hide screen' : 'Show screen'}
-              title={screenOpen ? 'Hide the remote screen' : 'View a remote screen over VNC'}
-              aria-pressed={screenOpen}
-              // The viewer is only in the page while open; a reference to a missing
-              // id is invalid and cannot be followed.
-              aria-controls={screenOpen ? 'coven-screen-viewer' : undefined}
-              onClick={() => setScreenOpen((open) => !open)}
-            />
-            <FamIconButton
-              icon="arrow-clockwise"
-              label="Refresh Coven"
-              className={props.loading ? 'coven-refreshing' : undefined}
-              disabled={props.busy || props.loading || props.lifecycleBusy}
-              onClick={props.onRefresh}
-            />
-          </div>
-        </header>
-        {/* Optional panels share one grid row, so opening them can never push
-            the transcript or the composer out of their tracks. */}
-        <div className="coven-thread-panels">
-          {screenOpen ? (
-            <div id="coven-screen-viewer">
-              {/* Keyed by familiar: switching threads unmounts the pane, and its
-                  teardown closes the host connection and forgets the address. */}
-              <ScreenViewer
-                key={props.familiarId}
-                relay={props.screen}
-                familiarName={familiar?.name}
-                onClose={() => setScreenOpen(false)}
-                {...(props.screenLoadRfb ? { loadRfb: props.screenLoadRfb } : {})}
-              />
-            </div>
-          ) : null}
-          {findOpen ? (
-            <search className="coven-find" aria-label="Find in conversation">
+            <label className="coven-agent-search">
+              <Icon name="magnifying-glass" size={14} />
               <input
-                ref={findRef}
+                ref={searchRef}
                 type="search"
-                aria-label="Find in conversation"
-                placeholder="Find in conversation"
-                value={findQuery}
-                onChange={(event) => {
-                  setFindQuery(event.target.value);
-                  setFindAt(0);
-                }}
+                aria-label="Search familiars"
+                aria-keyshortcuts={SEARCH_SHORTCUT}
+                title={SEARCH_HINT}
+                placeholder="Search"
+                value={query}
+                onChange={(event) => setQuery(event.target.value)}
                 onKeyDown={(event) => {
                   if (event.nativeEvent.isComposing) return;
-                  if (event.key === 'Enter') {
+                  if (event.key === 'ArrowDown') {
                     event.preventDefault();
-                    stepFind(event.shiftKey ? -1 : 1);
-                  } else if (event.key === 'Escape') {
+                    rowButtons()[0]?.focus();
+                  } else if (event.key === 'Enter') {
+                    const first = agents[0];
+                    if (!first || props.lifecycleBusy) return;
                     event.preventDefault();
-                    closeFind();
+                    chooseFamiliar(first.id);
+                  } else if (event.key === 'Escape' && query) {
+                    event.preventDefault();
+                    setQuery('');
                   }
                 }}
               />
-              <output className="coven-find-count" aria-live="polite">
-                {!findQuery.trim()
-                  ? ''
-                  : matches.length
-                    ? `${Math.min(findAt, matches.length - 1) + 1} of ${matches.length}`
-                    : 'No matches'}
-              </output>
-              <FamIconButton
-                icon="caret-up"
-                label="Previous match"
-                disabled={!matches.length}
-                onClick={() => stepFind(-1)}
-              />
-              <FamIconButton
-                icon="caret-down"
-                label="Next match"
-                disabled={!matches.length}
-                onClick={() => stepFind(1)}
-              />
-              <FamIconButton icon="x" label="Close find" onClick={closeFind} />
-            </search>
-          ) : null}
-        </div>
-        <div
-          className="fr-transcript"
-          ref={transcriptRef}
-          role="log"
-          aria-label="Messages"
-          aria-busy={props.loading}
-          // biome-ignore lint/a11y/noNoninteractiveTabindex: The transcript scrolls; the keyboard needs a way in.
-          tabIndex={0}
-          onScroll={(event) => {
-            const transcript = event.currentTarget;
-            nearBottom.current =
-              transcript.scrollHeight - transcript.clientHeight - transcript.scrollTop <= 80;
-            setShowLatest(!nearBottom.current);
-          }}
-        >
-          <div className="fr-column">
-            {props.status ? (
-              <details className="coven-connection" open={!props.ready}>
-                <summary>{props.ready ? 'Connection details' : 'Coven setup required'}</summary>
-                <output className="coven-status">{props.status}</output>
-                <CopyButton
-                  className="coven-status-copy"
-                  text={props.status}
-                  label="Copy connection details"
-                />
-              </details>
-            ) : null}
-            {props.partialHistory ? (
-              <div className="coven-notice coven-history-notice" role="note">
-                {props.onLoadEarlier ? (
-                  <>
-                    <span>Only the most recent part of this chat is shown here.</span>
-                    <FamButton
-                      size="sm"
-                      onClick={() => {
-                        // Older turns arrive above the reader; keep them where they are.
-                        const transcript = transcriptRef.current;
-                        if (transcript)
-                          keepFromBottom.current = transcript.scrollHeight - transcript.scrollTop;
-                        props.onLoadEarlier?.();
-                      }}
+            </label>
+            <div className="fr-conv-scroll">
+              <div className="fr-conv-list" ref={listRef}>
+                {agents.map((item, index) => {
+                  const thread = headOf(item.id);
+                  const when = formatRelativeTime(thread?.updatedAt, now);
+                  const live = props.busy && item.id === runFamiliarId;
+                  const draft = props.drafts?.[item.id]?.trim() ?? '';
+                  const done = live ? undefined : props.finished?.[item.id];
+                  const doneLabel = done === 'error' ? 'Run failed' : 'New reply';
+                  return (
+                    <button
+                      type="button"
+                      key={item.id}
+                      className="fr-conv coven-agent-row"
+                      aria-label={done ? `${item.name} (${doneLabel.toLowerCase()})` : item.name}
+                      title={item.description}
+                      aria-current={item.id === props.familiarId || undefined}
+                      disabled={props.lifecycleBusy}
+                      onKeyDown={(event) => moveRowFocus(event, index)}
+                      onClick={() => chooseFamiliar(item.id)}
                     >
-                      Load earlier turns
-                    </FamButton>
-                  </>
-                ) : (
-                  <span>
-                    Only the most recent part of this chat is shown here. Use the Coven CLI to read
-                    the full history.
+                      <FamiliarAvatar name={item.name} avatarUrl={item.avatarUrl} size={36} />
+                      <span className="coven-agent-copy">
+                        <span className="fr-conv-top">
+                          <span className="fr-conv-title">{item.name}</span>
+                          {live ? (
+                            <span className="fr-conv-time coven-agent-live">
+                              {props.cancelling ? 'Stopping…' : 'Responding…'}
+                            </span>
+                          ) : done ? (
+                            <span
+                              className={`fr-conv-time coven-agent-done${done === 'error' ? ' coven-agent-done--error' : ''}`}
+                            >
+                              {doneLabel}
+                            </span>
+                          ) : when ? (
+                            <time
+                              className="fr-conv-time"
+                              dateTime={thread?.updatedAt}
+                              title={formatAbsoluteTime(thread?.updatedAt)}
+                            >
+                              {when}
+                            </time>
+                          ) : null}
+                        </span>
+                        <span className="fr-conv-preview">
+                          {draft ? (
+                            <>
+                              <span className="coven-agent-draft">Draft:</span>
+                              <span className="fr-conv-preview-text">{draft}</span>
+                            </>
+                          ) : (
+                            thread?.preview ||
+                            (thread ? 'Continue your conversation' : 'Start a conversation')
+                          )}
+                        </span>
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+              {!agents.length ? (
+                <div className="fr-sidebar-empty">
+                  <span className="fr-empty-glyph">
+                    <Icon name="chats-circle" size={16} />
                   </span>
-                )}
-              </div>
-            ) : null}
-            {props.error ? (
-              <div className="coven-error" role="alert">
-                <span className="coven-error-text">{props.error}</span>
-                {props.onReloadChat && !props.loading ? (
-                  <FamButton size="sm" className="coven-error-retry" onClick={props.onReloadChat}>
-                    Reload chat
-                  </FamButton>
-                ) : null}
-                <CopyButton className="coven-error-copy" text={props.error} label="Copy error" />
-                {props.onRetry &&
-                !composerDisabled &&
-                (props.draft.trim() || props.attachments?.length) ? (
-                  <FamButton size="sm" className="coven-error-retry" onClick={props.onRetry}>
-                    Try again
-                  </FamButton>
-                ) : null}
-                {props.onDismissError ? (
-                  <button
-                    type="button"
-                    className="coven-error-dismiss"
-                    aria-label="Dismiss error"
-                    title="Dismiss"
-                    onClick={props.onDismissError}
-                  >
-                    <Icon name="x" size={12} />
-                  </button>
-                ) : null}
-              </div>
-            ) : null}
-            {props.loading ? <ThinkingIndicator label="Loading conversation" /> : null}
-            <TranscriptBlocks
-              blocks={blocks}
-              name={name}
-              avatarUrl={familiar?.avatarUrl}
-              withCard={Boolean(familiar)}
-              cardOpen={inspector && tab === 'overview'}
-              onShowCard={onShowCard}
-            />
-            {liveRow ? (
-              <div className="fr-thinking-row coven-live-row">
-                <FamiliarAvatar name={name} avatarUrl={familiar?.avatarUrl} size={22} />
-                <ThinkingIndicator label={liveRow} />
-              </div>
-            ) : null}
-            {!props.messages.length && !props.loading && !runHere ? (
-              <div className="fr-thread-empty">
-                {familiar ? (
-                  <FamiliarAvatar name={name} avatarUrl={familiar.avatarUrl} size={36} ring />
-                ) : null}
-                <span className="fr-thread-empty-title">
-                  {familiar ? `Chat with ${name}` : 'No familiar selected'}
-                </span>
-                {familiar?.description ? (
-                  <span className="coven-thread-empty-purpose">{familiar.description}</span>
-                ) : null}
-                <span className="fr-empty-text">
-                  {emptyThreadText(props.connected, familiar?.name, props.familiars.length > 0)}
-                </span>
-                {!props.connected || !props.familiars.length ? (
-                  <FamButton size="sm" disabled={refreshBlocked} onClick={props.onRefresh}>
-                    {props.connected ? 'Check for familiars' : 'Check again'}
-                  </FamButton>
-                ) : null}
-              </div>
-            ) : null}
+                  <span className="fr-empty-text">
+                    {!props.connected
+                      ? 'Connect to your local Coven CLI to see your familiars.'
+                      : query
+                        ? 'No matching familiars.'
+                        : props.archivedFilter
+                          ? 'No archived familiars.'
+                          : 'No active familiars available. Configure a familiar in Coven, then refresh.'}
+                  </span>
+                  {query ? (
+                    <FamButton size="sm" onClick={() => setQuery('')}>
+                      Clear search
+                    </FamButton>
+                  ) : !props.archivedFilter ? (
+                    // The copy says to refresh; the control to do it is right here.
+                    <FamButton size="sm" disabled={refreshBlocked} onClick={props.onRefresh}>
+                      {props.connected ? 'Check for familiars' : 'Check again'}
+                    </FamButton>
+                  ) : null}
+                </div>
+              ) : null}
+            </div>
+            <div className="fr-sidebar-foot coven-user-settings">
+              {props.onArchivedFilter ? (
+                <details>
+                  <summary>User settings</summary>
+                  <label>
+                    <input
+                      type="checkbox"
+                      checked={Boolean(props.archivedFilter)}
+                      disabled={props.lifecycleBusy}
+                      onChange={(event) => props.onArchivedFilter?.(event.target.checked)}
+                    />
+                    Show archived chats
+                  </label>
+                </details>
+              ) : null}
+              <details className="coven-shortcuts">
+                <summary>Keyboard shortcuts</summary>
+                <dl>
+                  {SHORTCUTS.map(([keys, action]) => (
+                    <div key={keys}>
+                      <dt>
+                        <kbd>{keys}</kbd>
+                      </dt>
+                      <dd>{action}</dd>
+                    </div>
+                  ))}
+                </dl>
+              </details>
+            </div>
           </div>
-        </div>
-        <div className="fr-composer-wrap">
-          <div className="fr-composer-inner">
-            {showLatest && (
+        </aside>
+        <main className="fr-thread" {...dropProps} data-dragging={dragging || undefined}>
+          {dragging ? (
+            <div className="coven-drop-zone" aria-hidden="true">
+              <span>
+                {canDrop
+                  ? 'Drop text or code files to attach them'
+                  : 'Files can be attached once the composer is ready'}
+              </span>
+            </div>
+          ) : null}
+          <output className="coven-sr-only" aria-live="polite" aria-label="Run announcements">
+            {announcement.n ? <span key={announcement.n}>{announcement.text}</span> : null}
+          </output>
+          <header className="fr-thread-header">
+            <div className="fr-thread-header-lead">
+              {familiar ? (
+                <FamiliarAvatar name={name} avatarUrl={familiar.avatarUrl} size={24} />
+              ) : null}
               <button
                 type="button"
-                className="coven-jump-latest"
-                onClick={() => {
-                  const transcript = transcriptRef.current;
-                  if (transcript) transcript.scrollTop = transcript.scrollHeight;
-                  nearBottom.current = true;
-                  setShowLatest(false);
-                }}
+                className="fr-thread-title coven-familiar-card-trigger"
+                disabled={!familiar}
+                onClick={showFamiliarCard}
+                aria-label={familiar ? `Open ${name}'s familiar card` : 'No familiar selected'}
               >
-                Jump to latest
-                {unseen ? (
-                  <span className="coven-jump-count">
-                    {unseen} new {unseen === 1 ? 'message' : 'messages'}
-                  </span>
-                ) : null}
+                {familiar ? name : 'No familiar selected'}
               </button>
-            )}
-            <div className="coven-composer-context" title={workspace}>
-              {workspace ? `${workspaceLabel}: ${workspace}` : 'No workspace reported'}
+              {familiar && updated ? (
+                <time
+                  className="fr-thread-familiar coven-thread-updated"
+                  dateTime={session?.updatedAt}
+                  title={formatAbsoluteTime(session?.updatedAt)}
+                >
+                  {updated}
+                </time>
+              ) : null}
             </div>
-            {props.busy && (
-              <output className="coven-run-status">
-                {runStatusText(name, runName, runHere, props.cancelling, runningTool)}
-                {elapsed ? <span className="coven-run-elapsed"> · {elapsed}</span> : null}
-              </output>
+            {session && props.onLifecycle && (
+              <ChatLifecycleControls
+                key={session.id}
+                id={session.id}
+                title={session.title}
+                archived={Boolean(props.selectedArchived)}
+                disabled={
+                  props.busy ||
+                  props.loading ||
+                  Boolean(props.attaching) ||
+                  Boolean(props.lifecycleBusy) ||
+                  Boolean(props.lifecycleLocked)
+                }
+                pending={Boolean(props.lifecycleBusy)}
+                error={props.error}
+                onChange={props.onLifecycle}
+              />
             )}
-            {props.readOnly && (
-              <p className="coven-composer-note">
-                This familiar chat is archived. Restore it to continue the conversation.
-              </p>
-            )}
-            {props.busy && composerDisabled && (
-              <div className="coven-run-actions">
-                <FamButton size="sm" onClick={props.onCancel} disabled={props.cancelling}>
-                  Stop run
-                </FamButton>
+            <div className="fr-thread-header-actions">
+              <FamIconButton
+                icon="squares-four"
+                label={screenOpen ? 'Hide screen' : 'Show screen'}
+                title={screenOpen ? 'Hide the remote screen' : 'View a remote screen over VNC'}
+                aria-pressed={screenOpen}
+                // The viewer is only in the page while open; a reference to a missing
+                // id is invalid and cannot be followed.
+                aria-controls={screenOpen ? 'coven-screen-viewer' : undefined}
+                onClick={() => setScreenOpen((open) => !open)}
+              />
+              <FamIconButton
+                icon="arrow-clockwise"
+                label="Refresh Coven"
+                className={props.loading ? 'coven-refreshing' : undefined}
+                disabled={props.busy || props.loading || props.lifecycleBusy}
+                onClick={props.onRefresh}
+              />
+            </div>
+          </header>
+          {/* Optional panels share one grid row, so opening them can never push
+            the transcript or the composer out of their tracks. */}
+          <div className="coven-thread-panels">
+            {screenOpen ? (
+              <div id="coven-screen-viewer">
+                {/* Keyed by familiar: switching threads unmounts the pane, and its
+                  teardown closes the host connection and forgets the address. */}
+                <ScreenViewer
+                  key={props.familiarId}
+                  relay={props.screen}
+                  familiarName={familiar?.name}
+                  onClose={() => setScreenOpen(false)}
+                  {...(props.screenLoadRfb ? { loadRfb: props.screenLoadRfb } : {})}
+                />
               </div>
-            )}
-            <fieldset className="coven-composer-fieldset" disabled={composerDisabled}>
-              <Composer
-                textareaRef={composerRef}
-                textareaProps={mentionCompletion.textareaProps}
-                onKeyDown={mentionCompletion.onKeyDown}
-                className="coven-compact-composer"
-                minRows={1}
-                attachmentIcon="plus"
-                value={props.draft}
-                onValueChange={props.onDraft}
-                label={composer.label}
-                placeholder={composer.placeholder}
-                onSend={props.onSend}
-                {...(oversize
-                  ? {
-                      warning: {
-                        // Exact bytes: a rounded size could read as within the limit.
-                        label: `Message is ${draftBytes.toLocaleString('en-US')} bytes; Coven accepts up to ${PROMPT_LIMIT_BYTES.toLocaleString('en-US')}. Shorten it or attach a file.`,
-                      },
+            ) : null}
+            {findOpen ? (
+              <search className="coven-find" aria-label="Find in conversation">
+                <input
+                  ref={findRef}
+                  type="search"
+                  aria-label="Find in conversation"
+                  placeholder="Find in conversation"
+                  value={findQuery}
+                  onChange={(event) => {
+                    setFindQuery(event.target.value);
+                    setFindAt(0);
+                  }}
+                  onKeyDown={(event) => {
+                    if (event.nativeEvent.isComposing) return;
+                    if (event.key === 'Enter') {
+                      event.preventDefault();
+                      stepFind(event.shiftKey ? -1 : 1);
+                    } else if (event.key === 'Escape') {
+                      event.preventDefault();
+                      closeFind();
                     }
-                  : {})}
-                running={props.busy && !composerDisabled}
-                onStop={props.onCancel}
-                allowAttachmentOnly
-                attachments={(props.attachments ?? []).map((file) => ({
-                  id: file.id,
-                  name: file.name,
-                  meta: formatAttachmentSize(file.bytes.length),
-                }))}
-                {...(props.onAttach && !props.busy && !props.attaching
-                  ? { onAttach: () => fileInput.current?.click() }
-                  : {})}
-                {...(!props.busy && props.onRemoveAttachment
-                  ? { onRemoveAttachment: props.onRemoveAttachment }
-                  : {})}
-              >
-                {mentionCompletion.suggestions}
-                <ContextPicker
-                  key={`${props.familiarId}:${props.sessionId}`}
-                  familiars={props.familiars}
-                  familiarId={props.familiarId}
+                  }}
+                />
+                <output className="coven-find-count" aria-live="polite">
+                  {!findQuery.trim()
+                    ? ''
+                    : matches.length
+                      ? `${Math.min(findAt, matches.length - 1) + 1} of ${matches.length}`
+                      : 'No matches'}
+                </output>
+                <FamIconButton
+                  icon="caret-up"
+                  label="Previous match"
+                  disabled={!matches.length}
+                  onClick={() => stepFind(-1)}
+                />
+                <FamIconButton
+                  icon="caret-down"
+                  label="Next match"
+                  disabled={!matches.length}
+                  onClick={() => stepFind(1)}
+                />
+                <FamIconButton icon="x" label="Close find" onClick={closeFind} />
+              </search>
+            ) : null}
+          </div>
+          <div
+            className="fr-transcript"
+            ref={transcriptRef}
+            role="log"
+            aria-label="Messages"
+            aria-busy={props.loading}
+            // biome-ignore lint/a11y/noNoninteractiveTabindex: The transcript scrolls; the keyboard needs a way in.
+            tabIndex={0}
+            onScroll={(event) => {
+              const transcript = event.currentTarget;
+              nearBottom.current =
+                transcript.scrollHeight - transcript.clientHeight - transcript.scrollTop <= 80;
+              setShowLatest(!nearBottom.current);
+            }}
+          >
+            <div className="fr-column">
+              {props.status ? (
+                <details className="coven-connection" open={!props.ready}>
+                  <summary>{props.ready ? 'Connection details' : 'Coven setup required'}</summary>
+                  <output className="coven-status">{props.status}</output>
+                  <CopyButton
+                    className="coven-status-copy"
+                    text={props.status}
+                    label="Copy connection details"
+                  />
+                </details>
+              ) : null}
+              {props.partialHistory ? (
+                <div className="coven-notice coven-history-notice" role="note">
+                  {props.onLoadEarlier ? (
+                    <>
+                      <span>Only the most recent part of this chat is shown here.</span>
+                      <FamButton
+                        size="sm"
+                        onClick={() => {
+                          // Older turns arrive above the reader; keep them where they are.
+                          const transcript = transcriptRef.current;
+                          if (transcript)
+                            keepFromBottom.current = transcript.scrollHeight - transcript.scrollTop;
+                          props.onLoadEarlier?.();
+                        }}
+                      >
+                        Load earlier turns
+                      </FamButton>
+                    </>
+                  ) : (
+                    <span>
+                      Only the most recent part of this chat is shown here. Use the Coven CLI to
+                      read the full history.
+                    </span>
+                  )}
+                </div>
+              ) : null}
+              {props.error ? (
+                <div className="coven-error" role="alert">
+                  <span className="coven-error-text">{props.error}</span>
+                  {props.onReloadChat && !props.loading ? (
+                    <FamButton size="sm" className="coven-error-retry" onClick={props.onReloadChat}>
+                      Reload chat
+                    </FamButton>
+                  ) : null}
+                  <CopyButton className="coven-error-copy" text={props.error} label="Copy error" />
+                  {props.onRetry &&
+                  !composerDisabled &&
+                  (props.draft.trim() || props.attachments?.length) ? (
+                    <FamButton size="sm" className="coven-error-retry" onClick={props.onRetry}>
+                      Try again
+                    </FamButton>
+                  ) : null}
+                  {props.onDismissError ? (
+                    <button
+                      type="button"
+                      className="coven-error-dismiss"
+                      aria-label="Dismiss error"
+                      title="Dismiss"
+                      onClick={props.onDismissError}
+                    >
+                      <Icon name="x" size={12} />
+                    </button>
+                  ) : null}
+                </div>
+              ) : null}
+              {props.loading ? <ThinkingIndicator label="Loading conversation" /> : null}
+              <TranscriptBlocks
+                blocks={blocks}
+                name={name}
+                avatarUrl={familiar?.avatarUrl}
+                withCard={Boolean(familiar)}
+                cardOpen={inspector && tab === 'overview'}
+                onShowCard={onShowCard}
+              />
+              {liveRow ? (
+                <div className="fr-thinking-row coven-live-row">
+                  <FamiliarAvatar name={name} avatarUrl={familiar?.avatarUrl} size={22} />
+                  <ThinkingIndicator label={liveRow} />
+                </div>
+              ) : null}
+              {!props.messages.length && !props.loading && !runHere ? (
+                <div className="fr-thread-empty">
+                  {familiar ? (
+                    <FamiliarAvatar name={name} avatarUrl={familiar.avatarUrl} size={36} ring />
+                  ) : null}
+                  <span className="fr-thread-empty-title">
+                    {familiar ? `Chat with ${name}` : 'No familiar selected'}
+                  </span>
+                  {familiar?.description ? (
+                    <span className="coven-thread-empty-purpose">{familiar.description}</span>
+                  ) : null}
+                  <span className="fr-empty-text">
+                    {emptyThreadText(props.connected, familiar?.name, props.familiars.length > 0)}
+                  </span>
+                  {!props.connected || !props.familiars.length ? (
+                    <FamButton size="sm" disabled={refreshBlocked} onClick={props.onRefresh}>
+                      {props.connected ? 'Check for familiars' : 'Check again'}
+                    </FamButton>
+                  ) : null}
+                </div>
+              ) : null}
+            </div>
+          </div>
+          <div className="fr-composer-wrap">
+            <div className="fr-composer-inner">
+              {showLatest && (
+                <button
+                  type="button"
+                  className="coven-jump-latest"
+                  onClick={() => {
+                    const transcript = transcriptRef.current;
+                    if (transcript) transcript.scrollTop = transcript.scrollHeight;
+                    nearBottom.current = true;
+                    setShowLatest(false);
+                  }}
+                >
+                  Jump to latest
+                  {unseen ? (
+                    <span className="coven-jump-count">
+                      {unseen} new {unseen === 1 ? 'message' : 'messages'}
+                    </span>
+                  ) : null}
+                </button>
+              )}
+              <div className="coven-composer-context" title={workspace}>
+                {workspace ? `${workspaceLabel}: ${workspace}` : 'No workspace reported'}
+              </div>
+              {props.busy && (
+                <output className="coven-run-status">
+                  {runStatusText(name, runName, runHere, props.cancelling, runningTool)}
+                  {elapsed ? <span className="coven-run-elapsed"> · {elapsed}</span> : null}
+                </output>
+              )}
+              {props.readOnly && (
+                <p className="coven-composer-note">
+                  This familiar chat is archived. Restore it to continue the conversation.
+                </p>
+              )}
+              {props.busy && composerDisabled && (
+                <div className="coven-run-actions">
+                  <FamButton size="sm" onClick={props.onCancel} disabled={props.cancelling}>
+                    Stop run
+                  </FamButton>
+                </div>
+              )}
+              <fieldset className="coven-composer-fieldset" disabled={composerDisabled}>
+                <Composer
+                  textareaRef={composerRef}
+                  textareaProps={mentionCompletion.textareaProps}
+                  onKeyDown={mentionCompletion.onKeyDown}
+                  className="coven-compact-composer"
+                  minRows={1}
+                  attachmentIcon="plus"
                   value={props.draft}
                   onValueChange={props.onDraft}
-                  textareaRef={composerRef}
-                  disabled={composerDisabled || props.busy}
-                />
-              </Composer>
-              {props.onAttach ? (
-                <>
-                  <input
-                    ref={fileInput}
-                    type="file"
-                    multiple
-                    hidden
-                    aria-label="Select text attachments"
-                    accept={ATTACHMENT_ACCEPT}
-                    disabled={props.busy || props.attaching}
-                    onChange={(event) => {
-                      props.onAttach?.(Array.from(event.target.files ?? []));
-                      event.target.value = '';
-                    }}
+                  label={composer.label}
+                  placeholder={composer.placeholder}
+                  onSend={props.onSend}
+                  {...(oversize
+                    ? {
+                        warning: {
+                          // Exact bytes: a rounded size could read as within the limit.
+                          label: `Message is ${draftBytes.toLocaleString('en-US')} bytes; Coven accepts up to ${PROMPT_LIMIT_BYTES.toLocaleString('en-US')}. Shorten it or attach a file.`,
+                        },
+                      }
+                    : {})}
+                  running={props.busy && !composerDisabled}
+                  onStop={props.onCancel}
+                  allowAttachmentOnly
+                  attachments={(props.attachments ?? []).map((file) => ({
+                    id: file.id,
+                    name: file.name,
+                    meta: formatAttachmentSize(file.bytes.length),
+                  }))}
+                  {...(props.onAttach && !props.busy && !props.attaching
+                    ? { onAttach: () => fileInput.current?.click() }
+                    : {})}
+                  {...(!props.busy && props.onRemoveAttachment
+                    ? { onRemoveAttachment: props.onRemoveAttachment }
+                    : {})}
+                >
+                  {mentionCompletion.suggestions}
+                  <ContextPicker
+                    key={`${props.familiarId}:${props.sessionId}`}
+                    familiars={props.familiars}
+                    familiarId={props.familiarId}
+                    value={props.draft}
+                    onValueChange={props.onDraft}
+                    textareaRef={composerRef}
+                    disabled={composerDisabled || props.busy}
                   />
-                  {/* The limits matter once a file is in play; until then the
+                </Composer>
+                {props.onAttach ? (
+                  <>
+                    <input
+                      ref={fileInput}
+                      type="file"
+                      multiple
+                      hidden
+                      aria-label="Select text attachments"
+                      accept={ATTACHMENT_ACCEPT}
+                      disabled={props.busy || props.attaching}
+                      onChange={(event) => {
+                        props.onAttach?.(Array.from(event.target.files ?? []));
+                        event.target.value = '';
+                      }}
+                    />
+                    {/* The limits matter once a file is in play; until then the
                       line was permanent noise under the composer. */}
-                  {props.attaching ? (
-                    <p className="coven-attachment-note">Reading files…</p>
-                  ) : props.attachments?.length ? (
-                    <p className="coven-attachment-note">Text/code · 4 files max · 64 KiB each</p>
-                  ) : null}
-                </>
-              ) : null}
-            </fieldset>
+                    {props.attaching ? (
+                      <p className="coven-attachment-note">Reading files…</p>
+                    ) : props.attachments?.length ? (
+                      <p className="coven-attachment-note">Text/code · 4 files max · 64 KiB each</p>
+                    ) : null}
+                  </>
+                ) : null}
+              </fieldset>
+            </div>
           </div>
-        </div>
-      </main>
-      <aside
-        ref={inspectorRef}
-        id="coven-familiar-inspector"
-        className="fr-inspector"
-        aria-label="Familiar inspector"
-        aria-hidden={!inspector || undefined}
-        inert={!inspector}
-      >
-        <div className="fr-inspector-inner">
-          <button
-            type="button"
-            className="fr-inspector-head"
-            onClick={() => setInspector(false)}
-            aria-label="Close inspector"
-            aria-keyshortcuts={RIGHT_RAIL_SHORTCUT}
-            title={RIGHT_RAIL_HINT}
-          >
-            {familiar ? (
-              <FamiliarAvatar name={name} avatarUrl={familiar.avatarUrl} size={22} ring />
-            ) : (
-              // .fr-inspector-head is a 3-column grid whose first column is a
-              // fixed 22px avatar slot; leaving it empty shifts the name into
-              // 22px and wraps it over the close icon.
-              <span className="fr-inspector-mark" aria-hidden="true" />
-            )}
-            <span className="fr-inspector-who">
-              <span className="fr-inspector-name">{familiar ? name : 'Coven CLI'}</span>
-              <span className="fr-inspector-kind">
-                {familiar ? 'Coven familiar' : 'No familiar selected'}
+        </main>
+        <aside
+          ref={inspectorRef}
+          id="coven-familiar-inspector"
+          className="fr-inspector"
+          aria-label="Familiar inspector"
+          aria-hidden={!inspector || undefined}
+          inert={!inspector}
+        >
+          <div className="fr-inspector-inner">
+            <button
+              type="button"
+              className="fr-inspector-head"
+              onClick={() => setInspector(false)}
+              aria-label="Close inspector"
+              aria-keyshortcuts={RIGHT_RAIL_SHORTCUT}
+              title={RIGHT_RAIL_HINT}
+            >
+              {familiar ? (
+                <FamiliarAvatar name={name} avatarUrl={familiar.avatarUrl} size={22} ring />
+              ) : (
+                // .fr-inspector-head is a 3-column grid whose first column is a
+                // fixed 22px avatar slot; leaving it empty shifts the name into
+                // 22px and wraps it over the close icon.
+                <span className="fr-inspector-mark" aria-hidden="true" />
+              )}
+              <span className="fr-inspector-who">
+                <span className="fr-inspector-name">{familiar ? name : 'Coven CLI'}</span>
+                <span className="fr-inspector-kind">
+                  {familiar ? 'Coven familiar' : 'No familiar selected'}
+                </span>
               </span>
-            </span>
-            <Icon name="sidebar-simple" size={15} />
-          </button>
-          <div className="fr-tabs">
-            <Segmented
-              options={INSPECTOR_TABS}
-              value={tab}
-              onChange={setTab}
-              getLabel={titleCase}
-              label="Familiar details"
-            />
-          </div>
-          <section className="fr-inspector-panel" aria-label={titleCase(tab)}>
-            {tab === 'overview' ? (
-              <div className="fr-stack">
-                <div className="fr-card fr-card--lift fr-overview-purpose">
-                  <span className="fr-eyebrow">{familiar ? 'Purpose' : 'Overview'}</span>
-                  <span className="fr-purpose">
-                    {familiar?.description ||
-                      (familiar
-                        ? 'No description provided by Coven.'
-                        : 'Select a familiar to chat with your local Coven CLI. Every message is sent on its behalf.')}
-                  </span>
-                </div>
-                {familiar ? (
-                  <div className="fr-card fr-card--lift fr-rows">
-                    <div className="fr-row">
-                      <span className="fr-row-label">Identity</span>
-                      <span className="coven-row-path">
-                        <code className="fr-row-value coven-row-value--path" title={familiar.id}>
-                          {familiar.id}
-                        </code>
-                        <CopyButton
-                          className="coven-row-copy"
-                          text={familiar.id}
-                          label="Copy identity"
-                        />
-                      </span>
-                    </div>
-                    <div className="fr-row">
-                      <span className="fr-row-label">Workspace</span>
-                      {familiar.workspace ? (
+              <Icon name="sidebar-simple" size={15} />
+            </button>
+            <div className="fr-tabs">
+              <Segmented
+                options={INSPECTOR_TABS}
+                value={tab}
+                onChange={setTab}
+                getLabel={titleCase}
+                label="Familiar details"
+              />
+            </div>
+            <section className="fr-inspector-panel" aria-label={titleCase(tab)}>
+              {tab === 'overview' ? (
+                <div className="fr-stack">
+                  <div className="fr-card fr-card--lift fr-overview-purpose">
+                    <span className="fr-eyebrow">{familiar ? 'Purpose' : 'Overview'}</span>
+                    <span className="fr-purpose">
+                      {familiar?.description ||
+                        (familiar
+                          ? 'No description provided by Coven.'
+                          : 'Select a familiar to chat with your local Coven CLI. Every message is sent on its behalf.')}
+                    </span>
+                  </div>
+                  {familiar ? (
+                    <div className="fr-card fr-card--lift fr-rows">
+                      <div className="fr-row">
+                        <span className="fr-row-label">Identity</span>
                         <span className="coven-row-path">
-                          <span
-                            className="fr-row-value coven-row-value--path"
-                            title={familiar.workspace}
-                          >
-                            {familiar.workspace}
-                          </span>
+                          <code className="fr-row-value coven-row-value--path" title={familiar.id}>
+                            {familiar.id}
+                          </code>
                           <CopyButton
                             className="coven-row-copy"
-                            text={familiar.workspace}
-                            label="Copy workspace path"
+                            text={familiar.id}
+                            label="Copy identity"
                           />
                         </span>
-                      ) : (
-                        <span className="fr-row-value">Not reported</span>
-                      )}
-                    </div>
-                    <div className="fr-row">
-                      <span className="fr-row-label">Chat</span>
-                      <span className="fr-row-value">
-                        {session ? (session.archived ? 'Archived' : 'Active') : 'Not started'}
-                      </span>
-                    </div>
-                    <div className="fr-row">
-                      <span className="fr-row-label">Last activity</span>
-                      {formatAbsoluteTime(session?.updatedAt) ? (
-                        <time
-                          className="fr-row-value"
-                          dateTime={session?.updatedAt}
-                          title={formatAbsoluteTime(session?.updatedAt)}
-                        >
-                          {formatAbsoluteTime(session?.updatedAt)}
-                        </time>
-                      ) : (
-                        <span className="fr-row-value">Not reported</span>
-                      )}
-                    </div>
-                  </div>
-                ) : null}
-                <FamButton
-                  size="sm"
-                  onClick={props.onRefresh}
-                  disabled={props.busy || props.loading}
-                >
-                  Refresh local data
-                </FamButton>
-              </div>
-            ) : null}
-            {tab === 'access' ? (
-              <div className="fr-stack">
-                {familiar ? (
-                  <div className="fr-card fr-card--lift coven-access">
-                    <span className="fr-eyebrow">Declared project access</span>
-                    {projectAccess.length ? (
-                      <div className="fr-rows coven-access-rows">
-                        {projectAccess.map((project) => (
-                          <div className="fr-row" key={`${project.path}:${project.access}`}>
-                            <span className="fr-row-copy">
-                              <span className="fr-row-label">{project.name}</span>
-                              <span className="fr-row-hint" title={project.path}>
-                                {project.path}
-                              </span>
-                            </span>
-                            <span
-                              className={cx(
-                                'fr-row-value',
-                                project.access === 'write' && 'fr-row-value--warn',
-                              )}
-                            >
-                              {project.access === 'write' ? 'Read and write' : 'Read only'}
-                            </span>
-                          </div>
-                        ))}
                       </div>
-                    ) : (
-                      <span className="fr-purpose">
-                        {familiar.projectAccessUnavailable
-                          ? `Chat could not read Coven's project registry or grants, so ${name}'s declared access is unknown. Check them in Coven, then refresh.`
-                          : `No project access is declared for ${name} in Coven's project registry or grants.`}
-                      </span>
-                    )}
-                  </div>
-                ) : null}
-                <div className="coven-details fr-card fr-card--lift">
-                  <h2>Access</h2>
-                  <p>
-                    Declared access comes from Coven's local project registry and grants; Chat shows
-                    it as declared and neither enforces nor extends it. Access rules and approvals
-                    are not exposed by this CLI integration.
-                  </p>
-                  <p>
-                    Configure your familiar in Coven. This app does not define or enforce an
-                    additional permission boundary.
-                  </p>
-                  <p>
-                    Text and code attachments are sent with your message. Show screen in the thread
-                    header opens a remote desktop over VNC; it starts view only. Tool approval
-                    controls are unavailable here.
-                  </p>
-                </div>
-              </div>
-            ) : null}
-            {tab === 'activity' ? (
-              <div className="fr-stack">
-                <div className="fr-card fr-card--lift fr-rows">
-                  <div className="fr-row">
-                    <span className="fr-row-label">Run</span>
-                    <span className="fr-row-value">
-                      {!props.busy
-                        ? 'Idle'
-                        : !runHere
-                          ? `${runName} is responding in another chat`
-                          : props.cancelling
-                            ? 'Stopping'
-                            : runningTool
-                              ? `Running ${runningTool}`
-                              : `${name} is responding`}
-                    </span>
-                  </div>
-                  {props.lastRun ? (
-                    <div className="fr-row">
-                      <span className="fr-row-label">Last run</span>
-                      <span className="fr-row-value">{lastRunText(props.lastRun)}</span>
+                      <div className="fr-row">
+                        <span className="fr-row-label">Workspace</span>
+                        {familiar.workspace ? (
+                          <span className="coven-row-path">
+                            <span
+                              className="fr-row-value coven-row-value--path"
+                              title={familiar.workspace}
+                            >
+                              {familiar.workspace}
+                            </span>
+                            <CopyButton
+                              className="coven-row-copy"
+                              text={familiar.workspace}
+                              label="Copy workspace path"
+                            />
+                          </span>
+                        ) : (
+                          <span className="fr-row-value">Not reported</span>
+                        )}
+                      </div>
+                      <div className="fr-row">
+                        <span className="fr-row-label">Chat</span>
+                        <span className="fr-row-value">
+                          {session ? (session.archived ? 'Archived' : 'Active') : 'Not started'}
+                        </span>
+                      </div>
+                      <div className="fr-row">
+                        <span className="fr-row-label">Last activity</span>
+                        {formatAbsoluteTime(session?.updatedAt) ? (
+                          <time
+                            className="fr-row-value"
+                            dateTime={session?.updatedAt}
+                            title={formatAbsoluteTime(session?.updatedAt)}
+                          >
+                            {formatAbsoluteTime(session?.updatedAt)}
+                          </time>
+                        ) : (
+                          <span className="fr-row-value">Not reported</span>
+                        )}
+                      </div>
                     </div>
                   ) : null}
-                  <div className="fr-row">
-                    <span className="fr-row-label">Your messages</span>
-                    <span className="fr-row-value">{counts.sent}</span>
-                  </div>
-                  <div className="fr-row">
-                    <span className="fr-row-label">Replies</span>
-                    <span className="fr-row-value">{counts.replies}</span>
-                  </div>
-                  <div className="fr-row">
-                    <span className="fr-row-copy">
-                      <span className="fr-row-label">Tool calls</span>
-                      {counts.breakdown ? (
-                        <span className="fr-row-hint" title={counts.breakdown}>
-                          {counts.breakdown}
+                  <FamButton
+                    size="sm"
+                    onClick={props.onRefresh}
+                    disabled={props.busy || props.loading}
+                  >
+                    Refresh local data
+                  </FamButton>
+                </div>
+              ) : null}
+              {tab === 'access' ? (
+                <div className="fr-stack">
+                  {familiar ? (
+                    <div className="fr-card fr-card--lift coven-access">
+                      <span className="fr-eyebrow">Declared project access</span>
+                      {projectAccess.length ? (
+                        <div className="fr-rows coven-access-rows">
+                          {projectAccess.map((project) => (
+                            <div className="fr-row" key={`${project.path}:${project.access}`}>
+                              <span className="fr-row-copy">
+                                <span className="fr-row-label">{project.name}</span>
+                                <span className="fr-row-hint" title={project.path}>
+                                  {project.path}
+                                </span>
+                              </span>
+                              <span
+                                className={cx(
+                                  'fr-row-value',
+                                  project.access === 'write' && 'fr-row-value--warn',
+                                )}
+                              >
+                                {project.access === 'write' ? 'Read and write' : 'Read only'}
+                              </span>
+                            </div>
+                          ))}
+                        </div>
+                      ) : (
+                        <span className="fr-purpose">
+                          {familiar.projectAccessUnavailable
+                            ? `Chat could not read Coven's project registry or grants, so ${name}'s declared access is unknown. Check them in Coven, then refresh.`
+                            : `No project access is declared for ${name} in Coven's project registry or grants.`}
                         </span>
-                      ) : null}
-                    </span>
-                    <span className="fr-row-value">
-                      {counts.failed ? `${counts.tools} · ${counts.failed} failed` : counts.tools}
-                    </span>
+                      )}
+                    </div>
+                  ) : null}
+                  <div className="coven-details fr-card fr-card--lift">
+                    <h2>Access</h2>
+                    <p>
+                      Declared access comes from Coven's local project registry and grants; Chat
+                      shows it as declared and neither enforces nor extends it. Access rules and
+                      approvals are not exposed by this CLI integration.
+                    </p>
+                    <p>
+                      Configure your familiar in Coven. This app does not define or enforce an
+                      additional permission boundary.
+                    </p>
+                    <p>
+                      Text and code attachments are sent with your message. Show screen in the
+                      thread header opens a remote desktop over VNC; it starts view only. Tool
+                      approval controls are unavailable here.
+                    </p>
                   </div>
                 </div>
-                <div className="coven-details fr-card fr-card--lift">
-                  <p>
-                    Counts cover the loaded transcript. Tool activity appears in the conversation;
-                    tokens, cost and timing are not reported by this CLI integration.
-                  </p>
+              ) : null}
+              {tab === 'activity' ? (
+                <div className="fr-stack">
+                  <div className="fr-card fr-card--lift fr-rows">
+                    <div className="fr-row">
+                      <span className="fr-row-label">Run</span>
+                      <span className="fr-row-value">
+                        {!props.busy
+                          ? 'Idle'
+                          : !runHere
+                            ? `${runName} is responding in another chat`
+                            : props.cancelling
+                              ? 'Stopping'
+                              : runningTool
+                                ? `Running ${runningTool}`
+                                : `${name} is responding`}
+                      </span>
+                    </div>
+                    {props.lastRun ? (
+                      <div className="fr-row">
+                        <span className="fr-row-label">Last run</span>
+                        <span className="fr-row-value">{lastRunText(props.lastRun)}</span>
+                      </div>
+                    ) : null}
+                    <div className="fr-row">
+                      <span className="fr-row-label">Your messages</span>
+                      <span className="fr-row-value">{counts.sent}</span>
+                    </div>
+                    <div className="fr-row">
+                      <span className="fr-row-label">Replies</span>
+                      <span className="fr-row-value">{counts.replies}</span>
+                    </div>
+                    <div className="fr-row">
+                      <span className="fr-row-copy">
+                        <span className="fr-row-label">Tool calls</span>
+                        {counts.breakdown ? (
+                          <span className="fr-row-hint" title={counts.breakdown}>
+                            {counts.breakdown}
+                          </span>
+                        ) : null}
+                      </span>
+                      <span className="fr-row-value">
+                        {counts.failed ? `${counts.tools} · ${counts.failed} failed` : counts.tools}
+                      </span>
+                    </div>
+                  </div>
+                  <div className="coven-details fr-card fr-card--lift">
+                    <p>
+                      Counts cover the loaded transcript. Tool activity appears in the conversation;
+                      tokens, cost and timing are not reported by this CLI integration.
+                    </p>
+                  </div>
                 </div>
-              </div>
-            ) : null}
-          </section>
-        </div>
-      </aside>
-    </div>
+              ) : null}
+            </section>
+          </div>
+        </aside>
+      </div>
+    </MenuPortalContainer.Provider>
   );
 }
