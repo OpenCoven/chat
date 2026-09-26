@@ -223,6 +223,13 @@ jobs:
           node-version-file: .node-version
           cache: pnpm
 
+      # The package's declared contract (names, window bounds, strict CSP,
+      # installer targets and icons, the capability allowlist, no shell or
+      # filesystem plugins) and the v0.0.1 decisions on issue #356 (no
+      # updater, no deep-link protocol) are enforced before any build.
+      - name: Verify the package contract
+        run: node scripts/verify-package.mjs
+
       - id: check
         name: Verify tag is annotated, signed, and version-consistent
         env:
