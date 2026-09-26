@@ -37,6 +37,21 @@ Run through this in order. Every step is runnable as written.
    grep -m1 '^version' src-tauri/Cargo.toml
    ```
 
+   **Verify the package contract.** The release workflow runs this before any
+   platform build, so run it locally first:
+
+   ```bash
+   node scripts/verify-package.mjs
+   ```
+
+   It enforces what the configuration already declares: product name and
+   identifier, the 1180×780 default and 480×520 minimum window, a strict CSP
+   with no network origins in `connect-src`, the installer targets and icons,
+   the main window's capability allowlist, and no shell, filesystem, HTTP or
+   opener plugin. It also prints the decisions issue #356 leaves open (the
+   updater key and the `opencoven-chat` protocol) as pending; once they are
+   made, pass `--release` in `release.yml` so they are enforced too.
+
    Also confirm bundling is enabled in `src-tauri/tauri.conf.json`
    (`bundle.active: true` with the platform targets), otherwise `tauri build`
    produces no installers.
