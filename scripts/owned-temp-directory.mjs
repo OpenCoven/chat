@@ -214,6 +214,50 @@ export function createOwnedShortTempDirectory({ prefix, childSegments = [] } = {
   return createOwnedTempDirectoryIn(parentPath, { prefix, childSegments });
 }
 
+/**
+ * Windows briefly denies renaming a directory right after the processes that
+ * worked in it exit: a handle held by process teardown or a file scanner
+ * outlives them. The protected Windows lane caught this as `root-rename` with
+ * `0x80070005` at 0 s, the same rename succeeding 3 s later with no process
+ * left in the root and no file still open. Retry only those transient codes,
+ * only on Windows, for a bounded time; every other failure is immediate.
+ * The identity and ownership checks after the rename are unchanged.
+ */
+const transientRenameCodes = new Set(['EPERM', 'EACCES', 'EBUSY']);
+const renameRetryBudgetMs = 30_000;
+const renameRetryMaxDelayMs = 2_000;
+
+function sleepSync(milliseconds) {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, milliseconds);
+}
+
+export function renameWithTransientRetry(
+  from,
+  to,
+  { platform = process.platform, sleep = sleepSync, budgetMs = renameRetryBudgetMs } = {},
+) {
+  let waited = 0;
+  let delay = 100;
+  for (;;) {
+    try {
+      renameSync(from, to);
+      return;
+    } catch (error) {
+      const transient =
+        platform === 'win32' &&
+        error instanceof Error &&
+        'code' in error &&
+        transientRenameCodes.has(error.code);
+      if (!transient || waited + delay > budgetMs) {
+        throw error;
+      }
+      sleep(delay);
+      waited += delay;
+      delay = Math.min(delay * 2, renameRetryMaxDelayMs);
+    }
+  }
+}
+
 export function cleanupOwnedTempRoot(context) {
   cleanupOperation('root-precondition', () => assertOwnedRootStillMatches(context));
 
@@ -222,7 +266,7 @@ export function cleanupOwnedTempRoot(context) {
     `${basename(context.rootPath)}.deleting-${process.pid}-${randomUUID()}`,
   );
 
-  cleanupOperation('root-rename', () => renameSync(context.rootPath, deletingRoot));
+  cleanupOperation('root-rename', () => renameWithTransientRetry(context.rootPath, deletingRoot));
 
   cleanupOperation('root-postrename', () => {
     const renamedStats = lstatSync(deletingRoot);

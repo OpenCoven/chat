@@ -2040,10 +2040,10 @@ revision authorities can therefore have different workflow hashes:
 
 | File | Bytes | SHA-256 |
 | --- | ---: | --- |
-| `.github/workflows/client-v1-conformance.yml` | 181,684 | `a06a8f82ce8a852e3020eb76629510fe07c24230338e5a06907f8c3905a94be3` |
+| `.github/workflows/client-v1-conformance.yml` | 181,684 | `93858b9056614e5bcfd0ffc02fdf38b4b4408364f7b1916491133c92050d5ab5` |
 | `scripts/contract-canary.mjs` | 40,618 | `a4c2fe0a5eb6a5ff4653de5374c34c0fb46907c6806a5d23b86d8b37206ef958` |
 | `scripts/executable-resolution.mjs` | 9,154 | `31e3c412ff8c835f14522f36a59e91f4a4ba82913210ae8e3b4455217503f430` |
-| `scripts/owned-temp-directory.mjs` | 7,762 | `95f546ef9ed614f2a0f55d356ddfc54c943fc53b595b4eebebfcbd4db68e5c0b` |
+| `scripts/owned-temp-directory.mjs` | 9,205 | `1ba30d2d5f0312143e2837956899a4f3f116f3619937d5d9756ff197ecb2a325` |
 | `scripts/phase1-artifact-secret-scan.mjs` | 21,638 | `8b3c85cb8461fd520892a53a6169201e1db1bf50fe1457ed6315ba9fcd2fd658` |
 | `scripts/phase1-conformance-lock.mjs` | 48,960 | `92f981c43f75bc65c81e9e9ee16084aae658617b929d451a9db0d7c9e6bedbe2` |
 | `scripts/phase1-conformance.mjs` | 220,183 | `8f045e44cbe31377d7bb0697a398c27606c6505d2b3ff2ca23f8932809cb205c` |
