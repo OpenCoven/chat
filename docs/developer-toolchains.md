@@ -86,8 +86,8 @@
 - CI reads `contract-canary.lock.json`, checks out those exact reviewed SDK and
   Cave revisions, rejects dirty SDK or Cave checkouts, and verifies the
   checked-out HEADs before the canary runs. The SDK lock targets canonical
-  `main` commit `96804bc483a063e41e9a9738a4ace61970f6c0a4` and manifest digest
-  `2001d754823ef9183e49c35db6f3a890913c8301460b34a0df236b8dccc6cb6a`.
+  `main` commit `cd10a3fa1d9900e0dbcb04bbb2477140854fba1d` and manifest digest
+  `72041bfe9a236d709ea3fe26d32b871f17c7c5183e2991cd0229063ade730cb4`.
   The lock also pins the Cave
   producer's Client v1 contract fixture and `hpke-bound-v1` vector digests;
   the current canary and frozen-consumer verifier require packed fixture and
@@ -95,14 +95,15 @@
   the ancestry and exact historical bytes of the SDK's fixture provenance.
   Standalone historical-fixture validation retains support for authenticated
   older, different fixture bytes; it is not the current-candidate canary policy.
-- This adoption uses the fresh private SDK `0.0.1`
-  candidate including the public Automations API. Only the Coven archive
-  differs from candidate `77d825d`; the other three archives are byte-identical.
-  Previous candidate evidence remains historical. The new production consumer
-  retains its reviewed native sources; the producer preserves the subsequently
-  reviewed lifecycle and diagnostic changes. A validator freeze after reviewed
-  producer landing is still required.
-  Local packed-consumer verification is not accepted conformance evidence or
+- This production-consumer preparation uses the replacement private SDK
+  `0.0.1` candidate `cd10a3f`. SDK #40 blocked candidate `96804bc` because it
+  predates the High-severity Cave fixes SDK #277 and #285. The Cave, Coven and
+  SDK archives change and the core archive is byte-identical; the Cave client
+  now depends on `canonicalize` 5.1.0. Previous candidate evidence remains
+  historical. The production consumer retains its reviewed native sources;
+  the producer preserves its subsequently reviewed changes. A Phase 1 producer
+  repin and validator freeze after this lands are still required. Local
+  packed-consumer verification is not accepted conformance evidence or
   publication authorization.
 - `src-tauri/gen/schemas/desktop-schema.json` is intentionally kept outside the
   ignore rules so the capability `$schema` can ship with fresh checkouts.

@@ -2,11 +2,11 @@
   "version": 5,
   "chat": {
     "repository": "OpenCoven/chat",
-    "revision": "ef8c747f1dbae0fd2bc9fcb24d3a0914f9f1cc49"
+    "revision": "dabcdd47e7509880f26e9895ffb63d42d9070ca8"
   },
   "sdk": {
     "repository": "OpenCoven/sdk",
-    "revision": "96804bc483a063e41e9a9738a4ace61970f6c0a4"
+    "revision": "cd10a3fa1d9900e0dbcb04bbb2477140854fba1d"
   },
   "cave": {
     "repository": "OpenCoven/coven-cave",
@@ -204,7 +204,7 @@
     ]
   },
   "chatAuthority": {
-    "tree": "ffd1963ef9539c7a679909200175fb11a9305c95",
+    "tree": "48e9387d2f3727e944a82376652fdc0c1dd02732",
     "files": [
       {
         "path": "src-tauri/Cargo.toml",
@@ -274,7 +274,7 @@
   "release": {
     "sdkManifest": {
       "version": "0.0.1",
-      "sha256": "2001d754823ef9183e49c35db6f3a890913c8301460b34a0df236b8dccc6cb6a"
+      "sha256": "72041bfe9a236d709ea3fe26d32b871f17c7c5183e2991cd0229063ade730cb4"
     },
     "sdkArtifacts": [
       {
@@ -288,22 +288,22 @@
         "packageName": "@opencoven/cave-client",
         "releaseFile": "tarballs/cave/opencoven-cave-client-0.0.1.tgz",
         "vendorFile": "cave-client-0.0.1.tgz",
-        "size": 83218,
-        "sha256": "c4e44fb49a589ba26a2056f1308c31a7b86dec6d1e96506572e7a25b27b5fa0f"
+        "size": 89873,
+        "sha256": "7389376ebc40ff59d942957339769d4dbdb566e25adef9a9deb372581b39a245"
       },
       {
         "packageName": "@opencoven/coven-client",
         "releaseFile": "tarballs/coven/opencoven-coven-client-0.0.1.tgz",
         "vendorFile": "coven-client-0.0.1.tgz",
-        "size": 45724,
-        "sha256": "bc24d3c1542ba7c970b8e5eb1e54d3d9e7acc3e07028466906947773a4b5ef65"
+        "size": 102172,
+        "sha256": "4162dd685f78c8703497cba65f68a2f0c28fc640bb7da64b0dc9462c74f357dc"
       },
       {
         "packageName": "@opencoven/sdk",
         "releaseFile": "tarballs/sdk/opencoven-sdk-0.0.1.tgz",
         "vendorFile": "sdk-0.0.1.tgz",
-        "size": 16025,
-        "sha256": "5318c4c6d511f0bcda42e4fd88168f549fc3ea74a516d7a4b2004e1c5023c4b4"
+        "size": 16783,
+        "sha256": "68b258d21eb61360588c41db528d4b37e4594ddd82dac04cdf6477728161e43a"
       }
     ],
     "caveVersion": "0.4.2",
@@ -311,7 +311,7 @@
     "consumerLock": {
       "path": "pnpm-lock.yaml",
       "size": 56222,
-      "sha256": "62d871edd67d26cd4883814fc6146232ee0a5361675137cea257804344d0f555"
+      "sha256": "1721be3c4ac1c8d0e31690e0a6d4a8f77b59db1bb4b5ae31bf288eaadc652719"
     },
     "caveArtifacts": {
       "assertionEngine": {

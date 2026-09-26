@@ -266,17 +266,32 @@ the final bytes.
 
 ## SDK 0.0.1 candidate and diagnostic authority adoption
 
-The current target uses the exact private SDK candidate from
-`96804bc483a063e41e9a9738a4ace61970f6c0a4` (tree
-`aa9eb8e924735419a9afdbcc80a5b087504ccc9d`), not repacked or relabelled 0.1.0
-archives. Its runtime SHA-256 is
-`8c46276b5698d32d570ad4a89998b412cb0efde5641313b0c71ae41519e64ae7`.
-The schema-1 release manifest is 1,031 bytes with SHA-256
-`2001d754823ef9183e49c35db6f3a890913c8301460b34a0df236b8dccc6cb6a`.
+The current target is the replacement private SDK candidate from
+`cd10a3fa1d9900e0dbcb04bbb2477140854fba1d` (tree
+`6977092046b4cd5c3a3ce4a720141b1a97cfed39`), packed twice from that exact merge
+with identical bytes. Its runtime SHA-256 is
+`05bc8cc66bf07f9d2eef2015fdcd4e297a0ecb719fc2c92bca010d21c9045167`, from a
+135-entry canonical publication-source manifest of 26,543 bytes with SHA-256
+`a9d34128aa5aee886aebd9ce90a846dedd0c27a79d5060b13fa4c3cf6b54318b`. The
+schema-1 release manifest is 1,032 bytes with SHA-256
+`72041bfe9a236d709ea3fe26d32b871f17c7c5183e2991cd0229063ade730cb4`.
 Both locks record the four exact candidate archive sizes and digests.
 
-This fresh private candidate includes the reviewed public Automations API
-from OpenCoven/sdk#251 and initial-release metadata from OpenCoven/sdk#253.
+SDK #40 blocked the previous candidate `96804bc` because it predates the
+High-severity Cave fixes SDK #277 and #285. This replacement is cut from SDK
+`main` with those fixes, SDK #294 and the Automations and Cave APIs merged
+since (SDK #321). The Cave archive is 89,873 bytes
+(`7389376ebc40ff59d942957339769d4dbdb566e25adef9a9deb372581b39a245`), the
+Coven archive 102,172 bytes
+(`4162dd685f78c8703497cba65f68a2f0c28fc640bb7da64b0dc9462c74f357dc`) and the
+SDK archive 16,783 bytes
+(`68b258d21eb61360588c41db528d4b37e4594ddd82dac04cdf6477728161e43a`); the core
+archive is byte-identical. The Cave client now depends on `canonicalize`
+5.1.0. Evidence for `96804bc` remains historical and does not qualify the
+changed runtime.
+
+The previous candidate `96804bc483a063e41e9a9738a4ace61970f6c0a4` included
+the reviewed public Automations API from OpenCoven/sdk#251 and initial-release metadata from OpenCoven/sdk#253.
 Its 106-entry canonical publication-source manifest is 20,300 bytes with
 SHA-256 `c9e1c8c1538f5f14a170c3fa14a5d1a022d24937918e11caba1c7219232a624f`.
 Only the Coven archive differs from candidate `77d825d`: it is 45,724 bytes
@@ -311,9 +326,11 @@ fixture. Those test-only changes advance the `connection.rs` native delta
 identity without changing the frozen production consumer or native behavior.
 
 `chat.revision` and `chatAuthority.tree` identify a separate production
-consumer `ef8c747f1dbae0fd2bc9fcb24d3a0914f9f1cc49`, prepared from reviewed
-consumer `636f7da96fa178c2c14648f84137091b15a1cb8a`. All production native
-files remain unchanged; its consumer lock and SDK archives are rebound from
+consumer `dabcdd47e7509880f26e9895ffb63d42d9070ca8` (tree
+`48e9387d2f3727e944a82376652fdc0c1dd02732`), prepared directly on the previous
+consumer `ef8c747f1dbae0fd2bc9fcb24d3a0914f9f1cc49`, itself prepared from
+reviewed consumer `636f7da96fa178c2c14648f84137091b15a1cb8a`. All production
+native files remain unchanged; its consumer lock and SDK archives are rebound from
 their actual committed bytes. The production canary also receives the already
 reviewed non-publishing artifact entrypoint, so private candidate verification
 does not invoke the publication CLI. The executable harness retains all ten
@@ -689,10 +706,10 @@ diagnostic-only change.
 
 `phase1-conformance.lock.json` pins:
 
-- Chat production `ef8c747f1dbae0fd2bc9fcb24d3a0914f9f1cc49`, tree
-  `ffd1963ef9539c7a679909200175fb11a9305c95`, the fresh SDK 0.0.1 consumer
-  retaining the prior reviewed native production source;
-- SDK package candidate `96804bc483a063e41e9a9738a4ace61970f6c0a4`;
+- Chat production `dabcdd47e7509880f26e9895ffb63d42d9070ca8`, tree
+  `48e9387d2f3727e944a82376652fdc0c1dd02732`, the replacement SDK 0.0.1
+  consumer retaining the prior reviewed native production source;
+- SDK package candidate `cd10a3fa1d9900e0dbcb04bbb2477140854fba1d`;
 - Cave authority `5ee8545f5c2fe4c6121dfdfe842395a354bb3d7d`, tree
   `23cd75ef310e1f293a40e3eee183ea8df6180544`, release `0.4.2`;
 - Coven daemon and observation-test source `8c3735f374d6bc95e5b6fd107f7e7308fa26a2f8`;
@@ -703,7 +720,7 @@ diagnostic-only change.
 - Historical schema-1 SDK evidence contract and registry
   `4736bf2e0d5b16272d79ecf7784c75f376b39b94`;
 - manifest digest
-  `2001d754823ef9183e49c35db6f3a890913c8301460b34a0df236b8dccc6cb6a`;
+  `72041bfe9a236d709ea3fe26d32b871f17c7c5183e2991cd0229063ade730cb4`;
 - canonical package order, release/vendor paths, sizes, and SHA-256 digests.
 
 SDK PR #189 froze the preceding candidate and Chat source contract.
