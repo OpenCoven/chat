@@ -302,7 +302,7 @@ test('keeps the transcript and composer in their tracks with the screen and find
   expect(input?.y ?? 0).toBeGreaterThan((transcript?.y ?? 0) + (transcript?.height ?? 0) - 1);
 });
 
-test('keeps every visible text at or above the design contrast floor', async ({ page }) => {
+test('keeps every visible text at WCAG AA contrast', async ({ page }) => {
   await installRuntimeFixture(page);
   await page.goto('/');
   const composer = page.getByRole('textbox', { name: 'Message Local familiar' });
@@ -316,8 +316,8 @@ test('keeps every visible text at or above the design contrast floor', async ({ 
   // The palette tests check tokens in isolation; this measures the rendered
   // page. Every text is made transparent and the viewport captured, so each
   // text box is compared with the pixels actually behind it, gradients and
-  // layered surfaces included. 3:1 is the floor the design accepts for its
-  // quietest (muted) text.
+  // layered surfaces included. Every text must meet WCAG AA for normal text
+  // (4.5:1); the app sets none large enough for the 3:1 allowance.
   const texts = await page.evaluate(() => {
     const found: { label: string; color: string; opacity: number; box: number[] }[] = [];
     const seen = new Set<Element>();
@@ -403,7 +403,7 @@ test('keeps every visible text at or above the design contrast floor', async ({ 
           const shown = [r, g, b].map((v, i) => (v ?? 0) * alpha + (back[i] ?? 0) * (1 - alpha));
           worst = Math.min(worst, ratio(shown, back));
         }
-        if (worst < 3) found.push(`${worst.toFixed(2)} "${text.label}"`);
+        if (worst < 4.5) found.push(`${worst.toFixed(2)} "${text.label}"`);
       }
       return found;
     },

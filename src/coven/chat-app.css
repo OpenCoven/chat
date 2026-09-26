@@ -879,6 +879,15 @@
   white-space: nowrap;
 }
 
+/*
+ * Destructive buttons (Stop run) set their label in the danger colour over a
+ * tint of itself, 4.3:1. The label takes the same lift toward the primary
+ * text that the error notice uses, which clears 4.5:1.
+ */
+.coven-chat [data-slot="button"][data-variant="destructive"] {
+  color: color-mix(in oklch, var(--color-danger) 70%, var(--text-primary));
+}
+
 /* A partial history says so, with the control that reads further back. */
 .coven-chat .coven-history-notice {
   display: flex;

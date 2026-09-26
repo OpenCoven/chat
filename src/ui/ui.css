@@ -160,7 +160,7 @@
 }
 
 :where([data-slot="textarea"])::placeholder {
-  color: var(--text-muted, #6f6e78);
+  color: var(--text-muted, #8a8993);
 }
 
 :where([data-slot="textarea"]):focus-visible {
@@ -231,7 +231,7 @@
   font-weight: 600;
   letter-spacing: 0.08em;
   text-transform: uppercase;
-  color: var(--text-muted, #6f6e78);
+  color: var(--text-muted, #8a8993);
 }
 
 :where([data-slot="dropdown-menu-item"]) {
@@ -278,7 +278,7 @@
 
 .oc-palette-meta {
   font-size: 11px;
-  color: var(--text-muted, #6f6e78);
+  color: var(--text-muted, #8a8993);
   white-space: nowrap;
 }
 
@@ -293,7 +293,7 @@
   background: var(--bg-sunken, #101012);
   font-family: var(--font-jetbrains-mono, ui-monospace, monospace);
   font-size: 10px;
-  color: var(--text-muted, #6f6e78);
+  color: var(--text-muted, #8a8993);
 }
 
 /* ----------------------------------------------------------- attachment */
@@ -353,7 +353,7 @@
 .oc-attachment-meta {
   font-family: var(--font-jetbrains-mono, ui-monospace, monospace);
   font-size: 10.5px;
-  color: var(--text-muted, #6f6e78);
+  color: var(--text-muted, #8a8993);
 }
 
 .oc-attachment-progress {
@@ -512,7 +512,7 @@ textarea[data-slot="textarea"]:focus-visible {
   align-items: center;
   gap: 5px;
   font-size: 11px;
-  color: var(--text-muted, #6f6e78);
+  color: var(--text-muted, #8a8993);
 }
 
 /* ----------------------------------------------------------- keyframes */

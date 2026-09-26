@@ -3,7 +3,7 @@ import { resolve } from 'node:path';
 
 import { describe, expect, it } from 'vitest';
 
-import { AA_LARGE_TEXT, AA_NORMAL_TEXT, contrastRatio, type HexColor } from '../lib/contrast';
+import { AA_NORMAL_TEXT, contrastRatio, type HexColor } from '../lib/contrast';
 
 /**
  * Guards for the Familiars Redesign v2 palette.
@@ -75,12 +75,13 @@ describe('familiars-shell.css', () => {
     }
   });
 
-  it('keeps muted text at least large-text legible', () => {
-    // Muted text is timestamps, hints, and labels that sit beside a stronger
-    // line; the design accepts large-text contrast for it, never less.
+  it('keeps muted text readable at the small sizes it is set in', () => {
+    // Muted text is timestamps, hints, and labels at 10.5-12px. It was held
+    // to large-text contrast (3:1), which WCAG allows only at 18.66px bold or
+    // 24px; at these sizes it must meet the normal-text minimum.
     for (const surface of SURFACES) {
       expect(contrastRatio(hex('--text-muted'), hex(surface))).toBeGreaterThanOrEqual(
-        AA_LARGE_TEXT,
+        AA_NORMAL_TEXT,
       );
     }
   });
