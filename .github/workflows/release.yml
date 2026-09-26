@@ -966,6 +966,29 @@ jobs:
           echo "Verifying checksums..."
           shasum -a 256 -c SHA256SUMS
 
+      # Check the assembled set as a whole before anything is published: all
+      # six installers exactly once, SHA256SUMS covering every asset, version
+      # and identity agreeing with the tagged tree, and the updater and signing
+      # state stated in the summary rather than implied.
+      - name: Smoke-test the assembled release
+        shell: bash
+        env:
+          ALLOW_UNSIGNED: ${{ inputs.allow_unsigned }}
+        run: |
+          set -euo pipefail
+          args=(--dir release --version "${VERSION}" --tag "${TAG}")
+          if [ "${ALLOW_UNSIGNED:-false}" = "true" ]; then
+            args+=(--allow-unsigned)
+          fi
+          node scripts/release-smoke.mjs "${args[@]}" | tee release-smoke.json
+          {
+            echo "### Release smoke test"
+            echo
+            echo '```json'
+            cat release-smoke.json
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
       # Publish with the gh CLI (pre-installed on the runner) so no additional
       # third-party action needs pinning. --verify-tag makes gh refuse a tag
       # that does not exist on the remote; the signature gate already ran in

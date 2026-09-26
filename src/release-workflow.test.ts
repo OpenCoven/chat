@@ -81,6 +81,10 @@ describe('release workflow specification', () => {
     expect(publish.indexOf('Generate latest.json updater manifest')).toBeLessThan(
       publish.indexOf('Generate and verify SHA256SUMS'),
     );
+    const smoke = publish.indexOf('node scripts/release-smoke.mjs');
+    expect(smoke).toBeGreaterThan(publish.indexOf('Generate and verify SHA256SUMS'));
+    expect(smoke).toBeLessThan(publish.indexOf('Publish GitHub release'));
+    expect(publish).toContain('args+=(--allow-unsigned)');
     expect(workflow).not.toMatch(/^\s*-\s+run:\s+pnpm\b/m);
     expect(workflow).not.toMatch(/^\s*pnpm exec tauri build/m);
   });
