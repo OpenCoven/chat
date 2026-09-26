@@ -132,12 +132,12 @@ describe('Phase 1 specification guards', () => {
     expect(lock.version).toBe(4);
     expect(lock.sdk.repository).toBe('OpenCoven/sdk');
     expect(lock.cave.repository).toBe('OpenCoven/coven-cave');
-    expect(lock.sdk.revision).toBe('96804bc483a063e41e9a9738a4ace61970f6c0a4');
+    expect(lock.sdk.revision).toBe('cd10a3fa1d9900e0dbcb04bbb2477140854fba1d');
     expect(lock.cave.revision).toBe('8a06421a705c2d7891c3f44cc580c569f6cbe2c1');
     expect(lock.sdk.releaseManifest).toEqual({
       file: 'release-manifest.json',
       version: '0.0.1',
-      sha256: '2001d754823ef9183e49c35db6f3a890913c8301460b34a0df236b8dccc6cb6a',
+      sha256: '72041bfe9a236d709ea3fe26d32b871f17c7c5183e2991cd0229063ade730cb4',
     });
     expect(lock.sdk.artifacts).toEqual({
       core: {
@@ -153,24 +153,24 @@ describe('Phase 1 specification guards', () => {
         version: '0.0.1',
         releaseFile: 'tarballs/cave/opencoven-cave-client-0.0.1.tgz',
         vendorFile: 'cave-client-0.0.1.tgz',
-        size: 83218,
-        sha256: 'c4e44fb49a589ba26a2056f1308c31a7b86dec6d1e96506572e7a25b27b5fa0f',
+        size: 89873,
+        sha256: '7389376ebc40ff59d942957339769d4dbdb566e25adef9a9deb372581b39a245',
       },
       coven: {
         packageName: '@opencoven/coven-client',
         version: '0.0.1',
         releaseFile: 'tarballs/coven/opencoven-coven-client-0.0.1.tgz',
         vendorFile: 'coven-client-0.0.1.tgz',
-        size: 45724,
-        sha256: 'bc24d3c1542ba7c970b8e5eb1e54d3d9e7acc3e07028466906947773a4b5ef65',
+        size: 102172,
+        sha256: '4162dd685f78c8703497cba65f68a2f0c28fc640bb7da64b0dc9462c74f357dc',
       },
       sdk: {
         packageName: '@opencoven/sdk',
         version: '0.0.1',
         releaseFile: 'tarballs/sdk/opencoven-sdk-0.0.1.tgz',
         vendorFile: 'sdk-0.0.1.tgz',
-        size: 16025,
-        sha256: '5318c4c6d511f0bcda42e4fd88168f549fc3ea74a516d7a4b2004e1c5023c4b4',
+        size: 16783,
+        sha256: '68b258d21eb61360588c41db528d4b37e4594ddd82dac04cdf6477728161e43a',
       },
     });
     expect(lock.cave.artifacts).toEqual({

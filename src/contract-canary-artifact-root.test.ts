@@ -317,11 +317,11 @@ describe('contract canary temp directory safety', () => {
     const lock = readContractCanaryLock();
 
     expect(lock.sdk.repository).toBe('OpenCoven/sdk');
-    expect(lock.sdk.revision).toBe('96804bc483a063e41e9a9738a4ace61970f6c0a4');
+    expect(lock.sdk.revision).toBe('cd10a3fa1d9900e0dbcb04bbb2477140854fba1d');
     expect(lock.sdk.releaseManifest).toEqual({
       file: 'release-manifest.json',
       version: '0.0.1',
-      sha256: '2001d754823ef9183e49c35db6f3a890913c8301460b34a0df236b8dccc6cb6a',
+      sha256: '72041bfe9a236d709ea3fe26d32b871f17c7c5183e2991cd0229063ade730cb4',
     });
     expect(Object.keys(lock.sdk.artifacts)).toEqual(['core', 'cave', 'coven', 'sdk']);
     expect(lock.sdk.artifacts.core).toEqual({
@@ -338,8 +338,8 @@ describe('contract canary temp directory safety', () => {
       version: '0.0.1',
       releaseFile: 'tarballs/cave/opencoven-cave-client-0.0.1.tgz',
       vendorFile: 'cave-client-0.0.1.tgz',
-      size: 83218,
-      sha256: 'c4e44fb49a589ba26a2056f1308c31a7b86dec6d1e96506572e7a25b27b5fa0f',
+      size: 89873,
+      sha256: '7389376ebc40ff59d942957339769d4dbdb566e25adef9a9deb372581b39a245',
     });
     expect(lock.cave.repository).toBe('OpenCoven/coven-cave');
     expect(lock.cave.revision).toBe('8a06421a705c2d7891c3f44cc580c569f6cbe2c1');
