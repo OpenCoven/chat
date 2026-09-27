@@ -658,7 +658,10 @@ export function createCaveManagedCredentialTransport(
         },
         context,
       );
-      return canonicalFamiliarContractData(result) as unknown as CaveFamiliarContractResponse;
+      return {
+        ok: true,
+        ...canonicalFamiliarContractData(result),
+      } as unknown as CaveFamiliarContractResponse;
     },
     async familiarAnalytics(
       familiarId: string,
