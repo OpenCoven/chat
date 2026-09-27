@@ -92,6 +92,27 @@ static void write_record(const char *path, pid_t escape_pid) {
   write_file(path, record, 0600);
 }
 
+static void require_copied_workspace(void) {
+  char cwd[4096];
+  char bytes[9];
+  ssize_t count;
+  int descriptor;
+
+  if (getcwd(cwd, sizeof(cwd)) == NULL) fail("getcwd");
+  if (strcmp(cwd, required_text("OPENCOVEN_UNIX_WORKSPACE")) != 0) {
+    fprintf(stderr, "producer did not start in the copied workspace\n");
+    exit(1);
+  }
+  descriptor = open("tracked.txt", O_RDONLY | O_CLOEXEC);
+  if (descriptor < 0) fail("open tracked fixture");
+  count = read(descriptor, bytes, sizeof(bytes));
+  if (count != 8 || memcmp(bytes, "fixture\n", 8) != 0) {
+    fprintf(stderr, "copied workspace fixture is unavailable\n");
+    exit(1);
+  }
+  if (close(descriptor) != 0) fail("close tracked fixture");
+}
+
 static void run_escape(const char *record_path) {
   const char *workspace = required_text("OPENCOVEN_UNIX_ARTIFACT_DIRECTORY");
   char pid_path[4096];
@@ -152,6 +173,7 @@ int main(int argc, char **argv) {
     if (strcmp(argv[1], "escape") == 0) {
       run_escape(record_path);
     } else {
+      require_copied_workspace();
       write_record(record_path, 0);
     }
     return 0;

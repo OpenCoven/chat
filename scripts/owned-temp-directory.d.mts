@@ -18,3 +18,20 @@ export function createOwnedTempDirectory(options: {
   childSegments?: string[];
 }): OwnedTempDirectoryContext;
 export function cleanupOwnedTempRoot(context: OwnedTempDirectoryContext): void;
+export function renameWithTransientRetry(
+  from: string,
+  to: string,
+  options?: { platform?: string; sleep?: (milliseconds: number) => void; budgetMs?: number },
+): void;
+
+export function ownedTempCleanupFailureCategory(
+  error: unknown,
+):
+  | 'root-precondition'
+  | 'root-rename'
+  | 'root-postrename'
+  | 'entry-stat'
+  | 'leaf-remove'
+  | 'directory-enumerate'
+  | 'directory-remove'
+  | 'unknown';

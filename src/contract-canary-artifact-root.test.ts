@@ -25,8 +25,10 @@ import {
   assertPackedFixtureMatchesCaveCheckout,
   assertPackedPackageContentsMatch,
   createContractCanaryVerifier,
+  createReviewedSdkReleaseArtifacts,
   parseArgs,
   readContractCanaryLock,
+  runPnpm,
 } from '../scripts/contract-canary.mjs';
 import {
   cleanupOwnedTempRoot,
@@ -99,11 +101,127 @@ function createGitWorktreeFixture(prefix: string) {
   };
 }
 
+describe('contract canary pnpm invocation', () => {
+  test('uses the supervised pnpm executable when it is available', () => {
+    const invocations: Array<{ command: string; args: string[] }> = [];
+    const execute = (command: string, args: string[]) => {
+      invocations.push({ command, args });
+      return 'pnpm-ok';
+    };
+
+    expect(runPnpm(['install'], '/workspace', {}, { execute, environment: {} })).toBe('pnpm-ok');
+    expect(invocations).toEqual([{ command: 'pnpm', args: ['install'] }]);
+  });
+
+  test('prefers the active pnpm CLI over an ambient pnpm shim', () => {
+    const invocations: Array<{ command: string; args: string[] }> = [];
+    const execute = (command: string, args: string[]) => {
+      invocations.push({ command, args });
+
+      if (command === 'pnpm') {
+        return 'ambient-pnpm';
+      }
+
+      return 'active-pnpm';
+    };
+
+    expect(
+      runPnpm(
+        ['install'],
+        '/workspace',
+        {},
+        {
+          execute,
+          environment: { npm_execpath: '/corepack/pnpm.cjs' },
+          nodeExecutable: '/usr/bin/node',
+        },
+      ),
+    ).toBe('active-pnpm');
+    expect(invocations).toEqual([
+      { command: '/usr/bin/node', args: ['/corepack/pnpm.cjs', 'install'] },
+    ]);
+  });
+
+  test('does not mask failures from an available pnpm executable', () => {
+    const failure = Object.assign(new Error('pnpm failed'), { status: 1 });
+    const execute = (command: string) => {
+      if (command === 'pnpm') {
+        throw failure;
+      }
+
+      throw new Error('unexpected fallback');
+    };
+
+    expect(() => runPnpm(['install'], '/workspace', {}, { execute, environment: {} })).toThrow(
+      failure,
+    );
+  });
+
+  test('ignores the active pnpm CLI in a restricted producer', () => {
+    const invocations: Array<{ command: string; args: string[] }> = [];
+    const execute = (command: string, args: string[]) => {
+      invocations.push({ command, args });
+
+      if (command === 'pnpm') {
+        return 'restricted-pnpm';
+      }
+
+      throw new Error('unexpected fallback');
+    };
+
+    expect(
+      runPnpm(
+        ['install'],
+        '/workspace',
+        {},
+        {
+          execute,
+          environment: {
+            npm_execpath: '/corepack/pnpm.cjs',
+            OPENCOVEN_UNIX_PRODUCER_REQUIRED: '1',
+          },
+        },
+      ),
+    ).toBe('restricted-pnpm');
+    expect(invocations).toEqual([{ command: 'pnpm', args: ['install'] }]);
+  });
+
+  test('uses the nonce-bound pnpm CLI through Node on Windows', () => {
+    const invocations: Array<{ command: string; args: string[] }> = [];
+    const execute = (command: string, args: string[]) => {
+      invocations.push({ command, args });
+      return 'windows-pnpm';
+    };
+
+    expect(
+      runPnpm(
+        ['install'],
+        '/workspace',
+        {},
+        {
+          execute,
+          environment: {
+            OPENCOVEN_WINDOWS_JOB_REQUIRED: '1',
+            OPENCOVEN_WINDOWS_PNPM_CLI: 'C:\\workspace\\pnpm.cjs',
+          },
+          nodeExecutable: 'C:\\Program Files\\nodejs\\node.exe',
+        },
+      ),
+    ).toBe('windows-pnpm');
+    expect(invocations).toEqual([
+      {
+        command: 'C:\\Program Files\\nodejs\\node.exe',
+        args: ['C:\\workspace\\pnpm.cjs', 'install'],
+      },
+    ]);
+  });
+});
+
 function sha256(bytes: Buffer | string) {
   return createHash('sha256').update(bytes).digest('hex');
 }
 
-function createCaveAuthorityFixture() {
+function createCaveAuthorityFixture({ differentCurrentFixture = false } = {}) {
   const scratchRoot = createRepoLocalScratchRoot('cave-authority');
   const caveRoot = resolve(scratchRoot, 'cave');
   const harnessRoot = resolve(scratchRoot, 'harness');
@@ -139,6 +257,15 @@ function createCaveAuthorityFixture() {
   const nonAncestorCommit = runGit(['rev-parse', 'HEAD'], caveRoot);
   runGit(['checkout', 'main'], caveRoot);
 
+  const currentFixtureBytes = differentCurrentFixture
+    ? Buffer.from('current Cave contract fixture\n', 'utf8')
+    : fixtureBytes;
+  const currentFixtureDigest = sha256(currentFixtureBytes);
+  writeFileSync(resolve(authorityDirectory, 'contract-fixture.json'), currentFixtureBytes);
+  writeFileSync(
+    resolve(authorityDirectory, 'contract-fixture.sha256'),
+    `${currentFixtureDigest}\n`,
+  );
   writeFileSync(resolve(authorityDirectory, 'hpke-bound-v1-vectors.json'), vectorBytes);
   writeFileSync(resolve(authorityDirectory, 'hpke-bound-v1-vectors.sha256'), `${vectorDigest}\n`);
   runGit(['add', '.'], caveRoot);
@@ -176,7 +303,7 @@ function createCaveAuthorityFixture() {
         contractFixture: {
           path: 'src/lib/server/client-v1/contract-fixture.json',
           digestPath: 'src/lib/server/client-v1/contract-fixture.sha256',
-          sha256: fixtureDigest,
+          sha256: currentFixtureDigest,
         },
         hpkeVectors: {
           path: 'src/lib/server/client-v1/hpke-bound-v1-vectors.json',
@@ -316,37 +443,37 @@ describe('contract canary temp directory safety', () => {
     const lock = readContractCanaryLock();
 
     expect(lock.sdk.repository).toBe('OpenCoven/sdk');
-    expect(lock.sdk.revision).toBe('acc38488f00860d246c3c553375634d64806eabb');
+    expect(lock.sdk.revision).toBe('cd10a3fa1d9900e0dbcb04bbb2477140854fba1d');
     expect(lock.sdk.releaseManifest).toEqual({
       file: 'release-manifest.json',
-      version: '0.1.0',
-      sha256: 'b248f2d945f77e22d0dee1644e9131aa7d2a20db2f30d06206a974d7a4262dec',
+      version: '0.0.1',
+      sha256: '72041bfe9a236d709ea3fe26d32b871f17c7c5183e2991cd0229063ade730cb4',
     });
     expect(Object.keys(lock.sdk.artifacts)).toEqual(['core', 'cave', 'coven', 'sdk']);
     expect(lock.sdk.artifacts.core).toEqual({
       packageName: '@opencoven/sdk-core',
-      version: '0.1.0',
-      releaseFile: 'tarballs/core/opencoven-sdk-core-0.1.0.tgz',
-      vendorFile: 'sdk-core-0.1.0.tgz',
-      size: 33332,
-      sha256: 'dc86c6d4c88dc8273272b70d2014d2b62c80ae7368c9cf1e8eb78440f5fcc9c4',
+      version: '0.0.1',
+      releaseFile: 'tarballs/core/opencoven-sdk-core-0.0.1.tgz',
+      vendorFile: 'sdk-core-0.0.1.tgz',
+      size: 33308,
+      sha256: '5f41291d303cf25e5ff4a3c40d0169f025f7e218da8637fc905935524b5e4e2b',
     });
 
     expect(lock.sdk.artifacts.cave).toEqual({
       packageName: '@opencoven/cave-client',
-      version: '0.1.0',
-      releaseFile: 'tarballs/cave/opencoven-cave-client-0.1.0.tgz',
-      vendorFile: 'cave-client-0.1.0.tgz',
-      size: 85426,
-      sha256: 'de16ce13f2e3be0f6555cfc4413ca3c8f8f1a94f980261a6857c025615e7a14a',
+      version: '0.0.1',
+      releaseFile: 'tarballs/cave/opencoven-cave-client-0.0.1.tgz',
+      vendorFile: 'cave-client-0.0.1.tgz',
+      size: 89873,
+      sha256: '7389376ebc40ff59d942957339769d4dbdb566e25adef9a9deb372581b39a245',
     });
     expect(lock.cave.repository).toBe('OpenCoven/coven-cave');
-    expect(lock.cave.revision).toBe('6325fc4c1154c7d7398074a9760a2e2dc323b424');
+    expect(lock.cave.revision).toBe('ecdcdcf8a75b62bb912ec48215ae20ab0809a181');
     expect(lock.cave.artifacts).toEqual({
       contractFixture: {
         path: 'src/lib/server/client-v1/contract-fixture.json',
         digestPath: 'src/lib/server/client-v1/contract-fixture.sha256',
-        sha256: 'c0b1af2442409f8b26bbf0cf2a5fac467d23e5f56d2c966a9428c4b3e830a186',
+        sha256: '0c03baea9c21f0985df41eef3c5ae5223497b9081c665b53ddecab36598f5ede',
       },
       hpkeVectors: {
         path: 'src/lib/server/client-v1/hpke-bound-v1-vectors.json',
@@ -449,16 +576,16 @@ describe('contract canary temp directory safety', () => {
     const checkoutHeadsInput = {
       sdk: {
         repository: 'OpenCoven/sdk',
-        revision: 'acc38488f00860d246c3c553375634d64806eabb',
+        revision: '77d825d17809cfec2fad4acb9b1526b3c4752f9d',
       },
       cave: {
         repository: 'OpenCoven/coven-cave',
-        revision: '6325fc4c1154c7d7398074a9760a2e2dc323b424',
+        revision: 'bc310e9753783678014086ed6f7ef7d3fb797967',
       },
     } satisfies CheckoutHeadsInput;
     const packedFixtureInput = {
       cave: {
-        revision: '6325fc4c1154c7d7398074a9760a2e2dc323b424',
+        revision: 'bc310e9753783678014086ed6f7ef7d3fb797967',
         artifacts: {
           contractFixture: {
             path: 'src/lib/server/client-v1/contract-fixture.json',
@@ -477,7 +604,7 @@ describe('contract canary temp directory safety', () => {
     const missingCheckoutRevision: CheckoutHeadsInput = {
       sdk: {
         repository: 'OpenCoven/sdk',
-        revision: 'acc38488f00860d246c3c553375634d64806eabb',
+        revision: '77d825d17809cfec2fad4acb9b1526b3c4752f9d',
       },
       // @ts-expect-error Checkout validation consumes cave.revision.
       cave: {
@@ -488,7 +615,7 @@ describe('contract canary temp directory safety', () => {
     const missingFixtureRevision: PackedFixtureInput = { cave: {} };
 
     expect(checkoutHeadsInput.sdk.repository).toBe('OpenCoven/sdk');
-    expect(packedFixtureInput.cave.revision).toBe('6325fc4c1154c7d7398074a9760a2e2dc323b424');
+    expect(packedFixtureInput.cave.revision).toBe('bc310e9753783678014086ed6f7ef7d3fb797967');
     expect(missingCheckoutRevision).toBeDefined();
     expect(missingFixtureRevision).toBeDefined();
   });
@@ -556,6 +683,34 @@ describe('contract canary temp directory safety', () => {
 });
 
 describe('packed Cave authority artifact validation', () => {
+  test('current candidate accepts identical bytes from an authenticated historical ancestor', () => {
+    const fixture = createCaveAuthorityFixture();
+
+    expect(() =>
+      assertPackedFixtureMatchesCaveCheckout(fixture.lock, fixture.harnessRoot, fixture.caveRoot, {
+        requireCurrentFixtureMatch: true,
+      }),
+    ).not.toThrow();
+  }, 30_000);
+
+  test('current candidate rejects independently valid but different historical fixture bytes', () => {
+    const fixture = createCaveAuthorityFixture({ differentCurrentFixture: true });
+
+    expect(() =>
+      assertPackedFixtureMatchesCaveCheckout(fixture.lock, fixture.harnessRoot, fixture.caveRoot, {
+        requireCurrentFixtureMatch: true,
+      }),
+    ).toThrow('Packed Cave fixture bytes did not match the reviewed current producer.');
+  }, 30_000);
+
+  test('historical fixture validation still permits authenticated older contract bytes', () => {
+    const fixture = createCaveAuthorityFixture({ differentCurrentFixture: true });
+
+    expect(() =>
+      assertPackedFixtureMatchesCaveCheckout(fixture.lock, fixture.harnessRoot, fixture.caveRoot),
+    ).not.toThrow();
+  }, 30_000);
+
   test('accepts exact historical fixture provenance and reviewed HPKE vector bytes', () => {
     const fixture = createCaveAuthorityFixture();
 
@@ -646,6 +801,61 @@ describe('packed Cave authority artifact validation', () => {
 });
 
 describe('generated SDK release manifest validation', () => {
+  test('creates conformance inputs without invoking or enabling the publication CLI', () => {
+    const lock = readContractCanaryLock();
+    const scratchRoot = createRepoLocalScratchRoot('conformance-entrypoint');
+    const sdkRoot = resolve(scratchRoot, 'sdk candidate');
+    const artifactRoot = resolve(scratchRoot, 'conformance output');
+    mkdirSync(resolve(sdkRoot, 'scripts'), { recursive: true });
+    const configPath = resolve(sdkRoot, 'release.config.json');
+    writeFileSync(configPath, JSON.stringify({ publishingEnabled: false }));
+    writeFileSync(
+      resolve(sdkRoot, 'scripts', 'create-release-artifacts.mjs'),
+      `
+import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { dirname, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+if (process.argv[1] !== undefined && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  throw new Error('Release publishing is disabled by release.config.json');
+}
+export function createConformanceArtifacts(options) {
+  assert.deepEqual(options, {
+    root: ${JSON.stringify(sdkRoot)},
+    outputRoot: ${JSON.stringify(artifactRoot)},
+    version: ${JSON.stringify(lock.sdk.releaseManifest.version)},
+    build: true,
+    requireConformanceEvidence: false,
+  });
+  assert.equal(JSON.parse(readFileSync(${JSON.stringify(configPath)}, 'utf8')).publishingEnabled, false);
+  const artifacts = ${JSON.stringify(lock.sdk.artifacts)};
+  const packages = Object.entries(artifacts).map(([key, artifact]) => {
+    const file = resolve(options.outputRoot, artifact.releaseFile);
+    const bytes = Buffer.from('conformance-' + key);
+    mkdirSync(dirname(file), { recursive: true });
+    writeFileSync(file, bytes);
+    return {
+      name: artifact.packageName, version: artifact.version, file: artifact.releaseFile,
+      size: bytes.length, sha256: createHash('sha256').update(bytes).digest('hex'),
+    };
+  });
+  writeFileSync(resolve(options.outputRoot, 'release-manifest.json'), JSON.stringify({
+    schemaVersion: 1, version: ${JSON.stringify(lock.sdk.releaseManifest.version)}, packages,
+  }));
+}
+`,
+    );
+
+    const tarballs = createReviewedSdkReleaseArtifacts(lock, sdkRoot, artifactRoot);
+
+    for (const [key, artifact] of Object.entries(lock.sdk.artifacts)) {
+      expect(tarballs).toHaveProperty(key, resolve(artifactRoot, artifact.releaseFile));
+    }
+    expect(JSON.parse(readFileSync(configPath, 'utf8'))).toEqual({ publishingEnabled: false });
+  });
+
   test('accepts platform-specific archive bytes when package identity and manifest integrity hold', () => {
     const lock = readContractCanaryLock();
     const scratchRoot = createRepoLocalScratchRoot('generated-manifest');
@@ -754,6 +964,37 @@ describe('contract canary checkout cleanliness', () => {
   );
 
   describe('contract canary packed consumer isolation', () => {
+    test('reports only bounded packed-consumer substages before fallible operations', () => {
+      const canary = readFileSync(resolve(process.cwd(), 'scripts', 'contract-canary.mjs'), 'utf8');
+      const verifierStart = canary.indexOf('export function verifyFrozenPackedConsumer');
+      const verifierEnd = canary.indexOf('\nfunction safeTarEntries', verifierStart);
+      const verifier = canary.slice(verifierStart, verifierEnd);
+
+      for (const [stage, operation] of [
+        ['authority', 'assertCleanContractCanaryCheckouts'],
+        ['artifacts', 'frozenTarballs'],
+        ['harness', 'createHarness'],
+        ['install', 'installHarnessOfflineAfterWarming'],
+        ['isolation', 'assertIsolatedPackedInstall'],
+        ['fixture', 'assertPackedFixtureMatchesCaveCheckout'],
+        ['build', "runPnpm(['--ignore-workspace', 'run', 'build']"],
+        ['verify', "runPnpm(['--ignore-workspace', 'run', 'verify']"],
+      ] as const) {
+        const marker = verifier.indexOf(`onStage('${stage}')`);
+        expect(marker).toBeGreaterThan(-1);
+        expect(verifier.indexOf(operation)).toBeGreaterThan(marker);
+      }
+      const cleanupStart = canary.indexOf('function cleanupFrozenPackedConsumer');
+      const cleanupEnd = canary.indexOf(
+        '\nexport function verifyFrozenPackedConsumer',
+        cleanupStart,
+      );
+      const cleanup = canary.slice(cleanupStart, cleanupEnd);
+      expect(cleanup.indexOf("onStage('cleanup')")).toBeGreaterThan(
+        cleanup.indexOf('cleanupOwnedTempRoot'),
+      );
+    });
+
     test('removes the warm consumer install before its offline assertion', () => {
       const canary = readFileSync(resolve(process.cwd(), 'scripts', 'contract-canary.mjs'), 'utf8');
       const warm = canary.indexOf('isolatedInstallArgs({ offline: false })');
@@ -773,6 +1014,11 @@ describe('contract canary checkout cleanliness', () => {
         /resolve\(\s*harnessRoot,\s*'node_modules',\s*'@opencoven',\s*'cave-client',\s*'fixtures'/,
       );
       expect(canary).toContain('assertPackedFixtureMatchesCaveCheckout');
+      expect(
+        canary.match(
+          /assertPackedFixtureMatchesCaveCheckout\(lock, harnessRoot, (?:options\.)?caveRoot, \{\s*requireCurrentFixtureMatch: true,\s*\}\)/g,
+        ),
+      ).toHaveLength(2);
     });
 
     test('generates and executes a verifier for every shipped public entrypoint', () => {

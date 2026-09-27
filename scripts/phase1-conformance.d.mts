@@ -1,4 +1,5 @@
 export const cargoBuildTimeoutMs: number;
+export function caveLaunchRpcTimeoutForPlatform(platform?: NodeJS.Platform): number;
 export function windowsJobBindingEnvironment(
   environment?: NodeJS.ProcessEnv,
   platform?: NodeJS.Platform,
@@ -117,6 +118,7 @@ export function cloneExactCheckout(options: {
   destinationRoot: string;
   repository?: string;
   revision: string;
+  sourceRef?: 'refs/tags/opencoven-phase1-harness';
   environment: NodeJS.ProcessEnv;
   label: string;
 }): Promise<void>;
@@ -234,6 +236,10 @@ export function assertExecutingHarnessAuthority(
   environment?: NodeJS.ProcessEnv,
 ): void;
 export function assertProductionAdapterAtRevision(harnessRoot: string, lock: unknown): void;
+export function assertProductionChatAuthority(
+  roots: { chatRoot: string; chatHarnessRoot: string },
+  lock: unknown,
+): void;
 export function finalizeOperatorSafety(options: {
   primaryFailure?: unknown;
   cleanupFailure?: unknown;
@@ -279,6 +285,7 @@ export class CommandExecutionError extends Error {
   constructor(label: string, result: unknown);
 }
 export function publicPhase1FailureDiagnostic(error: unknown): string | undefined;
+export function runnerCheckoutFailureDiagnostic(error: unknown): string;
 export function extractVerifiedRunnerDiagnostic(stderr: unknown): string | undefined;
 export function classifyPackagingCommandFailure(baseId: string, error: unknown): string;
 export function diagnoseCovenLifecycleFailure(
@@ -286,7 +293,15 @@ export function diagnoseCovenLifecycleFailure(
   rerun: (testName: string) => Promise<unknown>,
 ): Promise<never>;
 export class NativeRpcClient {
-  constructor(child: unknown, options?: { shutdownTimeoutMs?: number; supervised?: boolean });
+  constructor(
+    child: unknown,
+    options?: {
+      shutdownTimeoutMs?: number;
+      requestTimeoutMs?: number;
+      caveLaunchTimeoutMs?: number;
+      supervised?: boolean;
+    },
+  );
   request(command: string, args?: unknown): Promise<unknown>;
   close(): Promise<void>;
 }
@@ -335,3 +350,10 @@ export function withOwnedArtifactRoot<T>(
 export function recordCaveMatrixFailure(results: Map<string, unknown>, error: unknown): unknown;
 export function wrapInfrastructureFailure(error: unknown, report: unknown): CommandExecutionError;
 export function runPhase1Conformance(options?: ReturnType<typeof parseArgs>): Promise<unknown>;
+
+export function assertSdkCandidateProvenance(
+  roots: { sdkRoot: string; sdkEvidenceRoot: string },
+  lock: unknown,
+): void;
+
+export function runPublicPhase1StageAsync<T>(id: string, action: () => Promise<T>): Promise<T>;

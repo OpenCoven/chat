@@ -2,7 +2,7 @@
 set -Eeuo pipefail
 
 usage() {
-  echo "usage: unix-producer-supervisor.sh --platform PLATFORM --source PATH --destination PATH --temp-root PATH --handoff-helper PATH --command PATH [--command-arg VALUE ...] [--validator-revision REVISION] [--tool-path PATH] [--timeout-seconds N]" >&2
+  echo "usage: unix-producer-supervisor.sh --platform PLATFORM --source PATH --destination PATH --temp-root PATH --handoff-helper PATH --command PATH --node-executable PATH --pnpm-executable PATH --rustup-executable PATH [--command-arg VALUE ...] [--validator-revision REVISION] [--tool-path PATH] [--timeout-seconds N]" >&2
   exit 2
 }
 
@@ -12,6 +12,9 @@ destination_path=
 temp_root=
 handoff_helper=
 command_path=
+node_executable=
+pnpm_executable=
+rustup_executable=
 tool_path='/usr/bin:/bin:/usr/sbin:/sbin'
 timeout_seconds=3300
 validator_revision=
@@ -26,6 +29,9 @@ while [[ $# -gt 0 ]]; do
     --handoff-helper) [[ $# -ge 2 ]] || usage; handoff_helper=$2; shift 2 ;;
     --command) [[ $# -ge 2 ]] || usage; command_path=$2; shift 2 ;;
     --command-arg) [[ $# -ge 2 ]] || usage; command_arguments+=("$2"); shift 2 ;;
+    --node-executable) [[ $# -ge 2 ]] || usage; node_executable=$2; shift 2 ;;
+    --pnpm-executable) [[ $# -ge 2 ]] || usage; pnpm_executable=$2; shift 2 ;;
+    --rustup-executable) [[ $# -ge 2 ]] || usage; rustup_executable=$2; shift 2 ;;
     --validator-revision) [[ $# -ge 2 ]] || usage; validator_revision=$2; shift 2 ;;
     --tool-path) [[ $# -ge 2 ]] || usage; tool_path=$2; shift 2 ;;
     --timeout-seconds) [[ $# -ge 2 ]] || usage; timeout_seconds=$2; shift 2 ;;
@@ -38,7 +44,8 @@ if [[ $EUID -ne 0 ]]; then
   exit 1
 fi
 if [[ -z "$platform" || -z "$source_path" || -z "$destination_path" ||
-      -z "$temp_root" || -z "$handoff_helper" || -z "$command_path" ]]; then
+      -z "$temp_root" || -z "$handoff_helper" || -z "$command_path" ||
+      -z "$node_executable" || -z "$pnpm_executable" || -z "$rustup_executable" ]]; then
   usage
 fi
 if [[ ! "$timeout_seconds" =~ ^[1-9][0-9]{0,4}$ ]] || (( timeout_seconds > 7200 )); then
@@ -95,6 +102,32 @@ handoff_helper="$(canonical_file "$handoff_helper")" ||
   { echo 'unix-producer-supervisor: handoff helper is unsafe' >&2; exit 1; }
 command_path="$(canonical_file "$command_path")" ||
   { echo 'unix-producer-supervisor: restricted command is unsafe' >&2; exit 1; }
+node_executable="$(canonical_file "$node_executable")" ||
+  { echo 'unix-producer-supervisor: node executable is unsafe' >&2; exit 1; }
+pnpm_executable="$(canonical_file "$pnpm_executable")" ||
+  { echo 'unix-producer-supervisor: pnpm executable is unsafe' >&2; exit 1; }
+rustup_executable="$(canonical_file "$rustup_executable")" ||
+  { echo 'unix-producer-supervisor: rustup executable is unsafe' >&2; exit 1; }
+pnpm_cli="$(
+  LC_ALL=C /usr/bin/sed -n 's/^# cmd-shim-target=//p' "$pnpm_executable"
+)"
+if [[ "$pnpm_cli" != /* ||
+      "$pnpm_cli" == *$'\n'* ||
+      "$pnpm_cli" == *$'\r'* ]]; then
+  echo 'unix-producer-supervisor: pnpm launcher target is unsafe' >&2
+  exit 1
+fi
+pnpm_cli="$(canonical_file "$pnpm_cli")" ||
+  { echo 'unix-producer-supervisor: pnpm CLI entrypoint is unsafe' >&2; exit 1; }
+pnpm_bin_directory="$(canonical_directory "$(dirname "$pnpm_cli")")" ||
+  { echo 'unix-producer-supervisor: pnpm bin directory is unsafe' >&2; exit 1; }
+pnpm_runtime_root="$(canonical_directory "$(dirname "$pnpm_bin_directory")")" ||
+  { echo 'unix-producer-supervisor: pnpm runtime root is unsafe' >&2; exit 1; }
+if [[ "$(basename "$pnpm_runtime_root")" != pnpm ||
+      "$pnpm_cli" != "$pnpm_runtime_root/bin/pnpm.cjs" ]]; then
+  echo 'unix-producer-supervisor: pnpm launcher target is unexpected' >&2
+  exit 1
+fi
 if [[ "$destination_path" != /* ]]; then
   destination_path="$(pwd -P)/$destination_path"
 fi
@@ -133,7 +166,41 @@ stat_identity() {
   fi
 }
 
-for trusted_file in "$handoff_helper" "$command_path"; do
+validate_pnpm_runtime_tree() {
+  local runtime_root=$1
+  local expected_owner=$2
+  local require_single_links=$3
+  local trusted_file mode
+
+  while IFS= read -r -d '' trusted_file; do
+    mode="$(stat_mode "$trusted_file")"
+    if [[ -L "$trusted_file" ||
+          "$(stat_owner "$trusted_file")" != "$expected_owner" ||
+          $((8#$mode & 8#022)) -ne 0 ]]; then
+      echo 'unix-producer-supervisor: pnpm runtime ownership or mode is unsafe' >&2
+      return 1
+    fi
+    if [[ -f "$trusted_file" ]]; then
+      if [[ "$require_single_links" == 1 &&
+            "$(stat_links "$trusted_file")" != 1 ]]; then
+        echo 'unix-producer-supervisor: pnpm runtime file has multiple links' >&2
+        return 1
+      fi
+    elif [[ ! -d "$trusted_file" ]]; then
+      echo 'unix-producer-supervisor: pnpm runtime contains a special file' >&2
+      return 1
+    fi
+  done < <(/usr/bin/find -P "$runtime_root" -xdev -print0)
+}
+
+trusted_files=(
+  "$handoff_helper"
+  "$command_path"
+  "$node_executable"
+  "$pnpm_executable"
+  "$rustup_executable"
+)
+for trusted_file in "${trusted_files[@]}"; do
   mode="$(stat_mode "$trusted_file")"
   if [[ "$(stat_owner "$trusted_file")" != "$broker_uid" ||
         "$(stat_links "$trusted_file")" != 1 ||
@@ -142,6 +209,9 @@ for trusted_file in "$handoff_helper" "$command_path"; do
     exit 1
   fi
 done
+
+validate_pnpm_runtime_tree "$pnpm_runtime_root" "$broker_uid" 0
+
 temp_mode="$(stat_mode "$temp_root")"
 destination_mode="$(stat_mode "$destination_parent")"
 if [[ "$(stat_owner "$temp_root")" != "$broker_uid" ||
@@ -183,11 +253,19 @@ chmod 711 "$isolated_root"
 chmod 711 "$temp_root"
 temp_root_relaxed=1
 producer_root="$isolated_root/producer"
+native_lock_root="$producer_root/native-credential-lock"
 workspace="$isolated_root/source"
 artifact_workspace="$producer_root/workspace"
 trusted_root="$isolated_root/trusted"
 source_record="$artifact_workspace/.artifacts/client-v1-conformance-$platform.json"
 trusted_command="$trusted_root/producer-command"
+trusted_node="$trusted_root/node"
+trusted_pnpm="$trusted_root/pnpm"
+trusted_pnpm_root="$trusted_root/pnpm-runtime"
+trusted_pnpm_cli="$trusted_pnpm_root/bin/pnpm.cjs"
+trusted_rustup="$trusted_root/rustup"
+trusted_cargo="$trusted_root/cargo"
+trusted_rustc="$trusted_root/rustc"
 trusted_handoff="$trusted_root/unix-artifact-handoff"
 
 producer_uid=
@@ -457,7 +535,8 @@ mkdir -p -m 700 \
   "$producer_root/rustup" \
   "$producer_root/corepack" \
   "$producer_root/pnpm-home" \
-  "$producer_root/pnpm-store"
+  "$producer_root/pnpm-store" \
+  "$native_lock_root"
 mkdir -m 755 "$workspace"
 mkdir -m 555 "$trusted_root"
 cp -a "$source_path/." "$workspace/"
@@ -472,12 +551,35 @@ if [[ -e "$source_record" || -L "$source_record" ]]; then
 fi
 cp "$command_path" "$trusted_command"
 cp "$handoff_helper" "$trusted_handoff"
+cp "$node_executable" "$trusted_node"
+mkdir -m 555 "$trusted_pnpm_root"
+cp -R "$pnpm_runtime_root/." "$trusted_pnpm_root/"
+cat >"$trusted_pnpm" <<'EOF'
+#!/bin/sh
+trusted_root=${0%/*}
+exec "$trusted_root/node" "$trusted_root/pnpm-runtime/bin/pnpm.cjs" "$@"
+EOF
+cp "$rustup_executable" "$trusted_rustup"
+cp "$rustup_executable" "$trusted_cargo"
+cp "$rustup_executable" "$trusted_rustc"
 if [[ "$host_os" == Darwin ]]; then
   /bin/chmod -RN "$producer_root" "$workspace" "$trusted_root"
 fi
-chown root:0 "$trusted_root" "$trusted_command" "$trusted_handoff"
+chown root:0 \
+  "$trusted_root" \
+  "$trusted_command" \
+  "$trusted_handoff" \
+  "$trusted_node" \
+  "$trusted_pnpm" \
+  "$trusted_rustup" \
+  "$trusted_cargo" \
+  "$trusted_rustc"
+chown -R -h root:0 "$trusted_pnpm_root"
 chmod 555 "$trusted_root" "$trusted_command"
 chmod 500 "$trusted_handoff"
+chmod 555 "$trusted_node" "$trusted_pnpm" "$trusted_rustup" "$trusted_cargo" "$trusted_rustc"
+chmod -R a+rX,a-w "$trusted_pnpm_root"
+validate_pnpm_runtime_tree "$trusted_pnpm_root" 0 1
 chown -R -h "$producer_uid:$producer_gid" \
   "$producer_root/home" \
   "$producer_root/temp" \
@@ -489,9 +591,14 @@ chown -R -h "$producer_uid:$producer_gid" \
   "$producer_root/corepack" \
   "$producer_root/pnpm-home" \
   "$producer_root/pnpm-store" \
+  "$native_lock_root" \
   "$artifact_workspace"
 chown "$producer_uid:$producer_gid" "$producer_root"
-chmod 700 "$producer_root" "$artifact_workspace" "$artifact_workspace/.artifacts"
+chmod 700 \
+  "$producer_root" \
+  "$native_lock_root" \
+  "$artifact_workspace" \
+  "$artifact_workspace/.artifacts"
 chown -R -h root:0 "$workspace"
 chmod -R a+rX "$workspace"
 chmod -R a-w "$workspace"
@@ -521,7 +628,8 @@ restricted_environment=(
   "COREPACK_HOME=$producer_root/corepack"
   "PNPM_HOME=$producer_root/pnpm-home"
   "PNPM_STORE_DIR=$producer_root/pnpm-store"
-  "PATH=$producer_root/cargo/bin:$tool_path"
+  "OPENCOVEN_PHASE1_CONFORMANCE_LOCK_ROOT=$native_lock_root"
+  "PATH=$trusted_root:$producer_root/cargo/bin:$tool_path"
   "LANG=C"
   "LC_ALL=C"
   "CI=1"
@@ -598,10 +706,13 @@ if [[ "$host_os" == Linux ]]; then
   producer_contained=1
   kill -CONT "$producer_pid"
 else
-  /usr/bin/sudo -n -u "#$producer_uid" /usr/bin/env -i "${restricted_environment[@]}" \
-    /bin/bash -c \
-    'exec 7<&- 8<&- 9<&-; cd "$OPENCOVEN_UNIX_WORKSPACE"; exec "$@"' opencoven-producer \
-    "${producer_invocation[@]}" &
+  (
+    cd /
+    exec /usr/bin/sudo -n -u "#$producer_uid" /usr/bin/env -i "${restricted_environment[@]}" \
+      /bin/bash -c \
+      'exec 7<&- 8<&- 9<&-; cd "$OPENCOVEN_UNIX_WORKSPACE"; exec "$@"' opencoven-producer \
+      "${producer_invocation[@]}"
+  ) &
   producer_pid=$!
   producer_contained=1
 fi
@@ -624,6 +735,10 @@ wait "$producer_pid"
 producer_status=$?
 set -e
 producer_pid=
+
+if (( producer_status != 0 )); then
+  echo "unix-producer-supervisor: restricted producer exited with status $producer_status" >&2
+fi
 
 if [[ "$host_os" == Linux ]]; then
   drain_linux_cgroup ||

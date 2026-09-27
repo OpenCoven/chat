@@ -1,247 +1,397 @@
 # OpenCoven Chat
 
-OpenCoven Chat is a production-oriented read-only desktop client with a
-least-privilege native adapter for the Cave SDK. The default UI initializes a
-keychain-backed installation identity, connects or pairs with Cave, and renders
-bounded canonical chat reads. Explicit demo routes remain available for later
-write-oriented design exploration.
+OpenCoven Chat uses one desktop interface: the Familiars Redesign, connected
+to your installed Coven CLI. You don't need Cave, pairing, or a separate demo
+build.
 
-## Security boundaries
+```bash
+coven --version
+corepack pnpm install:clean
+corepack pnpm app:dev
+```
 
-- The main window can invoke only the reviewed `app_identity`,
-  `app_installation_id`, and SDK-managed Cave adapter commands.
-- No browser direct HTTP calls or generic native request command are implemented.
-- Managed aborts and deadlines cross the bridge only as single-use opaque
-  attempt IDs, a timeout capped at five seconds, and a dedicated narrow cancel
-  command; signals and error causes are never serialized.
-- Keyring mutations are serialized through a bounded native worker. Cancelled
-  or expired queued work is skipped; a mutation already in progress reports a
-  non-retryable `credential_update_in_progress` ambiguity until custody is
-  coherent.
-- Pairing secrets, bearer credentials, headers, and keychain values remain in
-  Rust and their transient owners zeroize secret bytes on drop. A random
-  canonical UUID v4 pairing identity is stored per installation in the native
-  keyring; browser results are bounded non-secret DTOs and diagnostics.
-- On Windows, native discovery accepts only the current token's canonical
-  `.coven/cave` record after handle-based owner, ACL, identity, and reparse
-  validation. Credentials use binary Local persistence, migrate prior
-  Enterprise entries and legacy UTF-16 password values, and serialize through
-  a bounded current-user-only `Global\` mutex whose owner and DACL are verified
-  after creation. During the compatibility window it also acquires the shipped
-  session-local mutex in a fixed order. Unix credential mutations use
-  owner-private lock files with bounded acquisition.
-- No Tauri shell, filesystem, opener, or network plugin capabilities are granted.
-- The webview uses frozen packed `@opencoven/cave-client/managed` and
-  `@opencoven/sdk-core/browser` artifacts. It never imports SDK workspace
-  source or makes repository-relative imports.
-- Production Coven health crosses the bounded Tauri operation boundary and
-  uses the producer-owned Rust `coven-client` pinned exactly to Coven commit
-  `721437b84026c042e431b0882dcd14fdb29ac07d`. Discovery uses explicit
-  `COVEN_HOME` when set, otherwise the current account's platform home plus
-  `.coven`; the client validates the live connected Unix peer credentials or
-  Windows named-pipe ownership and connected identity before health succeeds.
-  The direct producer probe runs in the same trusted executable behind one
-  fixed internal argument, with null standard streams and an independent
-  absolute parent timeout that terminates and reaps only that child. The parent
-  consumes only its success or failure status. Missing native trust fails
-  closed. There is no pathname, naming, shell, PowerShell, or process-list
-  fallback.
+The desktop window opens the familiar list, transcript, composer, and
+familiar inspector at `/`. Old `?demo=` links no longer select different
+applications. `VITE_DEFAULT_DEMO` and `app:build:demo` are removed.
 
-### Phase 1 conformance status
+The application frame stays within the window and does not scroll globally.
+Conversation history, rails, and long drafts scroll inside their own regions,
+so a long reply or a short window does not push the composer off the page.
+The conversation region can take keyboard focus, so it scrolls with the
+arrow and page keys without a control inside it being focused.
 
-The native host now uses the reviewed `hpke-bound-v1` request and response
-binding, and production Coven health uses the producer-backed native adapter.
-The immutable runtime gate is documented in
-[`docs/phase1-conformance.md`](docs/phase1-conformance.md). It emits only
-complete SDK #38 platform records and never substitutes mocks for missing
-release assertions. Release evidence still requires complete real-authority
-runs on the frozen three-platform matrix.
+The interface follows your system's light or dark appearance. Both palettes
+hold every visible text to WCAG AA contrast, checked on the rendered app in
+each scheme.
 
-## Prerequisites
+The window is titled after the familiar you are viewing, such as
+"Astra — OpenCoven Chat", and leads with a count when runs have ended in
+other chats you have not opened yet, so a window in the background shows
+that a reply is waiting.
 
-- Node.js `24.18.1`
-- `pnpm` `10.34.0` via Corepack
-- Rust toolchain `1.95.0` with `clippy` and `rustfmt`
-- Playwright Chromium for local E2E runs
+Toggle the familiar list with **Cmd/Ctrl+\\** and the inspector with
+**Cmd/Ctrl+Shift+\\**, and reach the familiar search with **Cmd/Ctrl+K**
+(it opens the list if it is closed), and step to the previous or next
+familiar with **Cmd/Ctrl+[** and **Cmd/Ctrl+]**, in the list's own order and
+filter. **Cmd/Ctrl+F** opens a find bar over the conversation that counts
+the messages and tool calls containing your text; **Enter** and
+**Shift+Enter** step through them, scrolling each into view, and
+**Escape** closes it. These shortcuts work while composing
+without changing your text, stay quiet while a dialog or menu is open, and **Keyboard
+shortcuts** at the foot of the familiar list lists them all. Typing a letter while nothing editable has
+focus starts a message: the keystroke moves to the composer and lands there,
+unless the composer cannot send or a dialog or menu is open. Rail buttons include shortcut hints; modal dialogs and input-method
+composition do not trigger the shortcuts.
 
-See [`docs/developer-toolchains.md`](docs/developer-toolchains.md) for the full
-pin list.
+Closed rails remain as 28px full-height tabs: **Familiars** on the left and the
+selected familiar's name on the right. Click anywhere along a tab to reopen
+its rail. The tabs reserve their own space instead of covering chat content,
+with opaque smoky surfaces, subtle depth, and visible keyboard focus.
+
+Use **Add context** in the composer to clarify which familiar or project you
+mean. Search by name, identity, or full path (`@` filters familiars; `#` filters
+workspaces). Suggestions come from known familiars and the selected familiar's
+declared read/write project access,
+with full identities and paths to distinguish similar names. The inspector's
+Access tab lists that same declared access, write grants first, and says
+plainly that Chat neither enforces nor extends it. When none is declared
+it says so, and when Chat could not read the registry or grants it says
+that instead, so an unreadable store is never shown as an empty one. Selection inserts
+visible reference text at your cursor; it does not switch the recipient,
+delegate work, or grant file access.
+
+You can also type **`@name`** or **`#project`** directly in your message for
+inline suggestions. Use the arrow keys to choose and **Tab** to confirm, or
+**Escape** to dismiss. The optional `@{name` / `#{project` opening-brace syntax
+works too. Completed references use `@{Name}` or `#{project}` with the full
+identity or path alongside them, so similarly named choices remain unambiguous.
+Projects come from the local project registry and stored direct/group grants
+used by Cave, not inferred familiar directories or chat history. Read-only and
+write access are labeled separately; only the selected familiar's granted
+projects appear. This reads local metadata without requiring Cave to run,
+importing conversations, or modifying permissions. Without a configured
+registry/grants, no project access is assumed. Use **Refresh Coven** after
+changing grants. Email addresses and URL fragments remain ordinary text.
+
+The composer shows the reported chat project, or the familiar workspace when
+no chat project has been reported. This is observed context, not a workspace
+switch or permission grant. The reference picker opens above the app on modern
+desktop webviews so long paths do not push the composer out of view.
+
+Connection diagnostics are collapsed during normal use. Run status and Stop
+stay beside the composer, and the end of the thread shows the familiar's
+avatar with what the run is doing right now (waiting for the familiar, running
+a named tool, or stopping) until reply text starts to stream, and the status
+counts how long the run has been going. After thirty seconds without a sign
+of life the row says it is still waiting, or still running the tool. When a run ends, assistive
+technology hears how: the familiar's outcome and duration, or that a
+familiar replied or failed in another chat. A run belongs to
+the familiar it was sent to: if you switch to another familiar while it is
+live, that familiar's sidebar row reads **Responding…**, the status beside the
+composer names them and says the composer is free once their run finishes or
+is stopped, and the thread you are viewing does not claim the run. When that
+run ends, their row reads **New reply** (or **Run failed**) until you open
+them again; a run you stop yourself leaves no marker. While the familiar list
+is collapsed, its tab carries a count of such runs so they are not missed. Without a connected CLI
+the empty familiar list says to connect rather than to configure a familiar. **Jump to
+latest** returns to new output after you scroll back and counts the messages
+that arrived while you were reading. Error notices carry Copy and dismiss controls; a
+notice also clears on the next send, familiar switch, or refresh. When a
+chat's history could not be read, its notice offers **Reload chat**, which
+reads it again without refreshing everything. The collapsed connection
+details have a Copy control too, for a bug report. Replies and the composer share a responsive reading column up to
+1200px wide (36% wider than the previous 880px limit), while
+the application frame remains stationary.
+The window can shrink to 480×520: above 1100px every rail stays in the grid,
+below it the inspector folds into a drawer, and at 760px or less both rails
+become drawers that open one at a time.
+
+Unsent drafts are kept per familiar in memory only. They survive switching
+familiars but not closing the window: conversation content never reaches
+browser storage (see `SECURITY.md`), and only the selected familiar is
+remembered across restarts.
+
+With a connected CLI but no familiars configured, the empty thread and the
+composer say so, rather than asking you to select from an empty list, and
+the empty thread and the empty familiar list each offer **Check for
+familiars**, which refreshes Coven. Without a connected CLI they offer
+**Check again** instead.
+
+## Local runtime
+
+The desktop host owns access to Coven. The browser does not execute commands,
+receive credentials, or connect directly to a daemon. `pnpm dev` and `pnpm
+preview` render the same interface, but cannot access your installed CLI.
+Use the desktop app for runtime operations.
+
+The interface shows actual runtime results, not sample familiars, fabricated
+activity, or timed assistant replies. Unavailable capabilities are disclosed
+rather than simulated. Installing Coven does not configure a model provider:
+complete any provider setup required by your CLI before starting a run.
+
+Runs use Coven's bundled `coven-code` engine with explicit read-only
+permissions. Chat does not grant write access or simulate approval controls.
+The native runtime currently supports macOS and Linux. Windows displays an
+unavailable notice until equivalent process-tree containment is implemented.
+
+The frozen SDK artifacts remain pinned. Their existing health and conformance
+contracts are not expanded into undocumented chat methods, and the standalone
+runtime does not fall back to Cave.
+
+## Persistent familiar chats
+
+The sidebar is an agent list: each familiar has one canonical, persistent Chat
+conversation. Select a familiar to return to that thread. There is no separate
+familiar selector or new-conversation chooser. Rows are ordered by the most
+recent activity Coven reports, each captioned with how long ago that was
+(hover for the full timestamp, and the captions age on their own while the
+window stays open); familiars whose chats carry no readable
+timestamp keep the CLI's order after them; hovering a row shows the familiar's
+purpose. The search box matches a familiar's name, identity, or purpose. From the search box, **Enter**
+opens the first match, **Escape** clears the filter, and the arrow keys move
+into and along the list. A search that matches nothing offers **Clear search**.
+Choosing a familiar, by click or by Enter, puts the cursor in the composer as
+soon as their thread is ready. A row whose familiar has unsent text leads its
+preview with **Draft:** and that text. The thread header captions the
+familiar's name with when their chat last moved (hover for the full
+timestamp), and an empty thread shows the familiar's purpose under its
+heading.
+
+The inspector's Overview shows the familiar's purpose, identity and workspace
+(each path with its own **Copy** control),
+whether their chat is active, archived or not yet started, and its last
+activity. Activity reports the run state, how the most recent run in this window
+ended and how long it took, and counts the messages you sent, the
+replies and the tool calls (with failures, and a breakdown by tool) in the
+loaded transcript; tokens,
+cost and timing are not reported by this CLI integration.
+
+When Chat holds only the most recent part of a chat's history, a quiet line at
+the top of the thread says so; nothing has failed, so it is not an error
+notice. **Load earlier turns** reads the chat again with twice, three and then
+four times the usual budget of sessions and bytes, keeping the
+transcript on screen and your place in it while it loads. Past that the line
+points to the Coven CLI for the rest. Opening another chat starts from the
+usual budget.
+
+Chat and Cave are separate applications. There is no Cave import action or
+runtime import command, and Cave history does not appear in Chat. Previously
+saved import files are not automatically deleted or submitted to a model.
+Only app-owned history can become a familiar's canonical Chat thread.
+
+Claude Code and Codex threads continue from the harness's own session store.
+The bundled Coven Code engine cannot reopen a thread's earlier turns that way,
+so when you continue a Coven Code chat, Chat replays the most recent turns from
+its saved transcript into the new run (the newest turns first, up to 24 KiB,
+each message capped at 4 KiB) and adds a notice to the thread saying how many
+turns were replayed and whether older ones were left out. That notice is a
+quiet line between messages, not a reply from anyone. The saved transcript
+keeps only your original message, not the replayed prompt.
+
+The chat's actions live behind the **Chat actions** control (the ⋯ in the
+thread header; focus returns there after the delete dialog closes).
+**Archive chat** keeps the saved history and hides the
+familiar from the active list; an archived chat shows **Restore chat** in the
+header itself, since restoring is what lets you send again.
+The familiar list shows active chats; **Show archived chats**, under **User
+settings** at the foot of the list, switches it to archived ones. Archived
+history is preserved, and archive state survives refreshes and app restarts.
+
+**Delete chat** requires confirmation and is strictly app-local: it removes the
+saved Chat transcript and that chat's local draft. It does
+not delete original Coven CLI database records/files or change Cave history.
+A permanent tombstone prevents rediscovery or restoration of the deleted
+thread; deleted ancestors are not replayed through a remaining chat's captured
+history chain. This is not secure erasure of backups, provider history, or CLI
+attachment staging. Lifecycle storage is private, atomically replaced, and bounded
+to 10,000 entries / 2 MiB; corrupt or full storage reports an error rather than
+forgetting tombstones. Lifecycle actions wait until all active runs, including
+cancellation cleanup, have finished; deleting a chat never cancels an agent.
+
+## Attachments and formatted replies
+
+Use the compact **+** attachment button beside the message field, or drag
+files onto the conversation. A drop goes through the same checks as the
+picker, and a file dropped anywhere else in the window is ignored rather
+than opened. Selected files
+appear as cards with their filename, size (in KiB above a kibibyte), and a
+remove control; sent messages retain file cards in the transcript.
+
+A message itself may be up to 32,768 bytes; past that the composer warns
+before you send, naming the exact byte count, since Coven would refuse it. The composer accepts up to four UTF-8
+text/code files, each at most 64 KiB.
+Selected bytes are validated and passed to Coven as actual file contents, not
+just filenames. You can send files with or without an accompanying message.
+The installed `coven-code` 0.7.0 engine does not support genuine image/PDF input
+through this transport, so binary files are explicitly rejected.
+
+Unsent attachments stay in the current window. Failed or cancelled sends keep
+them available for retry or removal; successful sends retain filename/size
+metadata in history. Native staging is private and bounded to 64 MiB of
+retained files; originals are never modified.
+
+Sending clears the submitted text and attachment cards immediately. You can
+compose the next message while the familiar responds. A failed or cancelled
+send restores its attachments and restores its text only if you have not
+edited the new draft; later edits are never overwritten. While a failed run's
+error notice shows and the restored text or attachments are still in the
+composer, the notice offers **Try again**, which sends them once more.
+
+Assistant replies render Markdown headings, lists, emphasis, quotes, code,
+tables, and task lists. Wide code and tables scroll inside the message.
+Raw HTML is disabled and remote Markdown images are not fetched automatically.
+Links open outside the window, so hovering one shows its address first.
+Each reply has a **Copy** control that copies its Markdown source, your own
+messages have one too, and each
+fenced code block names its language with its own **Copy** control for the
+code alone. The control reports "Copied" only after the clipboard accepted
+the text and "Copy failed" when it did not.
+
+Tool calls appear as activity rows between the prose, each expanding to the
+call's input and, once reported, its result, each block labeled and with its
+own **Copy** control. The turn's header counts the calls it holds and how
+many failed, whether or not the list is folded. When the runtime reports a call as data rather than as a
+`⚒ Name(args)` line — a `tool_start` frame from the bundled engine, a
+`tool_use` block in an assistant message, or a `tool_result` frame — the row
+also shows the input (cut at 16 KiB with a note saying so) and, once
+reported, the result (a collapsed row says how many lines it holds), and the run status
+names the tool that is executing while its row is marked as running. A run of
+more than ten consecutive calls folds to its newest six, behind a control that
+says how many earlier calls it hides and how many of those failed. The bundled engine's Claude CLI provider
+reports calls as text only, so those rows carry the one-line summary alone.
+
+## Remote screen (VNC)
+
+The **Show screen** button in the thread header opens a viewer pane above the
+transcript. Enter the WebSocket address of a VNC server that speaks the noVNC
+transport (for example the `websockify` endpoint of a Daytona sandbox, with its
+access token in the query string), an optional password, and choose
+**Connect**. The desktop appears scaled to fit and starts **view only**; clear
+that toggle to send mouse and keyboard input. The status line names the
+desktop reported by the server, and a failure names the reason the host saw:
+an HTTP status instead of a WebSocket upgrade, a refused or timed-out
+connection, a handshake that did not complete, or a server that rejected the
+password.
+
+The window never opens the connection itself. The desktop host performs the
+WebSocket upgrade, forwards opaque frames both ways, and reports the close;
+it adds no credentials or headers, follows no redirects, refuses anything but
+`ws://` and `wss://`, caps a message at 64 KiB upstream and 16 MiB
+downstream, and holds at most two screens per window. Its error messages
+never repeat the address, because the address may carry a token. The address
+and password live only in the pane while it is open; closing the pane,
+switching away, or closing the window drops the connection, and nothing is
+written to browser storage. In the browser (`pnpm dev`) the pane says that
+screen viewing needs the desktop app.
+
+The VNC client is [noVNC](https://github.com/novnc/noVNC) 1.7.0, vendored
+under `src/vendor/novnc` (MPL-2.0); see its `README.md` for provenance.
+
+## Familiar avatars
+
+Your familiar's portrait lives at
+`~/.coven/workspaces/familiars/<familiarName>/avatars/<familiarName>.png`.
+The verified directory is `avatars`, not `assets`. Chat resolves it from the
+workspace reported by Coven rather than assuming your home directory or
+ignoring a custom Coven home.
+
+The desktop host creates a small PNG thumbnail for the interface without
+changing your original file. It recognizes PNG or JPEG content, including
+JPEG portraits saved with a `.png` filename. A familiar without a portrait
+keeps its initial as a fallback; the webview never receives general
+filesystem access.
+
+Click the familiar's avatar or name beside an assistant reply to open their
+overview card in the inspector without leaving the conversation.
+
+## Existing local data
+
+The previous app's IndexedDB database, `opencoven-chat`, is not deleted or
+converted into Coven sessions. Local notes and retained side-note receipts
+remain separate from CLI-owned history. They are not submitted to a model
+automatically. The production application identifier remains
+`ai.opencoven.chat`; no demo identity replaces it.
 
 ## Developer setup
+
+You need Node.js `24.18.1`, `pnpm` `10.34.0` through Corepack, Rust `1.95.0`
+with `clippy` and `rustfmt`, and the platform's Tauri dependencies. See
+[`docs/developer-toolchains.md`](docs/developer-toolchains.md) for the full
+toolchain list.
 
 ```bash
 corepack enable
 pnpm install:clean
 pnpm exec playwright install chromium
+pnpm app:dev
 ```
 
-## Scripts
+The default Vite port is `4173`. Browser smoke coverage uses a separate
+production preview on `4174`.
 
 | Script | Purpose |
 | --- | --- |
-| `pnpm install:clean` | Install exactly from `pnpm-lock.yaml` |
-| `pnpm dev` | Run the Vite web scaffold on `127.0.0.1:4173` |
-| `pnpm build` | Build the production web assets |
-| `pnpm typecheck` | Run TypeScript 6.0.3 with `--noEmit` |
+| `pnpm dev` | Render the desktop interface in a browser |
+| `pnpm build` | Build production web assets |
+| `pnpm typecheck` | Run TypeScript with `--noEmit` |
 | `pnpm lint` | Run Biome checks |
-| `pnpm test` / `pnpm test:unit` | Run Vitest + Testing Library smoke tests |
-| `pnpm test:e2e` | Run Playwright smoke coverage against a dedicated local preview server on `127.0.0.1:4174` |
-| `pnpm test:native-e2e` | Run the feature-gated native RPC subprocess integration tests |
-| `pnpm test:contract-canary -- --sdk-root <sdk-root> --cave-root <cave-root>` | Verify reviewed clean checkouts, frozen SDK artifact digests, isolated packed imports, and the Cave authority fixture |
-| `/bin/sh scripts/phase1-conformance-launcher.sh "$(command -v node)"` | Exercise the exact locked release through the trusted non-Node launcher and retain one SDK-compatible platform record |
-| `pnpm cargo:fmt` | Verify Rust formatting |
-| `pnpm cargo:check` | Run Rust compile checks |
-| `pnpm cargo:check:windows-gnu` | Check all Rust targets for `x86_64-pc-windows-gnu` |
-| `pnpm cargo:clippy` | Run Rust lint checks with warnings denied |
-| `pnpm cargo:test` | Run Rust smoke tests |
-| `pnpm app:dev` | Start the Tauri desktop scaffold in development |
-| `pnpm app:build` | Build the Tauri desktop scaffold |
+| `pnpm test:unit` | Run the normal and heavy Vitest suites |
+| `pnpm test:e2e` | Run Playwright against the production preview |
+| `pnpm cargo:fmt` | Check Rust formatting |
+| `pnpm cargo:check` | Compile all Rust targets |
+| `pnpm cargo:clippy` | Run Rust lints |
+| `pnpm cargo:test` | Run Rust tests |
+| `pnpm app:dev` | Start the hot-reloading desktop app |
+| `pnpm app:build` | Package the desktop app |
 
-## Phase 1 scope
+## Native boundaries
 
-The current application renders:
+Runtime operations cross typed, narrowly scoped Tauri commands. There is no
+generic shell, filesystem, or HTTP command exposed to the webview, and no
+Tauri shell, filesystem, opener, or network plugin permission is granted.
+The main window is allowed to invoke only the seven `coven_runtime_*`
+commands the chat interface uses, the three `coven_screen_*` commands of the
+screen relay, and Tauri's permission to set its own window title; the Cave
+adapter and app-identity commands remain registered for native and
+conformance coverage but are not reachable from the webview.
 
-- the OpenCoven Chat product identity and exact `#9386d0` Coven violet token
-- an explicitly labeled browser fallback when Tauri is absent
-- a typed, non-secret desktop bridge that reads the keyring-backed pairing
-  identity through `app_installation_id` before creating the SDK controller
-- connection states and actions for discovery, launch, pairing, cancellation,
-  retry, revocation, scope repair, and credential removal
-- a read-only canonical Chat surface for familiars, projects, conversations,
-  conversation detail, and messages
-- bounded cursor-driven load-more controls with short in-memory deduplication
-  and caching; authenticated bodies are never written to browser storage
-- the familiar switcher at the top of the left rail
-- explicit `?demo=chat`, `?demo=messages`, and `?demo=minimal` local mock surfaces
+The reviewed Cave adapter remains in the repository for its independent
+native and conformance coverage. The single Chat entrypoint does not start
+it, pair with it, or require its credentials. Removing the old UI modes does
+not rewrite the protected release evidence or broaden existing trust
+boundaries.
 
-Sending messages and other write operations remain deferred to later phases.
+## Protected conformance
 
-## Proof-of-concept chat demo
+The product UI and the historical Phase 1 release gate are separate.
+[`docs/phase1-conformance.md`](docs/phase1-conformance.md) documents the
+immutable native gate and real-authority three-platform matrix.
 
-`pnpm app:dev` opens the production read-only desktop surface. `pnpm dev`
-serves the browser fallback at <127.0.0.1:4173/> and the richer mock chat at
-<127.0.0.1:4173/?demo=chat>, which implements the **Familiars Redesign v2**
-design: the ward at the centre of the chat, with a "Needs you" section, held
-actions the familiar stops at until you decide, a composer that warns before a
-draft crosses into the must-ask tier, and an inspector for the familiar's
-purpose, access, and activity. The design files it was built from are under
-`docs/superpowers/specs/2026-09-01-familiars-redesign-v2/`.
+`contract-canary.lock.json` pins reviewed SDK and Cave commits, packed
+tarball digests, and the Client v1 authority fixture.
+`phase1-conformance.lock.json` independently pins the real-authority release
+candidate. Neither lock is changed by the UI migration.
 
-<127.0.0.1:4173/?demo=messages> is the earlier Messages-shaped surface it
-replaced, kept reachable for side-by-side comparison. It previews generated
-images, link unfurls, `/spec` and `/handoff` artifacts, and a composer.
+```bash
+pnpm test:contract-canary -- --sdk-root <sdk-root> --cave-root <cave-root>
+/bin/sh scripts/phase1-conformance-launcher.sh "$(command -v node)"
+pnpm test:native-e2e
+```
 
-### Demo build
+Conformance requires the exact counterpart checkouts and platform authority
+described in its guide. A successful local UI build is not evidence of a
+successful protected conformance run.
 
-`pnpm app:build:demo` (`VITE_DEFAULT_DEMO=chat tauri build --config
-src-tauri/tauri.demo.conf.json`) packages **OpenCoven Chat Demo**
-(`ai.opencoven.chat.demo`), which opens on the
-familiars surface with no query flag and installs alongside the real app. The
-overlay changes only the name, identifier, blurb, and macOS signing identity;
-the production build is unaffected because `VITE_DEFAULT_DEMO` stays unset.
+## Delivery and releases
 
-**It connects to nothing.** No Cave, no network, no persistence. Replies come
-from canned strings and a timer, link unfurls invent their metadata from the
-hostname rather than fetching the page, and the generated image is a drawn
-placeholder whose palette varies by prompt. A refresh resets everything.
+See the [delivery roadmap](docs/roadmap.md) for PR dependencies and
+consolidation history. CI runs frontend, browser, Rust, packed-artifact,
+and native lifecycle coverage. The heavy Phase 1 Vitest suites test the
+conformance scripts rather than the app, so a pull request runs them only
+when it changes something outside the chat UI, the browser suite, or prose;
+every push to `main` runs them regardless.
 
-Two consequences worth knowing:
-
-- **The demo is explicit.** `tauri.conf.json` uses the production shell route;
-  no demo query is embedded in `devUrl`.
-- **The production gate is the default view.** Without a demo query flag the
-  app initializes native installation identity and Cave connection state.
-
-`src/demo/` is meant to be deleted when the real read and send paths land. Its
-mock types are shaped close to the canonical ones so that lands as a change of
-data source rather than a rewrite of the view.
-
-### Minimal (macOS) surface
-
-<127.0.0.1:4173/?demo=minimal> implements the approved **Coven Cave Minimal
-(macOS)** design: one window, a sidebar of chats and familiars, an activity
-panel, and the approval, familiar and settings sheets over the top.
-
-A second surface rather than a revision of the first, because they are two
-directions rather than two drafts of one. Keeping both means the choice between
-them can be made by looking at them side by side.
-
-It connects to nothing either, and it carries its own palette — the design
-system's tokens, not the scaffold's — scoped under `.mm-desktop` so the two
-cannot bleed into each other. Unlike the chat demo it does have test coverage,
-in `src/demo/minimal-macos.test.tsx`: what is covered there is the design's
-checkable claims, chiefly that an irreversible action stops and asks, and that
-the transcript then records which answer it got.
-
-## Reviewed counterpart lock
-
-`contract-canary.lock.json` pins reviewed SDK and Cave commits, the exact SDK
-release manifest, all four public tarball paths, sizes, and SHA-256 digests, and
-the Cave producer's current Client v1 contract fixture and `hpke-bound-v1`
-vectors. CI rejects dirty counterpart checkouts, verifies their immutable
-HEADs, regenerates the canonical release artifact set for byte-level digest
-comparison, checks packed fixture ancestry and vector byte identity, and
-installs the frozen artifacts into an isolated consumer.
-
-Local explicit-root canary runs still use
-`pnpm test:contract-canary -- --sdk-root <sdk-root> --cave-root <cave-root>`,
-and the script rejects staged, unstaged, or untracked changes before it
-verifies that the checked-out HEADs match the tracked lock.
-
-`phase1-conformance.lock.json` independently pins Chat, the SDK package
-candidate and evidence authority, Cave, Coven, and the canonical package
-metadata for the real-authority gate. The protected
-`.github/workflows/client-v1-conformance.yml` schema-v2 producer takes its
-separate immutable SDK validator revision as a required dispatch input and
-requires it to equal the protected environment's nonsecret
-`CLIENT_V1_CONFORMANCE_VALIDATOR_REVISION` variable, avoiding a circular pin
-while retaining both the strict schema-v1 gate and canonical schema-v2
-platform records. Producer and validator jobs have no OIDC or attestation
-authority. A fresh validator job revalidates the immutable uploaded artifacts
-and hands only their SHA-256 digests to a separate OIDC job, which downloads
-the same artifacts again, compares the digests, and attests without executing
-repository or artifact content. Neither replaces or loosens the Phase 0
-canary lock.
-
-Before the Windows producer downloads or checks out anything, its trusted
-outer supervisor creates a random local non-admin identity with an isolated,
-protected profile, temporary directory, and workspace. It protects the
-supervisor process and authoritative Job handle from that identity, launches
-the complete producer tree suspended with `CreateProcessWithLogonW`, and
-assigns it to the query-only nonce-bound Job before resuming it. Every exit
-terminates the Job and verifies removal of the ephemeral account, Windows
-profile, and bootstrap root.
-The macOS and Linux lanes likewise place dependency installation, builds,
-candidate/validator/authority execution, and evidence production under a fresh
-non-admin UID with isolated home/workspace/temp/tool caches. Linux uses a
-trusted cgroup-v2 supervisor and `cgroup.kill`; macOS disables the ephemeral
-account and drains every process with its exact UID. Only after a native
-zero-process proof does the original runner perform the no-follow,
-descriptor-based, create-new artifact handoff.
-
-## CI coverage
-
-`.github/workflows/ci.yml` runs:
-
-- Biome linting
-- TypeScript typecheck
-- Vitest smoke tests
-- Vite production builds for Playwright smoke and `pnpm app:build`
-- Playwright smoke coverage
-- `pnpm app:build` on Ubuntu with the Linux Tauri system dependencies installed
-- the cross-repository packed-tarball contract canary with explicit SDK and Cave checkouts pinned by `contract-canary.lock.json`
-- the macOS packaged real-authority matrix with exact counterpart checkouts
-  pinned by `phase1-conformance.lock.json`, an isolated keychain, and a
-  secret-scanned SDK platform record
-- Windows runtime coverage for the cross-user Job supervisor boundary,
-  descendant teardown, quotas, membership, and fail-closed account/profile
-  cleanup
-- native Ubuntu 24.04 and macOS 14 runtime coverage for `setsid`/double-fork
-  escape cleanup plus symlink, hardlink, parent-swap, and in-place artifact
-  races in the Unix producer supervisor
-- Rust `fmt`, `check`, `clippy`, and `test`
-
-The Tauri capability schema at `src-tauri/gen/schemas/desktop-schema.json` is
-intentionally kept outside the ignore rules so the capability `$schema` can ship
-with fresh checkouts without granting permissions beyond the reviewed app and
-Cave adapter commands.
+Releases are cut from signed `v*` tags through
+[`.github/workflows/release.yml`](.github/workflows/release.yml). The
+[release guide](docs/releasing.md) covers platform bundles, signing,
+checksums, rehearsals, and recovery.

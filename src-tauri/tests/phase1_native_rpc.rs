@@ -264,7 +264,7 @@ fn subprocess_rejects_missing_malformed_and_production_keyring_services_before_c
         command
             .env(NATIVE_PROVIDER_PRESET_ENV, "system-native")
             .env("HOME", &home)
-            .stdin(Stdio::piped())
+            .stdin(Stdio::null())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
         if let Some(service) = service {
@@ -272,15 +272,7 @@ fn subprocess_rejects_missing_malformed_and_production_keyring_services_before_c
         } else {
             command.env_remove(CONFORMANCE_SERVICE_ENV);
         }
-        let mut child = command.spawn().expect("phase1-native-rpc must start");
-        {
-            let mut stdin = child.stdin.take().expect("child stdin must be piped");
-            writeln!(
-                stdin,
-                r#"{{"id":"installation","command":"app_installation_id"}}"#
-            )
-            .expect("installation request must be written");
-        }
+        let child = command.spawn().expect("phase1-native-rpc must start");
         let output = child
             .wait_with_output()
             .expect("phase1-native-rpc must reject its configuration");
@@ -527,10 +519,20 @@ fn subprocess_cleanup_grants_are_exact_scoped_single_use_and_tamper_evident() {
             "phase1-cleanup-grant-home-{}-{nonce}",
             std::process::id()
         ));
+    let cleanup_home = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("target")
+        .join(format!(
+            "phase1-cleanup-grant-marker-home-{}-{nonce}",
+            std::process::id()
+        ));
     fs::create_dir_all(&home).expect("isolated home must be created");
     fs::set_permissions(&home, fs::Permissions::from_mode(0o700))
         .expect("isolated home must be private");
+    fs::create_dir_all(&cleanup_home).expect("isolated cleanup home must be created");
+    fs::set_permissions(&cleanup_home, fs::Permissions::from_mode(0o700))
+        .expect("isolated cleanup home must be private");
     let _home_cleanup = HomeCleanup(home.clone());
+    let _cleanup_home_cleanup = HomeCleanup(cleanup_home.clone());
     let preferences = home.join("Library").join("Preferences");
     let keychains = home.join("Library").join("Keychains");
     for directory in [home.join("Library"), preferences, keychains.clone()] {
@@ -538,7 +540,7 @@ fn subprocess_cleanup_grants_are_exact_scoped_single_use_and_tamper_evident() {
         fs::set_permissions(&directory, fs::Permissions::from_mode(0o700))
             .expect("isolated keychain directory must be private");
     }
-    let keychain = keychains.join("phase1-test.keychain-db");
+    let keychain = keychains.join("phase1.keychain-db");
     let password = format!("{:064x}", nonce ^ u128::from(std::process::id()));
     for arguments in [
         vec![
@@ -592,6 +594,9 @@ fn subprocess_cleanup_grants_are_exact_scoped_single_use_and_tamper_evident() {
         .env(NATIVE_PROVIDER_PRESET_ENV, "system-native")
         .env(CONFORMANCE_SERVICE_ENV, &service)
         .env("HOME", &home)
+        .env("OPENCOVEN_PHASE1_TEST_KEYCHAIN_ISOLATED", "1")
+        .env("PHASE1_TEST_KEYCHAIN", &keychain)
+        .env("OPENCOVEN_PHASE1_CONFORMANCE_CLEANUP_HOME", &cleanup_home)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -604,6 +609,13 @@ fn subprocess_cleanup_grants_are_exact_scoped_single_use_and_tamper_evident() {
         stdin,
         stdout,
     };
+
+    let cold_start_grant = rpc.issue(&[TARGET_A]);
+    let cold_start_cleanup = rpc.cleanup(&cold_start_grant);
+    assert_eq!(
+        cold_start_cleanup["ok"], true,
+        "cleanup must initialize the native store before checking absent accounts: {cold_start_cleanup}"
+    );
 
     let before = rpc.request(json!({
         "id": "state",
@@ -636,18 +648,12 @@ fn subprocess_cleanup_grants_are_exact_scoped_single_use_and_tamper_evident() {
         &home,
         &keychain,
         &service,
-        &credential_account(TARGET_B),
-        credential,
-    );
-    set_entry(
-        &home,
-        &keychain,
-        &service,
         &credential_account(UNRELATED),
         credential,
     );
 
-    let (grant, marker) = issue_with_marker(&mut rpc, &home, &[TARGET_B, TARGET_A, TARGET_B]);
+    let (grant, marker) =
+        issue_with_marker(&mut rpc, &cleanup_home, &[TARGET_B, TARGET_A, TARGET_B]);
     let marker_text = fs::read_to_string(&marker).expect("marker must be readable");
     assert!(
         !marker_text.contains(&grant),
@@ -677,12 +683,10 @@ fn subprocess_cleanup_grants_are_exact_scoped_single_use_and_tamper_evident() {
         &service,
         &credential_account(TARGET_A)
     ));
-    assert!(entry_present(
-        &home,
-        &keychain,
-        &service,
-        &credential_account(TARGET_B)
-    ));
+    assert!(
+        !entry_present(&home, &keychain, &service, &credential_account(TARGET_B)),
+        "cleanup scope must include an account that is already absent"
+    );
     assert!(entry_present(
         &home,
         &keychain,
@@ -735,7 +739,9 @@ fn subprocess_cleanup_grants_are_exact_scoped_single_use_and_tamper_evident() {
     let cleaned = concurrent
         .iter()
         .find(|response| response["ok"] == true)
-        .expect("one concurrent cleanup redemption must succeed");
+        .unwrap_or_else(|| {
+            panic!("one concurrent cleanup redemption must succeed: {concurrent:?}")
+        });
     let rejected = concurrent
         .iter()
         .find(|response| response["ok"] == false)
@@ -787,7 +793,7 @@ fn subprocess_cleanup_grants_are_exact_scoped_single_use_and_tamper_evident() {
         &credential_account(TARGET_A),
         credential,
     );
-    let (account_grant, account_marker) = issue_with_marker(&mut rpc, &home, &[TARGET_A]);
+    let (account_grant, account_marker) = issue_with_marker(&mut rpc, &cleanup_home, &[TARGET_A]);
     rewrite_marker(&account_marker, |marker| {
         marker["payload"]["accounts"][1] = Value::String(credential_account(UNRELATED));
     });
@@ -806,7 +812,7 @@ fn subprocess_cleanup_grants_are_exact_scoped_single_use_and_tamper_evident() {
     ));
     rpc.reject_cleanup(&account_grant);
 
-    let (service_grant, service_marker) = issue_with_marker(&mut rpc, &home, &[TARGET_A]);
+    let (service_grant, service_marker) = issue_with_marker(&mut rpc, &cleanup_home, &[TARGET_A]);
     rewrite_marker(&service_marker, |marker| {
         marker["payload"]["service"] =
             Value::String("ai.opencoven.chat.phase1.ffffffffffffffffffffffffffffffff".to_owned());
@@ -825,7 +831,7 @@ fn subprocess_cleanup_grants_are_exact_scoped_single_use_and_tamper_evident() {
         &credential_account(TARGET_A)
     ));
 
-    let (symlink_grant, symlink_marker) = issue_with_marker(&mut rpc, &home, &[TARGET_A]);
+    let (symlink_grant, symlink_marker) = issue_with_marker(&mut rpc, &cleanup_home, &[TARGET_A]);
     let saved_marker = symlink_marker.with_extension("saved");
     fs::rename(&symlink_marker, &saved_marker).expect("marker must move aside");
     std::os::unix::fs::symlink(
@@ -849,7 +855,7 @@ fn subprocess_cleanup_grants_are_exact_scoped_single_use_and_tamper_evident() {
         &credential_account(TARGET_A)
     ));
 
-    let (hardlink_grant, hardlink_marker) = issue_with_marker(&mut rpc, &home, &[TARGET_A]);
+    let (hardlink_grant, hardlink_marker) = issue_with_marker(&mut rpc, &cleanup_home, &[TARGET_A]);
     let hardlink_alias = hardlink_marker.with_extension("alias");
     fs::hard_link(&hardlink_marker, &hardlink_alias).expect("marker hard link must be created");
     rpc.reject_cleanup(&hardlink_grant);
@@ -866,8 +872,9 @@ fn subprocess_cleanup_grants_are_exact_scoped_single_use_and_tamper_evident() {
         &credential_account(TARGET_A)
     ));
 
-    let (replaced_grant, replaced_marker) = issue_with_marker(&mut rpc, &home, &[TARGET_A]);
-    let (_substitute_grant, substitute_marker) = issue_with_marker(&mut rpc, &home, &[UNRELATED]);
+    let (replaced_grant, replaced_marker) = issue_with_marker(&mut rpc, &cleanup_home, &[TARGET_A]);
+    let (_substitute_grant, substitute_marker) =
+        issue_with_marker(&mut rpc, &cleanup_home, &[UNRELATED]);
     fs::remove_file(&replaced_marker).expect("original marker must be removed");
     fs::rename(&substitute_marker, &replaced_marker).expect("substitute marker must be installed");
     rpc.reject_cleanup(&replaced_grant);
@@ -884,7 +891,8 @@ fn subprocess_cleanup_grants_are_exact_scoped_single_use_and_tamper_evident() {
         &credential_account(TARGET_A)
     ));
 
-    let (directory_grant, directory_marker) = issue_with_marker(&mut rpc, &home, &[TARGET_A]);
+    let (directory_grant, directory_marker) =
+        issue_with_marker(&mut rpc, &cleanup_home, &[TARGET_A]);
     let marker_directory = directory_marker
         .parent()
         .expect("marker must have a parent")
@@ -1080,6 +1088,36 @@ mod windows_cleanup {
         (path.clone(), HomeCleanup { profile, path })
     }
 
+    struct ProfileMarkerCleanup(Vec<(PathBuf, bool)>);
+
+    impl Drop for ProfileMarkerCleanup {
+        fn drop(&mut self) {
+            for (path, existed) in self.0.iter().rev() {
+                if !existed {
+                    let _ = fs::remove_dir(path);
+                }
+            }
+        }
+    }
+
+    fn token_profile_marker_home() -> (PathBuf, ProfileMarkerCleanup) {
+        let profile =
+            PathBuf::from(std::env::var_os("USERPROFILE").expect("USERPROFILE must be set"));
+        let coven = profile.join(".coven");
+        let chat = coven.join("chat");
+        let markers = chat.join("phase1-cleanup-grants-v1");
+        let cleanup = ProfileMarkerCleanup(
+            [coven, chat, markers]
+                .into_iter()
+                .map(|path| {
+                    let existed = path.exists();
+                    (path, existed)
+                })
+                .collect(),
+        );
+        (profile, cleanup)
+    }
+
     struct RpcProcess {
         child: Child,
         stdin: ChildStdin,
@@ -1089,6 +1127,15 @@ mod windows_cleanup {
 
     impl RpcProcess {
         fn spawn(home: &Path, service: &str, hook: Option<(&str, &Path)>) -> Self {
+            Self::spawn_with_cleanup_home(home, None, service, hook)
+        }
+
+        fn spawn_with_cleanup_home(
+            home: &Path,
+            cleanup_home: Option<&Path>,
+            service: &str,
+            hook: Option<(&str, &Path)>,
+        ) -> Self {
             let mut command = Command::new(env!("CARGO_BIN_EXE_phase1-native-rpc"));
             command
                 .env(NATIVE_PROVIDER_PRESET_ENV, "system-native")
@@ -1097,6 +1144,9 @@ mod windows_cleanup {
                 .stdin(Stdio::piped())
                 .stdout(Stdio::piped())
                 .stderr(Stdio::piped());
+            if let Some(cleanup_home) = cleanup_home {
+                command.env("OPENCOVEN_PHASE1_CONFORMANCE_CLEANUP_HOME", cleanup_home);
+            }
             if let Some((name, directory)) = hook {
                 command
                     .env(CLEANUP_HOOK_ENV, name)
@@ -1367,6 +1417,22 @@ mod windows_cleanup {
     }
 
     #[test]
+    fn native_cleanup_accepts_the_explicit_token_profile_marker_home() {
+        let (home, _home_cleanup) = isolated_home();
+        let (profile, _profile_marker_cleanup) = token_profile_marker_home();
+        let service = service_name();
+        let mut credential_cleanup = CredentialCleanup(Vec::new());
+        set_cleanup_entries(&mut credential_cleanup, &service, &[TARGET_A]);
+        let mut rpc = RpcProcess::spawn_with_cleanup_home(&home, Some(&profile), &service, None);
+
+        let grant = rpc.issue(&[TARGET_A]);
+        assert_eq!(rpc.cleanup(&grant)["ok"], true);
+        assert!(!entry_present(&service, INSTALLATION_ACCOUNT));
+        assert!(!entry_present(&service, &credential_account(TARGET_A)));
+        rpc.shutdown();
+    }
+
+    #[test]
     fn native_cleanup_rejects_delete_child_acl_and_reparse_directory_substitution() {
         let (home, _home_cleanup) = isolated_home();
         let service = service_name();
@@ -1461,7 +1527,7 @@ mod windows_cleanup {
         release_hook(&hook_directory, "issue-storage-identity");
         assert_eq!(
             rpc.receive()["error"],
-            json!({"code": "secure_store_unavailable", "retryable": true}),
+            json!({"code": "cleanup_grant_marker_publish_unavailable", "retryable": true}),
             "publication must reject a replaced parent chain even when the marker directory identity is retained",
         );
         rpc.shutdown();
@@ -1565,13 +1631,41 @@ fn internal_coven_probe_failure_exits_silently_before_rpc_startup() {
 
 #[test]
 fn subprocess_exits_nonzero_when_its_response_stream_is_closed() {
+    #[cfg(unix)]
+    let writer = {
+        // A concurrent fork can retain a pipe reader until exec, even after our
+        // reader is dropped. Shut down the socket's shared write direction so
+        // every duplicate is unwritable regardless of inherited peer handles.
+        let (_reader, mut writer) =
+            std::os::unix::net::UnixStream::pair().expect("response socket pair must be created");
+        writer
+            .shutdown(std::net::Shutdown::Write)
+            .expect("response writes must be shut down");
+        assert_eq!(
+            writer.write(b"probe").unwrap_err().kind(),
+            std::io::ErrorKind::BrokenPipe,
+        );
+        Stdio::from(std::os::fd::OwnedFd::from(writer))
+    };
+    #[cfg(not(unix))]
+    let writer = {
+        let (reader, mut writer) = std::io::pipe().expect("response pipe must be created");
+        drop(reader);
+        assert_eq!(
+            writer
+                .write(b"probe")
+                .expect_err("response pipe must reject writes before RPC startup")
+                .kind(),
+            std::io::ErrorKind::BrokenPipe,
+        );
+        Stdio::from(writer)
+    };
     let mut child = Command::new(env!("CARGO_BIN_EXE_phase1-native-rpc"))
         .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
+        .stdout(writer)
         .stderr(Stdio::piped())
         .spawn()
         .expect("phase1-native-rpc must start");
-    drop(child.stdout.take().expect("child stdout must be piped"));
     {
         let mut stdin = child.stdin.take().expect("child stdin must be piped");
         writeln!(
@@ -2444,7 +2538,7 @@ const server = createServer((request, response) => {
     response.writeHead(200, { 'content-type': 'application/json' });
     response.end(JSON.stringify({
       apiVersion: '1.0',
-      minimumClientVersion: '0.1.0',
+      minimumClientVersion: '0.0.1',
       capabilities: ['health', 'pairing', 'credentials', 'familiars', 'projects', 'conversations', 'conversation-messages', 'cursors'],
       operations: ['health.read', 'pairing.create', 'pairing.poll', 'pairing.exchange', 'pairing.admin.list', 'pairing.admin.decide', 'credentials.admin.list', 'credentials.admin.revoke', 'familiars.list', 'projects.list', 'conversations.list', 'conversations.read', 'messages.list'],
       data: {

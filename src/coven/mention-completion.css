@@ -1,0 +1,84 @@
+.chat-mention-panel {
+  position: fixed;
+  z-index: 100;
+  display: flex;
+  flex-direction: column;
+  box-sizing: border-box;
+  overflow: hidden;
+  border: 1px solid var(--border-strong);
+  border-radius: 14px;
+  background: var(--bg-raised);
+  color: var(--text-primary);
+  box-shadow: 0 12px 36px rgb(0 0 0 / 35%);
+  font: 13px / 1.4 var(--font-inter, sans-serif);
+}
+
+.chat-mention-heading,
+.chat-mention-note {
+  flex: 0 0 auto;
+  padding: 10px 12px;
+}
+
+.chat-mention-heading {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 4px 12px;
+}
+
+.chat-mention-heading > span,
+.chat-mention-note {
+  color: var(--text-secondary);
+  font-size: 11px;
+}
+
+.chat-mention-options {
+  position: relative;
+  min-height: 0;
+  overflow: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+  padding: 4px;
+}
+
+.chat-mention-option {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  width: 100%;
+  min-height: 44px;
+  padding: 9px;
+  border: 1px solid transparent;
+  border-radius: 9px;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  font: inherit;
+  cursor: pointer;
+}
+
+.chat-mention-option[aria-selected="true"],
+.chat-mention-option:hover {
+  border-color: var(--accent-presence);
+  background: color-mix(in srgb, var(--accent-presence) 14%, transparent);
+}
+
+.chat-mention-marker {
+  flex: 0 0 24px;
+  color: var(--accent-presence);
+  text-align: center;
+  font-size: 19px;
+}
+
+.chat-mention-copy {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+  overflow-wrap: anywhere;
+}
+
+.chat-mention-copy small {
+  color: var(--text-secondary);
+  font-size: 11px;
+}

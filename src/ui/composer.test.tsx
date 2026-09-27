@@ -164,4 +164,13 @@ describe('Composer', () => {
     expect(rowsFor('x'.repeat(120), 2, 8)).toBe(2);
     expect(rowsFor('a\n'.repeat(20), 2, 8)).toBe(8);
   });
+
+  it('does not submit an Enter key used to compose an IME character', () => {
+    const onSend = vi.fn();
+    renderComposer({ value: 'Draft', onSend });
+    const field = screen.getByRole('textbox');
+    fireEvent.keyDown(field, { key: 'Enter', isComposing: true });
+    fireEvent.keyDown(field, { key: 'Enter', keyCode: 229 });
+    expect(onSend).not.toHaveBeenCalled();
+  });
 });

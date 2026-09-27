@@ -2,32 +2,32 @@
   "version": 5,
   "chat": {
     "repository": "OpenCoven/chat",
-    "revision": "edd4728792321771496df58bfc0e6122908a96ec"
+    "revision": "dabcdd47e7509880f26e9895ffb63d42d9070ca8"
   },
   "sdk": {
     "repository": "OpenCoven/sdk",
-    "revision": "acc38488f00860d246c3c553375634d64806eabb"
+    "revision": "cd10a3fa1d9900e0dbcb04bbb2477140854fba1d"
   },
   "cave": {
     "repository": "OpenCoven/coven-cave",
-    "revision": "6325fc4c1154c7d7398074a9760a2e2dc323b424"
+    "revision": "ecdcdcf8a75b62bb912ec48215ae20ab0809a181"
   },
   "coven": {
     "repository": "OpenCoven/coven",
-    "revision": "721437b84026c042e431b0882dcd14fdb29ac07d"
+    "revision": "8c3735f374d6bc95e5b6fd107f7e7308fa26a2f8"
   },
   "harness": {
     "repository": "OpenCoven/chat",
-    "revision": "55071f4200d312911ff5f6e5220873ae6f6197f2"
+    "revision": "2f72ecedd225759a11889ec4b7dd112b71361d56"
   },
   "harnessAuthority": {
-    "revision": "55071f4200d312911ff5f6e5220873ae6f6197f2",
-    "tree": "d4d0d383d3f004d4d99ba5b69928dffb94228140",
+    "revision": "2f72ecedd225759a11889ec4b7dd112b71361d56",
+    "tree": "0a2e550bddbeaec405367d1dcb383c38fb10fb51",
     "files": [
       {
         "path": "scripts/phase1-conformance.mjs",
-        "blob": "30fdc89ef0ef2f0f0df5bf93e36b6fd387cd4dcc",
-        "sha256": "cc374d616d9de0a0cd94ce2ced5847fd877e124323acce3fca31f3df35d67d1b"
+        "blob": "47825da877b5285fc0936a4884b1e4918117fcd2",
+        "sha256": "8f045e44cbe31377d7bb0697a398c27606c6505d2b3ff2ca23f8932809cb205c"
       },
       {
         "path": "scripts/phase1-conformance-launcher.sh",
@@ -51,18 +51,18 @@
       },
       {
         "path": "scripts/process-owned-artifact-root.mjs",
-        "blob": "d6f44015f0ddd93d01c41b4baa9c0591ad1a7fbf",
-        "sha256": "9ee158453044cd57b91c77c50262092a91993c6b1533b6584c61e1cbadfd794a"
+        "blob": "c3127190fdbfd082f79a1ce73b6778746f2c89b4",
+        "sha256": "103cc789f12a6bbde16b2414aecf05813d9d28a2c40c7d6eaa2073b86e8e5d77"
       },
       {
         "path": "scripts/owned-temp-directory.mjs",
-        "blob": "e5677dc8751b713284334635683d7dd89847402e",
-        "sha256": "a9c55c85cf2b7d70310d278bafd2c8e7695d66f4ae38b9c3f1f12fce0b442095"
+        "blob": "5b6fcc651a3b3d859f79d4163a9ed91a446ca47d",
+        "sha256": "1ba30d2d5f0312143e2837956899a4f3f116f3619937d5d9756ff197ecb2a325"
       },
       {
         "path": "scripts/phase1-conformance-lock.mjs",
-        "blob": "ae9e95c8c290cd4158a0b26ad757fcb815d3a70e",
-        "sha256": "e24f8bdca96ff32968875021090cb8d569c92d842562e01988a769e9728d3789"
+        "blob": "c62a3c379eb09021c957206fd6ae78ffb6c657df",
+        "sha256": "92f981c43f75bc65c81e9e9ee16084aae658617b929d451a9db0d7c9e6bedbe2"
       },
       {
         "path": "scripts/phase1-evidence-contract.mjs",
@@ -71,18 +71,18 @@
       },
       {
         "path": "scripts/phase1-evidence-runtime.mjs",
-        "blob": "56767afb7b5e04bf5acf3a902f2ce196dbc7b960",
-        "sha256": "3d227c354e6d908c5912d2b8244336e3b79c3bbd4dec79b0ad219ed65b8cb159"
+        "blob": "fb744e9f11ec002418ff42741c23f8a5f2f346e6",
+        "sha256": "b09a0d20abc7ebbc6289c57c985fd42b8a4b5d196895bc035b8fca40281d9315"
       },
       {
         "path": "scripts/phase1-schema-v2-evidence.mjs",
-        "blob": "0d0424731a06f169342258e76216583667e4deb0",
-        "sha256": "a7cab994aa0ee97baceb4b2c475ec1ff253ae5681f39e2c3d15fb1035b2d2387"
+        "blob": "023c87e5055472b4be2e0914d97e14109b1d86ad",
+        "sha256": "0aede2ab3abd76fabf5ac61d64d2dbaaffa497c8647b82236403de16a47751c8"
       },
       {
         "path": "scripts/phase1-schema-v2-producer.mjs",
-        "blob": "212f4f2abb045e990622f9eaf877ea45227125e0",
-        "sha256": "40db3738d948149c48e75c0ead409722c0d9ebaf90e5c6ec625d25fde5f5d337"
+        "blob": "20b6f63c0fdb2b0a2f6d0558ecbe5624ac7fea1b",
+        "sha256": "24c0750ebdc917d653e76ec929372f5abfe5dbfc52e11e685fb64f4766b82ba7"
       },
       {
         "path": "scripts/phase1-linux-secret-service.mjs",
@@ -106,23 +106,23 @@
       },
       {
         "path": "scripts/unix-producer-command.sh",
-        "blob": "7e9e329c741de52ecaa6c4076b495e9f063217b2",
-        "sha256": "d4ee80fae32f48647cda18501c38e03baee62832caf9ed4393ab6e7edfea2135"
+        "blob": "2c1a3e5f8ca96d801d900f5df3886fb3b0d3601b",
+        "sha256": "ce9ec2ff00947f3ec0db53f144c99d34bc27de6085062d00dccff7c934c2e3c8"
       },
       {
         "path": "scripts/unix-producer-supervisor.sh",
-        "blob": "b0e6f392af80b8562d155707a61ab51c199ed525",
-        "sha256": "7bb1d791b6b46aabaca2864e4b82b9f02da116b632774dfedb9aec3dc9ba0d52"
+        "blob": "0a27a5be4d2eb4981d35d7e3c178424c851697c5",
+        "sha256": "b73036415744c80ed27d5667f255ceea149096ca517b47c93a154299802206ff"
       },
       {
         "path": "scripts/windows-job-supervisor.cs",
-        "blob": "547f2db1e7cacd539f49f5c879839fa80397ac1d",
-        "sha256": "08c18fa81b16f922b3fac32abec3a2f6369e5f2b9f4caa19a0b48df6302bb110"
+        "blob": "c6ddcb12a3b439b04e1272b8b26d110a8372c973",
+        "sha256": "ec56ad9daf9cfd2e92de4420cfc5ce328e09a76b627a8253ef35f2e9ef151669"
       },
       {
         "path": "scripts/contract-canary.mjs",
-        "blob": "6f72082c6b900bb0987665f0271bb45ec9fe04b2",
-        "sha256": "4eb4d9b693187f110343a4c1efd92e59a9705e25790845bf04b05cb5bac6cbb5"
+        "blob": "f4c72220cd200dba09aa9aeea05cd905b7cec435",
+        "sha256": "a4c2fe0a5eb6a5ff4653de5374c34c0fb46907c6806a5d23b86d8b37206ef958"
       },
       {
         "path": "scripts/supervised-exec.mjs",
@@ -136,30 +136,30 @@
       },
       {
         "path": "scripts/phase1-artifact-secret-scan.mjs",
-        "blob": "80fae017ed84215909c7f3a91b46d0d776b8a13b",
-        "sha256": "be0ec302b9c4372f232d6bd1efcba873fd3380cc5de7f756cd0b9eeeec07222a"
+        "blob": "94365a87156a54d1202e8d6e7f8fac33d1278ad0",
+        "sha256": "8b3c85cb8461fd520892a53a6169201e1db1bf50fe1457ed6315ba9fcd2fd658"
       },
       {
         "path": ".github/workflows/ci.yml",
-        "blob": "5dee6b72205f7098b832a0da6c996afad3f5874e",
-        "sha256": "c3659b47808dcde989c10c7b37efe0845c743e18b25381182748329ce1e6cc71"
+        "blob": "1212c7eecfa5781713b2399a2f0d37ad765f6afa",
+        "sha256": "4e2a4d77c6224bc098d9b356c6a47da256b86d6537a4477374dd87680f2b939a"
       },
       {
         "path": ".github/workflows/client-v1-conformance.yml",
-        "blob": "28bad32e2ad0fc849ac87e9a7b9cbd3229e9640a",
-        "sha256": "047ae05690461530e609370b3d2d5c90817d5a2ff06484f13ffef9f4d5c775f2"
+        "blob": "836a0702cee4736b7a529fecd43014f805258b85",
+        "sha256": "93858b9056614e5bcfd0ffc02fdf38b4b4408364f7b1916491133c92050d5ab5"
       }
     ],
     "productionDeltas": [
       {
         "path": "src-tauri/Cargo.toml",
-        "blob": "7c668d36be4bb981b0658bd17ae153a359fe8a4d",
-        "sha256": "649985eed6b18f4f732a03246178d93991b3f311728c7569e970cfda3499df60"
+        "blob": "6c0f118ad21595067c91d1965994be95fae9dbf1",
+        "sha256": "3f53d4710dd4bf17d3be30b3d219d61fb5d85c66ecb2472ecd7206f186666f68"
       },
       {
         "path": "src-tauri/Cargo.lock",
-        "blob": "359ef1ac955b0f28b397802e5f3c0d6f022058e9",
-        "sha256": "e3d360b5d0ec7d0f4278e798b3e91fd4ce65e86ef6949bd8f030e51b78b2909e"
+        "blob": "5bb14effed69756d32fa1f3d7f75ab173733547c",
+        "sha256": "3f3d7ecd87fd6f96678dab9fe484081e49161fcc413cd20a2a7af045f588a71d"
       },
       {
         "path": "src-tauri/src/bin/phase1-native-rpc.rs",
@@ -168,23 +168,23 @@
       },
       {
         "path": "src-tauri/src/cave.rs",
-        "blob": "e3b1867a9500764f1508c5f3e514c55933616fab",
-        "sha256": "78fab63ca59021803b5c84e99651fdb422e1ec310447cd4473c3c2341825b9c4"
+        "blob": "eb1164316beefd9a3cddaf6e09791f74f1718cf0",
+        "sha256": "6b4104d434700bae00926d4f1ecf28943306a01e8fb69a9ac40e79ed9da98f51"
       },
       {
         "path": "src-tauri/src/cleanup_grant.rs",
-        "blob": "58e53e96d4f0addb37891bc74bfb25eb9f9462aa",
-        "sha256": "de4bd519a557bb3c17703eaa15f02451e3d02a0029f3bf5ab10ce510b6b5575b"
+        "blob": "20069473a430936117749fb04ee3349b4087cb93",
+        "sha256": "38be47c72bbd480da581e39641cb9ee67c77c283961b1801b20eb54c35a812fa"
       },
       {
         "path": "src-tauri/src/conformance.rs",
-        "blob": "7cffd03c932a52286ee5329aee180e693e2afeed",
-        "sha256": "3f45ce93f960ef91d9b9d1f58fb8ac48b9b20e98aca092891675f15d45376919"
+        "blob": "e7e2c98dd98a2bd3c4c825611b2fc5137ca4879b",
+        "sha256": "4d4c79d2e4112a88c3bb90db7a19f76dd3c2fceedc3db463173dd2195873068f"
       },
       {
         "path": "src-tauri/src/connection.rs",
-        "blob": "65ea88062020460b8bd402b91a874a99355660fb",
-        "sha256": "83b45bbb128bfc83f85c6b8d6e471866978effce1919485b6491c8503a7caee1"
+        "blob": "ecc90e392ff4cd100e5cf9836d370efc0a8de8df",
+        "sha256": "19594c0fdd412a87dddbcbd42225e23cd3eacffb7fb93d790fb8a66a862389ff"
       },
       {
         "path": "src-tauri/src/coven.rs",
@@ -193,28 +193,28 @@
       },
       {
         "path": "src-tauri/src/keyring.rs",
-        "blob": "54150c5700c664d8ed3993f2629a2d0c2d315dc8",
-        "sha256": "7fd9151397b8f465dec577f002ac547bc2ee646046a75721a0068d8662a9bc9c"
+        "blob": "39309e546d975349df16acbca9b47dee5beab6ce",
+        "sha256": "8b143925f1796c79ad67d2dfe4b05a6396b7278875a67e7885ca7e7ae9605c54"
       },
       {
         "path": "src-tauri/src/lib.rs",
-        "blob": "62d08ca73cb116614f2e4f4c78b05f677af38e80",
-        "sha256": "3559017a6818e2b8067c09f28676dfd7a6078792b44fc5eefb5c3d4e9d5d0301"
+        "blob": "10c82a88c793c2e90bd216bc27d66c786675f4cc",
+        "sha256": "05f9ebc0c32b52556a94f7a77498c00c87e2468b08d50a35db75cbd4a50df146"
       }
     ]
   },
   "chatAuthority": {
-    "tree": "c373902b48b06520450f520e669a34f72b64a35d",
+    "tree": "48e9387d2f3727e944a82376652fdc0c1dd02732",
     "files": [
       {
         "path": "src-tauri/Cargo.toml",
-        "blob": "75a54c604d5d8b88b661f5a2427c3f9494e3a374",
-        "sha256": "92b6839acf7785fbeb77abeeb8c3576d904f71bdaed1f79f834c740b09ecfbaf"
+        "blob": "50bb635ce23e25fd6b460e0cacc247b2eee947c7",
+        "sha256": "c1971ef226315e6ec57cfd6c11d91f4fdd1c77ae80a1c537b62960c837d825de"
       },
       {
         "path": "src-tauri/Cargo.lock",
-        "blob": "4bcf036ae5f2c9be11bef0ac890159c6cf0fd06a",
-        "sha256": "50ff6c361744a08b9cc2770f6e06659ebb7cd1d5cd1b43b39ea7127c9c80e7ca"
+        "blob": "77f6ae3bd7c439228bea4e37a149dcd8536538ec",
+        "sha256": "af0805758f12cc36c92e21e195a5b33313062db9ca3fcc3b298332c25d22acc7"
       },
       {
         "path": "src-tauri/src/bin/phase1-native-rpc.rs",
@@ -273,56 +273,56 @@
   },
   "release": {
     "sdkManifest": {
-      "version": "0.1.0",
-      "sha256": "b248f2d945f77e22d0dee1644e9131aa7d2a20db2f30d06206a974d7a4262dec"
+      "version": "0.0.1",
+      "sha256": "72041bfe9a236d709ea3fe26d32b871f17c7c5183e2991cd0229063ade730cb4"
     },
     "sdkArtifacts": [
       {
         "packageName": "@opencoven/sdk-core",
-        "releaseFile": "tarballs/core/opencoven-sdk-core-0.1.0.tgz",
-        "vendorFile": "sdk-core-0.1.0.tgz",
-        "size": 33332,
-        "sha256": "dc86c6d4c88dc8273272b70d2014d2b62c80ae7368c9cf1e8eb78440f5fcc9c4"
+        "releaseFile": "tarballs/core/opencoven-sdk-core-0.0.1.tgz",
+        "vendorFile": "sdk-core-0.0.1.tgz",
+        "size": 33308,
+        "sha256": "5f41291d303cf25e5ff4a3c40d0169f025f7e218da8637fc905935524b5e4e2b"
       },
       {
         "packageName": "@opencoven/cave-client",
-        "releaseFile": "tarballs/cave/opencoven-cave-client-0.1.0.tgz",
-        "vendorFile": "cave-client-0.1.0.tgz",
-        "size": 85426,
-        "sha256": "de16ce13f2e3be0f6555cfc4413ca3c8f8f1a94f980261a6857c025615e7a14a"
+        "releaseFile": "tarballs/cave/opencoven-cave-client-0.0.1.tgz",
+        "vendorFile": "cave-client-0.0.1.tgz",
+        "size": 89873,
+        "sha256": "7389376ebc40ff59d942957339769d4dbdb566e25adef9a9deb372581b39a245"
       },
       {
         "packageName": "@opencoven/coven-client",
-        "releaseFile": "tarballs/coven/opencoven-coven-client-0.1.0.tgz",
-        "vendorFile": "coven-client-0.1.0.tgz",
-        "size": 33009,
-        "sha256": "cba09410aeae9670173a1f7bfe3174b5dd610873358944ed0955c86ac56a3aa1"
+        "releaseFile": "tarballs/coven/opencoven-coven-client-0.0.1.tgz",
+        "vendorFile": "coven-client-0.0.1.tgz",
+        "size": 102172,
+        "sha256": "4162dd685f78c8703497cba65f68a2f0c28fc640bb7da64b0dc9462c74f357dc"
       },
       {
         "packageName": "@opencoven/sdk",
-        "releaseFile": "tarballs/sdk/opencoven-sdk-0.1.0.tgz",
-        "vendorFile": "sdk-0.1.0.tgz",
-        "size": 15833,
-        "sha256": "eee7557feeaf4719d0cb990a66fdddf62270dbbeb05cfe7e35efbfe22827d04f"
+        "releaseFile": "tarballs/sdk/opencoven-sdk-0.0.1.tgz",
+        "vendorFile": "sdk-0.0.1.tgz",
+        "size": 16783,
+        "sha256": "68b258d21eb61360588c41db528d4b37e4594ddd82dac04cdf6477728161e43a"
       }
     ],
-    "caveVersion": "0.3.12",
+    "caveVersion": "0.4.2",
     "covenVersion": "0.1.0",
     "consumerLock": {
       "path": "pnpm-lock.yaml",
       "size": 56222,
-      "sha256": "d2f0db8eca64112324e861bb7cbd2b645ed9ae4aad836200855b3477f3ea49ae"
+      "sha256": "1721be3c4ac1c8d0e31690e0a6d4a8f77b59db1bb4b5ae31bf288eaadc652719"
     },
     "caveArtifacts": {
       "assertionEngine": {
         "path": "scripts/client-v1-conformance.mjs",
-        "size": 146432,
-        "sha256": "b611d2b2935dad3cf913eda45e30ba109ba2ab53dadfef8670a26c7c03b115dd"
+        "size": 153390,
+        "sha256": "e2742e3041648082e1087313f005a6e9407e2b8d2180881c42e109257804ec7b"
       },
       "contractFixture": {
         "path": "src/lib/server/client-v1/contract-fixture.json",
-        "size": 16695,
-        "sha256": "c0b1af2442409f8b26bbf0cf2a5fac467d23e5f56d2c966a9428c4b3e830a186"
+        "size": 18280,
+        "sha256": "0c03baea9c21f0985df41eef3c5ae5223497b9081c665b53ddecab36598f5ede"
       },
       "hpkeVectors": {
         "path": "src/lib/server/client-v1/hpke-bound-v1-vectors.json",

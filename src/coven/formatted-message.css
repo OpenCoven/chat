@@ -1,0 +1,411 @@
+.coven-formatted {
+  min-width: 0;
+  max-width: 100%;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  line-height: 1.65;
+}
+
+.coven-formatted > :first-child {
+  margin-top: 0;
+}
+
+.coven-formatted > :last-child {
+  margin-bottom: 0;
+}
+
+.coven-formatted p,
+.coven-formatted ul,
+.coven-formatted ol,
+.coven-formatted blockquote,
+.coven-formatted pre,
+.coven-markdown-table {
+  margin: 0.75em 0;
+}
+
+.coven-formatted :is(h1, h2, h3, h4, h5, h6) {
+  margin: 1.2em 0 0.5em;
+  color: var(--text-primary);
+  font-weight: 600;
+  line-height: 1.35;
+}
+
+.coven-formatted h1 {
+  font-size: 1.4em;
+}
+
+.coven-formatted h2 {
+  font-size: 1.25em;
+}
+
+.coven-formatted :is(h3, h4, h5, h6) {
+  font-size: 1.1em;
+}
+
+.coven-formatted strong {
+  font-weight: 600;
+}
+
+.coven-formatted ul {
+  padding-left: 1.5em;
+  list-style: disc;
+}
+
+.coven-formatted ol {
+  padding-left: 1.5em;
+  list-style: decimal;
+}
+
+.coven-formatted li + li {
+  margin-top: 0.25em;
+}
+
+.coven-formatted blockquote {
+  padding: 0.15em 1em;
+  border-left: 3px solid var(--accent-presence);
+  color: var(--text-secondary);
+}
+
+.coven-formatted code {
+  padding: 0.12em 0.35em;
+  border-radius: 4px;
+  background: var(--bg-elevated);
+  font-family: "JetBrains Mono Variable", ui-monospace, monospace;
+  font-size: 0.9em;
+}
+
+.coven-formatted pre {
+  max-width: 100%;
+  padding: 12px 14px;
+  overflow-x: auto;
+  border: 1px solid var(--border-hairline);
+  border-radius: 8px;
+  background: var(--bg-sunken);
+  white-space: pre;
+  overflow-wrap: normal;
+}
+
+.coven-formatted pre code {
+  padding: 0;
+  border: 0;
+  background: transparent;
+}
+
+.coven-formatted a {
+  color: var(--accent-presence);
+  text-decoration: underline;
+  text-underline-offset: 0.18em;
+}
+
+.coven-markdown-table {
+  max-width: 100%;
+  overflow-x: auto;
+}
+
+.coven-markdown-table table {
+  width: max-content;
+  min-width: 100%;
+  border-collapse: collapse;
+}
+
+.coven-markdown-table :is(th, td) {
+  max-width: 24rem;
+  padding: 7px 10px;
+  border: 1px solid var(--border-hairline);
+  text-align: left;
+}
+
+.coven-markdown-table th {
+  background: var(--bg-elevated);
+  font-weight: 600;
+}
+
+.coven-formatted .contains-task-list {
+  padding-left: 0;
+  list-style: none;
+}
+
+.coven-formatted .task-list-item input {
+  margin-right: 0.5em;
+}
+
+.coven-formatted hr {
+  margin: 1.2em 0;
+  border: 0;
+  border-top: 1px solid var(--border-hairline);
+}
+
+.coven-markdown-image {
+  color: var(--text-secondary);
+}
+
+/*
+ * Tool activity. A quiet ledger rather than prose: one hairline row per call,
+ * mono name, arguments dimmed and clamped so a long shell line never
+ * dominates the reply it belongs to.
+ */
+.coven-formatted .coven-tools {
+  display: grid;
+  gap: 2px;
+  margin: 0.6em 0;
+  padding: 0;
+  list-style: none;
+}
+
+/* A long run of calls folds to its newest; the control says what it hides. */
+.coven-tools-fold {
+  display: flex;
+  padding: 2px 0 4px;
+}
+
+.coven-tools-fold-button {
+  padding: 3px 9px;
+  border: 1px solid var(--border-hairline);
+  border-radius: 12px;
+  background: transparent;
+  color: var(--text-secondary);
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.coven-tools-fold-button:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.coven-tools-fold-button:focus-visible {
+  outline: 2px solid var(--ring-focus);
+  outline-offset: 1px;
+}
+
+.coven-tool {
+  min-width: 0;
+  border: 1px solid var(--border-hairline);
+  border-radius: 6px;
+  /* sRGB, not oklch: mixing with transparent (black, hue 0) in oklch swings a
+     neutral grey's hue through red, which shows as pink on light surfaces. */
+  background: color-mix(in srgb, var(--bg-sunken) 70%, transparent);
+  font-family: var(--font-jetbrains-mono);
+  font-size: 11.5px;
+  line-height: 1.45;
+}
+
+.coven-tool-summary {
+  display: grid;
+  grid-template-columns: 6px auto minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: baseline;
+  padding: 6px 10px;
+  cursor: pointer;
+  list-style: none;
+  border-radius: inherit;
+}
+
+.coven-tool-summary::-webkit-details-marker {
+  display: none;
+}
+
+.coven-tool-summary:focus-visible {
+  outline: 2px solid var(--accent-presence);
+  outline-offset: 2px;
+}
+
+.coven-tool-tail {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  align-self: center;
+}
+
+.coven-tool-chevron {
+  color: var(--text-muted);
+}
+
+.coven-tool-details[open] .coven-tool-chevron {
+  transform: rotate(90deg);
+}
+
+/* Each detail block names itself and offers its text to the clipboard. */
+.coven-tool-section-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 10px 2px;
+}
+
+.coven-tool-section-label {
+  font-family: var(--font-jetbrains-mono);
+  font-size: 10.5px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.coven-formatted .coven-tool-raw {
+  margin: 0 10px 10px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.coven-tool + .coven-tool {
+  margin-top: 0;
+}
+
+.coven-tool-glyph {
+  width: 6px;
+  height: 6px;
+  align-self: center;
+  border-radius: 50%;
+  background: var(--accent-presence);
+  box-shadow: 0 0 0 3px color-mix(in oklch, var(--accent-presence) 18%, transparent);
+}
+
+.coven-formatted .coven-tool-name {
+  padding: 0;
+  background: transparent;
+  color: var(--text-primary);
+  font-size: inherit;
+  font-weight: 500;
+}
+
+.coven-tool-args {
+  display: -webkit-box;
+  min-width: 0;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  color: var(--text-muted);
+  overflow-wrap: anywhere;
+}
+
+.coven-tool-state {
+  font-size: 0.75em;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--color-danger);
+}
+
+.coven-tool[data-error] .coven-tool-glyph {
+  background: var(--color-danger);
+}
+
+.coven-formatted .coven-tool-result {
+  border-top: 1px solid var(--border-hairline);
+}
+
+.coven-tool-size {
+  font-size: 0.75em;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.coven-tool-state--running {
+  color: var(--accent-presence);
+}
+
+.coven-tool[data-running] .coven-tool-glyph {
+  animation: coven-tool-pulse 1.2s ease-in-out infinite;
+}
+
+@keyframes coven-tool-pulse {
+  0%,
+  100% {
+    box-shadow: 0 0 0 3px color-mix(in oklch, var(--accent-presence) 18%, transparent);
+  }
+  50% {
+    box-shadow: 0 0 0 5px color-mix(in oklch, var(--accent-presence) 30%, transparent);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .coven-tool[data-running] .coven-tool-glyph {
+    animation: none;
+  }
+}
+
+/*
+ * Fenced code. The bar names the language and offers a copy control; the
+ * block below keeps its own horizontal scroll so a long line never widens
+ * the reply.
+ */
+.coven-formatted .coven-code {
+  margin: 0.75em 0;
+  min-width: 0;
+  max-width: 100%;
+  border: 1px solid var(--border-hairline);
+  border-radius: 8px;
+  background: var(--bg-sunken);
+  overflow: hidden;
+}
+
+.coven-code-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 4px 6px 4px 12px;
+  border-bottom: 1px solid var(--border-hairline);
+  background: color-mix(in srgb, var(--bg-elevated) 60%, transparent);
+}
+
+.coven-code-lang {
+  font-family: var(--font-jetbrains-mono);
+  font-size: 10.5px;
+  letter-spacing: 0.04em;
+  text-transform: lowercase;
+  color: var(--text-muted);
+}
+
+.coven-formatted .coven-code pre {
+  margin: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+
+/*
+ * The copy control. Quiet until pointed at; the label carries the outcome so
+ * a reader who cannot see the icon change still knows whether it worked.
+ */
+.coven-copy {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-height: 22px;
+  padding: 2px 7px;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--text-muted);
+  font: inherit;
+  font-size: 11px;
+  line-height: 1;
+  cursor: pointer;
+  transition:
+    color 120ms,
+    background-color 120ms,
+    border-color 120ms;
+}
+
+.coven-copy:hover {
+  border-color: var(--border-hairline);
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.coven-copy:focus-visible {
+  outline: 2px solid var(--ring-focus);
+  outline-offset: 1px;
+  color: var(--text-primary);
+}
+
+.coven-copy[data-state="copied"] {
+  color: var(--accent-presence);
+}
+
+.coven-copy[data-state="failed"] {
+  color: var(--color-danger);
+}

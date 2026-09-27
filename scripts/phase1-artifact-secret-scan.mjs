@@ -58,6 +58,15 @@ const schemaV2ApprovedDiagnosticIds = [
   'phase1.producer.stale-reconciliation-fixture-unavailable',
   'phase1.producer.coven-identity-fixture-unavailable',
   'phase1.producer.native-trust-fixture-unavailable',
+  // Stage-specific outcomes of the Coven same-user identity scenario. The
+  // report previously carried only the flat
+  // 'phase1.integration.coven-identity-failed', which named the assertion
+  // but not the step of the daemon handshake (OpenCoven/chat#219).
+  'phase1.coven-identity.daemon-ready',
+  'phase1.coven-identity.rpc-start',
+  'phase1.coven-identity.unavailable-health',
+  'phase1.coven-identity.result',
+  'phase1.coven-identity.unknown',
 ];
 const schemaV2RequiredAssertionSet = new Set(schemaV2RequiredAssertionIds);
 const schemaV2ApprovedDiagnosticSet = new Set(schemaV2ApprovedDiagnosticIds);

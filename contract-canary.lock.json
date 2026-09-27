@@ -2,55 +2,55 @@
   "version": 4,
   "sdk": {
     "repository": "OpenCoven/sdk",
-    "revision": "acc38488f00860d246c3c553375634d64806eabb",
+    "revision": "cd10a3fa1d9900e0dbcb04bbb2477140854fba1d",
     "releaseManifest": {
       "file": "release-manifest.json",
-      "version": "0.1.0",
-      "sha256": "b248f2d945f77e22d0dee1644e9131aa7d2a20db2f30d06206a974d7a4262dec"
+      "version": "0.0.1",
+      "sha256": "72041bfe9a236d709ea3fe26d32b871f17c7c5183e2991cd0229063ade730cb4"
     },
     "artifacts": {
       "core": {
         "packageName": "@opencoven/sdk-core",
-        "version": "0.1.0",
-        "releaseFile": "tarballs/core/opencoven-sdk-core-0.1.0.tgz",
-        "vendorFile": "sdk-core-0.1.0.tgz",
-        "size": 33332,
-        "sha256": "dc86c6d4c88dc8273272b70d2014d2b62c80ae7368c9cf1e8eb78440f5fcc9c4"
+        "version": "0.0.1",
+        "releaseFile": "tarballs/core/opencoven-sdk-core-0.0.1.tgz",
+        "vendorFile": "sdk-core-0.0.1.tgz",
+        "size": 33308,
+        "sha256": "5f41291d303cf25e5ff4a3c40d0169f025f7e218da8637fc905935524b5e4e2b"
       },
       "cave": {
         "packageName": "@opencoven/cave-client",
-        "version": "0.1.0",
-        "releaseFile": "tarballs/cave/opencoven-cave-client-0.1.0.tgz",
-        "vendorFile": "cave-client-0.1.0.tgz",
-        "size": 85426,
-        "sha256": "de16ce13f2e3be0f6555cfc4413ca3c8f8f1a94f980261a6857c025615e7a14a"
+        "version": "0.0.1",
+        "releaseFile": "tarballs/cave/opencoven-cave-client-0.0.1.tgz",
+        "vendorFile": "cave-client-0.0.1.tgz",
+        "size": 89873,
+        "sha256": "7389376ebc40ff59d942957339769d4dbdb566e25adef9a9deb372581b39a245"
       },
       "coven": {
         "packageName": "@opencoven/coven-client",
-        "version": "0.1.0",
-        "releaseFile": "tarballs/coven/opencoven-coven-client-0.1.0.tgz",
-        "vendorFile": "coven-client-0.1.0.tgz",
-        "size": 33009,
-        "sha256": "cba09410aeae9670173a1f7bfe3174b5dd610873358944ed0955c86ac56a3aa1"
+        "version": "0.0.1",
+        "releaseFile": "tarballs/coven/opencoven-coven-client-0.0.1.tgz",
+        "vendorFile": "coven-client-0.0.1.tgz",
+        "size": 102172,
+        "sha256": "4162dd685f78c8703497cba65f68a2f0c28fc640bb7da64b0dc9462c74f357dc"
       },
       "sdk": {
         "packageName": "@opencoven/sdk",
-        "version": "0.1.0",
-        "releaseFile": "tarballs/sdk/opencoven-sdk-0.1.0.tgz",
-        "vendorFile": "sdk-0.1.0.tgz",
-        "size": 15833,
-        "sha256": "eee7557feeaf4719d0cb990a66fdddf62270dbbeb05cfe7e35efbfe22827d04f"
+        "version": "0.0.1",
+        "releaseFile": "tarballs/sdk/opencoven-sdk-0.0.1.tgz",
+        "vendorFile": "sdk-0.0.1.tgz",
+        "size": 16783,
+        "sha256": "68b258d21eb61360588c41db528d4b37e4594ddd82dac04cdf6477728161e43a"
       }
     }
   },
   "cave": {
     "repository": "OpenCoven/coven-cave",
-    "revision": "6325fc4c1154c7d7398074a9760a2e2dc323b424",
+    "revision": "ecdcdcf8a75b62bb912ec48215ae20ab0809a181",
     "artifacts": {
       "contractFixture": {
         "path": "src/lib/server/client-v1/contract-fixture.json",
         "digestPath": "src/lib/server/client-v1/contract-fixture.sha256",
-        "sha256": "c0b1af2442409f8b26bbf0cf2a5fac467d23e5f56d2c966a9428c4b3e830a186"
+        "sha256": "0c03baea9c21f0985df41eef3c5ae5223497b9081c665b53ddecab36598f5ede"
       },
       "hpkeVectors": {
         "path": "src/lib/server/client-v1/hpke-bound-v1-vectors.json",

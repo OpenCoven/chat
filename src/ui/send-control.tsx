@@ -1,4 +1,4 @@
-import { Icon } from '../demo/minimal-icons';
+import { Icon } from '../design/minimal-icons';
 import { Button } from './button';
 import { type CompletionCommand, CompletionPalette } from './completion-palette';
 import { cn, type Density } from './utils';

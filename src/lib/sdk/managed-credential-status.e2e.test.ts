@@ -34,7 +34,7 @@ const operations = [
 function clientV1HealthEnvelope() {
   return {
     apiVersion: '1.0',
-    minimumClientVersion: '0.1.0',
+    minimumClientVersion: '0.0.1',
     capabilities,
     operations,
     data: {
@@ -48,7 +48,7 @@ function clientV1HealthEnvelope() {
 function clientV1FamiliarsEnvelope() {
   return {
     apiVersion: '1.0',
-    minimumClientVersion: '0.1.0',
+    minimumClientVersion: '0.0.1',
     capabilities,
     operations,
     data: {
@@ -83,7 +83,7 @@ describe('managed credential status native adapter end-to-end', () => {
           health: {
             status: 'ok',
             apiVersion: '1.0',
-            minimumClientVersion: '0.1.0',
+            minimumClientVersion: '0.0.1',
             capabilities,
             operations,
             instanceId: '00000000-0000-4000-8000-000000000000',
@@ -101,7 +101,7 @@ describe('managed credential status native adapter end-to-end', () => {
             health: {
               status: 'ok',
               apiVersion: '1.0',
-              minimumClientVersion: '0.1.0',
+              minimumClientVersion: '0.0.1',
               capabilities,
               operations,
               instanceId: '00000000-0000-4000-8000-000000000000',
@@ -148,7 +148,7 @@ describe('managed credential status native adapter end-to-end', () => {
 
     const denied = managedClient(async () => ({
       apiVersion: '1.0',
-      minimumClientVersion: '0.1.0',
+      minimumClientVersion: '0.0.1',
       capabilities,
       operations,
       error: {

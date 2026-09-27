@@ -11,6 +11,8 @@ use std::marker::PhantomData;
 use std::sync::Mutex;
 use std::sync::OnceLock;
 
+#[cfg(all(feature = "phase1-conformance", target_os = "macos"))]
+use security_framework::{item, os::macos::keychain::SecKeychain};
 #[cfg(any(windows, test, feature = "phase1-conformance"))]
 use sha2::{Digest, Sha256};
 
@@ -31,6 +33,12 @@ const CONFORMANCE_SERVICE_ENV: &str = "OPENCOVEN_PHASE1_CONFORMANCE_KEYRING_SERV
 pub(crate) const CONFORMANCE_SERVICE_PREFIX: &str = "ai.opencoven.chat.phase1.";
 pub(crate) const CREDENTIAL_ACCOUNT_PREFIX: &str = "cave-client-v1";
 pub(crate) const INSTALLATION_ID_ACCOUNT: &str = "installation-id-v1";
+// allow(dead_code): read by the session accessors below, which are wired
+// to a caller in a later task.
+#[allow(dead_code)]
+pub(crate) const SESSION_ACCOUNT: &str = "workos-session-v1";
+#[allow(dead_code)]
+const MAX_SESSION_RECORD_BYTES: usize = 4 * 1024;
 #[cfg(unix)]
 const CREDENTIAL_LOCK_TIMEOUT: Duration = Duration::from_secs(5);
 const MAX_CREDENTIAL_RECORD_BYTES: usize = 4 * 1024;
@@ -40,6 +48,10 @@ const CONFORMANCE_CLEANUP_SERVICE: &str = "ai.opencoven.chat.conformance-cleanup
 const CONFORMANCE_CLEANUP_ACCOUNT_PREFIX: &str = "cleanup-reservation-v1";
 #[cfg(feature = "phase1-conformance")]
 const CONFORMANCE_HARNESS_IDENTITY: &str = "phase1-native-rpc-v1";
+#[cfg(all(feature = "phase1-conformance", target_os = "macos"))]
+const CONFORMANCE_TEST_KEYCHAIN_ENV: &str = "PHASE1_TEST_KEYCHAIN";
+#[cfg(all(feature = "phase1-conformance", target_os = "macos"))]
+const CONFORMANCE_TEST_KEYCHAIN_ISOLATED_ENV: &str = "OPENCOVEN_PHASE1_TEST_KEYCHAIN_ISOLATED";
 
 static STORE_INITIALIZED: OnceLock<()> = OnceLock::new();
 
@@ -74,9 +86,72 @@ fn configured_conformance_service() -> Result<String, KeyringError> {
 pub(crate) enum KeyringError {
     NotFound,
     Unavailable,
+    #[cfg(feature = "phase1-conformance")]
+    InstallationUnavailable(InstallationStage),
+    #[cfg(feature = "phase1-conformance")]
+    CustodyInstallationUnsupported,
     Failure,
     #[cfg(feature = "phase1-conformance")]
     CleanupGrantRejected,
+    #[cfg(feature = "phase1-conformance")]
+    CleanupGrantServiceUnavailable,
+    #[cfg(feature = "phase1-conformance")]
+    CleanupGrantProcessSecretUnavailable,
+    #[cfg(feature = "phase1-conformance")]
+    CleanupGrantRandomUnavailable,
+    #[cfg(feature = "phase1-conformance")]
+    CleanupGrantMarkerHomeUnavailable,
+    #[cfg(feature = "phase1-conformance")]
+    CleanupGrantMarkerDirectoryCreateUnavailable,
+    #[cfg(feature = "phase1-conformance")]
+    CleanupGrantMarkerDirectoryOpenUnavailable,
+    #[cfg(feature = "phase1-conformance")]
+    CleanupGrantMarkerDirectoryMetadataUnavailable,
+    #[cfg(feature = "phase1-conformance")]
+    CleanupGrantMarkerDirectoryTrustUnavailable,
+    #[cfg(feature = "phase1-conformance")]
+    CleanupGrantMarkerSyncUnavailable,
+    #[cfg(feature = "phase1-conformance")]
+    CleanupGrantMarkerIdentityUnavailable,
+    #[cfg(feature = "phase1-conformance")]
+    CleanupGrantMarkerPublishUnavailable,
+    #[cfg(feature = "phase1-conformance")]
+    CleanupGrantCollisionExhausted,
+    #[cfg(feature = "phase1-conformance")]
+    CleanupBackendUnavailable,
+    #[cfg(all(feature = "phase1-conformance", not(unix)))]
+    CleanupLockUnavailable,
+    #[cfg(feature = "phase1-conformance")]
+    CleanupLockProcessUnavailable,
+    #[cfg(feature = "phase1-conformance")]
+    CleanupLockPathUnavailable,
+    #[cfg(feature = "phase1-conformance")]
+    CleanupLockFileUnavailable,
+    #[cfg(feature = "phase1-conformance")]
+    CleanupLockContended,
+    #[cfg(feature = "phase1-conformance")]
+    CleanupInstallationDeleteUnavailable,
+    #[cfg(feature = "phase1-conformance")]
+    CleanupCredentialDeleteUnavailable,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub(crate) enum InstallationStage {
+    Lock,
+    Entry,
+    Read,
+    Write,
+    Persistence,
+}
+
+impl InstallationStage {
+    fn classify(self, error: KeyringError) -> KeyringError {
+        #[cfg(feature = "phase1-conformance")]
+        if matches!(error, KeyringError::Unavailable) {
+            return KeyringError::InstallationUnavailable(self);
+        }
+        error
+    }
 }
 
 impl KeyringError {
@@ -84,9 +159,100 @@ impl KeyringError {
         match self {
             Self::NotFound => NativeDiagnostic::new("credential_missing", true),
             Self::Unavailable => NativeDiagnostic::new("secure_store_unavailable", true),
+            #[cfg(feature = "phase1-conformance")]
+            Self::InstallationUnavailable(stage) => NativeDiagnostic::new(
+                match stage {
+                    InstallationStage::Lock => "installation_lock_unavailable",
+                    InstallationStage::Entry => "installation_entry_unavailable",
+                    InstallationStage::Read => "installation_read_unavailable",
+                    InstallationStage::Write => "installation_write_unavailable",
+                    InstallationStage::Persistence => "installation_persistence_unavailable",
+                },
+                true,
+            ),
+            #[cfg(feature = "phase1-conformance")]
+            Self::CustodyInstallationUnsupported => {
+                NativeDiagnostic::new("installation_custody_unsupported", true)
+            }
             Self::Failure => NativeDiagnostic::new("keychain_failure", true),
             #[cfg(feature = "phase1-conformance")]
             Self::CleanupGrantRejected => NativeDiagnostic::new("cleanup_grant_rejected", false),
+            #[cfg(feature = "phase1-conformance")]
+            Self::CleanupGrantServiceUnavailable => {
+                NativeDiagnostic::new("cleanup_grant_service_unavailable", false)
+            }
+            #[cfg(feature = "phase1-conformance")]
+            Self::CleanupGrantProcessSecretUnavailable => {
+                NativeDiagnostic::new("cleanup_grant_process_secret_unavailable", true)
+            }
+            #[cfg(feature = "phase1-conformance")]
+            Self::CleanupGrantRandomUnavailable => {
+                NativeDiagnostic::new("cleanup_grant_random_unavailable", true)
+            }
+            #[cfg(feature = "phase1-conformance")]
+            Self::CleanupGrantMarkerHomeUnavailable => {
+                NativeDiagnostic::new("cleanup_grant_marker_home_unavailable", true)
+            }
+            #[cfg(feature = "phase1-conformance")]
+            Self::CleanupGrantMarkerDirectoryCreateUnavailable => {
+                NativeDiagnostic::new("cleanup_grant_marker_directory_create_unavailable", true)
+            }
+            #[cfg(feature = "phase1-conformance")]
+            Self::CleanupGrantMarkerDirectoryOpenUnavailable => {
+                NativeDiagnostic::new("cleanup_grant_marker_directory_open_unavailable", true)
+            }
+            #[cfg(feature = "phase1-conformance")]
+            Self::CleanupGrantMarkerDirectoryMetadataUnavailable => {
+                NativeDiagnostic::new("cleanup_grant_marker_directory_metadata_unavailable", true)
+            }
+            #[cfg(feature = "phase1-conformance")]
+            Self::CleanupGrantMarkerDirectoryTrustUnavailable => {
+                NativeDiagnostic::new("cleanup_grant_marker_directory_trust_unavailable", true)
+            }
+            #[cfg(feature = "phase1-conformance")]
+            Self::CleanupGrantMarkerSyncUnavailable => {
+                NativeDiagnostic::new("cleanup_grant_marker_sync_unavailable", true)
+            }
+            #[cfg(feature = "phase1-conformance")]
+            Self::CleanupGrantMarkerIdentityUnavailable => {
+                NativeDiagnostic::new("cleanup_grant_marker_identity_unavailable", true)
+            }
+            #[cfg(feature = "phase1-conformance")]
+            Self::CleanupGrantMarkerPublishUnavailable => {
+                NativeDiagnostic::new("cleanup_grant_marker_publish_unavailable", true)
+            }
+            #[cfg(feature = "phase1-conformance")]
+            Self::CleanupGrantCollisionExhausted => {
+                NativeDiagnostic::new("cleanup_grant_collision_exhausted", true)
+            }
+            #[cfg(feature = "phase1-conformance")]
+            Self::CleanupBackendUnavailable => {
+                NativeDiagnostic::new("cleanup_backend_unavailable", true)
+            }
+            #[cfg(all(feature = "phase1-conformance", not(unix)))]
+            Self::CleanupLockUnavailable => NativeDiagnostic::new("cleanup_lock_unavailable", true),
+            #[cfg(feature = "phase1-conformance")]
+            Self::CleanupLockProcessUnavailable => {
+                NativeDiagnostic::new("cleanup_lock_process_unavailable", true)
+            }
+            #[cfg(feature = "phase1-conformance")]
+            Self::CleanupLockPathUnavailable => {
+                NativeDiagnostic::new("cleanup_lock_path_unavailable", true)
+            }
+            #[cfg(feature = "phase1-conformance")]
+            Self::CleanupLockFileUnavailable => {
+                NativeDiagnostic::new("cleanup_lock_file_unavailable", true)
+            }
+            #[cfg(feature = "phase1-conformance")]
+            Self::CleanupLockContended => NativeDiagnostic::new("cleanup_lock_contended", true),
+            #[cfg(feature = "phase1-conformance")]
+            Self::CleanupInstallationDeleteUnavailable => {
+                NativeDiagnostic::new("cleanup_installation_delete_unavailable", true)
+            }
+            #[cfg(feature = "phase1-conformance")]
+            Self::CleanupCredentialDeleteUnavailable => {
+                NativeDiagnostic::new("cleanup_credential_delete_unavailable", true)
+            }
         }
     }
 }
@@ -112,6 +278,71 @@ impl Drop for Credential {
     }
 }
 
+/// The WorkOS session the app holds for the signed-in person. Tokens never
+/// leave native code; the webview only ever receives a derived status.
+///
+/// `allow(dead_code)`: consumed by the identity commands added in a later
+/// task; nothing in this crate calls the session accessors yet.
+///
+/// `deny_unknown_fields` makes the shape a one-way door: adding a field
+/// means bumping the account name to `workos-session-v2`, not extending
+/// `v1`.
+#[derive(Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[allow(dead_code)]
+pub(crate) struct StoredSession {
+    pub(crate) access_token: String,
+    pub(crate) refresh_token: String,
+    /// Unix seconds; copied from the access token's `exp`.
+    pub(crate) expires_at: u64,
+    /// Unix seconds of the last successful exchange or refresh.
+    pub(crate) checked_at: u64,
+    pub(crate) subject: String,
+    pub(crate) email: String,
+}
+
+impl Drop for StoredSession {
+    fn drop(&mut self) {
+        self.access_token.zeroize();
+        self.refresh_token.zeroize();
+        self.subject.zeroize();
+        self.email.zeroize();
+    }
+}
+
+#[allow(dead_code)]
+/// The one field invariant for a stored session. Reads and writes share it so
+/// a write cannot persist a record that every later read rejects.
+fn session_fields_are_complete(session: &StoredSession) -> bool {
+    !session.access_token.is_empty()
+        && !session.refresh_token.is_empty()
+        && !session.subject.is_empty()
+        && !session.email.is_empty()
+}
+
+fn serialize_session(session: &StoredSession) -> Result<Zeroizing<Vec<u8>>, KeyringError> {
+    if !session_fields_are_complete(session) {
+        return Err(KeyringError::Failure);
+    }
+    let bytes = Zeroizing::new(serde_json::to_vec(session).map_err(|_| KeyringError::Failure)?);
+    if bytes.len() > MAX_SESSION_RECORD_BYTES {
+        return Err(KeyringError::Failure);
+    }
+    Ok(bytes)
+}
+
+#[allow(dead_code)]
+fn parse_stored_session(raw: &[u8]) -> Result<StoredSession, KeyringError> {
+    if raw.len() > MAX_SESSION_RECORD_BYTES {
+        return Err(KeyringError::Failure);
+    }
+    let session: StoredSession = serde_json::from_slice(raw).map_err(|_| KeyringError::Failure)?;
+    if !session_fields_are_complete(&session) {
+        return Err(KeyringError::Failure);
+    }
+    Ok(session)
+}
+
 #[derive(Serialize, Deserialize)]
 struct StoredCredential {
     bearer: String,
@@ -133,7 +364,47 @@ pub(crate) enum CredentialSlot {
 }
 
 pub(crate) trait CredentialCustody: Send + Sync {
+    // A custody implementation that does not override this is a distinct
+    // condition from an unavailable secure store; keep them separable.
     fn installation_id(&self) -> Result<String, KeyringError> {
+        #[cfg(feature = "phase1-conformance")]
+        return Err(KeyringError::CustodyInstallationUnsupported);
+        #[cfg(not(feature = "phase1-conformance"))]
+        return Err(KeyringError::Unavailable);
+    }
+
+    /// `Ok(None)` when no session is stored. An unreadable record is an
+    /// error and is left in place so the person can decide what to do.
+    #[allow(dead_code)]
+    fn read_session(&self) -> Result<Option<StoredSession>, KeyringError> {
+        Err(KeyringError::Unavailable)
+    }
+
+    /// Compare-and-swap. `expected` is the session the caller read. `Ok(false)`
+    /// means another writer won and nothing was written; the caller re-reads.
+    /// `Err` is reserved for real faults (backend, corrupt record, oversize).
+    #[allow(dead_code)]
+    fn write_session(
+        &self,
+        expected: Option<&StoredSession>,
+        next: &StoredSession,
+    ) -> Result<bool, KeyringError> {
+        let _ = (expected, next);
+        Err(KeyringError::Unavailable)
+    }
+
+    /// Compare-and-delete. `Ok(false)` means the stored record is not the one
+    /// the caller read, so a stale sign-out cannot remove a newer session.
+    #[allow(dead_code)]
+    fn delete_session_if_matches(&self, expected: &StoredSession) -> Result<bool, KeyringError> {
+        let _ = expected;
+        Err(KeyringError::Unavailable)
+    }
+
+    /// Unconditional removal, for explicit force-cleanup paths only. Prefer
+    /// `delete_session_if_matches` wherever the caller has read the record.
+    #[allow(dead_code)]
+    fn delete_session(&self) -> Result<(), KeyringError> {
         Err(KeyringError::Unavailable)
     }
 
@@ -267,7 +538,8 @@ impl NativeKeyring {
     fn cleanup_process_secret(&self, create: bool) -> Result<&[u8; 32], KeyringError> {
         if self.cleanup_process_secret.get().is_none() && create {
             let mut secret = Zeroizing::new([0_u8; 32]);
-            getrandom::fill(secret.as_mut()).map_err(|_| KeyringError::Unavailable)?;
+            getrandom::fill(secret.as_mut())
+                .map_err(|_| KeyringError::CleanupGrantProcessSecretUnavailable)?;
             let _ = self.cleanup_process_secret.set(secret);
         }
         self.cleanup_process_secret
@@ -622,7 +894,7 @@ impl NativeKeyring {
         let service = self.service_name();
         self.reject_provider_if_configured()?;
         if service == SERVICE {
-            return Err(KeyringError::Unavailable);
+            return Err(KeyringError::CleanupGrantServiceUnavailable);
         }
         let accounts = canonical_conformance_cleanup_accounts(instance_ids)?;
         let grant =
@@ -649,12 +921,14 @@ impl NativeKeyring {
         }
         let grant_identity = crate::cleanup_grant::grant_identity(grant)?;
         let process_secret = self.cleanup_process_secret(false)?;
+        let mut backend =
+            NativeCleanupBackend::new().map_err(|_| KeyringError::CleanupBackendUnavailable)?;
         run_cleanup_transaction(
             &self.issued_cleanup_grants,
             &grant_identity,
-            acquire_mutation_lock,
+            acquire_cleanup_mutation_lock,
             || crate::cleanup_grant::prepare(grant, service, process_secret),
-            &mut NativeCleanupBackend,
+            &mut backend,
         )
     }
 
@@ -710,25 +984,157 @@ impl CleanupGrantRedemption for crate::cleanup_grant::PreparedCleanupGrant {
 
 #[cfg(feature = "phase1-conformance")]
 trait CleanupBackend {
-    fn delete(&mut self, service: &str, account: &str) -> Result<(), KeyringError>;
     fn present(&mut self, service: &str, account: &str) -> Result<bool, KeyringError>;
+    fn delete(&mut self, service: &str, account: &str) -> Result<(), KeyringError>;
 }
 
 #[cfg(feature = "phase1-conformance")]
-struct NativeCleanupBackend;
+struct NativeCleanupBackend {
+    #[cfg(target_os = "macos")]
+    keychain: SecKeychain,
+}
+
+#[cfg(all(feature = "phase1-conformance", target_os = "macos"))]
+fn validate_conformance_macos_keychain_path(
+    isolated: Option<&std::ffi::OsStr>,
+    home: Option<&std::ffi::OsStr>,
+    path: Option<&std::ffi::OsStr>,
+) -> Result<std::path::PathBuf, KeyringError> {
+    use std::os::unix::fs::MetadataExt;
+
+    if isolated != Some(std::ffi::OsStr::new("1")) {
+        return Err(KeyringError::Unavailable);
+    }
+    let home = std::path::PathBuf::from(home.ok_or(KeyringError::Unavailable)?);
+    let path = std::path::PathBuf::from(path.ok_or(KeyringError::Unavailable)?);
+    if !home.is_absolute()
+        || path
+            != home
+                .join("Library")
+                .join("Keychains")
+                .join("phase1.keychain-db")
+    {
+        return Err(KeyringError::Unavailable);
+    }
+    let effective_uid = unsafe { libc::geteuid() };
+    let library = home.join("Library");
+    let keychains = library.join("Keychains");
+    for directory in [&home, &library, &keychains] {
+        let metadata = fs::symlink_metadata(directory).map_err(|_| KeyringError::Unavailable)?;
+        if !metadata.file_type().is_dir()
+            || metadata.file_type().is_symlink()
+            || metadata.mode() & 0o077 != 0
+            || metadata.uid() != effective_uid
+        {
+            return Err(KeyringError::Unavailable);
+        }
+    }
+    let metadata = fs::symlink_metadata(&path).map_err(|_| KeyringError::Unavailable)?;
+    if !metadata.file_type().is_file()
+        || metadata.file_type().is_symlink()
+        || metadata.mode() & 0o077 != 0
+        || metadata.uid() != effective_uid
+        || metadata.nlink() != 1
+    {
+        return Err(KeyringError::Unavailable);
+    }
+    Ok(path)
+}
+
+#[cfg(all(feature = "phase1-conformance", target_os = "macos"))]
+fn conformance_macos_keychain() -> Result<SecKeychain, KeyringError> {
+    use std::os::unix::fs::MetadataExt;
+
+    let path = validate_conformance_macos_keychain_path(
+        env::var_os(CONFORMANCE_TEST_KEYCHAIN_ISOLATED_ENV).as_deref(),
+        env::var_os("HOME").as_deref(),
+        env::var_os(CONFORMANCE_TEST_KEYCHAIN_ENV).as_deref(),
+    )?;
+    let before = fs::symlink_metadata(&path).map_err(|_| KeyringError::Unavailable)?;
+    let keychain = SecKeychain::open(&path).map_err(|_| KeyringError::Unavailable)?;
+    let after = fs::symlink_metadata(&path).map_err(|_| KeyringError::Unavailable)?;
+    if before.dev() != after.dev()
+        || before.ino() != after.ino()
+        || before.nlink() != 1
+        || after.nlink() != 1
+    {
+        return Err(KeyringError::Unavailable);
+    }
+    Ok(keychain)
+}
+
+#[cfg(feature = "phase1-conformance")]
+impl NativeCleanupBackend {
+    fn new() -> Result<Self, KeyringError> {
+        #[cfg(target_os = "macos")]
+        {
+            Ok(Self {
+                keychain: conformance_macos_keychain()?,
+            })
+        }
+        #[cfg(not(target_os = "macos"))]
+        {
+            Ok(Self {})
+        }
+    }
+}
+
+#[cfg(all(feature = "phase1-conformance", target_os = "macos"))]
+fn delete_conformance_macos_entry(
+    keychain: &SecKeychain,
+    service: &str,
+    account: &str,
+) -> Result<(), KeyringError> {
+    let mut options = item::ItemSearchOptions::new();
+    options
+        .keychains(std::slice::from_ref(keychain))
+        .class(item::ItemClass::generic_password())
+        .service(service)
+        .account(account);
+    match options.delete() {
+        Ok(()) => Ok(()),
+        Err(error) if error.code() == -25300 => Ok(()),
+        Err(_) => Err(KeyringError::Unavailable),
+    }
+}
 
 #[cfg(feature = "phase1-conformance")]
 impl CleanupBackend for NativeCleanupBackend {
-    fn delete(&mut self, service: &str, account: &str) -> Result<(), KeyringError> {
-        let entry = NativeKeyring::entry_for(service, account)?;
-        match entry.delete_credential() {
-            Ok(()) | Err(KeyringBackendError::NoEntry) => Ok(()),
-            Err(error) => Err(map_keyring_error(error)),
+    fn present(&mut self, service: &str, account: &str) -> Result<bool, KeyringError> {
+        #[cfg(target_os = "macos")]
+        {
+            let mut options = item::ItemSearchOptions::new();
+            options
+                .keychains(std::slice::from_ref(&self.keychain))
+                .class(item::ItemClass::generic_password())
+                .service(service)
+                .account(account);
+            // A successful search proves presence even when no data is requested.
+            match options.search() {
+                Ok(_) => Ok(true),
+                Err(error) if error.code() == -25300 => Ok(false),
+                Err(_) => Err(KeyringError::Unavailable),
+            }
+        }
+        #[cfg(not(target_os = "macos"))]
+        {
+            NativeKeyring::conformance_entry_present(&NativeKeyring::entry_for(service, account)?)
         }
     }
 
-    fn present(&mut self, service: &str, account: &str) -> Result<bool, KeyringError> {
-        NativeKeyring::conformance_entry_present(&NativeKeyring::entry_for(service, account)?)
+    fn delete(&mut self, service: &str, account: &str) -> Result<(), KeyringError> {
+        #[cfg(target_os = "macos")]
+        {
+            delete_conformance_macos_entry(&self.keychain, service, account)
+        }
+        #[cfg(not(target_os = "macos"))]
+        {
+            let entry = NativeKeyring::entry_for(service, account)?;
+            match entry.delete_credential() {
+                Ok(()) | Err(KeyringBackendError::NoEntry) => Ok(()),
+                Err(error) => Err(map_keyring_error(error)),
+            }
+        }
     }
 }
 
@@ -758,11 +1164,27 @@ where
     let scope = redemption.scope();
     validate_conformance_cleanup_accounts(&scope.accounts)?;
     for account in &scope.accounts {
-        backend.delete(&scope.service, account)?;
+        backend.delete(&scope.service, account).map_err(|_| {
+            if account == INSTALLATION_ID_ACCOUNT {
+                KeyringError::CleanupInstallationDeleteUnavailable
+            } else {
+                KeyringError::CleanupCredentialDeleteUnavailable
+            }
+        })?;
     }
+
+    // Verify the entire scope after all deletes, while retaining the mutation lock.
+    // Failed or inconclusive cleanup must leave the grant available for retry.
     for account in &scope.accounts {
-        if backend.present(&scope.service, account)? {
-            return Err(KeyringError::Failure);
+        let present = backend
+            .present(&scope.service, account)
+            .map_err(|_| KeyringError::CleanupBackendUnavailable)?;
+        if present {
+            return Err(if account == INSTALLATION_ID_ACCOUNT {
+                KeyringError::CleanupInstallationDeleteUnavailable
+            } else {
+                KeyringError::CleanupCredentialDeleteUnavailable
+            });
         }
     }
 
@@ -827,6 +1249,27 @@ struct CredentialMutationGuard {
     _file: fs::File,
 }
 
+#[cfg(unix)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum MutationLockFailure {
+    ProcessUnavailable,
+    PathUnavailable,
+    FileUnavailable,
+    Contended,
+}
+
+#[cfg(unix)]
+impl From<MutationLockFailure> for KeyringError {
+    fn from(error: MutationLockFailure) -> Self {
+        match error {
+            MutationLockFailure::ProcessUnavailable => Self::Failure,
+            MutationLockFailure::PathUnavailable
+            | MutationLockFailure::FileUnavailable
+            | MutationLockFailure::Contended => Self::Unavailable,
+        }
+    }
+}
+
 #[cfg(all(unix, any(not(feature = "phase1-conformance"), test)))]
 fn default_credential_lock_root(home: &std::path::Path) -> std::path::PathBuf {
     home.join(".coven").join("chat")
@@ -835,28 +1278,28 @@ fn default_credential_lock_root(home: &std::path::Path) -> std::path::PathBuf {
 #[cfg(unix)]
 fn credential_lock_path_for_root(
     root: &std::path::Path,
-) -> Result<std::path::PathBuf, KeyringError> {
+) -> Result<std::path::PathBuf, MutationLockFailure> {
     use std::os::unix::fs::{MetadataExt, PermissionsExt};
 
     if !root.is_absolute() {
-        return Err(KeyringError::Unavailable);
+        return Err(MutationLockFailure::PathUnavailable);
     }
-    fs::create_dir_all(root).map_err(|_| KeyringError::Unavailable)?;
+    fs::create_dir_all(root).map_err(|_| MutationLockFailure::PathUnavailable)?;
     fs::set_permissions(root, fs::Permissions::from_mode(0o700))
-        .map_err(|_| KeyringError::Unavailable)?;
-    let metadata = fs::symlink_metadata(root).map_err(|_| KeyringError::Unavailable)?;
+        .map_err(|_| MutationLockFailure::PathUnavailable)?;
+    let metadata = fs::symlink_metadata(root).map_err(|_| MutationLockFailure::PathUnavailable)?;
     if metadata.file_type().is_symlink()
         || !metadata.is_dir()
         || metadata.uid() != unsafe { libc::geteuid() }
         || metadata.mode() & 0o077 != 0
     {
-        return Err(KeyringError::Unavailable);
+        return Err(MutationLockFailure::PathUnavailable);
     }
     Ok(root.join("credential-mutation.lock"))
 }
 
 #[cfg(unix)]
-fn credential_lock_path() -> Result<std::path::PathBuf, KeyringError> {
+fn credential_lock_path() -> Result<std::path::PathBuf, MutationLockFailure> {
     #[cfg(all(feature = "phase1-conformance", not(test)))]
     use std::os::unix::fs::{MetadataExt, PermissionsExt};
 
@@ -864,34 +1307,36 @@ fn credential_lock_path() -> Result<std::path::PathBuf, KeyringError> {
     if let Some(path) = env::var_os("OPENCOVEN_PHASE1_CONFORMANCE_LOCK_ROOT") {
         return credential_lock_path_for_root(&std::path::PathBuf::from(path));
     }
-    let home = env::var_os("HOME").ok_or(KeyringError::Unavailable)?;
+    let home = env::var_os("HOME").ok_or(MutationLockFailure::PathUnavailable)?;
     let home = std::path::PathBuf::from(home);
     #[cfg(all(feature = "phase1-conformance", not(test)))]
     {
-        let home_metadata = fs::symlink_metadata(&home).map_err(|_| KeyringError::Unavailable)?;
+        let home_metadata =
+            fs::symlink_metadata(&home).map_err(|_| MutationLockFailure::PathUnavailable)?;
         if home_metadata.file_type().is_symlink()
             || !home_metadata.is_dir()
             || home_metadata.uid() != unsafe { libc::geteuid() }
             || home_metadata.mode() & 0o777 != 0o700
         {
-            return Err(KeyringError::Unavailable);
+            return Err(MutationLockFailure::PathUnavailable);
         }
         let mut current = home;
         for component in [".coven", "chat"] {
             current.push(component);
             match fs::create_dir(&current) {
                 Ok(()) => fs::set_permissions(&current, fs::Permissions::from_mode(0o700))
-                    .map_err(|_| KeyringError::Unavailable)?,
+                    .map_err(|_| MutationLockFailure::PathUnavailable)?,
                 Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {}
-                Err(_) => return Err(KeyringError::Unavailable),
+                Err(_) => return Err(MutationLockFailure::PathUnavailable),
             }
-            let metadata = fs::symlink_metadata(&current).map_err(|_| KeyringError::Unavailable)?;
+            let metadata =
+                fs::symlink_metadata(&current).map_err(|_| MutationLockFailure::PathUnavailable)?;
             if metadata.file_type().is_symlink()
                 || !metadata.is_dir()
                 || metadata.uid() != unsafe { libc::geteuid() }
                 || metadata.mode() & 0o777 != 0o700
             {
-                return Err(KeyringError::Unavailable);
+                return Err(MutationLockFailure::PathUnavailable);
             }
         }
         Ok(current.join("credential-mutation.lock"))
@@ -903,6 +1348,18 @@ fn credential_lock_path() -> Result<std::path::PathBuf, KeyringError> {
 #[cfg(unix)]
 fn acquire_mutation_lock() -> Result<CredentialMutationGuard, KeyringError> {
     acquire_mutation_lock_with_timeout(CREDENTIAL_LOCK_TIMEOUT)
+}
+
+#[cfg(all(unix, feature = "phase1-conformance"))]
+fn acquire_cleanup_mutation_lock() -> Result<CredentialMutationGuard, KeyringError> {
+    acquire_mutation_lock_detailed_with_timeout_at(CREDENTIAL_LOCK_TIMEOUT, None).map_err(|error| {
+        match error {
+            MutationLockFailure::ProcessUnavailable => KeyringError::CleanupLockProcessUnavailable,
+            MutationLockFailure::PathUnavailable => KeyringError::CleanupLockPathUnavailable,
+            MutationLockFailure::FileUnavailable => KeyringError::CleanupLockFileUnavailable,
+            MutationLockFailure::Contended => KeyringError::CleanupLockContended,
+        }
+    })
 }
 
 #[cfg(unix)]
@@ -917,17 +1374,29 @@ fn acquire_mutation_lock_with_timeout_at(
     timeout: Duration,
     explicit_root: Option<&std::path::Path>,
 ) -> Result<CredentialMutationGuard, KeyringError> {
+    acquire_mutation_lock_detailed_with_timeout_at(timeout, explicit_root).map_err(Into::into)
+}
+
+#[cfg(unix)]
+fn acquire_mutation_lock_detailed_with_timeout_at(
+    timeout: Duration,
+    explicit_root: Option<&std::path::Path>,
+) -> Result<CredentialMutationGuard, MutationLockFailure> {
     use std::os::unix::fs::{MetadataExt, OpenOptionsExt, PermissionsExt};
 
     let deadline = Instant::now() + timeout;
     let process = loop {
         match mutation_lock().try_lock() {
             Ok(guard) => break guard,
-            Err(std::sync::TryLockError::Poisoned(_)) => return Err(KeyringError::Failure),
+            Err(std::sync::TryLockError::Poisoned(_)) => {
+                return Err(MutationLockFailure::ProcessUnavailable);
+            }
             Err(std::sync::TryLockError::WouldBlock) if Instant::now() < deadline => {
                 std::thread::sleep(Duration::from_millis(10));
             }
-            Err(std::sync::TryLockError::WouldBlock) => return Err(KeyringError::Unavailable),
+            Err(std::sync::TryLockError::WouldBlock) => {
+                return Err(MutationLockFailure::Contended);
+            }
         }
     };
     let path = match explicit_root {
@@ -941,16 +1410,18 @@ fn acquire_mutation_lock_with_timeout_at(
         .mode(0o600)
         .custom_flags(libc::O_NOFOLLOW)
         .open(&path)
-        .map_err(|_| KeyringError::Unavailable)?;
-    let metadata = file.metadata().map_err(|_| KeyringError::Unavailable)?;
+        .map_err(|_| MutationLockFailure::FileUnavailable)?;
+    let metadata = file
+        .metadata()
+        .map_err(|_| MutationLockFailure::FileUnavailable)?;
     if !metadata.is_file()
         || metadata.uid() != unsafe { libc::geteuid() }
         || metadata.mode() & 0o077 != 0
     {
-        return Err(KeyringError::Unavailable);
+        return Err(MutationLockFailure::FileUnavailable);
     }
     fs::set_permissions(&path, fs::Permissions::from_mode(0o600))
-        .map_err(|_| KeyringError::Unavailable)?;
+        .map_err(|_| MutationLockFailure::FileUnavailable)?;
     loop {
         match file.try_lock_exclusive() {
             Ok(()) => break,
@@ -962,7 +1433,15 @@ fn acquire_mutation_lock_with_timeout_at(
             {
                 std::thread::sleep(Duration::from_millis(10));
             }
-            Err(_) => return Err(KeyringError::Unavailable),
+            Err(error)
+                if matches!(
+                    error.kind(),
+                    std::io::ErrorKind::WouldBlock | std::io::ErrorKind::Interrupted
+                ) =>
+            {
+                return Err(MutationLockFailure::Contended);
+            }
+            Err(_) => return Err(MutationLockFailure::FileUnavailable),
         }
     }
     Ok(CredentialMutationGuard {
@@ -1299,6 +1778,11 @@ fn acquire_mutation_lock() -> Result<CredentialMutationGuard, KeyringError> {
     })
 }
 
+#[cfg(all(windows, feature = "phase1-conformance"))]
+fn acquire_cleanup_mutation_lock() -> Result<CredentialMutationGuard, KeyringError> {
+    acquire_mutation_lock().map_err(|_| KeyringError::CleanupLockUnavailable)
+}
+
 #[cfg(any(windows, test))]
 fn windows_mutex_name(identity: &str) -> String {
     let scope = format!("{SERVICE}:{CREDENTIAL_ACCOUNT_PREFIX}:{identity}");
@@ -1316,6 +1800,11 @@ fn legacy_windows_mutex_name(identity: &str) -> String {
 #[cfg(all(not(unix), not(windows)))]
 fn acquire_mutation_lock() -> Result<(), KeyringError> {
     Err(KeyringError::Unavailable)
+}
+
+#[cfg(all(not(unix), not(windows), feature = "phase1-conformance"))]
+fn acquire_cleanup_mutation_lock() -> Result<(), KeyringError> {
+    Err(KeyringError::CleanupLockUnavailable)
 }
 
 #[cfg(any(windows, test))]
@@ -1369,10 +1858,36 @@ fn decode_legacy_windows_password(value: &[u8]) -> Result<Zeroizing<Vec<u8>>, Ke
     Ok(Zeroizing::new(decoded.as_bytes().to_vec()))
 }
 
-fn parse_installation_id_entry(entry: &Entry, value: &[u8]) -> Result<String, KeyringError> {
+// Keep installation operations injectable without replacing the process-global store.
+trait InstallationEntry {
+    fn get_secret(&self) -> Result<Vec<u8>, KeyringBackendError>;
+    fn set_secret(&self, value: &[u8]) -> Result<(), KeyringBackendError>;
+    fn ensure_local_persistence(&self, value: &[u8]) -> Result<(), KeyringError>;
+}
+
+impl InstallationEntry for Entry {
+    fn get_secret(&self) -> Result<Vec<u8>, KeyringBackendError> {
+        Entry::get_secret(self)
+    }
+
+    fn set_secret(&self, value: &[u8]) -> Result<(), KeyringBackendError> {
+        Entry::set_secret(self, value)
+    }
+
+    fn ensure_local_persistence(&self, value: &[u8]) -> Result<(), KeyringError> {
+        ensure_windows_local_persistence(self, value)
+    }
+}
+
+fn parse_installation_id_entry(
+    entry: &impl InstallationEntry,
+    value: &[u8],
+) -> Result<String, KeyringError> {
     if let Ok(installation_id) = std::str::from_utf8(value) {
         if validate_installation_id(installation_id).is_ok() {
-            ensure_windows_local_persistence(entry, value)?;
+            entry
+                .ensure_local_persistence(value)
+                .map_err(|error| InstallationStage::Persistence.classify(error))?;
             return Ok(installation_id.to_owned());
         }
     }
@@ -1385,8 +1900,10 @@ fn parse_installation_id_entry(entry: &Entry, value: &[u8]) -> Result<String, Ke
         validate_installation_id(installation_id)?;
         entry
             .set_secret(decoded.as_slice())
-            .map_err(map_keyring_error)?;
-        ensure_windows_local_persistence(entry, decoded.as_slice())?;
+            .map_err(|error| InstallationStage::Write.classify(map_keyring_error(error)))?;
+        entry
+            .ensure_local_persistence(decoded.as_slice())
+            .map_err(|error| InstallationStage::Persistence.classify(error))?;
         return Ok(installation_id.to_owned());
     }
 
@@ -1418,6 +1935,26 @@ fn parse_stored_credential_entry(
     Err(KeyringError::Failure)
 }
 
+fn installation_id_from_entry(entry: &impl InstallationEntry) -> Result<String, KeyringError> {
+    match entry.get_secret() {
+        Ok(bytes) => {
+            let bytes = Zeroizing::new(bytes);
+            parse_installation_id_entry(entry, bytes.as_slice())
+        }
+        Err(KeyringBackendError::NoEntry) => {
+            let installation_id = Uuid::new_v4().to_string();
+            entry
+                .set_secret(installation_id.as_bytes())
+                .map_err(|error| InstallationStage::Write.classify(map_keyring_error(error)))?;
+            entry
+                .ensure_local_persistence(installation_id.as_bytes())
+                .map_err(|error| InstallationStage::Persistence.classify(error))?;
+            Ok(installation_id)
+        }
+        Err(error) => Err(InstallationStage::Read.classify(map_keyring_error(error))),
+    }
+}
+
 impl CredentialCustody for NativeKeyring {
     fn installation_id(&self) -> Result<String, KeyringError> {
         #[cfg(feature = "phase1-conformance")]
@@ -1426,23 +1963,11 @@ impl CredentialCustody for NativeKeyring {
         let service = self.service_name();
         #[cfg(not(feature = "phase1-conformance"))]
         let service = SERVICE;
-        let _guard = acquire_mutation_lock()?;
-        let entry = Self::installation_id_entry_for_service(service)?;
-        match entry.get_secret() {
-            Ok(bytes) => {
-                let bytes = Zeroizing::new(bytes);
-                parse_installation_id_entry(&entry, bytes.as_slice())
-            }
-            Err(KeyringBackendError::NoEntry) => {
-                let installation_id = Uuid::new_v4().to_string();
-                entry
-                    .set_secret(installation_id.as_bytes())
-                    .map_err(map_keyring_error)?;
-                ensure_windows_local_persistence(&entry, installation_id.as_bytes())?;
-                Ok(installation_id)
-            }
-            Err(error) => Err(map_keyring_error(error)),
-        }
+        let _guard =
+            acquire_mutation_lock().map_err(|error| InstallationStage::Lock.classify(error))?;
+        let entry = Self::installation_id_entry_for_service(service)
+            .map_err(|error| InstallationStage::Entry.classify(error))?;
+        installation_id_from_entry(&entry)
     }
 
     fn read(&self, instance_id: &str, origin: &str) -> Result<Credential, KeyringError> {
@@ -1643,6 +2168,89 @@ impl CredentialCustody for NativeKeyring {
             Err(error) => Err(map_keyring_error(error)),
         }
     }
+
+    /// `Ok(None)` when no session is stored. An unreadable record is an
+    /// error and is left in place so the person can decide what to do.
+    fn read_session(&self) -> Result<Option<StoredSession>, KeyringError> {
+        #[cfg(feature = "phase1-conformance")]
+        self.reject_provider_if_configured()?;
+        let _guard = acquire_mutation_lock()?;
+        let entry = self.session_entry()?;
+        match entry.get_secret() {
+            Ok(bytes) => {
+                let bytes = Zeroizing::new(bytes);
+                // Parse first. Migrating persistence rewrites the entry, and an
+                // unreadable record must surface as an error with its bytes
+                // left alone rather than being migrated on the way out.
+                let session = parse_stored_session(bytes.as_slice())?;
+                ensure_windows_local_persistence(&entry, bytes.as_slice())?;
+                Ok(Some(session))
+            }
+            Err(KeyringBackendError::NoEntry) => Ok(None),
+            Err(error) => Err(map_keyring_error(error)),
+        }
+    }
+
+    /// Compare-and-swap. `expected` is the session the caller read. `Ok(false)`
+    /// means another writer won and nothing was written; the caller re-reads.
+    /// `Err` is reserved for real faults (backend, corrupt record, oversize).
+    fn write_session(
+        &self,
+        expected: Option<&StoredSession>,
+        next: &StoredSession,
+    ) -> Result<bool, KeyringError> {
+        #[cfg(feature = "phase1-conformance")]
+        self.reject_provider_if_configured()?;
+        let _guard = acquire_mutation_lock()?;
+        let entry = self.session_entry()?;
+        let current = match entry.get_secret() {
+            Ok(bytes) => Some(Zeroizing::new(bytes)),
+            Err(KeyringBackendError::NoEntry) => None,
+            Err(error) => return Err(map_keyring_error(error)),
+        };
+        let expected_bytes = expected.map(serialize_session).transpose()?;
+        if current.as_deref().map(Vec::as_slice) != expected_bytes.as_deref().map(Vec::as_slice) {
+            return Ok(false);
+        }
+        let bytes = serialize_session(next)?;
+        entry.set_secret(&bytes).map_err(map_keyring_error)?;
+        ensure_windows_local_persistence(&entry, &bytes)?;
+        Ok(true)
+    }
+
+    /// Compare-and-delete. `Ok(false)` means the stored record changed after
+    /// the caller read it, so a stale sign-out or cleanup cannot remove the
+    /// session a concurrent refresh just wrote.
+    fn delete_session_if_matches(&self, expected: &StoredSession) -> Result<bool, KeyringError> {
+        #[cfg(feature = "phase1-conformance")]
+        self.reject_provider_if_configured()?;
+        let _guard = acquire_mutation_lock()?;
+        let entry = self.session_entry()?;
+        let current = match entry.get_secret() {
+            Ok(bytes) => Zeroizing::new(bytes),
+            Err(KeyringBackendError::NoEntry) => return Ok(false),
+            Err(error) => return Err(map_keyring_error(error)),
+        };
+        let expected_bytes = serialize_session(expected)?;
+        if current.as_slice() != expected_bytes.as_slice() {
+            return Ok(false);
+        }
+        match entry.delete_credential() {
+            Ok(()) | Err(KeyringBackendError::NoEntry) => Ok(true),
+            Err(error) => Err(map_keyring_error(error)),
+        }
+    }
+
+    fn delete_session(&self) -> Result<(), KeyringError> {
+        #[cfg(feature = "phase1-conformance")]
+        self.reject_provider_if_configured()?;
+        let _guard = acquire_mutation_lock()?;
+        let entry = self.session_entry()?;
+        match entry.delete_credential() {
+            Ok(()) | Err(KeyringBackendError::NoEntry) => Ok(()),
+            Err(error) => Err(map_keyring_error(error)),
+        }
+    }
 }
 
 pub(crate) fn validate_installation_id(installation_id: &str) -> Result<(), KeyringError> {
@@ -1695,13 +2303,18 @@ pub(crate) fn validate_credential_origin(origin: &str) -> Result<(), KeyringErro
 }
 
 impl NativeKeyring {
-    fn entry_for(service: &str, account: &str) -> Result<Entry, KeyringError> {
+    fn ensure_store_initialized() -> Result<(), KeyringError> {
         if STORE_INITIALIZED.get().is_none() {
             if !initialize_store() {
                 return Err(KeyringError::Unavailable);
             }
             let _ = STORE_INITIALIZED.set(());
         }
+        Ok(())
+    }
+
+    fn entry_for(service: &str, account: &str) -> Result<Entry, KeyringError> {
+        Self::ensure_store_initialized()?;
         #[cfg(windows)]
         {
             return Entry::new_with_modifiers(
@@ -1734,6 +2347,17 @@ impl NativeKeyring {
         )
     }
 
+    // allow(dead_code): the session accessors below are wired to a caller
+    // (the identity commands) in a later task.
+    #[allow(dead_code)]
+    fn session_entry(&self) -> Result<Entry, KeyringError> {
+        #[cfg(feature = "phase1-conformance")]
+        let service = self.service_name();
+        #[cfg(not(feature = "phase1-conformance"))]
+        let service = SERVICE;
+        Self::entry_for(service, SESSION_ACCOUNT)
+    }
+
     #[cfg(feature = "phase1-conformance")]
     fn conformance_entry_present(entry: &Entry) -> Result<bool, KeyringError> {
         match entry.get_secret() {
@@ -1747,22 +2371,25 @@ impl NativeKeyring {
     }
 }
 
-#[cfg(target_os = "macos")]
+#[cfg(all(feature = "phase1-conformance", target_os = "macos"))]
 const fn native_keyring_backend() -> &'static str {
     "macos-keychain"
 }
 
-#[cfg(target_os = "linux")]
+#[cfg(all(feature = "phase1-conformance", target_os = "linux"))]
 const fn native_keyring_backend() -> &'static str {
     "linux-keyring"
 }
 
-#[cfg(target_os = "windows")]
+#[cfg(all(feature = "phase1-conformance", target_os = "windows"))]
 const fn native_keyring_backend() -> &'static str {
     "windows-credential-manager"
 }
 
-#[cfg(not(any(target_os = "macos", target_os = "linux", target_os = "windows")))]
+#[cfg(all(
+    feature = "phase1-conformance",
+    not(any(target_os = "macos", target_os = "linux", target_os = "windows"))
+))]
 const fn native_keyring_backend() -> &'static str {
     "unsupported"
 }
@@ -1807,13 +2434,205 @@ fn map_keyring_error(error: KeyringBackendError) -> KeyringError {
 
 #[cfg(test)]
 mod tests {
+    #[cfg(feature = "phase1-conformance")]
+    #[test]
+    fn installation_operations_classify_failures_at_the_executed_boundary() {
+        use std::cell::RefCell;
+        struct FaultEntry {
+            stored: Option<Vec<u8>>,
+            fail: &'static str,
+            calls: RefCell<Vec<&'static str>>,
+        }
+        impl super::InstallationEntry for FaultEntry {
+            fn get_secret(&self) -> Result<Vec<u8>, super::KeyringBackendError> {
+                self.calls.borrow_mut().push("read");
+                if self.fail == "read" {
+                    return Err(super::KeyringBackendError::NoDefaultStore);
+                }
+                self.stored
+                    .clone()
+                    .ok_or(super::KeyringBackendError::NoEntry)
+            }
+            fn set_secret(&self, value: &[u8]) -> Result<(), super::KeyringBackendError> {
+                self.calls.borrow_mut().push("write");
+                assert!(
+                    super::validate_installation_id(std::str::from_utf8(value).unwrap()).is_ok()
+                );
+                if self.fail == "write" {
+                    Err(super::KeyringBackendError::NoDefaultStore)
+                } else {
+                    Ok(())
+                }
+            }
+            fn ensure_local_persistence(&self, _: &[u8]) -> Result<(), KeyringError> {
+                self.calls.borrow_mut().push("persistence");
+                if self.fail == "persistence" {
+                    Err(KeyringError::Unavailable)
+                } else {
+                    Ok(())
+                }
+            }
+        }
+        let id = "01234567-89ab-4cde-8fab-0123456789ab";
+        for (stored, fail, expected_calls) in [
+            (None, "read", vec!["read"]),
+            (None, "write", vec!["read", "write"]),
+            (None, "persistence", vec!["read", "write", "persistence"]),
+            (
+                Some(id.as_bytes().to_vec()),
+                "persistence",
+                vec!["read", "persistence"],
+            ),
+        ] {
+            let entry = FaultEntry {
+                stored,
+                fail,
+                calls: RefCell::new(Vec::new()),
+            };
+            let error = super::installation_id_from_entry(&entry)
+                .unwrap_err()
+                .diagnostic();
+            assert_eq!(error.code, format!("installation_{fail}_unavailable"));
+            assert!(error.retryable);
+            assert_eq!(*entry.calls.borrow(), expected_calls);
+        }
+        let entry = FaultEntry {
+            stored: Some(id.as_bytes().to_vec()),
+            fail: "",
+            calls: RefCell::new(Vec::new()),
+        };
+        assert_eq!(super::installation_id_from_entry(&entry).unwrap(), id);
+        assert_eq!(*entry.calls.borrow(), vec!["read", "persistence"]);
+        #[cfg(windows)]
+        for fail in ["write", "persistence"] {
+            let entry = FaultEntry {
+                stored: Some(id.encode_utf16().flat_map(u16::to_le_bytes).collect()),
+                fail,
+                calls: RefCell::new(Vec::new()),
+            };
+            let error = super::installation_id_from_entry(&entry)
+                .unwrap_err()
+                .diagnostic();
+            assert_eq!(error.code, format!("installation_{fail}_unavailable"));
+            assert_eq!(entry.calls.borrow()[..2], ["read", "write"]);
+        }
+    }
+    #[test]
+    fn installation_stage_diagnostics_preserve_other_errors_and_retryability() {
+        for (stage, code) in [
+            (
+                super::InstallationStage::Lock,
+                "installation_lock_unavailable",
+            ),
+            (
+                super::InstallationStage::Entry,
+                "installation_entry_unavailable",
+            ),
+            (
+                super::InstallationStage::Read,
+                "installation_read_unavailable",
+            ),
+            (
+                super::InstallationStage::Write,
+                "installation_write_unavailable",
+            ),
+            (
+                super::InstallationStage::Persistence,
+                "installation_persistence_unavailable",
+            ),
+        ] {
+            let diagnostic = stage.classify(KeyringError::Unavailable).diagnostic();
+            #[cfg(feature = "phase1-conformance")]
+            assert_eq!(diagnostic.code, code);
+            #[cfg(not(feature = "phase1-conformance"))]
+            {
+                let _ = code;
+                assert_eq!(diagnostic.code, "secure_store_unavailable");
+            }
+            assert!(diagnostic.retryable);
+            assert!(matches!(
+                stage.classify(KeyringError::NotFound),
+                KeyringError::NotFound
+            ));
+            assert!(matches!(
+                stage.classify(KeyringError::Failure),
+                KeyringError::Failure
+            ));
+        }
+    }
+    #[cfg(feature = "phase1-conformance")]
+    #[test]
+    fn unsupported_custody_installation_is_distinct_from_an_unavailable_store() {
+        // A custody type that does not override installation_id must not be
+        // reported as an unavailable secure store; the two are separate causes.
+        struct BareCustody;
+        impl super::CredentialCustody for BareCustody {
+            fn read(&self, _: &str, _: &str) -> Result<super::Credential, KeyringError> {
+                Err(KeyringError::Failure)
+            }
+            fn read_for_pairing_update(
+                &self,
+                _: &str,
+                _: &str,
+            ) -> Result<super::CredentialSlot, KeyringError> {
+                Err(KeyringError::Failure)
+            }
+            fn store_if_current(
+                &self,
+                _: &str,
+                _: &str,
+                _: Option<&super::Credential>,
+                _: &str,
+                _: &str,
+            ) -> Result<bool, KeyringError> {
+                Err(KeyringError::Failure)
+            }
+            fn replace_stale_if_current(
+                &self,
+                _: &str,
+                _: &str,
+                _: &super::Credential,
+                _: &str,
+                _: &str,
+            ) -> Result<bool, KeyringError> {
+                Err(KeyringError::Failure)
+            }
+            fn delete_if_matches(
+                &self,
+                _: &str,
+                _: &str,
+                _: &super::Credential,
+            ) -> Result<bool, KeyringError> {
+                Err(KeyringError::Failure)
+            }
+        }
+        let error = super::CredentialCustody::installation_id(&BareCustody)
+            .expect_err("the default custody implementation must fail");
+        assert!(matches!(
+            error,
+            KeyringError::CustodyInstallationUnsupported
+        ));
+        let diagnostic = error.diagnostic();
+        assert_eq!(diagnostic.code, "installation_custody_unsupported");
+        assert_ne!(diagnostic.code, KeyringError::Unavailable.diagnostic().code);
+        assert!(diagnostic.retryable);
+    }
     #[cfg(unix)]
-    use super::{acquire_mutation_lock_with_timeout_at, default_credential_lock_root};
+    use super::{
+        acquire_mutation_lock_detailed_with_timeout_at, acquire_mutation_lock_with_timeout_at,
+        default_credential_lock_root, MutationLockFailure,
+    };
     use super::{
         acquire_windows_mutex, decode_legacy_windows_password, legacy_windows_mutex_name,
-        parse_stored_credential, validate_installation_id, windows_mutex_name,
-        windows_persistence_action, KeyringError, WindowsMutexApi, WindowsMutexWait,
-        WindowsPersistenceAction, MAX_CREDENTIAL_RECORD_BYTES,
+        parse_stored_credential, parse_stored_session, serialize_session, validate_installation_id,
+        windows_mutex_name, windows_persistence_action, KeyringError, StoredSession,
+        WindowsMutexApi, WindowsMutexWait, WindowsPersistenceAction, MAX_CREDENTIAL_RECORD_BYTES,
+        MAX_SESSION_RECORD_BYTES,
+    };
+    #[cfg(all(feature = "phase1-conformance", target_os = "macos"))]
+    use super::{
+        conformance_macos_keychain, delete_conformance_macos_entry,
+        validate_conformance_macos_keychain_path,
     };
     #[cfg(feature = "phase1-conformance")]
     use super::{
@@ -1821,6 +2640,8 @@ mod tests {
     };
     #[cfg(feature = "phase1-conformance")]
     use crate::cleanup_grant::CleanupGrantScope;
+    #[cfg(all(feature = "phase1-conformance", target_os = "macos"))]
+    use std::ffi::OsStr;
     #[cfg(feature = "phase1-conformance")]
     use std::{
         collections::{HashMap, HashSet},
@@ -1829,6 +2650,185 @@ mod tests {
             Arc, Mutex,
         },
     };
+
+    #[cfg(all(feature = "phase1-conformance", target_os = "macos"))]
+    struct MacosKeychainPathFixture {
+        root: std::path::PathBuf,
+        home: std::path::PathBuf,
+        keychain: std::path::PathBuf,
+    }
+
+    #[cfg(all(feature = "phase1-conformance", target_os = "macos"))]
+    impl MacosKeychainPathFixture {
+        fn new() -> Self {
+            use std::os::unix::fs::PermissionsExt;
+
+            let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("target")
+                .join("keyring-path-tests")
+                .join(uuid::Uuid::new_v4().to_string());
+            let home = root.join("home");
+            let keychains = home.join("Library").join("Keychains");
+            std::fs::create_dir_all(&keychains).expect("private keychain tree must be created");
+            for directory in [&home, &home.join("Library"), &keychains] {
+                std::fs::set_permissions(directory, std::fs::Permissions::from_mode(0o700))
+                    .expect("private keychain directory mode must be set");
+            }
+            let keychain = keychains.join("phase1.keychain-db");
+            std::fs::write(&keychain, b"test keychain").expect("keychain fixture must be created");
+            std::fs::set_permissions(&keychain, std::fs::Permissions::from_mode(0o600))
+                .expect("private keychain mode must be set");
+            Self {
+                root,
+                home,
+                keychain,
+            }
+        }
+    }
+
+    #[cfg(all(feature = "phase1-conformance", target_os = "macos"))]
+    impl Drop for MacosKeychainPathFixture {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.root);
+        }
+    }
+
+    #[cfg(all(feature = "phase1-conformance", target_os = "macos"))]
+    #[test]
+    fn macos_cleanup_keychain_path_requires_the_isolation_marker() {
+        let fixture = MacosKeychainPathFixture::new();
+        assert!(matches!(
+            validate_conformance_macos_keychain_path(
+                None,
+                Some(fixture.home.as_os_str()),
+                Some(fixture.keychain.as_os_str()),
+            ),
+            Err(KeyringError::Unavailable)
+        ));
+    }
+
+    #[cfg(all(feature = "phase1-conformance", target_os = "macos"))]
+    #[test]
+    fn macos_cleanup_keychain_path_requires_the_exact_isolated_location() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let fixture = MacosKeychainPathFixture::new();
+        let alternate = fixture
+            .home
+            .join("Library")
+            .join("Keychains")
+            .join("alternate.keychain-db");
+        std::fs::write(&alternate, b"alternate keychain")
+            .expect("alternate keychain fixture must be created");
+        std::fs::set_permissions(&alternate, std::fs::Permissions::from_mode(0o600))
+            .expect("alternate keychain mode must be set");
+        assert!(matches!(
+            validate_conformance_macos_keychain_path(
+                Some(OsStr::new("1")),
+                Some(fixture.home.as_os_str()),
+                Some(alternate.as_os_str()),
+            ),
+            Err(KeyringError::Unavailable)
+        ));
+    }
+
+    #[cfg(all(feature = "phase1-conformance", target_os = "macos"))]
+    #[test]
+    fn macos_cleanup_keychain_path_rejects_a_symlinked_parent() {
+        use std::os::unix::fs::{symlink, PermissionsExt};
+
+        let fixture = MacosKeychainPathFixture::new();
+        let real_keychains = fixture.root.join("real-keychains");
+        std::fs::create_dir(&real_keychains).expect("real keychains directory must be created");
+        std::fs::set_permissions(&real_keychains, std::fs::Permissions::from_mode(0o700))
+            .expect("real keychains directory mode must be set");
+        let linked_keychain = real_keychains.join("phase1.keychain-db");
+        std::fs::write(&linked_keychain, b"linked keychain")
+            .expect("linked keychain fixture must be created");
+        std::fs::set_permissions(&linked_keychain, std::fs::Permissions::from_mode(0o600))
+            .expect("linked keychain mode must be set");
+        std::fs::remove_dir_all(fixture.home.join("Library").join("Keychains"))
+            .expect("original keychains directory must be removed");
+        symlink(
+            &real_keychains,
+            fixture.home.join("Library").join("Keychains"),
+        )
+        .expect("keychains symlink must be created");
+
+        assert!(matches!(
+            validate_conformance_macos_keychain_path(
+                Some(OsStr::new("1")),
+                Some(fixture.home.as_os_str()),
+                Some(fixture.keychain.as_os_str()),
+            ),
+            Err(KeyringError::Unavailable)
+        ));
+    }
+
+    #[cfg(all(feature = "phase1-conformance", target_os = "macos"))]
+    #[test]
+    fn macos_cleanup_keychain_path_rejects_a_hard_linked_file() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let fixture = MacosKeychainPathFixture::new();
+        let alternate = fixture.root.join("operator.keychain-db");
+        std::fs::write(&alternate, b"operator keychain")
+            .expect("alternate keychain fixture must be created");
+        std::fs::set_permissions(&alternate, std::fs::Permissions::from_mode(0o600))
+            .expect("alternate keychain mode must be set");
+        std::fs::remove_file(&fixture.keychain).expect("original keychain must be removed");
+        std::fs::hard_link(&alternate, &fixture.keychain)
+            .expect("hard-linked keychain fixture must be created");
+
+        assert!(matches!(
+            validate_conformance_macos_keychain_path(
+                Some(OsStr::new("1")),
+                Some(fixture.home.as_os_str()),
+                Some(fixture.keychain.as_os_str()),
+            ),
+            Err(KeyringError::Unavailable)
+        ));
+    }
+
+    #[cfg(all(feature = "phase1-conformance", target_os = "macos"))]
+    #[test]
+    fn macos_cleanup_keychain_path_accepts_the_exact_private_tree() {
+        let fixture = MacosKeychainPathFixture::new();
+        assert_eq!(
+            validate_conformance_macos_keychain_path(
+                Some(OsStr::new("1")),
+                Some(fixture.home.as_os_str()),
+                Some(fixture.keychain.as_os_str()),
+            )
+            .expect("exact isolated keychain path must be accepted"),
+            fixture.keychain
+        );
+    }
+
+    #[cfg(all(feature = "phase1-conformance", target_os = "macos"))]
+    #[test]
+    fn macos_cleanup_delete_is_idempotent_for_an_absent_entry() {
+        let configured_home = std::env::var_os("HOME").map(std::path::PathBuf::from);
+        let configured_keychain =
+            std::env::var_os("PHASE1_TEST_KEYCHAIN").map(std::path::PathBuf::from);
+        let canonical_keychain = configured_home
+            .as_ref()
+            .map(|home| home.join("Library/Keychains/phase1.keychain-db"));
+        if std::env::var("OPENCOVEN_PHASE1_TEST_KEYCHAIN_ISOLATED").as_deref() != Ok("1")
+            || configured_keychain != canonical_keychain
+        {
+            eprintln!("skipped: isolated Phase 1 keychain is not configured");
+            return;
+        }
+        let keychain = conformance_macos_keychain().expect("isolated keychain must open");
+        let account = uuid::Uuid::new_v4().to_string();
+        assert!(delete_conformance_macos_entry(
+            &keychain,
+            "ai.opencoven.chat.phase1.absent-delete",
+            &account,
+        )
+        .is_ok());
+    }
 
     #[cfg(feature = "phase1-conformance")]
     #[derive(Clone)]
@@ -1854,6 +2854,14 @@ mod tests {
             }
         }
 
+        fn with_absent_account(self, account: &str) -> Self {
+            self.entries
+                .lock()
+                .expect("fake entries")
+                .insert(account.to_owned(), false);
+            self
+        }
+
         fn all_absent(&self) -> bool {
             self.entries
                 .lock()
@@ -1865,19 +2873,6 @@ mod tests {
 
     #[cfg(feature = "phase1-conformance")]
     impl CleanupBackend for FakeCleanupBackend {
-        fn delete(&mut self, _service: &str, account: &str) -> Result<(), KeyringError> {
-            let call = self.delete_calls.fetch_add(1, Ordering::SeqCst) + 1;
-            let mut failure = self.fail_delete_call.lock().expect("fake failure");
-            if *failure == Some(call) {
-                *failure = None;
-                return Err(KeyringError::Unavailable);
-            }
-            if let Some(present) = self.entries.lock().expect("fake entries").get_mut(account) {
-                *present = false;
-            }
-            Ok(())
-        }
-
         fn present(&mut self, _service: &str, account: &str) -> Result<bool, KeyringError> {
             Ok(*self
                 .entries
@@ -1885,6 +2880,20 @@ mod tests {
                 .expect("fake entries")
                 .get(account)
                 .unwrap_or(&false))
+        }
+
+        fn delete(&mut self, _service: &str, account: &str) -> Result<(), KeyringError> {
+            let call = self.delete_calls.fetch_add(1, Ordering::SeqCst) + 1;
+            let mut failure = self.fail_delete_call.lock().expect("fake failure");
+            if *failure == Some(call) {
+                *failure = None;
+                return Err(KeyringError::Unavailable);
+            }
+            let mut entries = self.entries.lock().expect("fake entries");
+            if let Some(present) = entries.get_mut(account) {
+                *present = false;
+            }
+            Ok(())
         }
     }
 
@@ -1964,6 +2973,102 @@ mod tests {
 
     #[cfg(feature = "phase1-conformance")]
     #[test]
+    fn cleanup_grant_issue_failures_have_bounded_native_diagnostics() {
+        for (error, expected) in [
+            (
+                KeyringError::CleanupGrantServiceUnavailable,
+                "cleanup_grant_service_unavailable",
+            ),
+            (
+                KeyringError::CleanupGrantProcessSecretUnavailable,
+                "cleanup_grant_process_secret_unavailable",
+            ),
+            (
+                KeyringError::CleanupGrantRandomUnavailable,
+                "cleanup_grant_random_unavailable",
+            ),
+            (
+                KeyringError::CleanupGrantMarkerIdentityUnavailable,
+                "cleanup_grant_marker_identity_unavailable",
+            ),
+            (
+                KeyringError::CleanupGrantMarkerHomeUnavailable,
+                "cleanup_grant_marker_home_unavailable",
+            ),
+            (
+                KeyringError::CleanupGrantMarkerDirectoryCreateUnavailable,
+                "cleanup_grant_marker_directory_create_unavailable",
+            ),
+            (
+                KeyringError::CleanupGrantMarkerDirectoryOpenUnavailable,
+                "cleanup_grant_marker_directory_open_unavailable",
+            ),
+            (
+                KeyringError::CleanupGrantMarkerDirectoryMetadataUnavailable,
+                "cleanup_grant_marker_directory_metadata_unavailable",
+            ),
+            (
+                KeyringError::CleanupGrantMarkerDirectoryTrustUnavailable,
+                "cleanup_grant_marker_directory_trust_unavailable",
+            ),
+            (
+                KeyringError::CleanupGrantMarkerSyncUnavailable,
+                "cleanup_grant_marker_sync_unavailable",
+            ),
+            (
+                KeyringError::CleanupGrantMarkerPublishUnavailable,
+                "cleanup_grant_marker_publish_unavailable",
+            ),
+            (
+                KeyringError::CleanupGrantCollisionExhausted,
+                "cleanup_grant_collision_exhausted",
+            ),
+        ] {
+            assert_eq!(error.diagnostic().code, expected);
+        }
+    }
+
+    #[cfg(feature = "phase1-conformance")]
+    #[test]
+    fn cleanup_runtime_failures_identify_the_failed_boundary() {
+        for (error, expected) in [
+            (
+                KeyringError::CleanupBackendUnavailable,
+                "cleanup_backend_unavailable",
+            ),
+            (
+                KeyringError::CleanupLockProcessUnavailable,
+                "cleanup_lock_process_unavailable",
+            ),
+            (
+                KeyringError::CleanupLockPathUnavailable,
+                "cleanup_lock_path_unavailable",
+            ),
+            (
+                KeyringError::CleanupLockFileUnavailable,
+                "cleanup_lock_file_unavailable",
+            ),
+            (KeyringError::CleanupLockContended, "cleanup_lock_contended"),
+            (
+                KeyringError::CleanupInstallationDeleteUnavailable,
+                "cleanup_installation_delete_unavailable",
+            ),
+            (
+                KeyringError::CleanupCredentialDeleteUnavailable,
+                "cleanup_credential_delete_unavailable",
+            ),
+        ] {
+            assert_eq!(error.diagnostic().code, expected);
+        }
+        #[cfg(not(unix))]
+        assert_eq!(
+            KeyringError::CleanupLockUnavailable.diagnostic().code,
+            "cleanup_lock_unavailable"
+        );
+    }
+
+    #[cfg(feature = "phase1-conformance")]
+    #[test]
     fn cleanup_lock_failure_preserves_the_same_authenticated_retry() {
         let scope = cleanup_test_scope();
         let identity = "grant-id".to_owned();
@@ -1976,7 +3081,7 @@ mod tests {
             run_cleanup_transaction(
                 &issued,
                 &identity,
-                || Err::<(), _>(KeyringError::Unavailable),
+                || Err::<(), _>(KeyringError::CleanupLockPathUnavailable),
                 || {
                     prepared.fetch_add(1, Ordering::SeqCst);
                     Ok(FakeCleanupRedemption {
@@ -1986,7 +3091,7 @@ mod tests {
                 },
                 &mut backend,
             ),
-            Err(KeyringError::Unavailable)
+            Err(KeyringError::CleanupLockPathUnavailable)
         ));
         assert_eq!(prepared.load(Ordering::SeqCst), 0);
         assert!(issued.lock().unwrap().contains(&identity));
@@ -2011,6 +3116,38 @@ mod tests {
 
     #[cfg(feature = "phase1-conformance")]
     #[test]
+    fn cleanup_uses_idempotent_delete_for_accounts_that_are_already_absent() {
+        let scope = cleanup_test_scope();
+        let expected_delete_calls = scope.accounts.len();
+        let identity = "grant-id".to_owned();
+        let issued = Mutex::new(HashSet::from([identity.clone()]));
+        let consumed = Arc::new(AtomicUsize::new(0));
+        let absent_account = scope.accounts[1].clone();
+        let mut backend =
+            FakeCleanupBackend::new(&scope.accounts, None).with_absent_account(&absent_account);
+
+        assert!(run_cleanup_transaction(
+            &issued,
+            &identity,
+            || Ok(()),
+            || Ok(FakeCleanupRedemption {
+                scope,
+                consumed: Arc::clone(&consumed),
+            }),
+            &mut backend,
+        )
+        .is_ok());
+        assert!(backend.all_absent());
+        assert_eq!(
+            backend.delete_calls.load(Ordering::SeqCst),
+            expected_delete_calls
+        );
+        assert_eq!(consumed.load(Ordering::SeqCst), 1);
+        assert!(!issued.lock().unwrap().contains(&identity));
+    }
+
+    #[cfg(feature = "phase1-conformance")]
+    #[test]
     fn partial_backend_delete_failure_retries_with_the_same_grant_and_scope() {
         let scope = cleanup_test_scope();
         let identity = "grant-id".to_owned();
@@ -2029,7 +3166,7 @@ mod tests {
                 }),
                 &mut backend,
             ),
-            Err(KeyringError::Unavailable)
+            Err(KeyringError::CleanupCredentialDeleteUnavailable)
         ));
         assert_eq!(consumed.load(Ordering::SeqCst), 0);
         assert!(issued.lock().unwrap().contains(&identity));
@@ -2048,6 +3185,98 @@ mod tests {
         assert!(backend.all_absent());
         assert_eq!(consumed.load(Ordering::SeqCst), 1);
         assert!(!issued.lock().unwrap().contains(&identity));
+    }
+
+    #[cfg(feature = "phase1-conformance")]
+    #[test]
+    fn cleanup_does_not_claim_empty_when_successful_delete_leaves_entries_present() {
+        struct RetainingBackend;
+        impl CleanupBackend for RetainingBackend {
+            fn present(&mut self, _service: &str, _account: &str) -> Result<bool, KeyringError> {
+                Ok(true)
+            }
+            fn delete(&mut self, _service: &str, _account: &str) -> Result<(), KeyringError> {
+                Ok(())
+            }
+        }
+        let identity = "retained-grant".to_owned();
+        let issued = Mutex::new(HashSet::from([identity.clone()]));
+        let consumed = Arc::new(AtomicUsize::new(0));
+        let mut backend = RetainingBackend;
+        let result = run_cleanup_transaction(
+            &issued,
+            &identity,
+            || Ok(()),
+            || {
+                Ok(FakeCleanupRedemption {
+                    scope: cleanup_test_scope(),
+                    consumed: Arc::clone(&consumed),
+                })
+            },
+            &mut backend,
+        );
+        assert!(
+            result.is_err(),
+            "retained credentials must not be reported empty"
+        );
+        assert_eq!(consumed.load(Ordering::SeqCst), 0);
+        assert!(issued.lock().unwrap().contains(&identity));
+    }
+
+    #[cfg(feature = "phase1-conformance")]
+    #[test]
+    fn cleanup_readback_failure_preserves_grant_for_retry() {
+        struct ReadFailureBackend {
+            inner: FakeCleanupBackend,
+            fail_read: bool,
+        }
+        impl CleanupBackend for ReadFailureBackend {
+            fn delete(&mut self, service: &str, account: &str) -> Result<(), KeyringError> {
+                self.inner.delete(service, account)
+            }
+            fn present(&mut self, service: &str, account: &str) -> Result<bool, KeyringError> {
+                if self.fail_read {
+                    self.fail_read = false;
+                    Err(KeyringError::Unavailable)
+                } else {
+                    self.inner.present(service, account)
+                }
+            }
+        }
+        let scope = cleanup_test_scope();
+        let identity = "readback-retry-grant".to_owned();
+        let issued = Mutex::new(HashSet::from([identity.clone()]));
+        let consumed = Arc::new(AtomicUsize::new(0));
+        let mut backend = ReadFailureBackend {
+            inner: FakeCleanupBackend::new(&scope.accounts, None),
+            fail_read: true,
+        };
+        for attempt in 0..2 {
+            let result = run_cleanup_transaction(
+                &issued,
+                &identity,
+                || Ok(()),
+                || {
+                    Ok(FakeCleanupRedemption {
+                        scope: cleanup_test_scope(),
+                        consumed: Arc::clone(&consumed),
+                    })
+                },
+                &mut backend,
+            );
+            if attempt == 0 {
+                assert!(matches!(
+                    result,
+                    Err(KeyringError::CleanupBackendUnavailable)
+                ));
+                assert_eq!(consumed.load(Ordering::SeqCst), 0);
+                assert!(issued.lock().unwrap().contains(&identity));
+            } else {
+                assert!(result.is_ok());
+                assert_eq!(consumed.load(Ordering::SeqCst), 1);
+                assert!(!issued.lock().unwrap().contains(&identity));
+            }
+        }
     }
 
     #[cfg(feature = "phase1-conformance")]
@@ -2205,6 +3434,58 @@ mod tests {
         );
     }
 
+    #[cfg(unix)]
+    #[test]
+    fn unix_cleanup_lock_failures_identify_path_file_and_contention_boundaries() {
+        use std::{fs, path::Path, time::Duration};
+
+        assert!(matches!(
+            acquire_mutation_lock_detailed_with_timeout_at(
+                Duration::from_secs(1),
+                Some(Path::new("relative-lock-root"))
+            ),
+            Err(MutationLockFailure::PathUnavailable)
+        ));
+
+        let file_root = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("target")
+            .join("keyring-lock-tests")
+            .join(uuid::Uuid::new_v4().to_string());
+        fs::create_dir_all(file_root.join("credential-mutation.lock"))
+            .expect("conflicting lock directory");
+        assert!(matches!(
+            acquire_mutation_lock_detailed_with_timeout_at(
+                Duration::from_secs(1),
+                Some(&file_root)
+            ),
+            Err(MutationLockFailure::FileUnavailable)
+        ));
+        fs::remove_dir_all(&file_root).expect("file failure root cleanup");
+
+        let contention_root = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("target")
+            .join("keyring-lock-tests")
+            .join(uuid::Uuid::new_v4().to_string());
+        let first = acquire_mutation_lock_detailed_with_timeout_at(
+            Duration::from_secs(1),
+            Some(&contention_root),
+        )
+        .expect("first detailed credential lock");
+        let contender_root = contention_root.clone();
+        let contender = std::thread::spawn(move || {
+            matches!(
+                acquire_mutation_lock_detailed_with_timeout_at(
+                    Duration::from_millis(50),
+                    Some(&contender_root),
+                ),
+                Err(MutationLockFailure::Contended)
+            )
+        });
+        assert!(contender.join().expect("detailed contender thread"));
+        drop(first);
+        fs::remove_dir_all(contention_root).expect("contention root cleanup");
+    }
+
     #[test]
     fn windows_mutex_is_global_and_user_scoped() {
         let first = windows_mutex_name("S-1-5-21-test-user");
@@ -2267,6 +3548,107 @@ mod tests {
                 decode_legacy_windows_password(&value),
                 Err(KeyringError::Failure)
             ));
+        }
+    }
+
+    #[test]
+    fn session_record_round_trips_and_is_bounded() {
+        let record = StoredSession {
+            access_token: "a".repeat(100),
+            refresh_token: "r".repeat(100),
+            expires_at: 1_800_000_000,
+            checked_at: 1_799_990_000,
+            subject: "user_01H".to_owned(),
+            email: "val@example.com".to_owned(),
+        };
+        let bytes = serialize_session(&record).unwrap();
+        assert!(bytes.len() <= MAX_SESSION_RECORD_BYTES);
+        let parsed = parse_stored_session(&bytes).unwrap();
+        assert_eq!(parsed.subject, "user_01H");
+        assert_eq!(parsed.expires_at, 1_800_000_000);
+
+        let mut huge = record.clone();
+        huge.access_token = "a".repeat(5000);
+        assert!(matches!(
+            serialize_session(&huge),
+            Err(KeyringError::Failure)
+        ));
+        assert!(matches!(
+            parse_stored_session(b"{not json"),
+            Err(KeyringError::Failure)
+        ));
+    }
+
+    #[test]
+    fn session_record_enforces_the_exact_size_boundary_and_non_empty_fields() {
+        let mut record = StoredSession {
+            access_token: String::new(),
+            refresh_token: "r".repeat(100),
+            expires_at: 1_800_000_000,
+            checked_at: 1_799_990_000,
+            subject: "user_01H".to_owned(),
+            email: "val@example.com".to_owned(),
+        };
+        // Pad the access token so the serialized record is exactly the cap.
+        let overhead = {
+            record.access_token = "a".to_owned();
+            serialize_session(&record).unwrap().len() - 1
+        };
+        record.access_token = "a".repeat(MAX_SESSION_RECORD_BYTES - overhead);
+        assert_eq!(
+            serialize_session(&record).unwrap().len(),
+            MAX_SESSION_RECORD_BYTES
+        );
+        record.access_token.push('a');
+        assert!(matches!(
+            serialize_session(&record),
+            Err(KeyringError::Failure)
+        ));
+
+        assert!(matches!(
+            parse_stored_session(&vec![b'x'; MAX_SESSION_RECORD_BYTES + 1]),
+            Err(KeyringError::Failure)
+        ));
+        let empty = br#"{"accessToken":"","refreshToken":"r","expiresAt":1,"checkedAt":1,"subject":"s","email":"e"}"#;
+        assert!(matches!(
+            parse_stored_session(empty),
+            Err(KeyringError::Failure)
+        ));
+    }
+
+    #[test]
+    fn a_write_cannot_persist_a_record_that_every_read_would_reject() {
+        let complete = StoredSession {
+            access_token: "a".repeat(10),
+            refresh_token: "r".repeat(10),
+            expires_at: 1_800_000_000,
+            checked_at: 1_799_990_000,
+            subject: "user_01H".to_owned(),
+            email: "val@example.com".to_owned(),
+        };
+        assert!(serialize_session(&complete).is_ok());
+
+        // Each field the read path requires must also stop the write path,
+        // otherwise a record can be stored that can never be read back.
+        for blank in [
+            |s: &mut StoredSession| s.access_token.clear(),
+            |s: &mut StoredSession| s.refresh_token.clear(),
+            |s: &mut StoredSession| s.subject.clear(),
+            |s: &mut StoredSession| s.email.clear(),
+        ] {
+            let mut record = StoredSession {
+                access_token: complete.access_token.clone(),
+                refresh_token: complete.refresh_token.clone(),
+                expires_at: complete.expires_at,
+                checked_at: complete.checked_at,
+                subject: complete.subject.clone(),
+                email: complete.email.clone(),
+            };
+            blank(&mut record);
+            assert!(
+                matches!(serialize_session(&record), Err(KeyringError::Failure)),
+                "an incomplete record was accepted for writing"
+            );
         }
     }
 

@@ -31,27 +31,28 @@
     "cargo:clippy": "cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets --all-features -- -D warnings",
     "cargo:fmt": "cargo fmt --manifest-path src-tauri/Cargo.toml --all --check",
     "app:dev": "tauri dev",
-    "app:build": "tauri build",
-    "app:build:demo": "VITE_DEFAULT_DEMO=chat tauri build --config src-tauri/tauri.demo.conf.json"
+    "app:build": "tauri build"
   },
   "dependencies": {
     "@base-ui/react": "1.7.0",
     "@fontsource-variable/inter": "5.3.0",
     "@fontsource-variable/jetbrains-mono": "5.3.0",
-    "@opencoven/cave-client": "file:vendor/opencoven-sdk/cave-client-0.1.0.tgz",
-    "@opencoven/coven-client": "file:vendor/opencoven-sdk/coven-client-0.1.0.tgz",
-    "@opencoven/sdk": "file:vendor/opencoven-sdk/sdk-0.1.0.tgz",
-    "@opencoven/sdk-core": "file:vendor/opencoven-sdk/sdk-core-0.1.0.tgz",
+    "@opencoven/cave-client": "file:vendor/opencoven-sdk/cave-client-0.0.1.tgz",
+    "@opencoven/coven-client": "file:vendor/opencoven-sdk/coven-client-0.0.1.tgz",
+    "@opencoven/sdk": "file:vendor/opencoven-sdk/sdk-0.0.1.tgz",
+    "@opencoven/sdk-core": "file:vendor/opencoven-sdk/sdk-core-0.0.1.tgz",
     "@tauri-apps/api": "2.11.1",
     "react": "19.2.8",
-    "react-dom": "19.2.8"
+    "react-dom": "19.2.8",
+    "react-markdown": "10.1.0",
+    "remark-gfm": "4.0.1"
   },
   "pnpm": {
     "overrides": {
-      "@opencoven/cave-client": "file:vendor/opencoven-sdk/cave-client-0.1.0.tgz",
-      "@opencoven/coven-client": "file:vendor/opencoven-sdk/coven-client-0.1.0.tgz",
-      "@opencoven/sdk": "file:vendor/opencoven-sdk/sdk-0.1.0.tgz",
-      "@opencoven/sdk-core": "file:vendor/opencoven-sdk/sdk-core-0.1.0.tgz"
+      "@opencoven/cave-client": "file:vendor/opencoven-sdk/cave-client-0.0.1.tgz",
+      "@opencoven/coven-client": "file:vendor/opencoven-sdk/coven-client-0.0.1.tgz",
+      "@opencoven/sdk": "file:vendor/opencoven-sdk/sdk-0.0.1.tgz",
+      "@opencoven/sdk-core": "file:vendor/opencoven-sdk/sdk-core-0.0.1.tgz"
     }
   },
   "devDependencies": {
@@ -67,6 +68,6 @@
     "jsdom": "30.0.1",
     "typescript": "6.0.3",
     "vite": "8.2.1",
-    "vitest": "4.1.10"
+    "vitest": "4.1.11"
   }
 }

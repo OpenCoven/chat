@@ -1,0 +1,842 @@
+$ErrorActionPreference = 'Stop'
+Set-StrictMode -Version Latest
+if (-not ('OpenCoven.WindowsJobSupervisor' -as [type])) { Add-Type -TypeDefinition ([IO.File]::ReadAllText((Join-Path $PSScriptRoot 'windows-job-supervisor.cs'))) -Language CSharp }
+$flags = [Reflection.BindingFlags]'NonPublic,Static'
+$classify = [OpenCoven.WindowsJobSupervisor].GetMethod('ClassifyQuotaMonitorError', $flags)
+if ($null -eq $classify) { throw 'Missing quota monitor classifier.' }
+$boundType = [OpenCoven.WindowsJobSupervisor].GetNestedType('QuotaEntryBoundException', [Reflection.BindingFlags]'NonPublic')
+$bound = [Activator]::CreateInstance($boundType, $true)
+$cases = @(
+  @($bound, 'entry-bound'),
+  @([UnauthorizedAccessException]::new('secret-path'), 'access-denied'),
+  @([IO.IOException]::new('secret-path'), 'io'),
+  @([IO.IOException]::new('secret-path', -2147024894), 'io-file-not-found'),
+  @([IO.IOException]::new('secret-path', -2147024893), 'io-path-not-found'),
+  @([IO.IOException]::new('secret-path', -2147024891), 'io'),
+  @([IO.IOException]::new('secret-path', -2147024864), 'io-sharing-violation'),
+  @([IO.IOException]::new('secret-path', -2147024863), 'io-lock-violation'),
+  @([IO.IOException]::new('secret-path', -2147024690), 'io-name-too-long'),
+  @([IO.IOException]::new('secret-path', -2147024629), 'io-invalid-directory'),
+  @([IO.IOException]::new('secret-path', -2147024593), 'io-delete-pending'),
+  @([OverflowException]::new('secret-path'), 'arithmetic-overflow'),
+  @([InvalidOperationException]::new('secret-path'), 'unexpected')
+)
+foreach ($case in $cases) {
+  $actual = $classify.Invoke($null, [object[]]@($case[0]))
+  if ($actual -cne $case[1]) { throw "Wrong bounded category: $actual" }
+}
+$stateType = [OpenCoven.WindowsJobSupervisor].GetNestedType('DirectoryQuotaFailureState', [Reflection.BindingFlags]'NonPublic')
+$state = [Activator]::CreateInstance($stateType, $true)
+$instanceFlags = [Reflection.BindingFlags]'NonPublic,Instance'
+try {
+  $record = $stateType.GetMethod('RecordMonitorError', $instanceFlags)
+  $record.Invoke($state, [object[]]@([UnauthorizedAccessException]::new('secret-path')))
+  $record.Invoke($state, [object[]]@([IO.IOException]::new('secret-path')))
+  if ($stateType.GetProperty('MonitorErrorCategory', $instanceFlags).GetValue($state) -cne 'access-denied' -or
+      -not $stateType.GetProperty('MonitorError', $instanceFlags).GetValue($state) -or
+      -not $stateType.GetProperty('IsSet', $instanceFlags).GetValue($state)) {
+    throw 'First monitor failure category or fail-closed state was lost.'
+  }
+} finally { $state.Dispose() }
+Write-Host 'Bounded quota diagnostic classification and first-failure state passed.'
+# Exercise the actual terminal catch with a malformed quota entry. It must
+# fail closed and retain a previously classified monitor failure.
+$terminal = [OpenCoven.WindowsJobSupervisor].GetMethod('ApplyTerminalDirectoryQuotaCheck', $flags)
+$malformed = [OpenCoven.WindowsDirectoryQuota[]]@($null)
+foreach ($prior in @($false, $true)) {
+  $result = [OpenCoven.WindowsJobRunResult]::new()
+  if ($prior) {
+    $result.GetType().GetProperty('ResourceQuotaMonitorError').SetValue($result, $true)
+    $result.GetType().GetProperty('ResourceQuotaMonitorCategory').SetValue($result, 'access-denied')
+  }
+  $terminal.Invoke($null, [object[]]@($result, $malformed))
+  $expected = if ($prior) { 'access-denied' } else { 'unexpected' }
+  if (-not $result.ResourceQuotaExceeded -or -not $result.ResourceQuotaMonitorError -or
+      $result.ExitCode -eq 0 -or $result.ResourceQuotaMonitorCategory -cne $expected) {
+    throw 'Terminal quota failure lost its category or fail-closed outcome.'
+  }
+}
+$unknownResult = [OpenCoven.WindowsJobRunResult]::new()
+$terminal.Invoke($null, [object[]]@($unknownResult, $malformed))
+if ($unknownResult.ResourceQuotaMonitorRoot -cne 'unknown' -or $unknownResult.ResourceQuotaMonitorOperation -cne 'unknown') { throw 'Unattributed terminal failure did not use fixed unknown context.' }
+Write-Host 'Terminal quota failure propagation passed.'
+# Exercise the background monitor's real catch and signal path.
+$asyncState = [Activator]::CreateInstance($stateType, $true)
+try {
+  $monitor = [OpenCoven.WindowsJobSupervisor].GetMethod('MonitorDirectoryQuotasAsync', $flags)
+  $task = $monitor.Invoke($null, [object[]]@($malformed, $asyncState, [Threading.CancellationToken]::None))
+  if (-not $task.Wait(5000) -or
+      -not $stateType.GetProperty('IsSet', $instanceFlags).GetValue($asyncState) -or
+      $stateType.GetProperty('MonitorErrorCategory', $instanceFlags).GetValue($asyncState) -cne 'unexpected') {
+    throw 'Background monitor failed to retain its bounded failure category.'
+  }
+} finally { $asyncState.Dispose() }
+Write-Host 'Background quota monitor failure propagation passed.'
+# A later monitor exception must not relabel an already recorded quota breach.
+$quotaState = [Activator]::CreateInstance($stateType, $true)
+try {
+  $stateType.GetMethod('RecordQuotaExceeded', $instanceFlags).Invoke($quotaState, [object[]]@('bootstrap aggregate'))
+  $stateType.GetMethod('RecordMonitorError', $instanceFlags).Invoke($quotaState, [object[]]@([IO.IOException]::new('secret-path')))
+  if (-not $stateType.GetProperty('IsSet', $instanceFlags).GetValue($quotaState) -or
+      $stateType.GetProperty('QuotaLabel', $instanceFlags).GetValue($quotaState) -cne 'bootstrap aggregate' -or
+      $stateType.GetProperty('MonitorError', $instanceFlags).GetValue($quotaState) -or
+      $null -ne $stateType.GetProperty('MonitorErrorCategory', $instanceFlags).GetValue($quotaState)) {
+    throw 'Later monitor error replaced the first quota-breach result.'
+  }
+} finally { $quotaState.Dispose() }
+Write-Host 'First quota breach remains distinct from later monitor errors.'
+
+# Terminal rechecks must also preserve an earlier concrete quota breach.
+$breachedResult = [OpenCoven.WindowsJobRunResult]::new()
+$breachedResult.GetType().GetProperty('ResourceQuotaExceeded').SetValue($breachedResult, $true)
+$breachedResult.GetType().GetProperty('ResourceQuotaLabel').SetValue($breachedResult, 'bootstrap aggregate')
+$terminal.Invoke($null, [object[]]@($breachedResult, $malformed))
+if (-not $breachedResult.ResourceQuotaExceeded -or $breachedResult.ResourceQuotaMonitorError -or
+    $breachedResult.ResourceQuotaLabel -cne 'bootstrap aggregate' -or
+    $null -ne $breachedResult.ResourceQuotaMonitorCategory -or $breachedResult.ExitCode -eq 0) {
+  throw 'Terminal monitor error replaced the first quota-breach result.'
+}
+Write-Host 'Terminal recheck preserves the first quota breach.'
+
+# Context is an allowlisted diagnostic, never an exception message or caller label.
+$contextType = [OpenCoven.WindowsJobSupervisor].GetNestedType('QuotaMonitorContextException', [Reflection.BindingFlags]'NonPublic')
+if ($null -eq $contextType) { throw 'Missing bounded quota root and operation context.' }
+$constructor = $contextType.GetConstructor($instanceFlags, $null, [type[]]@([string], [string], [Exception]), $null)
+$context = $constructor.Invoke([object[]]@('bootstrap aggregate', 'directory-enumeration', [UnauthorizedAccessException]::new('secret-path')))
+$contextState = [Activator]::CreateInstance($stateType, $true)
+try {
+  $record.Invoke($contextState, [object[]]@($context))
+  $record.Invoke($contextState, [object[]]@([IO.IOException]::new('later-secret')))
+  foreach ($pair in @(@('MonitorErrorCategory', 'access-denied'), @('MonitorErrorRoot', 'bootstrap-aggregate'), @('MonitorErrorOperation', 'directory-enumeration'))) {
+    if ($stateType.GetProperty($pair[0], $instanceFlags).GetValue($contextState) -cne $pair[1]) { throw "Lost first context: $($pair[0])" }
+  }
+  if ($context.ToString().Contains('secret-path')) { throw 'Context exception retained raw exception text.' }
+} finally { $contextState.Dispose() }
+$boundedConstructor = $contextType.GetConstructor(
+  $instanceFlags,
+  $null,
+  [type[]]@([string], [string], [string], [string], [Exception]),
+  $null
+)
+if ($null -eq $boundedConstructor) { throw 'Missing bounded quota scope/repeat context overload.' }
+$boundedContext = $boundedConstructor.Invoke([object[]]@(
+  'bootstrap aggregate',
+  'directory-enumeration-depth-3-plus',
+  'workspace',
+  'persistent',
+  [UnauthorizedAccessException]::new('private-nonce')
+))
+$boundedState = [Activator]::CreateInstance($stateType, $true)
+try {
+  $record.Invoke($boundedState, [object[]]@($boundedContext))
+  foreach ($pair in @(
+      @('MonitorErrorRoot', 'bootstrap-aggregate'),
+      @('MonitorErrorScope', 'workspace'),
+      @('MonitorErrorOperation', 'directory-enumeration-depth-3-plus'),
+      @('MonitorErrorRepeat', 'persistent'))) {
+    if ($stateType.GetProperty($pair[0], $instanceFlags).GetValue($boundedState) -cne $pair[1]) {
+      throw "Lost bounded quota context: $($pair[0])"
+    }
+  }
+  if ($boundedContext.ToString().Contains('private-nonce')) {
+    throw 'Bounded quota context retained private exception text.'
+  }
+} finally { $boundedState.Dispose() }
+$unknown = $constructor.Invoke([object[]]@('secret-label', 'secret-operation', [UnauthorizedAccessException]::new('secret-message')))
+foreach ($property in @('Root', 'Operation')) {
+  if ($contextType.GetProperty($property, $instanceFlags).GetValue($unknown) -cne 'unknown') { throw "Unbounded $property" }
+}
+foreach ($operation in @('pattern-attributes', 'pattern-enumeration', 'directory-attributes', 'directory-enumeration', 'directory-enumeration-root', 'directory-enumeration-depth-1', 'directory-enumeration-depth-2', 'directory-enumeration-depth-3-plus', 'entry-attributes', 'file-length')) {
+  $operationContext = $constructor.Invoke([object[]]@('status staging', $operation, [IO.IOException]::new('secret-message')))
+  if ($contextType.GetProperty('Operation', $instanceFlags).GetValue($operationContext) -cne $operation) { throw 'Lost allowed operation.' }
+}
+foreach ($errorCase in $cases) {
+  $classifiedContext = $constructor.Invoke([object[]]@($null, $null, $errorCase[0]))
+  if ($classify.Invoke($null, [object[]]@($classifiedContext)) -cne $errorCase[1]) { throw 'Context changed an existing error category.' }
+}
+$classifyPersistentRepeat = [OpenCoven.WindowsJobSupervisor].GetMethod('ClassifyPersistentQuotaRepeat', $flags)
+$normalizeRepeat = [OpenCoven.WindowsJobSupervisor].GetMethod('NormalizeQuotaRepeat', $flags)
+if ($null -eq $classifyPersistentRepeat -or $null -eq $normalizeRepeat) { throw 'Missing bounded retry classifier.' }
+foreach ($retryCase in $cases) {
+  $repeatValue = $classifyPersistentRepeat.Invoke($null, [object[]]@($retryCase[0]))
+  if ($repeatValue -cne ('persistent-' + $retryCase[1])) { throw 'Retry category was lost.' }
+  $retryContext = $boundedConstructor.Invoke([object[]]@(
+    $null, 'directory-enumeration-depth-3-plus', 'checkouts', $repeatValue,
+    [UnauthorizedAccessException]::new('private-first-attempt')
+  ))
+  if ($contextType.GetProperty('Repeat', $instanceFlags).GetValue($retryContext) -cne $repeatValue -or
+      $contextType.GetProperty('Category', $instanceFlags).GetValue($retryContext) -cne 'access-denied' -or
+      $retryContext.ToString().Contains('private-') -or $retryContext.ToString().Contains('secret-path')) {
+    throw 'Retry context lost classification, first error, or privacy.'
+  }
+}
+foreach ($privateRepeat in @('persistent-secret-path', 'persistent-C:\private', 'persistent-io; secret-path')) {
+  if ($normalizeRepeat.Invoke($null, [object[]]@($privateRepeat)) -cne 'none') { throw 'Unbounded retry text escaped sanitization.' }
+}
+Write-Host 'Fixed retry categories preserve first failure and reject private text.'
+Write-Host 'Root and operation sanitization and first-failure preservation passed.'
+
+$classifyScope = [OpenCoven.WindowsJobSupervisor].GetMethod('ClassifyQuotaScope', $flags)
+if ($null -eq $classifyScope) { throw 'Missing bounded bootstrap quota scope classifier.' }
+$scopeRoot = 'C:\quota-root'
+$scopeCases = @(
+  @($scopeRoot, 'root'),
+  @("$scopeRoot\profile\AppData\private-nonce", 'profile'),
+  @("$scopeRoot\temp\private-nonce", 'temp'),
+  @("$scopeRoot\status-staging\private-nonce", 'status-staging'),
+  @("$scopeRoot\workspace\node_modules\private-nonce", 'workspace'),
+  @("$scopeRoot\downloads\private-nonce", 'downloads'),
+  @("$scopeRoot\tools\git\private-nonce", 'tools-git'),
+  @("$scopeRoot\tools\node\private-nonce", 'tools-node'),
+  @("$scopeRoot\tools\pnpm\private-nonce", 'tools-pnpm'),
+  @("$scopeRoot\tools\private-nonce", 'tools-other'),
+  @("$scopeRoot\rustup\private-nonce", 'rustup'),
+  @("$scopeRoot\cargo\registry\private-nonce", 'cargo-registry'),
+  @("$scopeRoot\cargo\git\private-nonce", 'cargo-git'),
+  @("$scopeRoot\cargo\private-nonce", 'cargo-other'),
+  @("$scopeRoot\pnpm-store\private-nonce", 'pnpm-store'),
+  @("$scopeRoot\npm-cache\private-nonce", 'npm-cache'),
+  @("$scopeRoot\counterparts\private-nonce", 'counterparts'),
+  @("$scopeRoot\private-nonce", 'other')
+)
+foreach ($scopeCase in $scopeCases) {
+  $actualScope = $classifyScope.Invoke($null, [object[]]@(
+    'bootstrap aggregate',
+    $scopeRoot,
+    $scopeCase[0]
+  ))
+  if ($actualScope -cne $scopeCase[1] -or $actualScope.Contains('private-nonce')) {
+    throw "Bootstrap scope was not bounded: $actualScope"
+  }
+}
+$harnessScopeCases = @(
+  @($scopeRoot, 'root'),
+  @("$scopeRoot\home\.config\private-nonce", 'home'),
+  @("$scopeRoot\tmp\private-nonce", 'temp'),
+  @("$scopeRoot\cache\private-nonce", 'cache'),
+  @("$scopeRoot\data\private-nonce", 'data'),
+  @("$scopeRoot\pnpm-store\private-nonce", 'pnpm-store'),
+  @("$scopeRoot\cargo-home\registry\private-nonce", 'cargo-home'),
+  @("$scopeRoot\checkouts\chat\private-nonce", 'checkouts'),
+  @("$scopeRoot\build\chat-target\private-nonce", 'build'),
+  @("$scopeRoot\packages\sdk\private-nonce", 'packages'),
+  @("$scopeRoot\bin\private-nonce", 'bin'),
+  @("$scopeRoot\native-authority-home\private-nonce", 'native'),
+  @("$scopeRoot\compatibility-current\private-nonce", 'compatibility'),
+  @("$scopeRoot\private-nonce", 'other')
+)
+foreach ($scopeCase in $harnessScopeCases) {
+  $actualScope = $classifyScope.Invoke($null, [object[]]@(
+    'harness execution aggregate',
+    $scopeRoot,
+    $scopeCase[0]
+  ))
+  if ($actualScope -cne $scopeCase[1] -or $actualScope.Contains('private-nonce')) {
+    throw "Harness scope was not bounded: $actualScope"
+  }
+}
+foreach ($unscoped in @(
+    @('workspace aggregate', $scopeRoot, "$scopeRoot\workspace"),
+    @('bootstrap aggregate', $scopeRoot, 'C:\quota-root-sibling\private-nonce'))) {
+  if ($classifyScope.Invoke($null, [object[]]@($unscoped[0], $unscoped[1], $unscoped[2])) -cne 'none') {
+    throw 'Non-bootstrap or out-of-root quota path gained a scope.'
+  }
+}
+Write-Host 'Bootstrap quota scope classification is fixed and path-free.'
+
+if (-not ('OpenCoven.Tests.QuotaRepeatProbe' -as [type])) {
+  Add-Type -Language CSharp -TypeDefinition @'
+using System;
+using System.Collections.Generic;
+using System.IO;
+namespace OpenCoven.Tests
+{
+    public static class QuotaRepeatProbe
+    {
+        public static int TransientCalls;
+        public static int PersistentCalls;
+        public static int MissingFileCalls;
+        public static int MissingDirectoryCalls;
+        public static int ChangedErrorCalls;
+        public static int SnapshotCalls;
+        public static int WholePassCalls;
+        public static string SnapshotDirectory;
+        public static Exception WholePassFirstFailure;
+        public static Exception WholePassSecondFailure;
+        public static bool WholePassResult;
+        public static Func<string> MissingFileRead { get { return MissingFile; } }
+        public static Func<string> MissingDirectoryRead { get { return MissingDirectory; } }
+        public static Func<string> ChangedErrorRead { get { return ChangedError; } }
+        public static Func<bool> WholePassMeasure { get { return MeasureWholePass; } }
+
+        public static string MissingFile()
+        {
+            MissingFileCalls++;
+            if (MissingFileCalls == 1) throw new UnauthorizedAccessException("private-first");
+            throw new System.IO.FileNotFoundException("private-missing-file");
+        }
+
+        public static string MissingDirectory()
+        {
+            MissingDirectoryCalls++;
+            if (MissingDirectoryCalls == 1) throw new UnauthorizedAccessException("private-first");
+            throw new System.IO.DirectoryNotFoundException("private-missing-directory");
+        }
+
+        public static string ChangedError()
+        {
+            ChangedErrorCalls++;
+            if (ChangedErrorCalls == 1) throw new UnauthorizedAccessException("private-first");
+            throw new System.IO.IOException("private-second-io");
+        }
+        public static Func<string> TransientRead { get { return Transient; } }
+        public static Func<string> PersistentRead { get { return Persistent; } }
+
+        public static string Transient()
+        {
+            TransientCalls++;
+            if (TransientCalls == 1) throw new UnauthorizedAccessException("private-transient");
+            return "ok";
+        }
+
+        public static string Persistent()
+        {
+            PersistentCalls++;
+            throw new UnauthorizedAccessException("private-persistent");
+        }
+
+        public static int ChangedSnapshotCalls;
+        public static Func<List<FileSystemInfo>> ChangedSnapshotRead { get { return ChangedSnapshot; } }
+        private static List<FileSystemInfo> ChangedSnapshot()
+        {
+            ChangedSnapshotCalls++;
+            if (ChangedSnapshotCalls == 1) throw new UnauthorizedAccessException("private-first-snapshot");
+            throw new IOException("private-second-snapshot");
+        }
+
+        public static int RepeatFailureCalls;
+        public static Exception RepeatFailure;
+        public static Func<string> RepeatFailureRead { get { return RepeatFailureMetadata; } }
+        public static Func<List<FileSystemInfo>> RepeatFailureSnapshotRead { get { return RepeatFailureSnapshot; } }
+
+        public static string RepeatFailureMetadata()
+        {
+            RepeatFailureCalls++;
+            if (RepeatFailureCalls == 1) throw new UnauthorizedAccessException("private-first-denial");
+            throw RepeatFailure;
+        }
+
+        private static List<FileSystemInfo> RepeatFailureSnapshot()
+        {
+            RepeatFailureCalls++;
+            if (RepeatFailureCalls == 1) throw new UnauthorizedAccessException("private-first-denial");
+            throw RepeatFailure;
+        }
+
+        public static Func<List<FileSystemInfo>> TransientSnapshotRead
+        {
+            get { return TransientSnapshot; }
+        }
+
+        public static List<FileSystemInfo> TransientSnapshot()
+        {
+            SnapshotCalls++;
+            if (SnapshotCalls == 1)
+                throw new UnauthorizedAccessException("private-transient-snapshot");
+            var snapshot = new List<FileSystemInfo>();
+            foreach (var entry in new DirectoryInfo(SnapshotDirectory).EnumerateFileSystemInfos(
+                "*",
+                SearchOption.TopDirectoryOnly))
+            {
+                snapshot.Add(entry);
+            }
+            return snapshot;
+        }
+
+        public static bool MeasureWholePass()
+        {
+            WholePassCalls++;
+            if (WholePassCalls == 1 && WholePassFirstFailure != null)
+                throw WholePassFirstFailure;
+            if (WholePassCalls == 2 && WholePassSecondFailure != null)
+                throw WholePassSecondFailure;
+            return WholePassResult;
+        }
+    }
+}
+'@
+}
+$wholePass = [OpenCoven.WindowsJobSupervisor].GetMethod(
+  'MeasureDirectoryQuotaWithRemovalRaceRecovery',
+  $flags
+)
+if ($null -eq $wholePass) { throw 'Missing whole-pass quota race recovery.' }
+$removalRaceContext = $boundedConstructor.Invoke([object[]]@(
+  $null,
+  'pattern-attributes',
+  $null,
+  'missing',
+  [UnauthorizedAccessException]::new('private-first-pass')
+))
+[OpenCoven.Tests.QuotaRepeatProbe]::WholePassCalls = 0
+[OpenCoven.Tests.QuotaRepeatProbe]::WholePassFirstFailure = $removalRaceContext
+[OpenCoven.Tests.QuotaRepeatProbe]::WholePassSecondFailure = $null
+[OpenCoven.Tests.QuotaRepeatProbe]::WholePassResult = $false
+$wholePassResult = $wholePass.Invoke(
+  $null,
+  [object[]]@([OpenCoven.Tests.QuotaRepeatProbe]::WholePassMeasure)
+)
+if ($wholePassResult -or [OpenCoven.Tests.QuotaRepeatProbe]::WholePassCalls -ne 2) {
+  throw 'Qualifying removal race did not restart exactly one complete quota pass.'
+}
+$secondPassFailure = [IO.IOException]::new('private-second-pass')
+[OpenCoven.Tests.QuotaRepeatProbe]::WholePassCalls = 0
+[OpenCoven.Tests.QuotaRepeatProbe]::WholePassFirstFailure = $removalRaceContext
+[OpenCoven.Tests.QuotaRepeatProbe]::WholePassSecondFailure = $secondPassFailure
+$caughtSecondPass = $null
+try {
+  $wholePass.Invoke(
+    $null,
+    [object[]]@([OpenCoven.Tests.QuotaRepeatProbe]::WholePassMeasure)
+  ) | Out-Null
+} catch {
+  $caughtSecondPass = $_.Exception.GetBaseException()
+}
+if ([OpenCoven.Tests.QuotaRepeatProbe]::WholePassCalls -ne 2 -or
+    $caughtSecondPass -ne $secondPassFailure) {
+  throw 'Second complete quota-pass failure was not terminal.'
+}
+Write-Host 'Whole-pass quota removal-race recovery is single-use and fail-closed.'
+
+$readQuota = [OpenCoven.WindowsJobSupervisor].GetMethod('ReadQuotaOperation', $flags).MakeGenericMethod([string])
+[OpenCoven.Tests.QuotaRepeatProbe]::PersistentCalls = 0
+try {
+  $readQuota.Invoke($null, [object[]]@('pattern-attributes', [OpenCoven.Tests.QuotaRepeatProbe]::PersistentRead, [Type]::Missing, [Type]::Missing)) | Out-Null
+} catch {
+  $singlePassError = $_.Exception.GetBaseException()
+}
+if ([OpenCoven.Tests.QuotaRepeatProbe]::PersistentCalls -ne 1) {
+  throw 'Supervisor quota validation repeated a failed read.'
+}
+[OpenCoven.Tests.QuotaRepeatProbe]::PersistentCalls = 0
+foreach ($repeatCase in @(
+    @([OpenCoven.Tests.QuotaRepeatProbe]::TransientRead, 'readable', 'TransientCalls'),
+    @([OpenCoven.Tests.QuotaRepeatProbe]::PersistentRead, 'persistent-access-denied', 'PersistentCalls'),
+    @([OpenCoven.Tests.QuotaRepeatProbe]::MissingFileRead, 'missing', 'MissingFileCalls'),
+    @([OpenCoven.Tests.QuotaRepeatProbe]::MissingDirectoryRead, 'missing', 'MissingDirectoryCalls'),
+    @([OpenCoven.Tests.QuotaRepeatProbe]::ChangedErrorRead, 'persistent-io', 'ChangedErrorCalls'))) {
+  $caught = $null
+  try {
+    $readQuota.Invoke($null, [object[]]@('entry-attributes', $repeatCase[0], $true, [Type]::Missing)) | Out-Null
+  } catch {
+    $caught = $_.Exception.GetBaseException()
+  }
+  if ($null -eq $caught -or
+      $contextType.GetProperty('Category', $instanceFlags).GetValue($caught) -cne 'access-denied' -or
+      $contextType.GetProperty('Scope', $instanceFlags).GetValue($caught) -cne 'none' -or
+      $contextType.GetProperty('Operation', $instanceFlags).GetValue($caught) -cne 'entry-attributes' -or
+      $contextType.GetProperty('Repeat', $instanceFlags).GetValue($caught) -cne $repeatCase[1] -or
+      [OpenCoven.Tests.QuotaRepeatProbe].GetField($repeatCase[2]).GetValue($null) -ne 2 -or
+      $caught.ToString().Contains('private-')) {
+    throw "Quota repeat classification changed: $($repeatCase[1])"
+  }
+}
+[OpenCoven.Tests.QuotaRepeatProbe]::PersistentCalls = 0
+[OpenCoven.Tests.QuotaRepeatProbe]::TransientCalls = 1
+try {
+  $readQuota.Invoke($null, [object[]]@('entry-attributes',
+    [OpenCoven.Tests.QuotaRepeatProbe]::PersistentRead, $true,
+    [OpenCoven.Tests.QuotaRepeatProbe]::TransientRead)) | Out-Null
+} catch { $freshRepeatError = $_.Exception.GetBaseException() }
+if ([OpenCoven.Tests.QuotaRepeatProbe]::PersistentCalls -ne 1 -or
+    [OpenCoven.Tests.QuotaRepeatProbe]::TransientCalls -ne 2 -or
+    $contextType.GetProperty('Repeat', $instanceFlags).GetValue($freshRepeatError) -cne 'readable' -or
+    $contextType.GetProperty('Category', $instanceFlags).GetValue($freshRepeatError) -cne 'access-denied') {
+  throw 'Fresh diagnostic metadata read changed the original failure or initial read.'
+}
+Write-Host 'Quota read repeat classification is bounded and remains fail-closed.'
+
+$readSnapshot = [OpenCoven.WindowsJobSupervisor].GetMethod('ReadDirectorySnapshotOperation', $flags)
+if ($null -eq $readSnapshot) { throw 'Missing readable directory-snapshot recovery.' }
+$changedSnapshotError = $null
+try {
+  $readSnapshot.Invoke($null, [object[]]@(
+    'directory-enumeration-depth-3-plus',
+    [OpenCoven.Tests.QuotaRepeatProbe]::ChangedSnapshotRead,
+    $true,
+    [Type]::Missing
+  )) | Out-Null
+} catch { $changedSnapshotError = $_.Exception.InnerException }
+if ($null -eq $changedSnapshotError -or
+    [OpenCoven.Tests.QuotaRepeatProbe]::ChangedSnapshotCalls -ne 2 -or
+    $classify.Invoke($null, [object[]]@($changedSnapshotError)) -cne 'access-denied' -or
+    $changedSnapshotError.GetType().GetProperty('Repeat', [Reflection.BindingFlags]'NonPublic,Instance').GetValue($changedSnapshotError) -cne 'persistent-io') {
+  throw 'Changed snapshot retry did not retain the initial category and bounded persistent outcome.'
+}
+Write-Host 'Snapshot retry distinguishes changed I/O failure from repeated access denial.'
+
+# Chat #219: run 35146928092 reported only `repeat=persistent` after an access
+# denial. That label could not tell a second denial from an exhausted
+# traversal-wide entry budget or a changed I/O failure. Each second-attempt
+# outcome must keep its own fixed label at both production seams, with exactly
+# one repeat and no private text.
+$repeatOutcomeCases = @(
+  @($bound, 'persistent-entry-bound'),
+  @([UnauthorizedAccessException]::new('private-second-denial'), 'persistent-access-denied'),
+  @([IO.IOException]::new('private-second-io'), 'persistent-io'),
+  # A plain IOException carrying the file- or path-not-found HRESULT is not a
+  # FileNotFoundException or DirectoryNotFoundException, so it must reach the
+  # classifier rather than the missing catch.
+  @([IO.IOException]::new('private-second-file-hresult', -2147024894), 'persistent-io-file-not-found'),
+  @([IO.IOException]::new('private-second-path-hresult', -2147024893), 'persistent-io-path-not-found'),
+  @([IO.IOException]::new('private-second-sharing', -2147024864), 'persistent-io-sharing-violation'),
+  @([IO.IOException]::new('private-second-lock', -2147024863), 'persistent-io-lock-violation'),
+  @([IO.IOException]::new('private-second-name', -2147024690), 'persistent-io-name-too-long'),
+  @([IO.IOException]::new('private-second-directory-hresult', -2147024629), 'persistent-io-invalid-directory'),
+  @([IO.IOException]::new('private-second-delete', -2147024593), 'persistent-io-delete-pending'),
+  @([OverflowException]::new('private-second-overflow'), 'persistent-arithmetic-overflow'),
+  @([IO.FileNotFoundException]::new('private-second-file'), 'missing'),
+  @([IO.DirectoryNotFoundException]::new('private-second-directory'), 'missing'),
+  @([InvalidOperationException]::new('private-second-unexpected'), 'persistent-unexpected')
+)
+foreach ($seam in @(
+    @('entry-attributes', $readQuota, [OpenCoven.Tests.QuotaRepeatProbe]::RepeatFailureRead),
+    @('directory-enumeration-depth-3-plus', $readSnapshot, [OpenCoven.Tests.QuotaRepeatProbe]::RepeatFailureSnapshotRead))) {
+  foreach ($outcome in $repeatOutcomeCases) {
+    [OpenCoven.Tests.QuotaRepeatProbe]::RepeatFailureCalls = 0
+    [OpenCoven.Tests.QuotaRepeatProbe]::RepeatFailure = $outcome[0]
+    $repeatOutcomeError = $null
+    try {
+      $seam[1].Invoke($null, [object[]]@($seam[0], $seam[2], $true, [Type]::Missing)) | Out-Null
+    } catch {
+      $repeatOutcomeError = $_.Exception.GetBaseException()
+    }
+    if ($null -eq $repeatOutcomeError -or $repeatOutcomeError.GetType() -ne $contextType -or
+        [OpenCoven.Tests.QuotaRepeatProbe]::RepeatFailureCalls -ne 2 -or
+        $contextType.GetProperty('Category', $instanceFlags).GetValue($repeatOutcomeError) -cne 'access-denied' -or
+        $contextType.GetProperty('Operation', $instanceFlags).GetValue($repeatOutcomeError) -cne $seam[0] -or
+        $contextType.GetProperty('Repeat', $instanceFlags).GetValue($repeatOutcomeError) -cne $outcome[1] -or
+        $repeatOutcomeError.ToString().Contains('private-')) {
+      throw "Repeat outcome lost its label at $($seam[0]): expected $($outcome[1])."
+    }
+  }
+}
+[OpenCoven.Tests.QuotaRepeatProbe]::RepeatFailure = $null
+Write-Host 'Second denial, exhausted entry budget, other I/O failures, and missing paths keep distinct repeat labels at both seams.'
+
+# The entry budget is spent across one whole traversal, not per directory, so a
+# denied directory can be followed by an entry-bound repeat with no ACL change.
+# Without injection, a real directory over a spent budget must report
+# `entry-bound` on both attempts through the production enumeration path.
+$readBoundedSnapshot = [OpenCoven.WindowsJobSupervisor].GetMethod('ReadBoundedDirectorySnapshot', $flags)
+if ($null -eq $readBoundedSnapshot) { throw 'Missing bounded directory snapshot seam.' }
+$budgetRoot = Join-Path $PSScriptRoot ('.quota-budget-' + [guid]::NewGuid().ToString('N'))
+try {
+  [IO.Directory]::CreateDirectory($budgetRoot) | Out-Null
+  [IO.File]::WriteAllText((Join-Path $budgetRoot 'first'), 'quota')
+  [IO.File]::WriteAllText((Join-Path $budgetRoot 'second'), 'quota')
+  $budgetError = $null
+  try {
+    $readBoundedSnapshot.Invoke($null, [object[]]@([string]$budgetRoot, $null, $false, 1, 3, $true)) | Out-Null
+  } catch {
+    $budgetError = $_.Exception.GetBaseException()
+  }
+  if ($null -eq $budgetError -or $budgetError.GetType() -ne $contextType -or
+      $contextType.GetProperty('Category', $instanceFlags).GetValue($budgetError) -cne 'entry-bound' -or
+      $contextType.GetProperty('Operation', $instanceFlags).GetValue($budgetError) -cne 'directory-enumeration-depth-3-plus' -or
+      $contextType.GetProperty('Repeat', $instanceFlags).GetValue($budgetError) -cne 'persistent-entry-bound' -or
+      $budgetError.ToString().Contains($budgetRoot)) {
+    throw 'Spent entry budget was not reported as entry-bound on both attempts.'
+  }
+} finally {
+  Remove-Item -LiteralPath $budgetRoot -Recurse -Force -ErrorAction SilentlyContinue
+}
+Write-Host 'A spent traversal entry budget reports entry-bound on the first attempt and its repeat.'
+
+$snapshotRoot = Join-Path $PSScriptRoot ('.quota-readable-' + [guid]::NewGuid().ToString('N'))
+try {
+  [IO.Directory]::CreateDirectory($snapshotRoot) | Out-Null
+  [IO.File]::WriteAllText((Join-Path $snapshotRoot 'payload'), 'quota')
+  [OpenCoven.Tests.QuotaRepeatProbe]::SnapshotDirectory = $snapshotRoot
+  [OpenCoven.Tests.QuotaRepeatProbe]::SnapshotCalls = 0
+  $snapshot = $readSnapshot.Invoke($null, [object[]]@(
+    'directory-enumeration-depth-3-plus',
+    [OpenCoven.Tests.QuotaRepeatProbe]::TransientSnapshotRead,
+    $true,
+    [Type]::Missing
+  ))
+  if ([OpenCoven.Tests.QuotaRepeatProbe]::SnapshotCalls -ne 2 -or
+      $snapshot.Count -ne 1 -or $snapshot[0].Name -cne 'payload') {
+    throw 'Readable repeat did not return the complete fresh directory snapshot.'
+  }
+} finally {
+  [OpenCoven.Tests.QuotaRepeatProbe]::SnapshotDirectory = $null
+  Remove-Item -LiteralPath $snapshotRoot -Recurse -Force -ErrorAction SilentlyContinue
+}
+Write-Host 'Readable directory-snapshot repeat supplies the accepted bounded measurement.'
+
+$missingRepeatError = $null
+try {
+  [OpenCoven.Tests.QuotaRepeatProbe]::SnapshotDirectory = $snapshotRoot
+  [OpenCoven.Tests.QuotaRepeatProbe]::SnapshotCalls = 0
+  $readSnapshot.Invoke($null, [object[]]@(
+    'directory-enumeration-depth-3-plus',
+    [OpenCoven.Tests.QuotaRepeatProbe]::TransientSnapshotRead,
+    $true,
+    [Type]::Missing
+  )) | Out-Null
+} catch {
+  $missingRepeatError = $_.Exception.GetBaseException()
+} finally {
+  [OpenCoven.Tests.QuotaRepeatProbe]::SnapshotDirectory = $null
+}
+if ($null -eq $missingRepeatError -or $missingRepeatError.GetType() -ne $contextType -or
+    [OpenCoven.Tests.QuotaRepeatProbe]::SnapshotCalls -ne 2 -or
+    $contextType.GetProperty('Category', $instanceFlags).GetValue($missingRepeatError) -cne 'access-denied' -or
+    $contextType.GetProperty('Operation', $instanceFlags).GetValue($missingRepeatError) -cne 'directory-enumeration-depth-3-plus' -or
+    $contextType.GetProperty('Repeat', $instanceFlags).GetValue($missingRepeatError) -cne 'missing' -or
+    $missingRepeatError.ToString().Contains($snapshotRoot) -or
+    $missingRepeatError.ToString().Contains('private-')) {
+  throw 'Missing directory-snapshot repeat was accepted or lost its bounded first failure.'
+}
+$missingRepeatState = [Activator]::CreateInstance($stateType, $true)
+try {
+  $missingContext = $boundedConstructor.Invoke([object[]]@(
+    'Cave checkout', 'directory-enumeration-depth-3-plus', 'none', 'missing', $missingRepeatError
+  ))
+  $record.Invoke($missingRepeatState, [object[]]@($missingContext))
+  $record.Invoke($missingRepeatState, [object[]]@([IO.IOException]::new('later-private-failure')))
+  foreach ($pair in @(
+    @('MonitorErrorCategory', 'access-denied'),
+    @('MonitorErrorRoot', 'cave-checkout'),
+    @('MonitorErrorOperation', 'directory-enumeration-depth-3-plus'),
+    @('MonitorErrorRepeat', 'missing'))) {
+    if ($stateType.GetProperty($pair[0], $instanceFlags).GetValue($missingRepeatState) -cne $pair[1]) {
+      throw 'Later failure replaced the missing directory-snapshot diagnostic.'
+    }
+  }
+  if (-not $stateType.GetProperty('IsSet', $instanceFlags).GetValue($missingRepeatState) -or
+      -not $stateType.GetProperty('MonitorError', $instanceFlags).GetValue($missingRepeatState)) {
+    throw 'Missing directory-snapshot repeat did not signal monitor failure.'
+  }
+} finally { $missingRepeatState.Dispose() }
+Write-Host 'Denied directory followed by a real missing snapshot remains fail-closed and preserves the first failure.'
+
+foreach ($overLimit in @($false, $true)) {
+  [OpenCoven.Tests.QuotaRepeatProbe]::WholePassCalls = 0
+  [OpenCoven.Tests.QuotaRepeatProbe]::WholePassFirstFailure = $missingRepeatError
+  [OpenCoven.Tests.QuotaRepeatProbe]::WholePassSecondFailure = $null
+  [OpenCoven.Tests.QuotaRepeatProbe]::WholePassResult = $overLimit
+  $recoveredResult = $wholePass.Invoke(
+    $null,
+    [object[]]@([OpenCoven.Tests.QuotaRepeatProbe]::WholePassMeasure)
+  )
+  if ($recoveredResult -ne $overLimit -or
+      [OpenCoven.Tests.QuotaRepeatProbe]::WholePassCalls -ne 2) {
+    throw 'Whole-pass recovery discarded the replacement measurement or its byte breach.'
+  }
+}
+$nonRecoverableCases = @(
+    @([IO.IOException]::new('private-io'), 'missing'),
+    @([UnauthorizedAccessException]::new('private-denial'), 'persistent'),
+    @([UnauthorizedAccessException]::new('private-denial'), 'readable'))
+foreach ($retryCase in $cases) {
+  $nonRecoverableCases += ,@([UnauthorizedAccessException]::new('private-denial'), ('persistent-' + $retryCase[1]))
+}
+foreach ($nonRecoverable in $nonRecoverableCases) {
+  $failure = $boundedConstructor.Invoke([object[]]@(
+    $null, 'directory-enumeration-depth-3-plus', $null, $nonRecoverable[1], $nonRecoverable[0]
+  ))
+  [OpenCoven.Tests.QuotaRepeatProbe]::WholePassCalls = 0
+  [OpenCoven.Tests.QuotaRepeatProbe]::WholePassFirstFailure = $failure
+  $caughtFailure = $null
+  try {
+    $wholePass.Invoke(
+      $null,
+      [object[]]@([OpenCoven.Tests.QuotaRepeatProbe]::WholePassMeasure)
+    ) | Out-Null
+  } catch {
+    $caughtFailure = $_.Exception.GetBaseException()
+  }
+  if ($caughtFailure -ne $failure -or [OpenCoven.Tests.QuotaRepeatProbe]::WholePassCalls -ne 1) {
+    throw 'Whole-pass recovery retried a nonqualifying failure.'
+  }
+}
+[OpenCoven.Tests.QuotaRepeatProbe]::WholePassCalls = 0
+[OpenCoven.Tests.QuotaRepeatProbe]::WholePassFirstFailure = $missingRepeatError
+[OpenCoven.Tests.QuotaRepeatProbe]::WholePassSecondFailure = $missingRepeatError
+$repeatedRemovalFailure = $null
+try {
+  $wholePass.Invoke(
+    $null,
+    [object[]]@([OpenCoven.Tests.QuotaRepeatProbe]::WholePassMeasure)
+  ) | Out-Null
+} catch {
+  $repeatedRemovalFailure = $_.Exception.GetBaseException()
+} finally {
+  [OpenCoven.Tests.QuotaRepeatProbe]::WholePassFirstFailure = $null
+  [OpenCoven.Tests.QuotaRepeatProbe]::WholePassSecondFailure = $null
+}
+if ($repeatedRemovalFailure -ne $missingRepeatError -or
+    [OpenCoven.Tests.QuotaRepeatProbe]::WholePassCalls -ne 2) {
+  throw 'A second removal race escaped the single whole-pass retry bound.'
+}
+Write-Host 'Whole-pass recovery preserves byte breaches, excludes other failures, and never retries a second removal race.'
+
+$snapshotCore = [OpenCoven.WindowsJobSupervisor].GetMethod(
+  'ReadBoundedDirectorySnapshotCore',
+  $flags,
+  $null,
+  [type[]]@([string], [string], [bool], [int], [bool]),
+  $null
+)
+if ($null -eq $snapshotCore) { throw 'Missing complete-snapshot enforcement.' }
+$missingSnapshotPath = [string](Join-Path $snapshotRoot 'missing')
+$missingSnapshot = $null
+try {
+  $snapshotCore.Invoke($null, [object[]]@(
+    $missingSnapshotPath,
+    '*',
+    $false,
+    10,
+    $true
+  )) | Out-Null
+} catch {
+  $missingSnapshot = $_.Exception.GetBaseException()
+}
+if ($missingSnapshot -isnot [IO.DirectoryNotFoundException]) {
+  throw 'Required-complete snapshot accepted a missing directory.'
+}
+$boundedSnapshotRoot = Join-Path $PSScriptRoot ('.quota-bounded-' + [guid]::NewGuid().ToString('N'))
+try {
+  [IO.Directory]::CreateDirectory($boundedSnapshotRoot) | Out-Null
+  [IO.File]::WriteAllText((Join-Path $boundedSnapshotRoot 'first'), 'quota')
+  [IO.File]::WriteAllText((Join-Path $boundedSnapshotRoot 'second'), 'quota')
+  $boundedSnapshotError = $null
+  try {
+    $snapshotCore.Invoke($null, [object[]]@(
+      [string]$boundedSnapshotRoot,
+      '*',
+      $false,
+      1,
+      $true
+    )) | Out-Null
+  } catch {
+    $boundedSnapshotError = $_.Exception.GetBaseException()
+  }
+  if ($null -eq $boundedSnapshotError -or
+      $boundedSnapshotError.GetType().Name -cne 'QuotaEntryBoundException') {
+    throw 'Required-complete snapshot did not preserve the entry bound.'
+  }
+} finally {
+  Remove-Item -LiteralPath $boundedSnapshotRoot -Recurse -Force -ErrorAction SilentlyContinue
+}
+Write-Host 'Readable recovery requires a complete bounded directory snapshot.'
+
+# A real overlong filesystem name exercises the terminal/background catches on
+# every platform. Windows reports an unreviewed runtime HRESULT as generic I/O;
+# Unix hosts expose the reviewed filename-too-long HRESULT.
+$invalidPath = [IO.Path]::Combine($PSScriptRoot, ('q' * 1024))
+$invalidPathCategory = if ($IsWindows) { 'io' } else { 'io-name-too-long' }
+$invalidQuotas = [OpenCoven.WindowsDirectoryQuota[]]@([OpenCoven.WindowsDirectoryQuota]::new('bootstrap aggregate', $invalidPath, 1MB))
+$contextResult = [OpenCoven.WindowsJobRunResult]::new()
+$terminal.Invoke($null, [object[]]@($contextResult, $invalidQuotas))
+if (-not $contextResult.ResourceQuotaMonitorError -or $contextResult.ResourceQuotaMonitorRoot -cne 'bootstrap-aggregate' -or
+    $contextResult.ResourceQuotaMonitorOperation -cne 'pattern-attributes' -or
+    $contextResult.ResourceQuotaMonitorCategory -cne $invalidPathCategory) {
+  throw "Real terminal filesystem failure lost bounded context: category=$($contextResult.ResourceQuotaMonitorCategory); root=$($contextResult.ResourceQuotaMonitorRoot); operation=$($contextResult.ResourceQuotaMonitorOperation)."
+}
+$terminal.Invoke($null, [object[]]@($contextResult, $malformed))
+if ($contextResult.ResourceQuotaMonitorRoot -cne 'bootstrap-aggregate' -or $contextResult.ResourceQuotaMonitorOperation -cne 'pattern-attributes') { throw 'Terminal recheck replaced first context.' }
+$backgroundContext = [Activator]::CreateInstance($stateType, $true)
+try {
+  $task = $monitor.Invoke($null, [object[]]@($invalidQuotas, $backgroundContext, [Threading.CancellationToken]::None))
+  if (-not $task.Wait(5000) -or $stateType.GetProperty('MonitorErrorRoot', $instanceFlags).GetValue($backgroundContext) -cne 'bootstrap-aggregate' -or
+      $stateType.GetProperty('MonitorErrorOperation', $instanceFlags).GetValue($backgroundContext) -cne 'pattern-attributes') { throw 'Background filesystem failure lost bounded context.' }
+} finally { $backgroundContext.Dispose() }
+Write-Host 'Real filesystem terminal and background context propagation passed.'
+
+$invalidHarnessQuotas = [OpenCoven.WindowsDirectoryQuota[]]@(
+  [OpenCoven.WindowsDirectoryQuota]::new('harness execution aggregate', $invalidPath, 1MB)
+)
+$harnessContextResult = [OpenCoven.WindowsJobRunResult]::new()
+$terminal.Invoke($null, [object[]]@($harnessContextResult, $invalidHarnessQuotas))
+if (-not $harnessContextResult.ResourceQuotaMonitorError -or
+    $harnessContextResult.ResourceQuotaMonitorRoot -cne 'harness-execution-aggregate' -or
+    $harnessContextResult.ResourceQuotaMonitorScope -cne 'root' -or
+    $harnessContextResult.ResourceQuotaMonitorOperation -cne 'pattern-attributes' -or
+    $harnessContextResult.ResourceQuotaMonitorCategory -cne $invalidPathCategory) {
+  throw 'Pre-traversal harness failure did not receive a bounded root scope.'
+}
+Write-Host 'Pre-traversal harness quota failures receive a bounded scope.'
+
+# Deny enumeration on a fresh fixture only; restore its original access before
+# deleting it. This exercises real access-denied on Windows and Unix hosts.
+foreach ($depth in @(0, 1, 2, 3, 5)) {
+  $fixtureRoot = Join-Path $PSScriptRoot ('.quota-denied-' + [guid]::NewGuid().ToString('N'))
+  $deniedPath = $fixtureRoot
+  for ($level = 0; $level -lt $depth; $level++) { $deniedPath = Join-Path $deniedPath ('private-child-' + $level) }
+  $expectedOperation = switch ($depth) {
+    0 { 'directory-enumeration-root' }
+    1 { 'directory-enumeration-depth-1' }
+    2 { 'directory-enumeration-depth-2' }
+    default { 'directory-enumeration-depth-3-plus' }
+  }
+  $null = [IO.Directory]::CreateDirectory($deniedPath)
+  $originalAcl = $null
+  try {
+    [IO.File]::WriteAllText((Join-Path $deniedPath 'payload'), 'quota')
+    if ($IsWindows) {
+      $originalAcl = Get-Acl -LiteralPath $deniedPath
+      $deniedAcl = Get-Acl -LiteralPath $deniedPath
+      $sid = [Security.Principal.WindowsIdentity]::GetCurrent().User
+      $rule = [Security.AccessControl.FileSystemAccessRule]::new($sid, [Security.AccessControl.FileSystemRights]::ListDirectory, [Security.AccessControl.AccessControlType]::Deny)
+      $deniedAcl.AddAccessRule($rule)
+      Set-Acl -LiteralPath $deniedPath -AclObject $deniedAcl
+    } else {
+      & chmod 000 $deniedPath
+      if ($LASTEXITCODE -ne 0) { throw 'Could not deny quota fixture access.' }
+    }
+    foreach ($pathPattern in @($fixtureRoot, ($fixtureRoot + '*'))) {
+      $deniedQuotas = [OpenCoven.WindowsDirectoryQuota[]]@([OpenCoven.WindowsDirectoryQuota]::new('status staging', $pathPattern, 1MB))
+      $deniedResult = [OpenCoven.WindowsJobRunResult]::new()
+      $terminal.Invoke($null, [object[]]@($deniedResult, $deniedQuotas))
+      if (-not $deniedResult.ResourceQuotaExceeded -or -not $deniedResult.ResourceQuotaMonitorError -or $deniedResult.ExitCode -eq 0 -or
+          $deniedResult.ResourceQuotaMonitorCategory -cne 'access-denied' -or $deniedResult.ResourceQuotaMonitorRoot -cne 'status-staging' -or
+          $deniedResult.ResourceQuotaMonitorScope -cne 'none' -or $deniedResult.ResourceQuotaMonitorOperation -cne $expectedOperation -or
+          $deniedResult.ResourceQuotaMonitorRepeat -cne 'none') { throw 'Native access-denied fixture lost its bounded context.' }
+      $terminal.Invoke($null, [object[]]@($deniedResult, $malformed))
+      if ($deniedResult.ResourceQuotaMonitorOperation -cne $expectedOperation) { throw 'Terminal recheck replaced first depth context.' }
+      # Wildcard discovery has a distinct enumeration seam; a caller label that
+      # happens to be valid quota grammar still must not enter diagnostics.
+      $wildcardQuotas = [OpenCoven.WindowsDirectoryQuota[]]@([OpenCoven.WindowsDirectoryQuota]::new('private-user-label', (Join-Path $deniedPath '*'), 1MB))
+      $wildcardResult = [OpenCoven.WindowsJobRunResult]::new()
+      $terminal.Invoke($null, [object[]]@($wildcardResult, $wildcardQuotas))
+      if ($wildcardResult.ResourceQuotaMonitorCategory -cne 'access-denied' -or $wildcardResult.ResourceQuotaMonitorRoot -cne 'unknown' -or
+          $wildcardResult.ResourceQuotaMonitorScope -cne 'none' -or $wildcardResult.ResourceQuotaMonitorOperation -cne 'pattern-enumeration' -or
+          $wildcardResult.ResourceQuotaMonitorRepeat -cne 'none') { throw 'Wildcard enumeration failed to preserve sanitized context.' }
+      $deniedState = [Activator]::CreateInstance($stateType, $true)
+      try {
+        $task = $monitor.Invoke($null, [object[]]@($deniedQuotas, $deniedState, [Threading.CancellationToken]::None))
+        if (-not $task.Wait(5000)) { throw 'Native access-denied background check did not terminate.' }
+        foreach ($pair in @(@('MonitorErrorCategory', 'access-denied'), @('MonitorErrorRoot', 'status-staging'), @('MonitorErrorOperation', $expectedOperation))) {
+          if ($stateType.GetProperty($pair[0], $instanceFlags).GetValue($deniedState) -cne $pair[1]) { throw "Native background check lost $($pair[0])." }
+        }
+        if ($stateType.GetProperty('MonitorErrorScope', $instanceFlags).GetValue($deniedState) -cne 'none' -or
+            $stateType.GetProperty('MonitorErrorRepeat', $instanceFlags).GetValue($deniedState) -cne 'none') {
+          throw 'Native background check lost scope/repeat context.'
+        }
+      } finally { $deniedState.Dispose() }
+    }
+  } finally {
+    if ($IsWindows) {
+      if ($null -ne $originalAcl) { Set-Acl -LiteralPath $deniedPath -AclObject $originalAcl }
+    } else {
+      & chmod 700 $deniedPath
+      if ($LASTEXITCODE -ne 0) { throw 'Could not restore quota fixture access.' }
+    }
+    Remove-Item -LiteralPath $fixtureRoot -Recurse -Force
+  }
+  Write-Host 'Native access-denied terminal and background quota context passed.'
+
+}

@@ -22,6 +22,7 @@ import {
   cleanupOwnedTempRoot,
   createOwnedShortTempDirectory,
   createOwnedTempDirectory,
+  ownedTempCleanupFailureCategory,
 } from './owned-temp-directory.mjs';
 
 const defaultTerminationGraceMs = 5_000;
@@ -238,31 +239,68 @@ function waitForChildClose(child, timeoutMs) {
   });
 }
 
+export const PROCESS_CLEANUP_FAILURE_CATEGORIES = Object.freeze([
+  'child-terminate',
+  'supervisor-wait',
+  'child-kill',
+  'child-reap',
+  'tracked-set-changed',
+  'root-precondition',
+  'root-rename',
+  'root-postrename',
+  'entry-stat',
+  'leaf-remove',
+  'directory-enumerate',
+  'directory-remove',
+  'multiple',
+  'unknown',
+]);
+
+const cleanupFailureCategories = new WeakMap();
+
+export function processCleanupFailureCategory(error) {
+  return cleanupFailureCategories.get(error) ?? ownedTempCleanupFailureCategory(error);
+}
+
+function classifyCleanupFailure(error, category) {
+  if ((typeof error === 'object' && error !== null) || typeof error === 'function') {
+    cleanupFailureCategories.set(error, category);
+  }
+  return error;
+}
+
 async function terminateAndReapChild(child, terminationGraceMs) {
   const pid = child.pid;
-
-  if (child.exitCode === null && child.signalCode === null) {
-    const signaled = child.kill('SIGTERM');
-    if (!signaled && child.exitCode === null && child.signalCode === null) {
-      throw new Error(`Tracked child ${pid} could not be terminated.`);
+  let operation = 'child-terminate';
+  try {
+    if (child.exitCode === null && child.signalCode === null) {
+      const signaled = child.kill('SIGTERM');
+      if (!signaled && child.exitCode === null && child.signalCode === null) {
+        throw new Error(`Tracked child ${pid} could not be terminated.`);
+      }
     }
-  }
 
-  if (await waitForChildClose(child, terminationGraceMs)) {
-    return;
-  }
+    operation = 'supervisor-wait';
+    if (await waitForChildClose(child, terminationGraceMs)) {
+      return;
+    }
 
-  if (child.__phase1SupervisorOwnsTree === true) {
-    throw new Error(`Tracked supervisor ${pid} did not complete owned-tree cleanup.`);
-  }
+    if (child.__phase1SupervisorOwnsTree === true) {
+      throw new Error(`Tracked supervisor ${pid} did not complete owned-tree cleanup.`);
+    }
 
-  const killed = child.kill('SIGKILL');
-  if (!killed && child.exitCode === null && child.signalCode === null) {
-    throw new Error(`Tracked child ${pid} could not be killed.`);
-  }
+    operation = 'child-kill';
+    const killed = child.kill('SIGKILL');
+    if (!killed && child.exitCode === null && child.signalCode === null) {
+      throw new Error(`Tracked child ${pid} could not be killed.`);
+    }
 
-  if (!(await waitForChildClose(child, terminationGraceMs))) {
-    throw new Error(`Tracked child ${pid} could not be reaped.`);
+    operation = 'child-reap';
+    if (!(await waitForChildClose(child, terminationGraceMs))) {
+      throw new Error(`Tracked child ${pid} could not be reaped.`);
+    }
+  } catch (error) {
+    throw classifyCleanupFailure(error, operation);
   }
 }
 
@@ -290,7 +328,12 @@ export function createProcessOwnedArtifactRoot(options) {
 
       const existing = trackedChildren.get(child.pid);
       if (existing !== undefined && existing !== child) {
-        throw new Error(`A different child is already tracked for PID ${child.pid}.`);
+        if (existing.exitCode === null && existing.signalCode === null) {
+          throw new Error(`A different child is already tracked for PID ${child.pid}.`);
+        }
+        // A completed child's PID may be recycled. Register the new process at
+        // the end so reverse-order cleanup still follows registration order.
+        trackedChildren.delete(child.pid);
       }
       trackedChildren.set(child.pid, child);
       return child;
@@ -301,7 +344,9 @@ export function createProcessOwnedArtifactRoot(options) {
         throw new Error('terminateChild requires a currently tracked ChildProcess.');
       }
       await terminateAndReapChild(tracked, terminationGraceMs);
-      trackedChildren.delete(child.pid);
+      if (trackedChildren.get(child.pid) === tracked) {
+        trackedChildren.delete(child.pid);
+      }
       cleanedChildren.push(child.pid);
       reapedChildren.push(child.pid);
     },
@@ -348,12 +393,22 @@ export function createProcessOwnedArtifactRoot(options) {
           await terminateAndReapChild(child, terminationGraceMs);
           cleanedChildren.push(pid);
           reapedChildren.push(pid);
-          trackedChildren.delete(pid);
+          if (trackedChildren.get(pid) === child) {
+            trackedChildren.delete(pid);
+          }
         } catch (error) {
           failures.push(error);
         }
       }
 
+      if (trackedChildren.size > 0 && failures.length === 0) {
+        failures.push(
+          classifyCleanupFailure(
+            new Error('Tracked children changed during cleanup; retry cleanup.'),
+            'tracked-set-changed',
+          ),
+        );
+      }
       if (trackedChildren.size === 0) {
         try {
           cleanupOwnedTempRoot(owned);
@@ -363,7 +418,10 @@ export function createProcessOwnedArtifactRoot(options) {
         }
       }
       if (failures.length > 0) {
-        throw new AggregateError(failures, 'Process-owned artifact root cleanup failed.');
+        throw classifyCleanupFailure(
+          new AggregateError(failures, 'Process-owned artifact root cleanup failed.'),
+          failures.length === 1 ? processCleanupFailureCategory(failures[0]) : 'multiple',
+        );
       }
     },
   };

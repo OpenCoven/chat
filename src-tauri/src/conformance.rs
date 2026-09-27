@@ -10,6 +10,7 @@ use std::{
 
 use serde::Deserialize;
 use serde_json::{json, Map, Value};
+use sha2::{Digest, Sha256};
 use zeroize::{Zeroize, Zeroizing};
 
 use crate::{
@@ -258,6 +259,7 @@ enum RpcCommand {
         capability: String,
         owner_token: String,
     },
+    ConformanceDiscoverySafety,
     ConformanceNativeCustodyState {
         instance_ids: Vec<String>,
     },
@@ -324,6 +326,7 @@ impl RpcCommand {
                 | Self::CaveResetPairing { .. }
                 | Self::ConformancePrepareNativeCleanup { .. }
                 | Self::ConformanceDeleteNativeCredential { .. }
+                | Self::ConformanceDiscoverySafety
                 | Self::ConformanceNativeCustodyState { .. }
                 | Self::ConformanceIssueNativeCustodyCleanup { .. }
                 | Self::ConformanceCleanupNativeCustody { .. }
@@ -1201,6 +1204,9 @@ impl RpcRuntime {
                 }
                 json!({ "status": "missing" })
             }
+            RpcCommand::ConformanceDiscoverySafety => {
+                json!({ "directories": crate::cave::windows_discovery_safety_probe() })
+            }
             RpcCommand::ConformanceNativeCustodyState { instance_ids } => {
                 let cleanup = self
                     .emergency_cleanup
@@ -1608,6 +1614,10 @@ fn parse_command(command: &str, args: Option<Value>) -> Result<RpcCommand, (&'st
                 owner_token,
             })
         }
+        "conformance_discovery_safety" => {
+            expect_exact_args(object, &[])?;
+            Ok(RpcCommand::ConformanceDiscoverySafety)
+        }
         "conformance_native_custody_state" => {
             expect_exact_args(object, &["instanceIds"])?;
             Ok(RpcCommand::ConformanceNativeCustodyState {
@@ -1985,9 +1995,11 @@ pub fn run_stdio() -> io::Result<()> {
                 .cancel_all_operations(NativeCancelReason::Aborted);
             join_rpc_workers(&mut workers)?;
         }
+        let is_cave_launch = matches!(&request.command, RpcCommand::CaveLaunch);
         let (response, shutdown) = runtime.process_request(request);
         let reservation = runtime.take_pending_reservation_response();
-        let delivered = write_rpc_response_transaction(&stdout, &response, reservation)?;
+        let delivered =
+            write_rpc_response_transaction(&stdout, &response, reservation, is_cave_launch)?;
         runtime.arm_delivered_reservation(delivered);
         if shutdown {
             break;
@@ -2071,7 +2083,7 @@ fn run_internal_test_reservation_output(wait_for_eof: bool) -> io::Result<()> {
 
     let response = success_response("prepare".to_owned(), control);
     let stdout = Arc::new(Mutex::new(io::BufWriter::new(io::stdout())));
-    match write_rpc_response_transaction(&stdout, &response, Some(rollback)) {
+    match write_rpc_response_transaction(&stdout, &response, Some(rollback), false) {
         Ok(Some(rollback)) => {
             if wait_for_eof {
                 keyring
@@ -2207,8 +2219,14 @@ fn write_rpc_response_transaction<W: Write>(
     stdout: &Arc<Mutex<W>>,
     response: &Value,
     rollback: Option<PreparedResponseRollback>,
+    launch_checkpoint: bool,
 ) -> io::Result<Option<PreparedResponseRollback>> {
-    match write_rpc_response(stdout, response) {
+    let write_result = if launch_checkpoint {
+        write_launch_rpc_response(stdout, &mut io::stderr(), response)
+    } else {
+        write_rpc_response(stdout, response)
+    };
+    match write_result {
         Ok(()) => Ok(rollback),
         Err(write_error) => {
             if let Some(rollback) = rollback {
@@ -2232,17 +2250,152 @@ fn write_prepared_response_for_test<W: Write>(
         stdout,
         &response,
         Some(PreparedResponseRollback::new(cleanup, reservation)),
+        false,
     )
     .map(|_| ())
 }
 
 fn write_rpc_response<W: Write>(stdout: &Arc<Mutex<W>>, response: &Value) -> io::Result<()> {
+    write_rpc_response_bytes(stdout, response)
+}
+
+fn write_rpc_response_bytes<W: Write>(stdout: &Arc<Mutex<W>>, response: &Value) -> io::Result<()> {
     let mut stdout = stdout
         .lock()
         .map_err(|_| io::Error::other("RPC stdout lock was poisoned"))?;
     serde_json::to_writer(&mut *stdout, response)?;
     stdout.write_all(b"\n")?;
     stdout.flush()
+}
+
+fn write_launch_rpc_response<W: Write, E: Write>(
+    stdout: &Arc<Mutex<W>>,
+    stderr: &mut E,
+    response: &Value,
+) -> io::Result<()> {
+    // The parent must observe this checkpoint on stderr, not infer its delivery
+    // from the independently buffered stdout response.
+    let checkpoint = match response.get("id").and_then(Value::as_str) {
+        Some(id) if valid_request_id(id) => {
+            let line = format!(
+                "[chat] native launch stderr checkpoint: {:x}\n",
+                Sha256::digest(id.as_bytes())
+            );
+            stderr
+                .write_all(line.as_bytes())
+                .and_then(|_| stderr.flush())
+        }
+        _ => Err(io::Error::other(
+            "Native launch response identity was invalid",
+        )),
+    };
+    // Preserve delivery of the original native failure even if the diagnostic
+    // channel failed, while still surfacing that I/O failure to the RPC loop.
+    write_rpc_response_bytes(stdout, response)?;
+    checkpoint
+}
+
+#[cfg(test)]
+mod launch_stderr_checkpoint_tests {
+    use super::*;
+    use sha2::{Digest, Sha256};
+
+    struct CheckpointWriter {
+        writes: Arc<Mutex<Vec<&'static str>>>,
+        label: &'static str,
+        bytes: Vec<u8>,
+        fail_flush: bool,
+    }
+
+    impl Write for CheckpointWriter {
+        fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+            self.writes.lock().unwrap().push(self.label);
+            self.bytes.extend_from_slice(bytes);
+            Ok(bytes.len())
+        }
+        fn flush(&mut self) -> io::Result<()> {
+            self.writes.lock().unwrap().push(self.label);
+            if self.fail_flush {
+                Err(io::Error::other("injected checkpoint flush failure"))
+            } else {
+                Ok(())
+            }
+        }
+    }
+
+    #[test]
+    fn launch_stderr_checkpoint_precedes_response_and_hashes_only_request_identity() {
+        let writes = Arc::new(Mutex::new(Vec::new()));
+        let stdout = Arc::new(Mutex::new(CheckpointWriter {
+            writes: writes.clone(),
+            label: "stdout",
+            bytes: Vec::new(),
+            fail_flush: false,
+        }));
+        let mut stderr = CheckpointWriter {
+            writes: writes.clone(),
+            label: "stderr",
+            bytes: Vec::new(),
+            fail_flush: false,
+        };
+        let response = failure_response("request-opaque", "cave_launch_discovery_not_found", true);
+        write_launch_rpc_response(&stdout, &mut stderr, &response).unwrap();
+        assert_eq!(
+            String::from_utf8(stderr.bytes.clone()).unwrap(),
+            format!(
+                "[chat] native launch stderr checkpoint: {:x}\n",
+                Sha256::digest(b"request-opaque")
+            )
+        );
+        let writes = writes.lock().unwrap();
+        let first_stdout = writes.iter().position(|label| *label == "stdout").unwrap();
+        assert!(first_stdout > 0);
+        assert!(writes[first_stdout..]
+            .iter()
+            .all(|label| *label == "stdout"));
+        let mut expected = serde_json::to_vec(&response).unwrap();
+        expected.push(b'\n');
+        assert_eq!(stdout.lock().unwrap().bytes, expected);
+    }
+
+    #[test]
+    fn launch_stderr_checkpoint_failure_preserves_response_and_surfaces_io_failure() {
+        let writes = Arc::new(Mutex::new(Vec::new()));
+        let stdout = Arc::new(Mutex::new(Vec::new()));
+        let mut stderr = CheckpointWriter {
+            writes,
+            label: "stderr",
+            bytes: Vec::new(),
+            fail_flush: true,
+        };
+        let response = failure_response("request-opaque", "cave_launch_discovery_not_found", true);
+        assert!(write_launch_rpc_response(&stdout, &mut stderr, &response).is_err());
+        let mut expected = serde_json::to_vec(&response).unwrap();
+        expected.push(b'\n');
+        assert_eq!(*stdout.lock().unwrap(), expected);
+    }
+
+    #[test]
+    fn launch_stderr_checkpoint_precedes_every_launch_response() {
+        for response in [
+            success_response("request-opaque".into(), json!({})),
+            failure_response("request-opaque", "cave_launch_in_progress", true),
+        ] {
+            let stdout = Arc::new(Mutex::new(Vec::new()));
+            let mut stderr = Vec::new();
+            write_launch_rpc_response(&stdout, &mut stderr, &response).unwrap();
+            assert_eq!(
+                String::from_utf8(stderr).unwrap(),
+                format!(
+                    "[chat] native launch stderr checkpoint: {:x}\n",
+                    Sha256::digest(b"request-opaque")
+                )
+            );
+            let mut expected = serde_json::to_vec(&response).unwrap();
+            expected.push(b'\n');
+            assert_eq!(*stdout.lock().unwrap(), expected);
+        }
+    }
 }
 
 fn join_rpc_workers(workers: &mut Vec<std::thread::JoinHandle<io::Result<()>>>) -> io::Result<()> {
@@ -2475,6 +2628,23 @@ mod tests {
     }
 
     #[test]
+    fn discovery_safety_rpc_rejects_caller_selected_paths_and_is_a_barrier() {
+        let command = parse_command("conformance_discovery_safety", Some(json!({})))
+            .expect("fixed discovery probe should be registered");
+        assert!(matches!(command, RpcCommand::ConformanceDiscoverySafety));
+        assert!(command.is_barrier());
+        for args in [
+            json!({"path": "private"}),
+            json!({"root": "private"}),
+            json!({"sid": "private"}),
+            json!([]),
+            json!("private"),
+        ] {
+            assert!(parse_command("conformance_discovery_safety", Some(args)).is_err());
+        }
+    }
+
+    #[test]
     fn parses_only_bounded_native_custody_proof_commands() {
         const INSTANCE_ID: &str = "00000000-0000-4000-8000-000000000001";
         let state = parse_command(
@@ -2698,6 +2868,7 @@ mod tests {
                     owner_token: OWNER_TOKEN.to_owned(),
                 },
             )),
+            false,
         )
         .expect("reservation response must be acknowledged");
         let mut runtime = RpcRuntime::with_custody(
@@ -2713,16 +2884,19 @@ mod tests {
 
     #[test]
     fn dispatches_coven_health_through_the_bounded_rpc_operation() {
-        let _environment = ENVIRONMENT_LOCK
-            .get_or_init(|| Mutex::new(()))
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
-        let original = env::var_os("COVEN_HOME");
-        env::set_var(
-            "COVEN_HOME",
-            env::current_dir().unwrap().join("missing-coven-health"),
-        );
+        struct UnavailableCoven;
+        impl crate::coven::CovenHealth for UnavailableCoven {
+            fn health(&self) -> crate::cave::NativeResult<crate::coven::CovenHealthResult> {
+                Err(crate::cave::NativeDiagnostic::new(
+                    "service_unavailable",
+                    true,
+                ))
+            }
+        }
+        // Exercise RPC dispatch without launching libtest as the packaged app.
         let mut runtime = RpcRuntime::new();
+        runtime.state =
+            crate::NativeConnectionState::with_test_coven_health(Arc::new(UnavailableCoven));
 
         let response = runtime.process_line(
             format!(
@@ -2742,10 +2916,6 @@ mod tests {
                 }
             })
         );
-        match original {
-            Some(value) => env::set_var("COVEN_HOME", value),
-            None => env::remove_var("COVEN_HOME"),
-        }
     }
 
     #[test]

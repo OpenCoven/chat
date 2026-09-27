@@ -38,6 +38,7 @@ pub struct NativeOperationInput {
 }
 
 impl NativeOperationInput {
+    #[cfg(any(test, feature = "phase1-conformance"))]
     pub(crate) fn new(attempt_id: String, timeout_ms: u32) -> NativeResult<Self> {
         let input = Self {
             attempt_id,
@@ -608,6 +609,7 @@ impl NativeOperationRegistry {
         Ok(NativeCancelResult::queued())
     }
 
+    #[cfg(feature = "phase1-conformance")]
     pub(crate) fn cancel_all(&self, reason: NativeCancelReason) {
         if let Ok(state) = self.state.lock() {
             for active in state.active.values() {
@@ -1102,7 +1104,9 @@ mod tests {
                 },
             ))
         });
+        let deadline = Instant::now() + Duration::from_secs(2);
         while !queue.busy.load(Ordering::SeqCst) {
+            assert!(Instant::now() < deadline, "mutation must enter the queue");
             std::thread::yield_now();
         }
         registry
@@ -1113,7 +1117,12 @@ mod tests {
             Err(NativeDiagnostic::new("aborted", false))
         );
         drop(worker);
+        let deadline = Instant::now() + Duration::from_secs(2);
         while queue.busy.load(Ordering::SeqCst) {
+            assert!(
+                Instant::now() < deadline,
+                "cancelled queued mutation must drain"
+            );
             std::thread::yield_now();
         }
         assert!(!started.load(Ordering::SeqCst));
@@ -1141,7 +1150,12 @@ mod tests {
 
         assert_eq!(operation, Err(NativeDiagnostic::new("timeout", true)));
         drop(worker);
+        let deadline = Instant::now() + Duration::from_secs(2);
         while queue.busy.load(Ordering::SeqCst) {
+            assert!(
+                Instant::now() < deadline,
+                "expired queued mutation must drain"
+            );
             std::thread::yield_now();
         }
         assert!(!started.load(Ordering::SeqCst));

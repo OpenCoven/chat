@@ -40,6 +40,67 @@ namespace OpenCoven
         }
     }
 
+    internal sealed class WindowsOwnedProfileApplication : IDisposable
+    {
+        private readonly object sync = new object();
+        private readonly SafeFileHandle profile;
+        private readonly SafeFileHandle application;
+        private readonly string profilePath;
+        private readonly string sid;
+        internal string Path { get; private set; }
+
+        internal WindowsOwnedProfileApplication(
+            SafeFileHandle profileHandle, SafeFileHandle applicationHandle,
+            string ownedProfilePath, string applicationPath, string isolatedSid)
+        {
+            profile = profileHandle;
+            application = applicationHandle;
+            profilePath = ownedProfilePath;
+            Path = applicationPath;
+            sid = isolatedSid;
+        }
+
+        internal T ReadVerified<T>(Func<string, T> read)
+        {
+            lock (sync)
+            {
+                if (profile.IsClosed || application.IsClosed)
+                    throw new ObjectDisposedException("WindowsOwnedProfileApplication");
+                WindowsJobSupervisor.ValidateOwnedProfileApplication(
+                    profile.DangerousGetHandle(), application.DangerousGetHandle(),
+                    profilePath, Path, sid);
+                T result = read(Path);
+                WindowsJobSupervisor.ValidateOwnedProfileApplication(
+                    profile.DangerousGetHandle(), application.DangerousGetHandle(),
+                    profilePath, Path, sid);
+                return result;
+            }
+        }
+
+        internal WindowsJobSupervisor.ProfileCleanupIdentity CaptureCleanupIdentity()
+        {
+            lock (sync)
+            {
+                if (profile.IsClosed || application.IsClosed)
+                    throw new ObjectDisposedException("WindowsOwnedProfileApplication");
+                WindowsJobSupervisor.ValidateOwnedProfileApplication(
+                    profile.DangerousGetHandle(), application.DangerousGetHandle(),
+                    profilePath, Path, sid);
+                return WindowsJobSupervisor.CaptureProfileCleanupIdentity(
+                    profile.DangerousGetHandle(), profilePath, sid);
+            }
+        }
+
+        public void Dispose()
+        {
+            lock (sync)
+            {
+                application.Dispose();
+                profile.Dispose();
+            }
+        }
+    }
+
     public sealed class WindowsIsolatedUser : IDisposable
     {
         private const uint NERR_SUCCESS = 0;
@@ -94,6 +155,11 @@ namespace OpenCoven
         private const uint MediumIntegrityRid = 0x2000;
         private const int MaximumAccountCreationAttempts = 8;
 
+        private readonly object quotaTokenSync = new object();
+        private SafeAccessTokenHandle quotaToken;
+        private IntPtr ownedProfileHandle;
+        private Func<SafeAccessTokenHandle, IntPtr, bool> unloadProfile = UnloadUserProfile;
+        private WindowsOwnedProfileApplication ownedApplication;
         private string password;
         private bool accountDisabled;
         private Action quarantineIsolatedIdentity;
@@ -107,9 +173,11 @@ namespace OpenCoven
             string rootPath,
             string profilePath,
             string tempPath,
+            string statusStagingPath,
             string workspacePath,
             string operatingSystemProfilePath,
-            string validationSummary)
+            string validationSummary,
+            SafeAccessTokenHandle validatedQuotaToken)
         {
             UserName = userName;
             password = passwordValue;
@@ -117,9 +185,11 @@ namespace OpenCoven
             RootPath = rootPath;
             ProfilePath = profilePath;
             TempPath = tempPath;
+            StatusStagingPath = statusStagingPath;
             WorkspacePath = workspacePath;
             OperatingSystemProfilePath = operatingSystemProfilePath;
             ValidationSummary = validationSummary;
+            quotaToken = validatedQuotaToken;
         }
 
         public string UserName { get; private set; }
@@ -127,6 +197,7 @@ namespace OpenCoven
         public string RootPath { get; private set; }
         public string ProfilePath { get; private set; }
         public string TempPath { get; private set; }
+        public string StatusStagingPath { get; private set; }
         public string WorkspacePath { get; private set; }
         public string OperatingSystemProfilePath { get; private set; }
         public string ValidationSummary { get; private set; }
@@ -152,6 +223,28 @@ namespace OpenCoven
 
         public static WindowsIsolatedUser Create(string rootPath)
         {
+            return CreateCore(rootPath, null);
+        }
+
+        private static WindowsIsolatedUser CreateCore(
+            string rootPath,
+            Action<string, string> afterProfileCreated)
+        {
+            return CreateCoreWithProfileHook(rootPath, afterProfileCreated, null);
+        }
+
+        private static WindowsIsolatedUser CreateCoreAfterProfileLoaded(
+            string rootPath,
+            Action<string, string> afterProfileLoaded)
+        {
+            return CreateCoreWithProfileHook(rootPath, null, afterProfileLoaded);
+        }
+
+        private static WindowsIsolatedUser CreateCoreWithProfileHook(
+            string rootPath,
+            Action<string, string> afterProfileCreated,
+            Action<string, string> afterProfileLoaded)
+        {
             if (String.IsNullOrWhiteSpace(rootPath) || !Path.IsPathRooted(rootPath))
             {
                 throw new ArgumentException(
@@ -168,6 +261,10 @@ namespace OpenCoven
             string passwordValue = null;
             string sid = null;
             bool accountCreated = false;
+            string ownedProfilePath = null;
+            WindowsOwnedProfileApplication ownedApplication = null;
+            SafeAccessTokenHandle validatedQuotaToken = null;
+            WindowsIsolatedUser created = null;
             try
             {
                 for (int attempt = 0; attempt < MaximumAccountCreationAttempts; attempt++)
@@ -212,16 +309,41 @@ namespace OpenCoven
                 sid = accountSid.Value;
                 EnsureUsersGroupMembership(userName);
                 string validationSummary =
-                    ValidateStandardUser(userName, passwordValue, sid);
+                    ValidateStandardUser(userName, passwordValue, sid, out validatedQuotaToken);
+
+                StringBuilder profileBuffer = new StringBuilder(260);
+                int profileResult = CreateProfile(sid, userName, profileBuffer, (uint)profileBuffer.Capacity);
+                if (profileResult != 0)
+                {
+                    throw new COMException("Ephemeral Windows profile creation failed.", profileResult);
+                }
+                // Ownership must survive every subsequent validation failure.
+                ownedProfilePath = profileBuffer.ToString();
+                if (afterProfileCreated != null)
+                {
+                    afterProfileCreated(sid, ownedProfilePath);
+                }
+                VerifyCreatedProfile(ownedProfilePath, validatedQuotaToken);
 
                 string profilePath = Path.Combine(fullRoot, "profile");
                 string tempPath = Path.Combine(fullRoot, "temp");
+                string statusStagingPath = Path.Combine(fullRoot, "status-staging");
                 string workspacePath = Path.Combine(fullRoot, "workspace");
+                // Own the token and profile before any loaded-hive initialization can fail.
+                created = new WindowsIsolatedUser(
+                    userName, passwordValue, sid, fullRoot, profilePath, tempPath,
+                    statusStagingPath, workspacePath, ownedProfilePath,
+                    validationSummary, validatedQuotaToken);
+                created.LoadOwnedProfile();
+                VerifyCreatedProfile(ownedProfilePath, validatedQuotaToken);
+                if (afterProfileLoaded != null)
+                    afterProfileLoaded(sid, ownedProfilePath);
                 Directory.CreateDirectory(fullRoot);
                 Directory.CreateDirectory(profilePath);
                 Directory.CreateDirectory(Path.Combine(profilePath, @"AppData\Roaming"));
                 Directory.CreateDirectory(Path.Combine(profilePath, @"AppData\Local"));
                 Directory.CreateDirectory(tempPath);
+                Directory.CreateDirectory(statusStagingPath);
                 Directory.CreateDirectory(workspacePath);
 
                 SecurityIdentifier supervisor =
@@ -235,6 +357,7 @@ namespace OpenCoven
                 {
                     fullRoot,
                     profilePath,
+                    Path.Combine(profilePath, "AppData"),
                     Path.Combine(profilePath, @"AppData\Roaming"),
                     Path.Combine(profilePath, @"AppData\Local"),
                     tempPath,
@@ -246,24 +369,54 @@ namespace OpenCoven
                         sid,
                         supervisor.Value);
                 }
+                WindowsJobSupervisor.SecureStatusStagingDirectory(
+                    statusStagingPath,
+                    sid,
+                    supervisor.Value);
                 WindowsJobSupervisor.ProtectCurrentProcess(
                     sid,
                     supervisor.Value);
 
-                return new WindowsIsolatedUser(
-                    userName,
-                    passwordValue,
-                    sid,
-                    fullRoot,
-                    profilePath,
-                    tempPath,
-                    workspacePath,
-                    Path.Combine(GetProfilesRoot(), userName),
-                    validationSummary);
+                ownedApplication = WindowsJobSupervisor.CreateOwnedProfileApplication(ownedProfilePath, sid);
+                created.ownedApplication = ownedApplication;
+                WindowsIdentity.RunImpersonated(validatedQuotaToken,
+                    () => ownedApplication.ReadVerified(path => true));
+                ownedApplication = null;
+                validatedQuotaToken = null;
+                return created;
             }
             catch (Exception original)
             {
+                if (created != null)
+                {
+                    try { created.Dispose(); }
+                    catch (Exception cleanup)
+                    {
+                        var failure = new InvalidOperationException(
+                            "Ephemeral local user cleanup failed during creation.",
+                            new AggregateException(original, cleanup));
+                        // Keep deferred cleanup ownership reachable by the trusted caller.
+                        failure.Data["WindowsIsolatedUserCleanupContext"] = created;
+                        throw failure;
+                    }
+                    throw;
+                }
                 List<Exception> cleanupFailures = new List<Exception>();
+                if (validatedQuotaToken != null)
+                {
+                    try { validatedQuotaToken.Dispose(); }
+                    catch (Exception error) { cleanupFailures.Add(error); }
+                }
+                if (ownedApplication != null)
+                {
+                    try { ownedApplication.Dispose(); }
+                    catch (Exception error) { cleanupFailures.Add(error); }
+                }
+                if (ownedProfilePath != null)
+                {
+                    try { WindowsJobSupervisor.DeleteOperatingSystemProfile(sid, ownedProfilePath); }
+                    catch (Exception error) { cleanupFailures.Add(error); }
+                }
                 if (Directory.Exists(fullRoot))
                 {
                     try
@@ -319,11 +472,77 @@ namespace OpenCoven
             }
         }
 
+        private void LoadOwnedProfile()
+        {
+            lock (quotaTokenSync)
+            {
+                ThrowIfDisposed();
+                PROFILEINFOW profile = new PROFILEINFOW();
+                profile.dwSize = (uint)Marshal.SizeOf(typeof(PROFILEINFOW));
+                profile.dwFlags = 1; // PI_NOUI. The caller is the privileged supervisor.
+                profile.lpUserName = UserName;
+                if (!LoadUserProfileW(quotaToken, ref profile))
+                    throw new Win32Exception(Marshal.GetLastWin32Error(),
+                        "Owned Windows profile could not be loaded.");
+                ownedProfileHandle = profile.hProfile;
+                if (ownedProfileHandle == IntPtr.Zero)
+                    throw new InvalidOperationException("Owned Windows profile handle is unavailable.");
+            }
+        }
+
+        private void UnloadOwnedProfile()
+        {
+            if (ownedProfileHandle == IntPtr.Zero) return;
+            if (!unloadProfile(quotaToken, ownedProfileHandle))
+                throw new InvalidOperationException(
+                    "Ephemeral Windows identity cleanup deferred: profile-unload.",
+                    new Win32Exception(Marshal.GetLastWin32Error(),
+                        "Owned Windows profile could not be unloaded."));
+            // UnloadUserProfile closes hProfile. Never close it as an ordinary key handle.
+            ownedProfileHandle = IntPtr.Zero;
+        }
+
         internal void ThrowIfDisposed()
         {
             if (disposed)
             {
                 throw new ObjectDisposedException("WindowsIsolatedUser");
+            }
+        }
+
+        internal T ReadOwnedProfileApplication<T>(Func<string, T> read)
+        {
+            ThrowIfDisposed();
+            if (ownedApplication == null)
+                throw new InvalidOperationException("Owned profile application is not registered.");
+            return ownedApplication.ReadVerified(read);
+        }
+
+        internal T RunQuotaRead<T>(Func<T> read)
+        {
+            if (read == null)
+            {
+                throw new ArgumentNullException("read");
+            }
+            SafeAccessTokenHandle readToken;
+            lock (quotaTokenSync)
+            {
+                ThrowIfDisposed();
+                IntPtr duplicate;
+                IntPtr process = GetCurrentProcess();
+                if (!DuplicateHandle(
+                        process, quotaToken, process,
+                        out duplicate, 0, false, 2))
+                {
+                    throw new Win32Exception(
+                        Marshal.GetLastWin32Error(),
+                        "Validated quota token could not be duplicated.");
+                }
+                readToken = new SafeAccessTokenHandle(duplicate);
+            }
+            using (readToken)
+            {
+                return WindowsIdentity.RunImpersonated(readToken, read);
             }
         }
 
@@ -465,8 +684,10 @@ namespace OpenCoven
         private static string ValidateStandardUser(
             string userName,
             string passwordValue,
-            string expectedSid)
+            string expectedSid,
+            out SafeAccessTokenHandle validatedQuotaToken)
         {
+            validatedQuotaToken = null;
             IntPtr information = IntPtr.Zero;
             uint legacyPrivilege;
             uint accountFlags;
@@ -603,11 +824,22 @@ namespace OpenCoven
                         error.Message + " " + summary,
                         error);
                 }
+                if (!SetHandleInformation(token, 1, 0))
+                {
+                    throw new Win32Exception(
+                        Marshal.GetLastWin32Error(),
+                        "Validated quota token could not be made noninheritable.");
+                }
+                validatedQuotaToken = new SafeAccessTokenHandle(token);
+                token = IntPtr.Zero;
                 return summary;
             }
             finally
             {
-                CloseHandle(token);
+                if (token != IntPtr.Zero)
+                {
+                    CloseHandle(token);
+                }
             }
         }
 
@@ -1039,11 +1271,48 @@ namespace OpenCoven
             return Convert.ToBase64String(bytes) + "aA1!";
         }
 
-        private static string GetProfilesRoot()
+        private static void VerifyCreatedProfile(
+            string createdProfilePath,
+            SafeAccessTokenHandle token)
+        {
+            string profilesRoot = GetProfilesRoot().TrimEnd('\\') + "\\";
+            if (String.IsNullOrWhiteSpace(createdProfilePath) ||
+                !Path.IsPathFullyQualified(createdProfilePath) ||
+                !String.Equals(Path.GetFullPath(createdProfilePath), createdProfilePath, StringComparison.OrdinalIgnoreCase) ||
+                !createdProfilePath.StartsWith(profilesRoot, StringComparison.OrdinalIgnoreCase) ||
+                createdProfilePath.Length <= profilesRoot.Length)
+            {
+                throw new InvalidOperationException("Created profile path is outside the Windows profile root.");
+            }
+            FileAttributes attributes = File.GetAttributes(createdProfilePath);
+            if ((attributes & FileAttributes.Directory) == 0 ||
+                (attributes & FileAttributes.ReparsePoint) != 0)
+            {
+                throw new InvalidOperationException("Created profile path is not an ordinary directory.");
+            }
+            uint capacity = 0;
+            bool sized = GetUserProfileDirectoryW(token, null, ref capacity);
+            int sizeError = Marshal.GetLastWin32Error();
+            if (sized || sizeError != ERROR_INSUFFICIENT_BUFFER || capacity == 0 || capacity > 32768)
+            {
+                throw new InvalidOperationException("Validated token profile size is unavailable.");
+            }
+            StringBuilder tokenProfile = new StringBuilder(checked((int)capacity));
+            if (!GetUserProfileDirectoryW(token, tokenProfile, ref capacity))
+            {
+                throw new Win32Exception(Marshal.GetLastWin32Error(), "Validated token profile query failed.");
+            }
+            if (!String.Equals(createdProfilePath, tokenProfile.ToString(), StringComparison.OrdinalIgnoreCase))
+            {
+                throw new InvalidOperationException("Created profile and validated token profile disagree.");
+            }
+        }
+
+        internal static string GetProfilesRoot()
         {
             uint length = 0;
             GetProfilesDirectoryW(null, ref length);
-            if (length == 0 || Marshal.GetLastWin32Error() != ERROR_INSUFFICIENT_BUFFER)
+            if (length == 0 || length > 32768 || Marshal.GetLastWin32Error() != ERROR_INSUFFICIENT_BUFFER)
             {
                 throw new Win32Exception(
                     Marshal.GetLastWin32Error(),
@@ -1066,6 +1335,8 @@ namespace OpenCoven
                 return;
             }
             List<Exception> cleanupFailures = new List<Exception>();
+            List<string> cleanupCategories = new List<string>();
+            WindowsJobSupervisor.ProfileCleanupIdentity cleanupIdentity = null;
             if (quarantineIsolatedIdentity != null)
             {
                 bool quarantineComplete = false;
@@ -1075,7 +1346,7 @@ namespace OpenCoven
                 }
                 catch (Exception error)
                 {
-                    cleanupFailures.Add(error);
+                    RecordCleanupFailure(cleanupFailures, cleanupCategories, "quarantine-check", error);
                 }
                 if (!quarantineComplete)
                 {
@@ -1085,20 +1356,76 @@ namespace OpenCoven
                     }
                     catch (Exception error)
                     {
-                        cleanupFailures.Add(error);
+                        RecordCleanupFailure(cleanupFailures, cleanupCategories, "quarantine", error);
                     }
                 }
             }
-            disposed = true;
+            if (quarantineIsolatedIdentity != null)
+            {
+                try
+                {
+                    if (!isQuarantineComplete())
+                        throw new InvalidOperationException("Owned process quarantine is incomplete.");
+                }
+                catch (Exception error)
+                {
+                    RecordCleanupFailure(cleanupFailures, cleanupCategories, "quarantine-check", error);
+                }
+                if (cleanupFailures.Count != 0)
+                    throw new InvalidOperationException(
+                        "Ephemeral Windows identity cleanup deferred: " +
+                            String.Join(",", cleanupCategories.ToArray()) + ".",
+                        new AggregateException(cleanupFailures.ToArray()));
+                if (accountDisabled)
+                {
+                    try
+                    {
+                        RequireDisabledAndVerify();
+                        if (ownedApplication == null)
+                            throw new InvalidOperationException("Owned profile identity is unavailable.");
+                        cleanupIdentity = ownedApplication.CaptureCleanupIdentity();
+                    }
+                    catch (Exception error)
+                    {
+                        RecordCleanupFailure(cleanupFailures, cleanupCategories, "profile-identity", error);
+                        throw new InvalidOperationException(
+                            "Ephemeral Windows identity cleanup deferred: " +
+                                String.Join(",", cleanupCategories.ToArray()) + ".",
+                            new AggregateException(cleanupFailures.ToArray()));
+                    }
+                }
+            }
+            SafeAccessTokenHandle retiredQuotaToken;
+            lock (quotaTokenSync)
+            {
+                UnloadOwnedProfile();
+                disposed = true;
+                retiredQuotaToken = quotaToken;
+                quotaToken = null;
+            }
+            if (retiredQuotaToken != null)
+            {
+                retiredQuotaToken.Dispose();
+            }
             try
             {
-                WindowsJobSupervisor.DeleteOperatingSystemProfile(
-                    Sid,
-                    OperatingSystemProfilePath);
+                if (ownedApplication != null) ownedApplication.Dispose();
             }
             catch (Exception error)
             {
-                cleanupFailures.Add(error);
+                cleanupIdentity = null;
+                RecordCleanupFailure(cleanupFailures, cleanupCategories, "profile-pins", error);
+            }
+            try
+            {
+                WindowsJobSupervisor.DeleteOperatingSystemProfileCore(
+                    Sid,
+                    OperatingSystemProfilePath,
+                    cleanupIdentity);
+            }
+            catch (Exception error)
+            {
+                RecordCleanupFailure(cleanupFailures, cleanupCategories, "profile-delete", error);
             }
             try
             {
@@ -1106,7 +1433,7 @@ namespace OpenCoven
             }
             catch (Exception error)
             {
-                cleanupFailures.Add(error);
+                RecordCleanupFailure(cleanupFailures, cleanupCategories, "root-delete", error);
             }
             try
             {
@@ -1117,40 +1444,92 @@ namespace OpenCoven
                         unchecked((int)status),
                         "Ephemeral local user deletion failed.");
                 }
+            }
+            catch (Exception error)
+            {
+                RecordCleanupFailure(cleanupFailures, cleanupCategories, "user-delete", error);
+            }
+            try
+            {
                 IntPtr information;
-                status = NetUserGetInfo(null, UserName, 1, out information);
+                uint status = NetUserGetInfo(null, UserName, 1, out information);
                 if (information != IntPtr.Zero)
                 {
                     NetApiBufferFree(information);
                 }
                 if (status != NERR_USER_NOT_FOUND)
                 {
-                    throw new InvalidOperationException(
+                    throw new Win32Exception(
+                        unchecked((int)status),
                         "Ephemeral local user survived cleanup.");
                 }
             }
             catch (Exception error)
             {
-                cleanupFailures.Add(error);
+                RecordCleanupFailure(cleanupFailures, cleanupCategories, "user-survived", error);
             }
             password = null;
             if (Directory.Exists(OperatingSystemProfilePath))
             {
-                cleanupFailures.Add(new InvalidOperationException(
-                    "Ephemeral Windows profile survived cleanup."));
+                RecordCleanupFailure(
+                    cleanupFailures,
+                    cleanupCategories,
+                    "profile-survived",
+                    new InvalidOperationException(
+                        "Ephemeral Windows profile survived cleanup."));
             }
             if (Directory.Exists(RootPath))
             {
-                cleanupFailures.Add(new InvalidOperationException(
-                    "Ephemeral bootstrap root survived cleanup."));
+                RecordCleanupFailure(
+                    cleanupFailures,
+                    cleanupCategories,
+                    "root-survived",
+                    new InvalidOperationException(
+                        "Ephemeral bootstrap root survived cleanup."));
             }
             GC.SuppressFinalize(this);
             if (cleanupFailures.Count != 0)
             {
                 throw new InvalidOperationException(
-                    "Ephemeral Windows identity cleanup failed.",
+                    "Ephemeral Windows identity cleanup failed: " +
+                        String.Join(",", cleanupCategories.ToArray()) + ".",
                     new AggregateException(cleanupFailures.ToArray()));
             }
+        }
+
+        private static void RecordCleanupFailure(
+            List<Exception> failures,
+            List<string> categories,
+            string step,
+            Exception error)
+        {
+            failures.Add(error);
+            categories.Add(step + ":" + ClassifyCleanupError(error));
+        }
+
+        internal static string ClassifyCleanupError(Exception error)
+        {
+            WindowsJobSupervisor.ProfileCleanupException profile =
+                error as WindowsJobSupervisor.ProfileCleanupException;
+            if (profile != null) return profile.Diagnostic;
+            Win32Exception native = error as Win32Exception;
+            if (native != null)
+            {
+                string kind = "win32-" + native.NativeErrorCode.ToString(CultureInfo.InvariantCulture);
+                WindowsJobSupervisor.CleanupDeleteException deletion =
+                    error as WindowsJobSupervisor.CleanupDeleteException;
+                if (deletion != null)
+                {
+                    kind += "[" + deletion.Context + "]";
+                }
+                return kind;
+            }
+            if (error is UnauthorizedAccessException) return "access-denied";
+            if (error is DirectoryNotFoundException) return "not-found";
+            if (error is IOException) return "io";
+            if (error is InvalidOperationException) return "invalid-operation";
+            if (error is TimeoutException) return "timeout";
+            return "unexpected";
         }
 
         [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
@@ -1261,6 +1640,19 @@ namespace OpenCoven
             ref LOCALGROUP_MEMBERS_INFO_3 buffer,
             uint totalEntries);
 
+        [DllImport("kernel32.dll")]
+        private static extern IntPtr GetCurrentProcess();
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static extern bool SetHandleInformation(IntPtr handle, uint mask, uint flags);
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static extern bool DuplicateHandle(
+            IntPtr sourceProcess, SafeAccessTokenHandle source, IntPtr targetProcess,
+            out IntPtr target, uint access, [MarshalAs(UnmanagedType.Bool)] bool inherit, uint options);
+
         [DllImport("netapi32.dll")]
         private static extern uint NetApiBufferFree(IntPtr buffer);
 
@@ -1325,6 +1717,36 @@ namespace OpenCoven
             IntPtr sid,
             out IntPtr stringSid);
 
+        [DllImport("userenv.dll", CharSet = CharSet.Unicode, ExactSpelling = true)]
+        private static extern int CreateProfile(
+            string sid, string userName, [Out] StringBuilder profilePath, uint capacity);
+
+        [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+        private struct PROFILEINFOW
+        {
+            public uint dwSize;
+            public uint dwFlags;
+            public string lpUserName;
+            public string lpProfilePath;
+            public string lpDefaultPath;
+            public string lpServerName;
+            public string lpPolicyPath;
+            public IntPtr hProfile;
+        }
+
+        [DllImport("userenv.dll", CharSet = CharSet.Unicode, ExactSpelling = true, SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static extern bool LoadUserProfileW(SafeAccessTokenHandle token, ref PROFILEINFOW profile);
+
+        [DllImport("userenv.dll", ExactSpelling = true, SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static extern bool UnloadUserProfile(SafeAccessTokenHandle token, IntPtr profile);
+
+        [DllImport("userenv.dll", CharSet = CharSet.Unicode, ExactSpelling = true, SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static extern bool GetUserProfileDirectoryW(
+            SafeAccessTokenHandle token, StringBuilder profilePath, ref uint capacity);
+
         [DllImport("userenv.dll", CharSet = CharSet.Unicode, SetLastError = true)]
         [return: MarshalAs(UnmanagedType.Bool)]
         private static extern bool GetProfilesDirectoryW(
@@ -1348,6 +1770,11 @@ namespace OpenCoven
         public bool ResourceQuotaExceeded { get; internal set; }
         public string ResourceQuotaLabel { get; internal set; }
         public bool ResourceQuotaMonitorError { get; internal set; }
+        public string ResourceQuotaMonitorCategory { get; internal set; }
+        public string ResourceQuotaMonitorRoot { get; internal set; }
+        public string ResourceQuotaMonitorScope { get; internal set; }
+        public string ResourceQuotaMonitorOperation { get; internal set; }
+        public string ResourceQuotaMonitorRepeat { get; internal set; }
         public string Stdout { get; internal set; }
         public string Stderr { get; internal set; }
     }
@@ -1392,7 +1819,16 @@ namespace OpenCoven
         public string PathPattern { get; private set; }
         public long MaxBytes { get; private set; }
 
+        public bool IncludeOwnedProfileApplication { get; private set; }
+
         public WindowsDirectoryQuota(string label, string pathPattern, long maxBytes)
+            : this(label, pathPattern, maxBytes, false)
+        {
+        }
+
+        public WindowsDirectoryQuota(
+            string label, string pathPattern, long maxBytes,
+            bool includeOwnedProfileApplication)
         {
             if (String.IsNullOrWhiteSpace(label) || label.Length > 120)
             {
@@ -1448,15 +1884,16 @@ namespace OpenCoven
             Label = label;
             PathPattern = pathPattern;
             MaxBytes = maxBytes;
+            IncludeOwnedProfileApplication = includeOwnedProfileApplication;
         }
     }
 
     public sealed class WindowsJobSupervisor : IDisposable
     {
+        private const uint LOGON_WITH_PROFILE = 0x00000001;
         private const uint CREATE_SUSPENDED = 0x00000004;
         private const uint CREATE_UNICODE_ENVIRONMENT = 0x00000400;
         private const uint CREATE_NO_WINDOW = 0x08000000;
-        private const uint LOGON_WITH_PROFILE = 0x00000001;
         private const uint STARTF_USESTDHANDLES = 0x00000100;
         private const uint HANDLE_FLAG_INHERIT = 0x00000001;
         private const uint JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE = 0x00002000;
@@ -1503,6 +1940,7 @@ namespace OpenCoven
         private const uint PROCESS_ALL_ACCESS = 0x001fffff;
         private const uint FILE_ALL_ACCESS = 0x001f01ff;
         private const uint FILE_MODIFY_ACCESS = 0x001301bf;
+        private const uint FILE_LIST_DIRECTORY = 0x00000001;
         private const uint FILE_READ_ATTRIBUTES = 0x00000080;
         private const uint FILE_SHARE_READ = 0x00000001;
         private const uint FILE_SHARE_WRITE = 0x00000002;
@@ -1535,8 +1973,14 @@ namespace OpenCoven
         private const int ERROR_FILE_NOT_FOUND = 2;
         private const int ERROR_PATH_NOT_FOUND = 3;
         private const int ERROR_SHARING_VIOLATION = 32;
+        private const int ERROR_LOCK_VIOLATION = 33;
         private const int ERROR_INVALID_PARAMETER = 87;
+        private const int ERROR_FILENAME_EXCED_RANGE = 206;
+        private const int ERROR_DIRECTORY = 267;
+        private const int ERROR_DELETE_PENDING = 303;
         private const int ERROR_NOT_FOUND = 1168;
+        private const int HRESULT_WIN32_MASK = unchecked((int)0xffff0000);
+        private const int HRESULT_WIN32_PREFIX = unchecked((int)0x80070000);
         private const int JobObjectBasicAccountingInformation = 1;
         private const int JobObjectExtendedLimitInformation = 9;
         private const int SCHED_E_TASK_NOT_RUNNING = unchecked((int)0x8004130b);
@@ -1558,6 +2002,7 @@ namespace OpenCoven
         private const uint STILL_ACTIVE = 259;
 
         private IntPtr jobHandle;
+        private uint? firstAssignedSession;
         private readonly string supervisedSid;
         private readonly string supervisedUserName;
         private readonly string supervisedQualifiedUserName;
@@ -1828,17 +2273,202 @@ namespace OpenCoven
             }
         }
 
+        internal static WindowsOwnedProfileApplication CreateOwnedProfileApplication(
+            string profilePath, string isolatedSid)
+        {
+            SafeFileHandle profile = new SafeFileHandle(OpenOwnedProfileDirectory(profilePath), true);
+            SafeFileHandle application = null;
+            try
+            {
+                ValidateProfileDirectorySecurity(profile.DangerousGetHandle(), isolatedSid, false);
+                string applicationPath = Path.Combine(profilePath, ".coven");
+                EnablePrivilege("SeRestorePrivilege");
+                string sddl = "O:" + isolatedSid + "D:P" +
+                    "(A;OICI;0x001f01ff;;;SY)(A;OICI;0x001f01ff;;;BA)" +
+                    "(A;OICI;0x001301bf;;;" + isolatedSid + ")" +
+                    "(A;OICIIO;0x001f01ff;;;" + isolatedSid + ")" +
+                    "(A;OICI;0x00020000;;;S-1-3-4)";
+                IntPtr descriptor;
+                uint descriptorLength;
+                if (!ConvertStringSecurityDescriptorToSecurityDescriptorW(
+                    sddl, SDDL_REVISION_1, out descriptor, out descriptorLength))
+                    throw new Win32Exception(Marshal.GetLastWin32Error(), "Application ACL creation failed.");
+                try
+                {
+                    SECURITY_ATTRIBUTES attributes = NonInheritableSecurityAttributes();
+                    attributes.lpSecurityDescriptor = descriptor;
+                    if (!CreateDirectoryW(applicationPath, ref attributes))
+                        throw new Win32Exception(Marshal.GetLastWin32Error(), "Fresh application directory creation failed.");
+                }
+                finally { LocalFree(descriptor); }
+                application = new SafeFileHandle(OpenOwnedProfileDirectory(applicationPath), true);
+                ValidateOwnedProfileApplication(profile.DangerousGetHandle(), application.DangerousGetHandle(),
+                    profilePath, applicationPath, isolatedSid);
+                WindowsOwnedProfileApplication registered = new WindowsOwnedProfileApplication(
+                    profile, application, profilePath, applicationPath, isolatedSid);
+                profile = null;
+                application = null;
+                return registered;
+            }
+            finally
+            {
+                if (application != null) application.Dispose();
+                if (profile != null) profile.Dispose();
+            }
+        }
+
+        internal static void ValidateOwnedProfileApplication(
+            IntPtr profile, IntPtr application, string profilePath, string applicationPath, string isolatedSid)
+        {
+            ValidateOwnedProfilePath(profile, profilePath, isolatedSid, false);
+            ValidateOwnedProfilePath(application, applicationPath, isolatedSid, true);
+        }
+
+        private static void ValidateOwnedProfilePath(
+            IntPtr retained, string path, string isolatedSid, bool application)
+        {
+            ValidateProfileDirectorySecurity(retained, isolatedSid, application);
+            using (SafeFileHandle current = new SafeFileHandle(OpenArtifactDirectory(path), true))
+            {
+                ValidateProfileDirectorySecurity(current.DangerousGetHandle(), isolatedSid, application);
+                if (!SameFileIdentity(
+                    QueryFileInformation(retained, "Retained profile identity query failed."),
+                    QueryFileInformation(current.DangerousGetHandle(), "Current profile identity query failed.")))
+                    throw new IOException("Owned profile path identity changed.");
+            }
+        }
+
+        private static void ValidateProfileDirectorySecurity(IntPtr handle, string isolatedSid, bool application)
+        {
+            FILE_ATTRIBUTE_TAG_INFO attributes = QueryAttributeTag(handle, "Profile directory attributes unavailable.");
+            if (GetFileType(handle) != FILE_TYPE_DISK ||
+                (attributes.FileAttributes & FILE_ATTRIBUTE_DIRECTORY) == 0 ||
+                (attributes.FileAttributes & FILE_ATTRIBUTE_REPARSE_POINT) != 0)
+                throw new IOException("Profile path is not a non-reparse disk directory.");
+            IntPtr isolated = IntPtr.Zero, system = IntPtr.Zero, administrators = IntPtr.Zero, ownerRights = IntPtr.Zero;
+            IntPtr owner = IntPtr.Zero, dacl = IntPtr.Zero, descriptor = IntPtr.Zero;
+            try
+            {
+                isolated = ConvertSid(isolatedSid, "Profile owner SID invalid.");
+                system = ConvertSid("S-1-5-18", "Profile SYSTEM SID invalid.");
+                administrators = ConvertSid("S-1-5-32-544", "Profile Administrators SID invalid.");
+                ownerRights = ConvertSid("S-1-3-4", "Profile OWNER RIGHTS SID invalid.");
+                uint status = GetSecurityInfo(handle, SE_FILE_OBJECT,
+                    OWNER_SECURITY_INFORMATION | DACL_SECURITY_INFORMATION,
+                    out owner, IntPtr.Zero, out dacl, IntPtr.Zero, out descriptor);
+                if (status != 0 || owner == IntPtr.Zero || dacl == IntPtr.Zero || descriptor == IntPtr.Zero ||
+                    !(EqualSid(owner, isolated) || (!application &&
+                        (EqualSid(owner, system) || EqualSid(owner, administrators)))))
+                    throw new IOException("Profile directory ownership or DACL is unsafe.");
+                ushort control;
+                uint revision;
+                if (!GetSecurityDescriptorControl(descriptor, out control, out revision) ||
+                    (application && (control & SE_DACL_PROTECTED) == 0))
+                    throw new IOException("Application DACL is not protected.");
+                ACL_SIZE_INFORMATION information;
+                if (!GetAclInformation(dacl, out information,
+                    (uint)Marshal.SizeOf(typeof(ACL_SIZE_INFORMATION)), AclSizeInformation) ||
+                    (application && information.AceCount != 5))
+                    throw new IOException("Profile DACL shape is invalid.");
+                bool[] found = new bool[5];
+                for (uint index = 0; index < information.AceCount; index++)
+                {
+                    IntPtr pointer;
+                    if (!GetAce(dacl, index, out pointer) || pointer == IntPtr.Zero)
+                        throw new IOException("Profile ACE could not be read.");
+                    ACCESS_ALLOWED_ACE ace = (ACCESS_ALLOWED_ACE)Marshal.PtrToStructure(pointer, typeof(ACCESS_ALLOWED_ACE));
+                    if (ace.Header.AceType != ACCESS_ALLOWED_ACE_TYPE)
+                        throw new IOException("Profile DACL contains an unsupported ACE.");
+                    IntPtr sid = new IntPtr(pointer.ToInt64() + Marshal.OffsetOf(typeof(ACCESS_ALLOWED_ACE), "SidStart").ToInt64());
+                    bool trusted = EqualSid(sid, isolated) || EqualSid(sid, system) || EqualSid(sid, administrators);
+                    // Same writable rights and trusted writer set as native Windows discovery.
+                    if ((ace.Mask & 0x500d0156u) != 0 && !trusted)
+                        throw new IOException("Profile directory permits an untrusted writer.");
+                    if (!application) continue;
+                    int slot = -1;
+                    byte inherited = OBJECT_INHERIT_ACE | CONTAINER_INHERIT_ACE;
+                    if (ace.Header.AceFlags == inherited)
+                    {
+                        if (EqualSid(sid, system) && ace.Mask == FILE_ALL_ACCESS) slot = 0;
+                        else if (EqualSid(sid, administrators) && ace.Mask == FILE_ALL_ACCESS) slot = 1;
+                        else if (EqualSid(sid, isolated) && ace.Mask == FILE_MODIFY_ACCESS) slot = 2;
+                        else if (EqualSid(sid, ownerRights) && ace.Mask == READ_CONTROL) slot = 3;
+                    }
+                    else if (ace.Header.AceFlags == (inherited | INHERIT_ONLY_ACE) &&
+                        EqualSid(sid, isolated) && ace.Mask == FILE_ALL_ACCESS) slot = 4;
+                    if (slot < 0 || found[slot]) throw new IOException("Application ACL is not exact.");
+                    found[slot] = true;
+                }
+                if (application)
+                    foreach (bool present in found)
+                        if (!present) throw new IOException("Application ACL is incomplete.");
+            }
+            finally
+            {
+                if (descriptor != IntPtr.Zero) LocalFree(descriptor);
+                FreeLocalSid(ownerRights);
+                FreeLocalSid(administrators);
+                FreeLocalSid(system);
+                FreeLocalSid(isolated);
+            }
+        }
+
+        [DllImport("kernel32.dll", CharSet = CharSet.Unicode, ExactSpelling = true, SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static extern bool CreateDirectoryW(string path, ref SECURITY_ATTRIBUTES attributes);
+
         internal static void SecureIsolatedDirectory(
             string path,
             string isolatedSid,
             string supervisorSid)
+        {
+            SecureIsolatedDirectory(
+                path,
+                isolatedSid,
+                supervisorSid,
+                FILE_MODIFY_ACCESS);
+        }
+
+        internal static void SecureStatusStagingDirectory(
+            string path,
+            string isolatedSid,
+            string supervisorSid)
+        {
+            SecureIsolatedDirectory(
+                path,
+                isolatedSid,
+                supervisorSid,
+                FILE_MODIFY_ACCESS,
+                FILE_ALL_ACCESS);
+        }
+
+        public static void SecureCaveConformanceTempDirectory(
+            string path,
+            string isolatedSid,
+            string supervisorSid)
+        {
+            SecureIsolatedDirectory(
+                path, isolatedSid, supervisorSid, FILE_MODIFY_ACCESS, FILE_ALL_ACCESS, true);
+        }
+
+        private static void SecureIsolatedDirectory(
+            string path,
+            string isolatedSid,
+            string supervisorSid,
+            uint isolatedAccess,
+            uint isolatedChildOnlyAccess = 0, bool childDirs = false)
         {
             EnablePrivilege("SeRestorePrivilege");
             string sddl = "O:" + isolatedSid + "D:P" +
                 "(A;OICI;0x001f01ff;;;SY)" +
                 "(A;OICI;0x001f01ff;;;BA)" +
                 "(A;OICI;0x001f01ff;;;" + supervisorSid + ")" +
-                "(A;OICI;0x001301bf;;;" + isolatedSid + ")" +
+                "(A;OICI;0x" + isolatedAccess.ToString("x8") + ";;;" + isolatedSid + ")" +
+                (isolatedChildOnlyAccess == 0
+                    ? String.Empty
+                    : (childDirs ? "(A;OICIIO;0x" : "(A;OIIO;0x") +
+                        isolatedChildOnlyAccess.ToString("x8") +
+                        ";;;" + isolatedSid + ")") +
                 "(A;OICI;0x00020000;;;S-1-3-4)";
             IntPtr securityDescriptor;
             uint securityDescriptorLength;
@@ -1870,7 +2500,13 @@ namespace OpenCoven
             {
                 LocalFree(securityDescriptor);
             }
-            ValidateIsolatedDirectory(path, isolatedSid, supervisorSid);
+            ValidateIsolatedDirectory(
+                path,
+                isolatedSid,
+                supervisorSid,
+                isolatedAccess,
+                isolatedChildOnlyAccess,
+                childDirs);
         }
 
         public static void ProtectSupervisorDirectory(string path)
@@ -1933,13 +2569,38 @@ namespace OpenCoven
                 throw new InvalidOperationException(
                     "Restricted Windows identity SID is unavailable.");
             }
-            ValidateIsolatedDirectory(path, current.Value, null);
+            ValidateIsolatedDirectory(path, current.Value, null, FILE_MODIFY_ACCESS, 0);
+        }
+
+        public static void RequireCurrentIdentityOwnsStatusStagingDirectory(
+            string path,
+            string supervisorSid)
+        {
+            if (String.IsNullOrWhiteSpace(supervisorSid))
+            {
+                throw new InvalidOperationException(
+                    "Status staging supervisor identity is required.");
+            }
+            SecurityIdentifier current = WindowsIdentity.GetCurrent().User;
+            if (current == null)
+            {
+                throw new InvalidOperationException(
+                    "Restricted Windows identity SID is unavailable.");
+            }
+            ValidateIsolatedDirectory(
+                path,
+                current.Value,
+                supervisorSid,
+                FILE_MODIFY_ACCESS,
+                FILE_ALL_ACCESS);
         }
 
         private static void ValidateIsolatedDirectory(
             string path,
             string isolatedSid,
-            string supervisorSid)
+            string supervisorSid,
+            uint isolatedAccess,
+            uint isolatedChildOnlyAccess, bool childDirs = false)
         {
             if (String.IsNullOrWhiteSpace(path) ||
                 !Path.IsPathRooted(path) ||
@@ -2021,16 +2682,18 @@ namespace OpenCoven
                         out aclInformation,
                         (uint)Marshal.SizeOf(typeof(ACL_SIZE_INFORMATION)),
                         AclSizeInformation) ||
-                    aclInformation.AceCount != 5)
+                    aclInformation.AceCount !=
+                        (isolatedChildOnlyAccess == 0 ? 5 : 6))
                 {
                     throw new InvalidOperationException(
-                        "Restricted directory DACL must contain exactly five ACEs.");
+                        "Restricted directory DACL has an unexpected ACE count.");
                 }
 
                 bool foundSystem = false;
                 bool foundAdministrators = false;
                 bool foundSupervisor = false;
                 bool foundOwner = false;
+                bool foundOwnerChildOnly = isolatedChildOnlyAccess == 0;
                 bool foundOwnerRights = false;
                 byte directoryFlags = OBJECT_INHERIT_ACE | CONTAINER_INHERIT_ACE;
                 for (uint index = 0; index < aclInformation.AceCount; index++)
@@ -2051,37 +2714,50 @@ namespace OpenCoven
                         Marshal.OffsetOf(
                             typeof(ACCESS_ALLOWED_ACE),
                             "SidStart").ToInt64());
-                    if (ace.Header.AceType != ACCESS_ALLOWED_ACE_TYPE ||
-                        ace.Header.AceFlags != directoryFlags)
+                    if (ace.Header.AceType != ACCESS_ALLOWED_ACE_TYPE)
                     {
                         throw new InvalidOperationException(
                             "Restricted directory DACL contains an unexpected ACE.");
                     }
-                    if (EqualSid(aceSid, expectedSystem) &&
+                    if (ace.Header.AceFlags == directoryFlags &&
+                        EqualSid(aceSid, expectedSystem) &&
                         ace.Mask == FILE_ALL_ACCESS &&
                         !foundSystem)
                     {
                         foundSystem = true;
                     }
-                    else if (EqualSid(aceSid, expectedAdministrators) &&
+                    else if (ace.Header.AceFlags == directoryFlags &&
+                        EqualSid(aceSid, expectedAdministrators) &&
                         ace.Mask == FILE_ALL_ACCESS &&
                         !foundAdministrators)
                     {
                         foundAdministrators = true;
                     }
-                    else if (EqualSid(aceSid, expectedOwner) &&
-                        ace.Mask == FILE_MODIFY_ACCESS &&
+                    else if (ace.Header.AceFlags == directoryFlags &&
+                        EqualSid(aceSid, expectedOwner) &&
+                        ace.Mask == isolatedAccess &&
                         !foundOwner)
                     {
                         foundOwner = true;
                     }
-                    else if (EqualSid(aceSid, expectedOwnerRights) &&
+                    else if (ace.Header.AceFlags ==
+                            (OBJECT_INHERIT_ACE | INHERIT_ONLY_ACE |
+                                (childDirs ? CONTAINER_INHERIT_ACE : 0)) &&
+                        EqualSid(aceSid, expectedOwner) &&
+                        ace.Mask == isolatedChildOnlyAccess &&
+                        !foundOwnerChildOnly)
+                    {
+                        foundOwnerChildOnly = true;
+                    }
+                    else if (ace.Header.AceFlags == directoryFlags &&
+                        EqualSid(aceSid, expectedOwnerRights) &&
                         ace.Mask == READ_CONTROL &&
                         !foundOwnerRights)
                     {
                         foundOwnerRights = true;
                     }
-                    else if (ace.Mask == FILE_ALL_ACCESS &&
+                    else if (ace.Header.AceFlags == directoryFlags &&
+                        ace.Mask == FILE_ALL_ACCESS &&
                         !foundSupervisor &&
                         !EqualSid(aceSid, forbiddenEveryone) &&
                         !EqualSid(aceSid, forbiddenAuthenticatedUsers) &&
@@ -2101,6 +2777,7 @@ namespace OpenCoven
                     !foundAdministrators ||
                     !foundSupervisor ||
                     !foundOwner ||
+                    !foundOwnerChildOnly ||
                     !foundOwnerRights)
                 {
                     throw new InvalidOperationException(
@@ -2498,46 +3175,187 @@ namespace OpenCoven
             }
         }
 
+        internal sealed class ProfileCleanupException : InvalidOperationException
+        {
+            internal string Diagnostic { get; private set; }
+
+            public ProfileCleanupException(
+                string deleteOutcome,
+                bool registryExists,
+                bool expectedPathExists,
+                bool actualPathExists)
+                : this(deleteOutcome, registryExists, expectedPathExists, actualPathExists, null)
+            {
+            }
+
+            internal ProfileCleanupException(
+                string deleteOutcome,
+                bool registryExists,
+                bool expectedPathExists,
+                bool actualPathExists,
+                Exception residualFailure)
+                : this(deleteOutcome, registryExists, expectedPathExists, actualPathExists, false, residualFailure)
+            {
+            }
+
+            internal ProfileCleanupException(
+                string deleteOutcome,
+                bool registryExists,
+                bool expectedPathExists,
+                bool actualPathExists,
+                bool hivesExist,
+                Exception residualFailure)
+                : base("Ephemeral Windows profile survived cleanup.", residualFailure)
+            {
+                if ((deleteOutcome != "not-needed" &&
+                    deleteOutcome != "accepted" &&
+                    deleteOutcome != "not-found") ||
+                    (!registryExists && !expectedPathExists && !actualPathExists && !hivesExist))
+                    throw new ArgumentException("Invalid profile cleanup diagnostic.");
+                Diagnostic = "profile-remained[delete=" + deleteOutcome +
+                    ";registry=" + (registryExists ? "1" : "0") +
+                    ";expected=" + (expectedPathExists ? "1" : "0") +
+                    ";actual=" + (actualPathExists ? "1" : "0") +
+                    (hivesExist ? ";hive=1" : String.Empty) +
+                    (residualFailure == null ? String.Empty :
+                        ";residual=" + WindowsIsolatedUser.ClassifyCleanupError(residualFailure)) + "]";
+            }
+        }
+
+        private static void ValidateProfileCleanupRegistration(
+            bool registered, string expectedPath, string actualPath)
+        {
+            if (String.IsNullOrWhiteSpace(expectedPath) ||
+                !Path.IsPathFullyQualified(expectedPath) ||
+                !String.Equals(Path.GetFullPath(expectedPath), expectedPath, StringComparison.OrdinalIgnoreCase) ||
+                (registered && (String.IsNullOrWhiteSpace(actualPath) ||
+                    !String.Equals(TrimDirectorySeparator(expectedPath),
+                        TrimDirectorySeparator(actualPath), StringComparison.OrdinalIgnoreCase))))
+                throw new InvalidOperationException("Profile cleanup registration is not bound to the owned path.");
+        }
+
+        private static bool ProfileCleanupPathExists(string path)
+        {
+            try
+            {
+                File.GetAttributes(path);
+                return true;
+            }
+            catch (FileNotFoundException) { return false; }
+            catch (DirectoryNotFoundException) { return false; }
+        }
+
+        private static void RequireProfileResidualBudget(TimeSpan elapsed, int depth, int entries)
+        {
+            if (elapsed >= TimeSpan.FromSeconds(10))
+                throw new TimeoutException("Profile residual cleanup exceeded its observation budget.");
+            if (depth < 0 || depth > 64 || entries < 0 || entries > 100000)
+                throw new InvalidOperationException("Profile residual traversal exceeded its bounds.");
+        }
+
+        private static void CompleteProfileDeletion(
+            string deleteOutcome,
+            bool residualAuthorized,
+            Func<bool> registrationExists,
+            Func<bool> hivesExist,
+            Func<bool> expectedExists,
+            Func<bool> actualExists,
+            Action removeResidual,
+            Func<TimeSpan> elapsed,
+            Action pause)
+        {
+            Exception lastSharingFailure = null;
+            while (true)
+            {
+                bool registered = registrationExists();
+                bool expected = expectedExists();
+                bool actual = actualExists();
+                bool hives = hivesExist();
+                if (!registered && !expected && !actual && !hives) return;
+                if (elapsed() >= TimeSpan.FromSeconds(10))
+                    throw new ProfileCleanupException(deleteOutcome, registered, expected, actual, hives, lastSharingFailure);
+                if (residualAuthorized && (deleteOutcome == "accepted" || deleteOutcome == "not-found") &&
+                    !registered && expected && !hives)
+                {
+                    try
+                    {
+                        removeResidual();
+                    }
+                    catch (Exception error) when (error is Win32Exception || error is IOException ||
+                        error is UnauthorizedAccessException || error is InvalidOperationException ||
+                        error is TimeoutException)
+                    {
+                        if (error is TimeoutException && lastSharingFailure != null &&
+                            elapsed() >= TimeSpan.FromSeconds(10))
+                            throw new ProfileCleanupException(deleteOutcome, registered, expected, actual, hives, lastSharingFailure);
+                        Win32Exception native = error as Win32Exception;
+                        bool sharing = native != null ? native.NativeErrorCode == ERROR_SHARING_VIOLATION :
+                            error is IOException && error.HResult == unchecked((int)0x80070020);
+                        if (!sharing)
+                            throw new ProfileCleanupException(deleteOutcome, registered, expected, actual, hives, error);
+                        lastSharingFailure = error;
+                        pause();
+                        continue;
+                    }
+                }
+                pause();
+            }
+        }
+
         internal static void DeleteOperatingSystemProfile(
             string sid,
             string expectedProfilePath)
         {
+            DeleteOperatingSystemProfileCore(sid, expectedProfilePath, null);
+        }
+
+        internal static void DeleteOperatingSystemProfileCore(
+            string sid,
+            string expectedProfilePath,
+            ProfileCleanupIdentity cleanupIdentity)
+        {
+            if (cleanupIdentity != null &&
+                (!String.Equals(sid, cleanupIdentity.Sid, StringComparison.Ordinal) ||
+                    !String.Equals(expectedProfilePath, cleanupIdentity.Path, StringComparison.OrdinalIgnoreCase)))
+                throw new InvalidOperationException("Profile cleanup capability does not match its owner.");
             string registryPath =
                 @"SOFTWARE\Microsoft\Windows NT\CurrentVersion\ProfileList\" + sid;
             string actualProfilePath = null;
+            bool registryProfileExists;
             using (RegistryKey profile = Registry.LocalMachine.OpenSubKey(registryPath))
             {
+                registryProfileExists = profile != null;
                 if (profile != null)
                 {
                     actualProfilePath = Convert.ToString(
                         profile.GetValue("ProfileImagePath"));
                     if (!String.IsNullOrWhiteSpace(actualProfilePath))
                     {
-                        actualProfilePath = Path.GetFullPath(
-                            Environment.ExpandEnvironmentVariables(actualProfilePath));
+                        actualProfilePath = Environment.ExpandEnvironmentVariables(actualProfilePath);
+                        if (!Path.IsPathFullyQualified(actualProfilePath))
+                            throw new InvalidOperationException("Profile cleanup registration is not bound to an absolute path.");
+                        actualProfilePath = Path.GetFullPath(actualProfilePath);
                     }
                 }
             }
-            bool registryProfileExists;
-            using (RegistryKey profile = Registry.LocalMachine.OpenSubKey(registryPath))
-            {
-                registryProfileExists = profile != null;
-            }
+            ValidateProfileCleanupRegistration(registryProfileExists, expectedProfilePath, actualProfilePath);
             bool profileExists =
                 registryProfileExists ||
-                Directory.Exists(expectedProfilePath) ||
+                ProfileCleanupPathExists(expectedProfilePath) ||
                 (!String.IsNullOrWhiteSpace(actualProfilePath) &&
-                    Directory.Exists(actualProfilePath));
+                    ProfileCleanupPathExists(actualProfilePath));
             bool deleteRequested = !profileExists;
+            string deleteOutcome = "not-needed";
             int lastDeleteError = 0;
             Stopwatch deleteTimer = Stopwatch.StartNew();
             while (
                 !deleteRequested &&
                 deleteTimer.Elapsed < TimeSpan.FromSeconds(10))
             {
-                if (DeleteProfileW(sid, null, null))
+                if (DeleteProfileW(sid, expectedProfilePath, null))
                 {
                     deleteRequested = true;
+                    deleteOutcome = "accepted";
                     break;
                 }
                 int error = Marshal.GetLastWin32Error();
@@ -2546,6 +3364,7 @@ namespace OpenCoven
                     error == ERROR_NOT_FOUND)
                 {
                     deleteRequested = true;
+                    deleteOutcome = "not-found";
                     break;
                 }
                 if (error != ERROR_SHARING_VIOLATION)
@@ -2558,31 +3377,441 @@ namespace OpenCoven
                 Thread.Sleep(100);
             }
             Stopwatch timer = Stopwatch.StartNew();
-            while (timer.Elapsed < TimeSpan.FromSeconds(10))
+            int residualEntries = 0;
+            try
             {
-                bool registryExists;
-                using (RegistryKey profile = Registry.LocalMachine.OpenSubKey(registryPath))
-                {
-                    registryExists = profile != null;
-                }
-                if (!registryExists &&
-                    !Directory.Exists(expectedProfilePath) &&
-                    (String.IsNullOrWhiteSpace(actualProfilePath) ||
-                        !Directory.Exists(actualProfilePath)))
-                {
-                    return;
-                }
-                Thread.Sleep(100);
+                CompleteProfileDeletion(
+                    deleteOutcome, cleanupIdentity != null && deleteRequested,
+                    delegate
+                    {
+                        using (RegistryKey profile = Registry.LocalMachine.OpenSubKey(registryPath))
+                            return profile != null;
+                    },
+                    delegate
+                    {
+                        using (RegistryKey hive = Registry.Users.OpenSubKey(sid))
+                        using (RegistryKey classes = Registry.Users.OpenSubKey(sid + "_Classes"))
+                            return hive != null || classes != null;
+                    },
+                    () => ProfileCleanupPathExists(expectedProfilePath),
+                    () => !String.IsNullOrWhiteSpace(actualProfilePath) && ProfileCleanupPathExists(actualProfilePath),
+                    () => DeleteOwnedProfileResidual(cleanupIdentity, timer, ref residualEntries),
+                    () => timer.Elapsed,
+                    () => Thread.Sleep(100));
             }
-            if (!deleteRequested)
+            catch (ProfileCleanupException) when (!deleteRequested)
             {
                 throw new Win32Exception(
                     lastDeleteError,
                     "Ephemeral Windows profile deletion remained blocked.");
             }
-            throw new InvalidOperationException(
-                "Ephemeral Windows profile survived cleanup.");
         }
+
+        internal sealed class ProfileCleanupIdentity
+        {
+            internal readonly string Path;
+            internal readonly string Sid;
+            private readonly BY_HANDLE_FILE_INFORMATION original;
+
+            internal ProfileCleanupIdentity(IntPtr originalHandle, string path, string sid)
+            {
+                Path = path;
+                Sid = sid;
+                original = QueryFileInformation(originalHandle, "Owned profile identity could not be captured.");
+            }
+
+            internal bool Matches(IntPtr handle)
+            {
+                return SameFileIdentity(original,
+                    QueryFileInformation(handle, "Residual profile identity could not be queried."));
+            }
+
+            internal uint Volume { get { return original.VolumeSerialNumber; } }
+        }
+
+        internal static ProfileCleanupIdentity CaptureProfileCleanupIdentity(IntPtr original, string path, string sid)
+        {
+            string profilesRoot = TrimDirectorySeparator(WindowsIsolatedUser.GetProfilesRoot());
+            if (!String.Equals(Path.GetDirectoryName(path), profilesRoot, StringComparison.OrdinalIgnoreCase))
+                throw new InvalidOperationException("Owned profile cleanup path is not a direct profile-root child.");
+            ValidateOwnedProfilePath(original, path, sid, false);
+            return new ProfileCleanupIdentity(original, path, sid);
+        }
+
+        private static CleanupDeleteException ProfileResidualNativeError(
+            int error, string operation, string kind, int depth)
+        {
+            return new CleanupDeleteException(error, "Owned profile residual operation failed.",
+                "phase=profile-residual;op=" + operation + ";kind=" + kind +
+                ";depth=" + (depth <= 4 ? "le4" : depth <= 16 ? "le16" : "le64"));
+        }
+
+        private static void ValidateProfileResidualName(string name)
+        {
+            if (String.IsNullOrEmpty(name) || name.Length > 255 || name == "." || name == ".." ||
+                name.IndexOfAny(new char[] { '\\', '/', ':', '\0', '*', '?' }) >= 0)
+                throw new InvalidOperationException("Residual child name is not a single literal component.");
+        }
+
+        private static string[] ParseProfileResidualNames(byte[] buffer, int used)
+        {
+            if (buffer == null || buffer.Length > 65536 || used < 12 || used > buffer.Length)
+                throw new InvalidOperationException("Residual directory buffer is outside its bounds.");
+            List<string> names = new List<string>();
+            UnicodeEncoding encoding = new UnicodeEncoding(false, false, true);
+            int offset = 0;
+            while (true)
+            {
+                if (used - offset < 12)
+                    throw new InvalidOperationException("Residual directory record is truncated.");
+                uint next = BitConverter.ToUInt32(buffer, offset);
+                uint length = BitConverter.ToUInt32(buffer, offset + 8);
+                if (length == 0 || length > 510 || (length & 1) != 0 || length > used - offset - 12)
+                    throw new InvalidOperationException("Residual directory name length is invalid.");
+                string name;
+                try { name = encoding.GetString(buffer, offset + 12, checked((int)length)); }
+                catch (DecoderFallbackException)
+                {
+                    throw new InvalidOperationException("Residual directory name is not valid UTF-16.");
+                }
+                if (name != "." && name != "..") ValidateProfileResidualName(name);
+                names.Add(name);
+                if (next == 0)
+                {
+                    if (used - offset - 12 - length > 7)
+                        throw new InvalidOperationException("Residual directory buffer has trailing records.");
+                    return names.ToArray();
+                }
+                if ((next & 3) != 0 || next < 12 + length || next > used - offset - 12)
+                    throw new InvalidOperationException("Residual directory record offset is invalid.");
+                offset += checked((int)next);
+            }
+        }
+
+        private static CleanupDeleteException ProfileResidualNtError(int status, string operation, int depth)
+        {
+            CleanupDeleteException native = ProfileResidualNativeError(
+                unchecked((int)ProfileNtStatusToDosError(status)), operation, "entry", depth);
+            return new CleanupDeleteException(native.NativeErrorCode, "Owned profile residual NT operation failed.",
+                native.Context + ";ntstatus=" + unchecked((uint)status).ToString("x8", CultureInfo.InvariantCulture));
+        }
+
+        private static CleanupDeleteException ProfileResidualOpenError(
+            int status, int nativeError, string role, int depth)
+        {
+            return ProfileResidualOpenError(status, nativeError, role, depth, null);
+        }
+
+        private static CleanupDeleteException ProfileResidualOpenError(
+            int status, int nativeError, string role, int depth, bool deleteAccess)
+        {
+            return ProfileResidualOpenError(status, nativeError, role, depth,
+                deleteAccess ? "delete-metadata" : "directory-list");
+        }
+
+        private static CleanupDeleteException ProfileResidualOpenError(
+            int status, int nativeError, string role, int depth, string access)
+        {
+            if (access != null && access != "delete-metadata" && access != "directory-list")
+                throw new InvalidOperationException("Residual open access is invalid.");
+            if (role != "ancestor" && role != "profile-root" && role != "child")
+                throw new InvalidOperationException("Residual open role is invalid.");
+            CleanupDeleteException native = ProfileResidualNativeError(nativeError, "relative-open", "entry", depth);
+            return new CleanupDeleteException(native.NativeErrorCode, "Owned profile residual NT open failed.",
+                native.Context + ";ntstatus=" + unchecked((uint)status).ToString("x8", CultureInfo.InvariantCulture) +
+                ";role=" + role + (access == null ? String.Empty :
+                    ";purpose=" + (access == "delete-metadata" ? "deletion" : "enumeration") +
+                    ";access=" + access));
+        }
+
+        private static string ProfileResidualScopeLabel(int state)
+        {
+            if (state < -1 || state > 3)
+                throw new InvalidOperationException("Residual scope state is invalid.");
+            return state == 3 ? "cleanup-grant-subtree" :
+                state == 1 || state == 2 ? "cleanup-grant-ancestor" : "other";
+        }
+
+        private static int ProfileResidualScopeStep(int state, string name)
+        {
+            ProfileResidualScopeLabel(state);
+            if (state == 3) return 3;
+            if (state == 0 && String.Equals(name, ".coven", StringComparison.Ordinal)) return 1;
+            if (state == 1 && String.Equals(name, "chat", StringComparison.Ordinal)) return 2;
+            if (state == 2 && String.Equals(name, "phase1-cleanup-grants-v1", StringComparison.Ordinal)) return 3;
+            return -1;
+        }
+
+        private static uint ProfileResidualOpenAccess(bool deleteAccess)
+        {
+            // Profile compatibility junctions deny LIST_DIRECTORY. Removing the link
+            // itself, or an ordinary file, must not require reading its contents.
+            return (deleteAccess ? DELETE : FILE_LIST_DIRECTORY) |
+                FILE_READ_ATTRIBUTES | READ_CONTROL | SYNCHRONIZE;
+        }
+
+        private static SafeFileHandle OpenProfileResidualRelative(
+            SafeFileHandle parent, string name, bool deleteAccess, int depth, string role,
+            bool shareDelete = false)
+        {
+            return OpenProfileResidualRelativeCore(parent, name, deleteAccess, depth, role, shareDelete, -1);
+        }
+
+        private static SafeFileHandle OpenProfileResidualRelativeCore(
+            SafeFileHandle parent, string name, bool deleteAccess, int depth, string role,
+            bool shareDelete, int scopeState)
+        {
+            string scope = ProfileResidualScopeLabel(scopeState);
+            ValidateProfileResidualName(name);
+            if (deleteAccess && shareDelete)
+                throw new InvalidOperationException("Residual deletion handles must deny delete sharing.");
+            bool retained = false;
+            IntPtr nameBuffer = IntPtr.Zero, unicodePointer = IntPtr.Zero;
+            try
+            {
+                parent.DangerousAddRef(ref retained);
+                nameBuffer = Marshal.StringToHGlobalUni(name);
+                PROFILE_UNICODE_STRING unicode = new PROFILE_UNICODE_STRING();
+                unicode.Length = checked((ushort)(name.Length * 2));
+                unicode.MaximumLength = checked((ushort)(unicode.Length + 2));
+                unicode.Buffer = nameBuffer;
+                unicodePointer = Marshal.AllocHGlobal(Marshal.SizeOf(typeof(PROFILE_UNICODE_STRING)));
+                Marshal.StructureToPtr(unicode, unicodePointer, false);
+                PROFILE_OBJECT_ATTRIBUTES attributes = new PROFILE_OBJECT_ATTRIBUTES();
+                attributes.Length = checked((uint)Marshal.SizeOf(typeof(PROFILE_OBJECT_ATTRIBUTES)));
+                attributes.RootDirectory = parent.DangerousGetHandle();
+                attributes.ObjectName = unicodePointer;
+                attributes.Attributes = 0x00001000; // OBJ_DONT_REPARSE
+                PROFILE_IO_STATUS_BLOCK io;
+                SafeFileHandle handle;
+                int status = OpenProfileResidualFile(out handle, ProfileResidualOpenAccess(deleteAccess),
+                    ref attributes, out io, IntPtr.Zero, 0,
+                    FILE_SHARE_READ | FILE_SHARE_WRITE | (shareDelete ? 0x00000004u : 0u),
+                    1, 0x00200020, IntPtr.Zero, 0); // FILE_OPEN; OPEN_REPARSE_POINT | SYNCHRONOUS_IO_NONALERT
+                if (status == 0) return handle;
+                if (handle != null) handle.Dispose();
+                if (status == unchecked((int)0xc0000034) || status == unchecked((int)0xc000000f))
+                    return null; // The single named entry is absent in the retained parent.
+                CleanupDeleteException failure = ProfileResidualOpenError(status,
+                    unchecked((int)ProfileNtStatusToDosError(status)), role, depth,
+                    deleteAccess ? "delete-metadata" : "directory-list");
+                throw new CleanupDeleteException(failure.NativeErrorCode, failure.Message,
+                    failure.Context + ";scope=" + scope);
+            }
+            finally
+            {
+                if (unicodePointer != IntPtr.Zero) Marshal.FreeHGlobal(unicodePointer);
+                if (nameBuffer != IntPtr.Zero) Marshal.FreeHGlobal(nameBuffer);
+                if (retained) parent.DangerousRelease();
+            }
+        }
+
+        private static void DeleteOwnedProfileResidual(
+            ProfileCleanupIdentity identity, Stopwatch timer, ref int entries)
+        {
+            // The drive-root bootstrap open uses backup semantics. Do not let the supervisor's enabled
+            // restore privilege turn an explicit deletion denial into a successful cleanup.
+            using (WindowsIdentity supervisor = WindowsIdentity.GetCurrent(TokenAccessLevels.Query | TokenAccessLevels.Duplicate))
+            {
+                SafeAccessTokenHandle token;
+                if (!DuplicateProfileCleanupToken(supervisor.Token, 0x002e, IntPtr.Zero, 2, 2, out token))
+                    throw new Win32Exception(Marshal.GetLastWin32Error(), "Residual cleanup token duplication failed.");
+                using (token)
+                {
+                    TOKEN_PRIVILEGES privileges = new TOKEN_PRIVILEGES();
+                    if (!AdjustTokenPrivileges(token.DangerousGetHandle(), true, ref privileges, 0, IntPtr.Zero, IntPtr.Zero) ||
+                        Marshal.GetLastWin32Error() != 0)
+                        throw new Win32Exception(Marshal.GetLastWin32Error(), "Residual cleanup privileges could not be disabled.");
+                    int visited = entries;
+                    try
+                    {
+                        WindowsIdentity.RunImpersonated(token,
+                            () => DeleteOwnedProfileResidualCore(identity, timer, ref visited));
+                    }
+                    finally { entries = visited; }
+                }
+            }
+        }
+
+        private static void DeleteOwnedProfileResidualCore(
+            ProfileCleanupIdentity identity, Stopwatch timer, ref int entries)
+        {
+            if (identity == null)
+                throw new InvalidOperationException("Profile residual cleanup requires owned identity evidence.");
+            RequireProfileResidualBudget(timer.Elapsed, 0, entries);
+            string drive = Path.GetPathRoot(identity.Path);
+            if (drive.Length != 3 || drive[1] != ':' || drive[2] != '\\')
+                throw new InvalidOperationException("Profile residual cleanup requires a local drive path.");
+            List<SafeFileHandle> ancestors = new List<SafeFileHandle>();
+            try
+            {
+                string parent = Path.GetDirectoryName(identity.Path);
+                string[] segments = parent.Substring(drive.Length).Split(
+                    new char[] { '\\' }, StringSplitOptions.RemoveEmptyEntries);
+                for (int index = 0; index <= segments.Length; index++)
+                {
+                    RequireProfileResidualBudget(timer.Elapsed, index, entries);
+                    SafeFileHandle ancestor = index == 0 ?
+                        new SafeFileHandle(OpenOwnedProfileDirectory(drive), true) :
+                        OpenProfileResidualRelative(ancestors[index - 1], segments[index - 1], false, index, "ancestor");
+                    if (ancestor == null)
+                        throw new InvalidOperationException("Profile cleanup ancestor disappeared.");
+                    ancestors.Add(ancestor);
+                    FILE_ATTRIBUTE_TAG_INFO attributes = QueryAttributeTag(
+                        ancestor.DangerousGetHandle(), "Profile ancestor attributes could not be queried.");
+                    if (GetFileType(ancestor.DangerousGetHandle()) != FILE_TYPE_DISK ||
+                        (attributes.FileAttributes & FILE_ATTRIBUTE_DIRECTORY) == 0 ||
+                        (attributes.FileAttributes & FILE_ATTRIBUTE_REPARSE_POINT) != 0)
+                        throw new InvalidOperationException("Profile cleanup ancestor is not an ordinary disk directory.");
+                }
+                using (SafeFileHandle root = OpenProfileResidualRelative(
+                    ancestors[ancestors.Count - 1], Path.GetFileName(identity.Path), true, 0, "profile-root"))
+                {
+                    if (root == null) return;
+                    if (!identity.Matches(root.DangerousGetHandle()))
+                        throw new InvalidOperationException("Profile residual root identity changed.");
+                    ValidateProfileDirectorySecurity(root.DangerousGetHandle(), identity.Sid, false);
+                    DeleteProfileResidualEntry(ancestors[ancestors.Count - 1], Path.GetFileName(identity.Path),
+                        root, identity.Volume, timer, 0, ref entries, 0);
+                }
+            }
+            finally
+            {
+                for (int index = ancestors.Count - 1; index >= 0; index--) ancestors[index].Dispose();
+            }
+        }
+
+        private static void DeleteProfileResidualEntry(
+            SafeFileHandle parent, string name, SafeFileHandle handle,
+            uint volume, Stopwatch timer, int depth, ref int entries, int scopeState)
+        {
+            RequireProfileResidualBudget(timer.Elapsed, depth, ++entries);
+            IntPtr pointer = handle.DangerousGetHandle();
+            FILE_ATTRIBUTE_TAG_INFO attributes = QueryAttributeTag(pointer, "Residual entry attributes unavailable.");
+            BY_HANDLE_FILE_INFORMATION information = QueryFileInformation(pointer, "Residual entry identity unavailable.");
+            bool directory = (attributes.FileAttributes & FILE_ATTRIBUTE_DIRECTORY) != 0;
+            bool reparse = (attributes.FileAttributes & FILE_ATTRIBUTE_REPARSE_POINT) != 0;
+            if (GetFileType(pointer) != FILE_TYPE_DISK || information.VolumeSerialNumber != volume)
+                throw new InvalidOperationException("Residual entry is not on the owned profile volume.");
+            if (!directory && (attributes.FileAttributes & (uint)FileAttributes.ReadOnly) != 0)
+                throw new InvalidOperationException("Residual read-only file cannot be removed without metadata mutation.");
+            if (directory && !reparse)
+                DeleteProfileResidualDirectoryContentsCore(parent, name, handle, volume, timer, depth, ref entries, scopeState);
+            RequireProfileResidualBudget(timer.Elapsed, depth, entries);
+            byte disposition = 1;
+            if (!SetFileInformationByHandle(pointer, 4, ref disposition, 1))
+                throw ProfileResidualNativeError(Marshal.GetLastWin32Error(), "disposition",
+                    reparse ? "reparse" : directory ? "directory" : "file", depth);
+        }
+
+        private static void DeleteProfileResidualDirectoryContents(
+            SafeFileHandle parent, string name, SafeFileHandle directory,
+            uint volume, Stopwatch timer, int depth, ref int entries)
+        {
+            DeleteProfileResidualDirectoryContentsCore(parent, name, directory, volume, timer, depth, ref entries, -1);
+        }
+
+        private static void DeleteProfileResidualDirectoryContentsCore(
+            SafeFileHandle parent, string name, SafeFileHandle directory,
+            uint volume, Stopwatch timer, int depth, ref int entries, int scopeState)
+        {
+            // Keep the original DELETE handle (which denies delete sharing) alive while
+            // reopening its single name through the retained parent for enumeration.
+            using (SafeFileHandle enumeration = OpenProfileResidualRelativeCore(
+                parent, name, false, depth, depth == 0 ? "profile-root" : "child", true, scopeState))
+            {
+                if (enumeration == null)
+                    throw new InvalidOperationException("Retained residual directory disappeared before enumeration.");
+                FILE_ATTRIBUTE_TAG_INFO attributes = QueryAttributeTag(
+                    enumeration.DangerousGetHandle(), "Residual enumeration attributes unavailable.");
+                if (GetFileType(enumeration.DangerousGetHandle()) != FILE_TYPE_DISK ||
+                    (attributes.FileAttributes & (FILE_ATTRIBUTE_DIRECTORY | FILE_ATTRIBUTE_REPARSE_POINT)) != FILE_ATTRIBUTE_DIRECTORY ||
+                    !SameFileIdentity(
+                        QueryFileInformation(directory.DangerousGetHandle(), "Retained residual identity unavailable."),
+                        QueryFileInformation(enumeration.DangerousGetHandle(), "Residual enumeration identity unavailable.")))
+                    throw new InvalidOperationException("Residual enumeration requires the same ordinary directory.");
+                byte[] buffer = new byte[65536];
+                bool restart = true;
+                while (true)
+                {
+                    RequireProfileResidualBudget(timer.Elapsed, depth, entries);
+                    PROFILE_IO_STATUS_BLOCK io;
+                    int status = QueryProfileResidualDirectory(enumeration, IntPtr.Zero, IntPtr.Zero, IntPtr.Zero,
+                        out io, buffer, (uint)buffer.Length, 12, false, IntPtr.Zero, restart); // FileNamesInformation
+                    restart = false;
+                    if (status == unchecked((int)0x80000006)) return; // STATUS_NO_MORE_FILES
+                    if (status != 0) throw ProfileResidualNtError(status, "handle-enumeration", depth);
+                    ulong used = io.Information.ToUInt64();
+                    if (used == 0 || used > (ulong)buffer.Length)
+                        throw new InvalidOperationException("Residual handle enumeration did not return a bounded record.");
+                    foreach (string childName in ParseProfileResidualNames(buffer, checked((int)used)))
+                    {
+                        RequireProfileResidualBudget(timer.Elapsed, depth, ++entries);
+                        if (childName == "." || childName == "..") continue;
+                        RequireProfileResidualBudget(timer.Elapsed, depth + 1, entries);
+                        int childScope = ProfileResidualScopeStep(scopeState, childName);
+                        using (SafeFileHandle child = OpenProfileResidualRelativeCore(directory, childName, true, depth + 1, "child", false, childScope))
+                        {
+                            if (child != null)
+                                DeleteProfileResidualEntry(directory, childName, child, volume, timer, depth + 1, ref entries, childScope);
+                        }
+                    }
+                }
+            }
+        }
+
+        [StructLayout(LayoutKind.Sequential)]
+        private struct PROFILE_UNICODE_STRING
+        {
+            internal ushort Length;
+            internal ushort MaximumLength;
+            internal IntPtr Buffer;
+        }
+
+        [StructLayout(LayoutKind.Sequential)]
+        private struct PROFILE_OBJECT_ATTRIBUTES
+        {
+            internal uint Length;
+            internal IntPtr RootDirectory;
+            internal IntPtr ObjectName;
+            internal uint Attributes;
+            internal IntPtr SecurityDescriptor;
+            internal IntPtr SecurityQualityOfService;
+        }
+
+        [StructLayout(LayoutKind.Sequential)]
+        private struct PROFILE_IO_STATUS_BLOCK
+        {
+            internal IntPtr Status;
+            internal UIntPtr Information;
+        }
+
+        [DllImport("ntdll.dll", EntryPoint = "NtCreateFile", ExactSpelling = true)]
+        private static extern int OpenProfileResidualFile(
+            out SafeFileHandle handle, uint access, ref PROFILE_OBJECT_ATTRIBUTES attributes,
+            out PROFILE_IO_STATUS_BLOCK io, IntPtr allocation, uint fileAttributes,
+            uint sharing, uint disposition, uint options, IntPtr eaBuffer, uint eaLength);
+
+        [DllImport("ntdll.dll", EntryPoint = "NtQueryDirectoryFile", ExactSpelling = true)]
+        private static extern int QueryProfileResidualDirectory(
+            SafeFileHandle directory, IntPtr completionEvent, IntPtr apc, IntPtr context,
+            out PROFILE_IO_STATUS_BLOCK io, [Out] byte[] buffer, uint length, int informationClass,
+            [MarshalAs(UnmanagedType.U1)] bool singleEntry, IntPtr name,
+            [MarshalAs(UnmanagedType.U1)] bool restart);
+
+        [DllImport("ntdll.dll", EntryPoint = "RtlNtStatusToDosError", ExactSpelling = true)]
+        private static extern uint ProfileNtStatusToDosError(int status);
+
+        [DllImport("kernel32.dll", ExactSpelling = true, SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static extern bool SetFileInformationByHandle(
+            IntPtr handle, int informationClass, ref byte information, uint size);
+
+        [DllImport("advapi32.dll", EntryPoint = "DuplicateTokenEx", ExactSpelling = true, SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static extern bool DuplicateProfileCleanupToken(
+            IntPtr existingToken, uint desiredAccess, IntPtr securityAttributes,
+            int impersonationLevel, int tokenType, out SafeAccessTokenHandle duplicate);
 
         internal static void DeleteDirectoryTree(string root)
         {
@@ -2606,23 +3835,36 @@ namespace OpenCoven
 
         private static void DeleteDirectoryContents(DirectoryInfo directory)
         {
+            DeleteDirectoryContents(directory, 1);
+        }
+
+        private static void DeleteDirectoryContents(DirectoryInfo directory, int depth)
+        {
             foreach (FileSystemInfo entry in directory.GetFileSystemInfos())
             {
                 if ((entry.Attributes & FileAttributes.ReparsePoint) != 0)
                 {
                     if ((entry.Attributes & FileAttributes.Directory) != 0)
                     {
-                        if (!RemoveDirectoryW(entry.FullName))
+                        if (!RemoveDirectoryW(ToExtendedPath(entry.FullName)))
                         {
-                            throw new Win32Exception(
+                            ThrowUnlessDeleted(
                                 Marshal.GetLastWin32Error(),
+                                "remove-reparse-directory",
+                                "reparse-directory",
+                                entry,
+                                depth,
                                 "Cleanup reparse directory could not be removed.");
                         }
                     }
-                    else if (!DeleteFileW(entry.FullName))
+                    else if (!DeleteFileW(ToExtendedPath(entry.FullName)))
                     {
-                        throw new Win32Exception(
+                        ThrowUnlessDeleted(
                             Marshal.GetLastWin32Error(),
+                            "remove-reparse-file",
+                            "reparse-file",
+                            entry,
+                            depth,
                             "Cleanup reparse file could not be removed.");
                     }
                     continue;
@@ -2630,15 +3872,114 @@ namespace OpenCoven
                 DirectoryInfo childDirectory = entry as DirectoryInfo;
                 if (childDirectory != null)
                 {
-                    DeleteDirectoryContents(childDirectory);
+                    DeleteDirectoryContents(childDirectory, depth + 1);
                     childDirectory.Delete(false);
                 }
                 else
                 {
-                    entry.Attributes = FileAttributes.Normal;
-                    entry.Delete();
+                    if (!DeleteFileW(ToExtendedPath(entry.FullName)))
+                    {
+                        int deleteError = Marshal.GetLastWin32Error();
+                        if (deleteError != ERROR_ACCESS_DENIED)
+                        {
+                            ThrowUnlessDeleted(
+                                deleteError,
+                                "delete-file",
+                                "file",
+                                entry,
+                                depth,
+                                "Cleanup file could not be removed.");
+                            continue;
+                        }
+                        entry.Attributes = FileAttributes.Normal;
+                        if (!DeleteFileW(ToExtendedPath(entry.FullName)))
+                        {
+                            ThrowUnlessDeleted(
+                                Marshal.GetLastWin32Error(),
+                                "delete-read-only-file",
+                                "file",
+                                entry,
+                                depth,
+                                "Cleanup read-only file could not be removed.");
+                        }
+                    }
                 }
             }
+        }
+
+        internal static string ToExtendedPath(string fullPath)
+        {
+            if (fullPath.StartsWith(@"\\?\", StringComparison.Ordinal))
+            {
+                return fullPath;
+            }
+            if (fullPath.StartsWith(@"\\", StringComparison.Ordinal))
+            {
+                return @"\\?\UNC\" + fullPath.Substring(2);
+            }
+            return @"\\?\" + fullPath;
+        }
+
+        private static void ThrowUnlessDeleted(
+            int error,
+            string operation,
+            string entryKind,
+            FileSystemInfo entry,
+            int depth,
+            string message)
+        {
+            bool isDirectory = (entry.Attributes & FileAttributes.Directory) != 0;
+            bool entryExists = isDirectory
+                ? Directory.Exists(entry.FullName)
+                : File.Exists(entry.FullName);
+            if ((error == ERROR_FILE_NOT_FOUND || error == ERROR_PATH_NOT_FOUND) &&
+                !entryExists &&
+                !Directory.Exists(entry.FullName) &&
+                !File.Exists(entry.FullName))
+            {
+                return;
+            }
+            string parent = Path.GetDirectoryName(entry.FullName);
+            bool parentExists = !String.IsNullOrEmpty(parent) && Directory.Exists(parent);
+            throw new CleanupDeleteException(
+                error,
+                message,
+                DescribeCleanupDeleteContext(
+                    operation,
+                    entryKind,
+                    depth,
+                    entry.FullName.Length,
+                    entryExists,
+                    parentExists));
+        }
+
+        internal static string DescribeCleanupDeleteContext(
+            string operation,
+            string entryKind,
+            int depth,
+            int pathLength,
+            bool entryExists,
+            bool parentExists)
+        {
+            string depthBucket = depth <= 4 ? "le4" : depth <= 16 ? "le16" : depth <= 64 ? "le64" : "gt64";
+            string lengthBucket = pathLength < 260 ? "lt260" : pathLength < 1024 ? "lt1024" : "ge1024";
+            return "op=" + operation +
+                ";kind=" + entryKind +
+                ";depth=" + depthBucket +
+                ";len=" + lengthBucket +
+                ";entry=" + (entryExists ? "present" : "gone") +
+                ";parent=" + (parentExists ? "present" : "gone");
+        }
+
+        internal sealed class CleanupDeleteException : Win32Exception
+        {
+            internal CleanupDeleteException(int error, string message, string context)
+                : base(error, message)
+            {
+                Context = context;
+            }
+
+            internal string Context { get; private set; }
         }
 
         private static IntPtr ConvertSid(string sid, string failureMessage)
@@ -3951,31 +5292,7 @@ namespace OpenCoven
                         throw new InvalidOperationException(
                             "Matching isolated-SID process identity changed.");
                     }
-                    if (!TerminateProcess(process, 1))
-                    {
-                        throw new Win32Exception(
-                            Marshal.GetLastWin32Error(),
-                            "Matching isolated-SID process termination failed.");
-                    }
-                    uint wait = WaitForSingleObject(process, 30000);
-                    if (wait != WAIT_OBJECT_0)
-                    {
-                        if (wait == WAIT_TIMEOUT)
-                        {
-                            throw new TimeoutException(
-                                "Matching isolated-SID process did not terminate.");
-                        }
-                        throw new Win32Exception(
-                            Marshal.GetLastWin32Error(),
-                            "Matching isolated-SID process wait failed.");
-                    }
-                    uint exitCode;
-                    if (!GetExitCodeProcess(process, out exitCode) ||
-                        exitCode == STILL_ACTIVE)
-                    {
-                        throw new InvalidOperationException(
-                            "Matching isolated-SID process could not be reaped.");
-                    }
+                    TerminateAndReapMatchingProcess(process);
                 }
                 finally
                 {
@@ -3983,6 +5300,97 @@ namespace OpenCoven
                 }
             }
             return matches.Count;
+        }
+
+        private static bool CanConfirmTerminatedProcess(int terminationError, uint waitResult)
+        {
+            return terminationError == ERROR_ACCESS_DENIED && waitResult == WAIT_OBJECT_0;
+        }
+
+        private static void TerminateAndReapMatchingProcess(IntPtr process)
+        {
+            int? terminationError = null;
+            if (!TerminateProcess(process, 1))
+            {
+                terminationError = Marshal.GetLastWin32Error();
+            }
+            ReapMatchingProcessCore(
+                process,
+                terminationError,
+                WaitForSingleObject,
+                retainedHandle =>
+                {
+                    uint exitCode;
+                    return GetExitCodeProcess(retainedHandle, out exitCode)
+                        ? (uint?)exitCode
+                        : null;
+                },
+                Marshal.GetLastWin32Error);
+        }
+
+        private static void ReapMatchingProcessCore(
+            IntPtr process,
+            int? terminationError,
+            Func<IntPtr, uint, uint> waitForProcess,
+            Func<IntPtr, uint?> queryExitCode,
+            Func<int> lastError)
+        {
+            uint? observedWait = null;
+            uint? exitCode = null;
+            bool exitQueried = false;
+            Func<string, string> describeFailure = message =>
+            {
+                if (!terminationError.HasValue) return message;
+                // Observations describe the retained handle now, not the state
+                // at TerminateProcess failure. They never change acceptance.
+                if (!observedWait.HasValue) observedWait = waitForProcess(process, 0);
+                if (!exitQueried)
+                {
+                    exitCode = queryExitCode(process);
+                    exitQueried = true;
+                }
+                string waitCategory = observedWait == WAIT_OBJECT_0 ? "signaled"
+                    : observedWait == WAIT_TIMEOUT ? "timeout" : "failed";
+                string exitCategory = !exitCode.HasValue ? "failed"
+                    : exitCode == STILL_ACTIVE ? "active" : "nonactive";
+                return message + " [termination-error=" +
+                    terminationError.Value.ToString(CultureInfo.InvariantCulture) +
+                    ";wait=" + waitCategory + ";exit=" + exitCategory + "]";
+            };
+            if (terminationError.HasValue)
+            {
+                // A retained handle can outlive the process. Confirm exit on that
+                // same SID-verified handle before accepting access denied.
+                if (terminationError == ERROR_ACCESS_DENIED)
+                    observedWait = waitForProcess(process, 0);
+                if (!CanConfirmTerminatedProcess(
+                        terminationError.Value, observedWait ?? UInt32.MaxValue))
+                {
+                    throw new Win32Exception(
+                        terminationError.Value,
+                        describeFailure("Matching isolated-SID process termination failed."));
+                }
+            }
+            uint wait = waitForProcess(process, 30000);
+            if (wait != WAIT_OBJECT_0)
+            {
+                if (wait == WAIT_TIMEOUT)
+                {
+                    throw new TimeoutException(
+                        describeFailure("Matching isolated-SID process did not terminate."));
+                }
+                int waitError = lastError();
+                throw new Win32Exception(
+                    waitError,
+                    describeFailure("Matching isolated-SID process wait failed."));
+            }
+            exitCode = queryExitCode(process);
+            exitQueried = true;
+            if (!exitCode.HasValue || exitCode == STILL_ACTIVE)
+            {
+                throw new InvalidOperationException(
+                    describeFailure("Matching isolated-SID process could not be reaped."));
+            }
         }
 
         private static bool RevalidateFailedProcessOpen(
@@ -4086,26 +5494,7 @@ namespace OpenCoven
                             typeof(WTS_PROCESS_INFO_EXW));
                     if (information.pUserSid == IntPtr.Zero)
                     {
-                        // The Idle process, and the protected system processes
-                        // that live in session 0 -- Secure System, Registry,
-                        // and their kin -- expose no primary token SID to any
-                        // caller, however privileged. Refusing on their
-                        // account made the drain unrunnable on hosts that
-                        // enable virtualization-based security, which is every
-                        // current Windows image.
-                        //
-                        // Skipping them does not widen what this proves. The
-                        // supervised identity is a local account this process
-                        // created and logged on with CreateProcessWithLogonW,
-                        // so its processes hold a readable token and appear in
-                        // this enumeration with a SID to compare. A process
-                        // whose SID cannot be read AT ALL is not one of them.
-                        //
-                        // Anywhere else, an owner this enumeration cannot read
-                        // is an owner it cannot rule out, so the refusal
-                        // stands -- and names the process, because a process
-                        // that exited between enumeration and read and a
-                        // permanently unreadable one demand opposite fixes.
+                        // The supervised user has a readable SID; protected session-0 processes may not.
                         if (information.ProcessId == 0 ||
                             information.SessionId == 0)
                         {
@@ -5214,12 +6603,24 @@ namespace OpenCoven
             return value;
         }
 
+        private static IntPtr OpenOwnedProfileDirectory(string path)
+        {
+            // Metadata-only opens do not participate in delete-sharing checks.
+            // Directory list access activates those checks without granting write access.
+            return OpenArtifactDirectory(path, FILE_LIST_DIRECTORY | FILE_READ_ATTRIBUTES | READ_CONTROL);
+        }
+
         private static IntPtr OpenArtifactDirectory(string path)
+        {
+            return OpenArtifactDirectory(path, FILE_READ_ATTRIBUTES | READ_CONTROL);
+        }
+
+        private static IntPtr OpenArtifactDirectory(string path, uint desiredAccess)
         {
             SECURITY_ATTRIBUTES attributes = NonInheritableSecurityAttributes();
             IntPtr handle = CreateFileW(
                 path,
-                FILE_READ_ATTRIBUTES | READ_CONTROL,
+                desiredAccess,
                 FILE_SHARE_READ | FILE_SHARE_WRITE,
                 ref attributes,
                 OPEN_EXISTING,
@@ -5981,7 +7382,7 @@ namespace OpenCoven
                     "Terminal producer identity quarantine failed.",
                     quarantineFailure);
             }
-            ApplyTerminalDirectoryQuotaCheck(result, DirectoryQuotas);
+            ApplyTerminalDirectoryQuotaCheckAsUser(isolatedUser, result, DirectoryQuotas);
             lock (quarantineSync)
             {
                 terminalProducerSucceeded =
@@ -5992,6 +7393,62 @@ namespace OpenCoven
                     !result.ResourceQuotaExceeded;
             }
             return result;
+        }
+
+        private static string ReadAssignmentDiagnostic(Func<string> query)
+        {
+            try { return query(); }
+            catch { return "unavailable"; }
+        }
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static extern bool ProcessIdToSessionId(uint processId, out uint sessionId);
+
+        private static uint? ReadProcessSession(uint processId)
+        {
+            try
+            {
+                uint session;
+                return ProcessIdToSessionId(processId, out session) ? (uint?)session : null;
+            }
+            catch { return null; }
+        }
+
+        private static string CompareProcessSessions(uint? left, uint? right)
+        {
+            return !left.HasValue || !right.HasValue
+                ? "unavailable" : left.Value == right.Value ? "same" : "different";
+        }
+
+        private string CaptureAssignmentDiagnostic(PROCESS_INFORMATION process)
+        {
+            string active = ReadAssignmentDiagnostic(() =>
+            {
+                JOBOBJECT_BASIC_ACCOUNTING_INFORMATION accounting;
+                if (!QueryInformationJobObject(jobHandle, JobObjectBasicAccountingInformation,
+                        out accounting, (uint)Marshal.SizeOf(typeof(JOBOBJECT_BASIC_ACCOUNTING_INFORMATION)),
+                        IntPtr.Zero)) return "unavailable";
+                return accounting.ActiveProcesses == 0 ? "zero" : "nonzero";
+            });
+            string any = ReadAssignmentDiagnostic(() =>
+            {
+                bool member;
+                return !IsProcessInJob(process.hProcess, IntPtr.Zero, out member)
+                    ? "unavailable" : member ? "yes" : "no";
+            });
+            string target = ReadAssignmentDiagnostic(() =>
+            {
+                bool member;
+                return !IsProcessInJob(process.hProcess, jobHandle, out member)
+                    ? "unavailable" : member ? "yes" : "no";
+            });
+            uint? childSession = ReadProcessSession(process.dwProcessId);
+            string supervisorSession = ReadAssignmentDiagnostic(() => CompareProcessSessions(
+                childSession, ReadProcessSession((uint)Process.GetCurrentProcess().Id)));
+            return "active=" + active + ";childAny=" + any + ";childTarget=" + target +
+                ";supervisorSession=" + supervisorSession + ";firstSession=" +
+                CompareProcessSessions(childSession, firstAssignedSession);
         }
 
         private WindowsJobRunResult RunAsUserCore(
@@ -6137,6 +7594,8 @@ namespace OpenCoven
                     commandLine.Append(arguments);
                 }
 
+                // Load the fresh child logon session; the supervisor separately owns
+                // its profile reference until terminal quarantine and explicit unload.
                 bool created = CreateProcessWithLogonW(
                     isolatedUser.UserName,
                     Environment.MachineName,
@@ -6165,10 +7624,16 @@ namespace OpenCoven
 
                 if (!AssignProcessToJobObject(jobHandle, process.hProcess))
                 {
+                    int nativeError = Marshal.GetLastWin32Error();
+                    string diagnostic = "unavailable";
+                    try { diagnostic = CaptureAssignmentDiagnostic(process); }
+                    catch { }
                     TerminateProcess(process.hProcess, 1);
-                    throw new Win32Exception(
-                        Marshal.GetLastWin32Error(),
+                    Win32Exception failure = new Win32Exception(
+                        nativeError,
                         "AssignProcessToJobObject failed.");
+                    failure.Data["OpenCoven.JobAssignment"] = diagnostic;
+                    throw failure;
                 }
                 bool assigned;
                 if (!IsProcessInJob(process.hProcess, jobHandle, out assigned) || !assigned)
@@ -6176,6 +7641,10 @@ namespace OpenCoven
                     TerminateJobObject(jobHandle, 1);
                     throw new InvalidOperationException(
                         "Suspended child did not enter the expected Job Object.");
+                }
+                if (!firstAssignedSession.HasValue)
+                {
+                    firstAssignedSession = ReadProcessSession(process.dwProcessId);
                 }
                 ProtectRootProcess(process.hProcess, isolatedUser.Sid);
 
@@ -6185,7 +7654,8 @@ namespace OpenCoven
                 stderrRead = IntPtr.Zero;
                 if (DirectoryQuotas.Length > 0)
                 {
-                    quotaTask = MonitorDirectoryQuotasAsync(
+                    quotaTask = MonitorDirectoryQuotasAsUserAsync(
+                        isolatedUser,
                         DirectoryQuotas,
                         quotaFailure,
                         quotaCancellation.Token);
@@ -6194,8 +7664,9 @@ namespace OpenCoven
                 uint resumeResult = ResumeThread(process.hThread);
                 if (resumeResult == UInt32.MaxValue)
                 {
+                    int nativeError = Marshal.GetLastWin32Error();
                     TerminateJobObject(jobHandle, 1);
-                    throw new Win32Exception(Marshal.GetLastWin32Error(), "ResumeThread failed.");
+                    throw new Win32Exception(nativeError, "ResumeThread failed.");
                 }
                 if (StandardInput != null)
                 {
@@ -6215,9 +7686,10 @@ namespace OpenCoven
                     }
                     if (wait != WAIT_TIMEOUT)
                     {
+                        int nativeError = Marshal.GetLastWin32Error();
                         TerminateJobObject(jobHandle, 1);
                         throw new Win32Exception(
-                            Marshal.GetLastWin32Error(),
+                            nativeError,
                             "WaitForSingleObject failed.");
                     }
                     if (
@@ -6261,7 +7733,8 @@ namespace OpenCoven
                     try
                     {
                         WindowsDirectoryQuota exceededQuota;
-                        if (DirectoryQuotasExceeded(
+                        if (DirectoryQuotasExceededAsUser(
+                                isolatedUser,
                                 DirectoryQuotas,
                                 out exceededQuota))
                         {
@@ -6269,9 +7742,9 @@ namespace OpenCoven
                             quotaExceeded = true;
                         }
                     }
-                    catch
+                    catch (Exception error)
                     {
-                        quotaFailure.RecordMonitorError();
+                        quotaFailure.RecordMonitorError(error);
                         quotaExceeded = true;
                     }
                 }
@@ -6309,6 +7782,11 @@ namespace OpenCoven
                     ResourceQuotaExceeded = quotaExceeded,
                     ResourceQuotaLabel = quotaFailure.QuotaLabel,
                     ResourceQuotaMonitorError = quotaFailure.MonitorError,
+                    ResourceQuotaMonitorCategory = quotaFailure.MonitorErrorCategory,
+                    ResourceQuotaMonitorRoot = quotaFailure.MonitorErrorRoot,
+                    ResourceQuotaMonitorScope = quotaFailure.MonitorErrorScope,
+                    ResourceQuotaMonitorOperation = quotaFailure.MonitorErrorOperation,
+                    ResourceQuotaMonitorRepeat = quotaFailure.MonitorErrorRepeat,
                     Stdout = stdout.Text,
                     Stderr = stderr.Text,
                 };
@@ -6352,8 +7830,7 @@ namespace OpenCoven
                     {
                     }
                 }
-                quotaCancellation.Dispose();
-                quotaFailure.Dispose();
+                DisposeDirectoryQuotaResources(quotaTask, quotaCancellation, quotaFailure);
                 overflow.Dispose();
                 if (environmentBlock != IntPtr.Zero)
                 {
@@ -6368,6 +7845,29 @@ namespace OpenCoven
                 CloseIfValid(stdinRead);
                 CloseIfValid(stdinWrite);
             }
+        }
+
+        private static Task DisposeDirectoryQuotaResources(
+            Task quotaTask,
+            CancellationTokenSource quotaCancellation,
+            DirectoryQuotaFailureState quotaFailure)
+        {
+            if (quotaTask == null || quotaTask.IsCompleted)
+            {
+                quotaCancellation.Dispose();
+                quotaFailure.Dispose();
+                return Task.CompletedTask;
+            }
+            return quotaTask.ContinueWith(
+                completed =>
+                {
+                    AggregateException observed = completed.Exception;
+                    quotaCancellation.Dispose();
+                    quotaFailure.Dispose();
+                },
+                CancellationToken.None,
+                TaskContinuationOptions.ExecuteSynchronously,
+                TaskScheduler.Default);
         }
 
         private static void TerminateJobAndWaitForZero(
@@ -6416,6 +7916,25 @@ namespace OpenCoven
             DirectoryQuotaFailureState failure,
             CancellationToken cancellationToken)
         {
+            return MonitorDirectoryQuotasCoreAsync(null, quotas, failure, cancellationToken);
+        }
+
+        private static Task MonitorDirectoryQuotasAsUserAsync(
+            WindowsIsolatedUser isolatedUser,
+            WindowsDirectoryQuota[] quotas,
+            DirectoryQuotaFailureState failure,
+            CancellationToken cancellationToken)
+        {
+            if (isolatedUser == null) throw new ArgumentNullException("isolatedUser");
+            return MonitorDirectoryQuotasCoreAsync(isolatedUser, quotas, failure, cancellationToken);
+        }
+
+        private static Task MonitorDirectoryQuotasCoreAsync(
+            WindowsIsolatedUser isolatedUser,
+            WindowsDirectoryQuota[] quotas,
+            DirectoryQuotaFailureState failure,
+            CancellationToken cancellationToken)
+        {
             return Task.Run(delegate
             {
                 while (!cancellationToken.IsCancellationRequested)
@@ -6423,15 +7942,15 @@ namespace OpenCoven
                     try
                     {
                         WindowsDirectoryQuota exceededQuota;
-                        if (DirectoryQuotasExceeded(quotas, out exceededQuota))
+                        if (DirectoryQuotasExceededAsUser(isolatedUser, quotas, out exceededQuota))
                         {
                             failure.RecordQuotaExceeded(exceededQuota.Label);
                             return;
                         }
                     }
-                    catch
+                    catch (Exception error)
                     {
-                        failure.RecordMonitorError();
+                        failure.RecordMonitorError(error);
                         return;
                     }
                     if (cancellationToken.WaitHandle.WaitOne(1000))
@@ -6442,33 +7961,191 @@ namespace OpenCoven
             });
         }
 
+        private static bool DirectoryQuotasExceededAsUser(
+            WindowsIsolatedUser isolatedUser,
+            WindowsDirectoryQuota[] quotas,
+            out WindowsDirectoryQuota exceededQuota)
+        {
+            if (isolatedUser == null)
+            {
+                return DirectoryQuotasExceeded(quotas, out exceededQuota);
+            }
+            return DirectoryQuotasExceededCore(isolatedUser, quotas, out exceededQuota);
+        }
+
         private static bool DirectoryQuotasExceeded(
+            WindowsDirectoryQuota[] quotas,
+            out WindowsDirectoryQuota exceededQuota)
+        {
+            return DirectoryQuotasExceededCore(null, quotas, out exceededQuota);
+        }
+
+        private static bool DirectoryQuotasExceededCore(
+            WindowsIsolatedUser isolatedUser,
             WindowsDirectoryQuota[] quotas,
             out WindowsDirectoryQuota exceededQuota)
         {
             exceededQuota = null;
             foreach (WindowsDirectoryQuota quota in quotas)
             {
-                long total = 0;
-                foreach (string path in ExpandQuotaPattern(quota.PathPattern))
+                try
                 {
-                    total = checked(
-                        total + MeasureDirectoryBytes(
-                            path,
-                            quota.MaxBytes - Math.Min(total, quota.MaxBytes)));
-                    if (total > quota.MaxBytes)
+                    bool exceeded;
+                    if (quota.IncludeOwnedProfileApplication)
+                    {
+                        ValidateOwnedProfileAggregateDefinition(isolatedUser, quota);
+                    }
+                    if (isolatedUser == null)
+                    {
+                        exceeded = DirectoryQuotaExceeded(quota, Path.GetPathRoot(quota.PathPattern));
+                    }
+                    else
+                    {
+                        exceeded = MeasureDirectoryQuotaWithRemovalRaceRecovery(() =>
+                            DirectoryQuotaExceededAsIsolatedUser(isolatedUser, quota));
+                    }
+                    if (exceeded)
                     {
                         exceededQuota = quota;
                         return true;
                     }
                 }
+                catch (Exception error)
+                {
+                    QuotaMonitorContextException context = error as QuotaMonitorContextException;
+                    string scope = context == null ? null : context.Scope;
+                    if ((String.IsNullOrEmpty(scope) || scope == "none") &&
+                        quota != null &&
+                        String.Equals(
+                            quota.Label,
+                            "harness execution aggregate",
+                            StringComparison.Ordinal))
+                    {
+                        scope = "root";
+                    }
+                    throw new QuotaMonitorContextException(
+                        quota == null ? null : quota.Label,
+                        context == null ? null : context.Operation,
+                        scope,
+                        context == null ? null : context.Repeat,
+                        error);
+                }
             }
             return false;
         }
 
-        private static IEnumerable<string> ExpandQuotaPattern(string pattern)
+        private static bool MeasureDirectoryQuotaWithRemovalRaceRecovery(Func<bool> measure)
         {
-            string root = Path.GetPathRoot(pattern);
+            try
+            {
+                return measure();
+            }
+            catch (QuotaMonitorContextException error)
+            {
+                if (error.Category != "access-denied" || error.Repeat != "missing")
+                    throw;
+                return measure();
+            }
+        }
+
+        private static bool DirectoryQuotaExceededAsIsolatedUser(
+            WindowsIsolatedUser isolatedUser,
+            WindowsDirectoryQuota quota)
+        {
+            string readRoot = ReadQuotaOperation("pattern-attributes", () =>
+                GetIsolatedQuotaReadRoot(isolatedUser.RootPath, quota.PathPattern));
+            bool prefixExists = false;
+            foreach (string prefix in ExpandQuotaPattern(readRoot, true))
+            {
+                prefixExists = true;
+            }
+            if (!prefixExists)
+            {
+                if (quota.IncludeOwnedProfileApplication)
+                    throw new IOException("Owned aggregate root is missing.");
+                return false;
+            }
+            return isolatedUser.RunQuotaRead(() =>
+                quota.IncludeOwnedProfileApplication
+                    ? isolatedUser.ReadOwnedProfileApplication(applicationPath =>
+                        DirectoryQuotaExceeded(quota, readRoot, true, applicationPath))
+                    : DirectoryQuotaExceeded(quota, readRoot, true));
+        }
+
+        private static void ValidateOwnedProfileAggregateDefinition(
+            WindowsIsolatedUser isolatedUser, WindowsDirectoryQuota quota)
+        {
+            if (isolatedUser == null)
+                throw new ArgumentException("Owned application accounting requires an isolated user.");
+            bool bootstrap = quota.Label == "bootstrap aggregate" &&
+                String.Equals(quota.PathPattern, isolatedUser.RootPath, StringComparison.OrdinalIgnoreCase);
+            bool harness = quota.Label == "harness execution aggregate" &&
+                String.Equals(quota.PathPattern,
+                    Path.Combine(isolatedUser.TempPath, "phase1-conformance-run-*"),
+                    StringComparison.OrdinalIgnoreCase);
+            if (!bootstrap && !harness)
+                throw new ArgumentException("Owned application accounting requires an exact aggregate definition.");
+        }
+
+        private static string GetIsolatedQuotaReadRoot(string isolatedRoot, string pattern)
+        {
+            string root = Path.GetFullPath(isolatedRoot).Replace('/', '\\').TrimEnd('\\');
+            string normalizedPattern = pattern.Replace('/', '\\').TrimEnd('\\');
+            if (root.Length < 3 || root[1] != ':' || root[2] != '\\' ||
+                !((root[0] >= 'A' && root[0] <= 'Z') || (root[0] >= 'a' && root[0] <= 'z')) ||
+                root.IndexOf('*') >= 0 ||
+                (!String.Equals(normalizedPattern, root, StringComparison.OrdinalIgnoreCase) &&
+                    !normalizedPattern.StartsWith(root + "\\", StringComparison.OrdinalIgnoreCase)))
+            {
+                throw new ArgumentException("Quota pattern is outside the isolated root.");
+            }
+            foreach (string segment in normalizedPattern.Substring(3).Split('\\'))
+            {
+                if (segment.Length == 0 || segment.EndsWith(".", StringComparison.Ordinal) ||
+                    segment.EndsWith(" ", StringComparison.Ordinal) || segment.IndexOf(':') >= 0)
+                {
+                    throw new ArgumentException("Quota pattern has an ambiguous path component.");
+                }
+            }
+            return root;
+        }
+
+        private static bool DirectoryQuotaExceeded(
+            WindowsDirectoryQuota quota, string readRoot,
+            bool repeatDiagnostic = false, string ownedProfileApplication = null)
+        {
+            if (quota.IncludeOwnedProfileApplication != (ownedProfileApplication != null))
+            {
+                throw new ArgumentException("Application quota requires its supervisor-owned root.");
+            }
+            long total = 0;
+            foreach (string path in ExpandQuotaPatternFromRoot(quota.PathPattern, readRoot, repeatDiagnostic))
+            {
+                total = checked(total + MeasureDirectoryBytes(
+                    path,
+                    quota.MaxBytes - Math.Min(total, quota.MaxBytes),
+                    quota.Label, repeatDiagnostic));
+                if (total > quota.MaxBytes) return true;
+            }
+            if (ownedProfileApplication != null)
+            {
+                total = checked(total + MeasureDirectoryBytes(
+                    ownedProfileApplication,
+                    quota.MaxBytes - Math.Min(total, quota.MaxBytes),
+                    quota.Label, repeatDiagnostic));
+            }
+            return total > quota.MaxBytes;
+        }
+
+        private static IEnumerable<string> ExpandQuotaPattern(
+            string pattern, bool repeatDiagnostic = false)
+        {
+            return ExpandQuotaPatternFromRoot(
+                pattern, Path.GetPathRoot(pattern), repeatDiagnostic);
+        }
+
+        private static IEnumerable<string> ExpandQuotaPatternFromRoot(string pattern, string root, bool repeatDiagnostic = false)
+        {
             string relative = pattern.Substring(root.Length);
             string[] segments = relative.Split(
                 new char[] { '\\', '/' },
@@ -6483,7 +8160,7 @@ namespace OpenCoven
                     FileAttributes candidateAttributes;
                     try
                     {
-                        candidateAttributes = File.GetAttributes(candidate);
+                        candidateAttributes = ReadQuotaOperation("pattern-attributes", () => File.GetAttributes(candidate), repeatDiagnostic);
                     }
                     catch (FileNotFoundException)
                     {
@@ -6500,14 +8177,14 @@ namespace OpenCoven
                     }
                     if (segment.IndexOf('*') >= 0)
                     {
-                        List<string> matches = ReadBoundedDirectorySnapshot(
+                        List<FileSystemInfo> matches = ReadBoundedDirectorySnapshot(
                             candidate,
                             segment,
                             true,
-                            MaximumQuotaEntries - next.Count);
-                        foreach (string matched in matches)
+                            MaximumQuotaEntries - next.Count, -1, repeatDiagnostic);
+                        foreach (FileSystemInfo matched in matches)
                         {
-                            next.Add(matched);
+                            next.Add(matched.FullName);
                         }
                     }
                     else
@@ -6516,7 +8193,7 @@ namespace OpenCoven
                         FileAttributes childAttributes;
                         try
                         {
-                            childAttributes = File.GetAttributes(child);
+                            childAttributes = ReadQuotaOperation("pattern-attributes", () => File.GetAttributes(child), repeatDiagnostic);
                         }
                         catch (FileNotFoundException)
                         {
@@ -6542,31 +8219,106 @@ namespace OpenCoven
             return candidates;
         }
 
-        private static List<string> ReadBoundedDirectorySnapshot(
+        private static List<FileSystemInfo> ReadBoundedDirectorySnapshot(
             string directory,
             string searchPattern,
             bool directoriesOnly,
-            int maximumEntries)
+            int maximumEntries,
+            int depth = -1, bool repeatDiagnostic = false)
         {
-            List<string> snapshot = new List<string>();
-            IEnumerable<string> entries;
-            IEnumerator<string> enumerator;
-            try
-            {
-                entries = directoriesOnly
-                    ? Directory.EnumerateDirectories(
+            string operation = directoriesOnly ? "pattern-enumeration" :
+                depth == 0 ? "directory-enumeration-root" :
+                depth == 1 ? "directory-enumeration-depth-1" :
+                depth == 2 ? "directory-enumeration-depth-2" :
+                depth >= 3 ? "directory-enumeration-depth-3-plus" : "directory-enumeration";
+            return ReadDirectorySnapshotOperation(
+                operation,
+                () => ReadBoundedDirectorySnapshotCore(
+                    directory,
+                    searchPattern,
+                    directoriesOnly,
+                    maximumEntries),
+                repeatDiagnostic,
+                () => ReadBoundedDirectorySnapshotCore(
                         directory,
                         searchPattern,
+                        directoriesOnly,
+                        maximumEntries,
+                        true));
+        }
+
+        private static List<FileSystemInfo> ReadDirectorySnapshotOperation(
+            string operation,
+            Func<List<FileSystemInfo>> read,
+            bool repeatDiagnostic,
+            Func<List<FileSystemInfo>> repeatRead = null)
+        {
+            try { return read(); }
+            catch (Exception error)
+            {
+                string repeat = "none";
+                if (repeatDiagnostic && error is UnauthorizedAccessException)
+                {
+                    try
+                    {
+                        return (repeatRead ?? read)();
+                    }
+                    catch (FileNotFoundException)
+                    {
+                        repeat = "missing";
+                    }
+                    catch (DirectoryNotFoundException)
+                    {
+                        repeat = "missing";
+                    }
+                    catch (Exception repeatError)
+                    {
+                        repeat = ClassifyPersistentQuotaRepeat(repeatError);
+                    }
+                }
+                else if (repeatDiagnostic)
+                {
+                    repeat = ClassifyQuotaReadRepeat(repeatRead ?? read);
+                }
+                throw new QuotaMonitorContextException(
+                    null,
+                    operation,
+                    null,
+                    repeat,
+                    error);
+            }
+        }
+
+        private static List<FileSystemInfo> ReadBoundedDirectorySnapshotCore(
+            string directory,
+            string searchPattern,
+            bool directoriesOnly,
+            int maximumEntries,
+            bool requireComplete = false)
+        {
+            List<FileSystemInfo> snapshot = new List<FileSystemInfo>();
+            IEnumerable<FileSystemInfo> entries;
+            IEnumerator<FileSystemInfo> enumerator;
+            try
+            {
+                DirectoryInfo directoryInfo = new DirectoryInfo(directory);
+                entries = directoriesOnly
+                    ? directoryInfo.EnumerateDirectories(
+                        searchPattern,
                         SearchOption.TopDirectoryOnly)
-                    : Directory.EnumerateFileSystemEntries(directory);
+                    : directoryInfo.EnumerateFileSystemInfos(
+                        "*",
+                        SearchOption.TopDirectoryOnly);
                 enumerator = entries.GetEnumerator();
             }
             catch (FileNotFoundException)
             {
+                if (requireComplete) throw;
                 return snapshot;
             }
             catch (DirectoryNotFoundException)
             {
+                if (requireComplete) throw;
                 return snapshot;
             }
             using (enumerator)
@@ -6580,10 +8332,12 @@ namespace OpenCoven
                     }
                     catch (FileNotFoundException)
                     {
+                        if (requireComplete) throw;
                         break;
                     }
                     catch (DirectoryNotFoundException)
                     {
+                        if (requireComplete) throw;
                         break;
                     }
                     if (!moved)
@@ -6592,8 +8346,7 @@ namespace OpenCoven
                     }
                     if (snapshot.Count >= maximumEntries)
                     {
-                        throw new IOException(
-                            "Directory quota entry bound exceeded.");
+                        throw new QuotaEntryBoundException();
                     }
                     snapshot.Add(enumerator.Current);
                 }
@@ -6601,44 +8354,32 @@ namespace OpenCoven
             return snapshot;
         }
 
-        private static long MeasureDirectoryBytes(string root, long remaining)
+        private static long MeasureDirectoryBytes(
+            string root,
+            long remaining,
+            string quotaLabel, bool repeatDiagnostic)
         {
             long total = 0;
             int entries = 0;
-            Stack<string> directories = new Stack<string>();
-            directories.Push(root);
+
+            Stack<KeyValuePair<string, int>> directories = new Stack<KeyValuePair<string, int>>();
+            directories.Push(new KeyValuePair<string, int>(root, 0));
             while (directories.Count > 0)
             {
-                string directory = directories.Pop();
-                FileAttributes directoryAttributes;
+                KeyValuePair<string, int> current = directories.Pop();
+                string directory = current.Key;
+                string scope = ClassifyQuotaScope(
+                    quotaLabel,
+                    root,
+                    directory);
                 try
                 {
-                    directoryAttributes = File.GetAttributes(directory);
-                }
-                catch (FileNotFoundException)
-                {
-                    continue;
-                }
-                catch (DirectoryNotFoundException)
-                {
-                    continue;
-                }
-                if ((directoryAttributes & FileAttributes.ReparsePoint) != 0)
-                {
-                    continue;
-                }
-                List<string> snapshot = ReadBoundedDirectorySnapshot(
-                    directory,
-                    null,
-                    false,
-                    MaximumQuotaEntries - entries);
-                entries = checked(entries + snapshot.Count);
-                foreach (string entry in snapshot)
-                {
-                    FileAttributes attributes;
+                    FileAttributes directoryAttributes;
                     try
                     {
-                        attributes = File.GetAttributes(entry);
+                        directoryAttributes = ReadQuotaOperation(
+                            "directory-attributes",
+                            () => File.GetAttributes(directory), repeatDiagnostic);
                     }
                     catch (FileNotFoundException)
                     {
@@ -6648,20 +8389,25 @@ namespace OpenCoven
                     {
                         continue;
                     }
-                    if ((attributes & FileAttributes.ReparsePoint) != 0)
+                    if ((directoryAttributes & FileAttributes.ReparsePoint) != 0)
                     {
                         continue;
                     }
-                    if ((attributes & FileAttributes.Directory) != 0)
+                    List<FileSystemInfo> snapshot = ReadBoundedDirectorySnapshot(
+                        directory,
+                        null,
+                        false,
+                        MaximumQuotaEntries - entries,
+                        current.Value, repeatDiagnostic);
+                    entries = checked(entries + snapshot.Count);
+                    foreach (FileSystemInfo entry in snapshot)
                     {
-                        directories.Push(entry);
-                    }
-                    else
-                    {
-                        long length;
+                        FileAttributes attributes;
                         try
                         {
-                            length = new FileInfo(entry).Length;
+                            attributes = ReadQuotaOperation(
+                                "entry-attributes",
+                                () => entry.Attributes, repeatDiagnostic, () => File.GetAttributes(entry.FullName));
                         }
                         catch (FileNotFoundException)
                         {
@@ -6671,18 +8417,78 @@ namespace OpenCoven
                         {
                             continue;
                         }
-                        total = checked(total + length);
-                        if (total > remaining)
+                        if ((attributes & FileAttributes.ReparsePoint) != 0)
                         {
-                            return total;
+                            continue;
+                        }
+                        if ((attributes & FileAttributes.Directory) != 0)
+                        {
+                            directories.Push(new KeyValuePair<string, int>(
+                                entry.FullName,
+                                Math.Min(current.Value + 1, 3)));
+                        }
+                        else
+                        {
+                            long length;
+                            try
+                            {
+                                FileInfo file = entry as FileInfo;
+                                if (file == null)
+                                {
+                                    throw new IOException(
+                                        "Directory quota file metadata was unavailable.");
+                                }
+                                length = ReadQuotaOperation(
+                                    "file-length",
+                                    () => file.Length, repeatDiagnostic, () => new FileInfo(file.FullName).Length);
+                            }
+                            catch (FileNotFoundException)
+                            {
+                                continue;
+                            }
+                            catch (DirectoryNotFoundException)
+                            {
+                                continue;
+                            }
+                            total = checked(total + length);
+                            if (total > remaining)
+                            {
+                                return total;
+                            }
                         }
                     }
+                }
+                catch (QuotaMonitorContextException error)
+                {
+                    throw new QuotaMonitorContextException(
+                        null,
+                        error.Operation,
+                        scope,
+                        error.Repeat,
+                        error);
                 }
             }
             return total;
         }
 
         private static void ApplyTerminalDirectoryQuotaCheck(
+            WindowsJobRunResult result,
+            WindowsDirectoryQuota[] quotas)
+        {
+            ApplyTerminalDirectoryQuotaCheckCore(null, result, quotas);
+        }
+
+        private static void ApplyTerminalDirectoryQuotaCheckAsUser(
+            WindowsIsolatedUser isolatedUser,
+            WindowsJobRunResult result,
+            WindowsDirectoryQuota[] quotas)
+        {
+            if (isolatedUser == null) throw new ArgumentNullException("isolatedUser");
+            ApplyTerminalDirectoryQuotaCheckCore(isolatedUser, result, quotas);
+        }
+
+        private static void ApplyTerminalDirectoryQuotaCheckCore(
+            WindowsIsolatedUser isolatedUser,
             WindowsJobRunResult result,
             WindowsDirectoryQuota[] quotas)
         {
@@ -6698,7 +8504,7 @@ namespace OpenCoven
             try
             {
                 WindowsDirectoryQuota exceededQuota;
-                if (DirectoryQuotasExceeded(quotas, out exceededQuota))
+                if (DirectoryQuotasExceededAsUser(isolatedUser, quotas, out exceededQuota))
                 {
                     result.ResourceQuotaExceeded = true;
                     if (!result.ResourceQuotaMonitorError &&
@@ -6709,11 +8515,19 @@ namespace OpenCoven
                     result.ExitCode = SupervisorFailureExitCode;
                 }
             }
-            catch
+            catch (Exception error)
             {
+                if (!result.ResourceQuotaExceeded && !result.ResourceQuotaMonitorError)
+                {
+                    result.ResourceQuotaMonitorCategory = ClassifyQuotaMonitorError(error);
+                    result.ResourceQuotaMonitorRoot = QuotaMonitorRoot(error);
+                    result.ResourceQuotaMonitorScope = QuotaMonitorScope(error);
+                    result.ResourceQuotaMonitorOperation = QuotaMonitorOperation(error);
+                    result.ResourceQuotaMonitorRepeat = QuotaMonitorRepeat(error);
+                    result.ResourceQuotaMonitorError = true;
+                    result.ResourceQuotaLabel = null;
+                }
                 result.ResourceQuotaExceeded = true;
-                result.ResourceQuotaMonitorError = true;
-                result.ResourceQuotaLabel = null;
                 result.ExitCode = SupervisorFailureExitCode;
             }
         }
@@ -6877,6 +8691,8 @@ namespace OpenCoven
             values["USERNAME"] = isolatedUser.UserName;
             values["USERDOMAIN"] = Environment.MachineName;
             values["OPENCOVEN_WINDOWS_RESTRICTED_USER_SID"] = isolatedUser.Sid;
+            values["OPENCOVEN_WINDOWS_PROFILE_ROOT"] =
+                isolatedUser.OperatingSystemProfilePath;
             values["OPENCOVEN_WINDOWS_SUPERVISOR_PID"] =
                 Process.GetCurrentProcess().Id.ToString(CultureInfo.InvariantCulture);
             values["OPENCOVEN_WINDOWS_SUPERVISOR_JOB_HANDLE"] =
@@ -6925,6 +8741,337 @@ namespace OpenCoven
             internal string Text;
         }
 
+        private sealed class QuotaEntryBoundException : IOException
+        {
+            internal QuotaEntryBoundException() : base("Directory quota entry bound exceeded.") { }
+        }
+
+        private sealed class QuotaMonitorContextException : Exception
+        {
+            internal string Category { get; private set; }
+            internal string Root { get; private set; }
+            internal string Scope { get; private set; }
+            internal string Operation { get; private set; }
+            internal string Repeat { get; private set; }
+
+            internal QuotaMonitorContextException(string root, string operation, Exception error)
+                : this(root, operation, null, null, error)
+            {
+            }
+
+            internal QuotaMonitorContextException(
+                string root,
+                string operation,
+                string scope,
+                string repeat,
+                Exception error)
+                : base("Directory quota monitor failed.")
+            {
+                Category = ClassifyQuotaMonitorError(error);
+                Root = NormalizeQuotaRoot(root);
+                Scope = NormalizeQuotaScope(scope == null ? "none" : scope);
+                Operation = NormalizeQuotaOperation(operation);
+                Repeat = NormalizeQuotaRepeat(repeat == null ? "none" : repeat);
+            }
+        }
+
+        private static string NormalizeQuotaRoot(string label)
+        {
+            switch (label)
+            {
+                case "bootstrap aggregate": return "bootstrap-aggregate";
+                case "status staging": return "status-staging";
+                case "workspace aggregate": return "workspace-aggregate";
+                case "direct downloads": return "direct-downloads";
+                case "PortableGit extraction": return "portablegit-extraction";
+                case "Node extraction": return "node-extraction";
+                case "pnpm installation": return "pnpm-installation";
+                case "rustup toolchains": return "rustup-toolchains";
+                case "bootstrap Cargo registry": return "bootstrap-cargo-registry";
+                case "bootstrap Cargo git": return "bootstrap-cargo-git";
+                case "bootstrap pnpm store": return "bootstrap-pnpm-store";
+                case "bootstrap npm cache": return "bootstrap-npm-cache";
+                case "protected Chat Git objects": return "protected-chat-git-objects";
+                case "SDK checkout": return "sdk-checkout";
+                case "Chat checkout": return "chat-checkout";
+                case "Cave checkout": return "cave-checkout";
+                case "Coven checkout": return "coven-checkout";
+                case "validator checkout": return "validator-checkout";
+                case "producer checkout": return "producer-checkout";
+                case "harness Cargo registry": return "harness-cargo-registry";
+                case "harness Cargo git": return "harness-cargo-git";
+                case "harness pnpm store": return "harness-pnpm-store";
+                case "harness build roots": return "harness-build-roots";
+                case "harness execution aggregate": return "harness-execution-aggregate";
+                default: return "unknown";
+            }
+        }
+
+        private static string NormalizeQuotaScope(string scope)
+        {
+            switch (scope)
+            {
+                case "root":
+                case "profile":
+                case "temp":
+                case "status-staging":
+                case "workspace":
+                case "downloads":
+                case "tools-git":
+                case "tools-node":
+                case "tools-pnpm":
+                case "tools-other":
+                case "rustup":
+                case "cargo-registry":
+                case "cargo-git":
+                case "cargo-other":
+                case "pnpm-store":
+                case "npm-cache":
+                case "counterparts":
+                case "home":
+                case "cache":
+                case "data":
+                case "cargo-home":
+                case "checkouts":
+                case "build":
+                case "packages":
+                case "bin":
+                case "native":
+                case "compatibility":
+                case "other":
+                    return scope;
+                default: return "none";
+            }
+        }
+
+        private static string NormalizeQuotaOperation(string operation)
+        {
+            switch (operation)
+            {
+                case "pattern-attributes":
+                case "pattern-enumeration":
+                case "directory-attributes":
+                case "directory-enumeration":
+                case "directory-enumeration-root":
+                case "directory-enumeration-depth-1":
+                case "directory-enumeration-depth-2":
+                case "directory-enumeration-depth-3-plus":
+                case "entry-attributes":
+                case "file-length":
+                    return operation;
+                default: return "unknown";
+            }
+        }
+
+        private static string NormalizeQuotaRepeat(string repeat)
+        {
+            switch (repeat)
+            {
+                case "readable":
+                case "missing":
+                case "persistent":
+                case "persistent-entry-bound":
+                case "persistent-access-denied":
+                case "persistent-arithmetic-overflow":
+                case "persistent-io":
+                case "persistent-io-file-not-found":
+                case "persistent-io-path-not-found":
+                case "persistent-io-sharing-violation":
+                case "persistent-io-lock-violation":
+                case "persistent-io-name-too-long":
+                case "persistent-io-invalid-directory":
+                case "persistent-io-delete-pending":
+                case "persistent-unexpected":
+                    return repeat;
+                default: return "none";
+            }
+        }
+
+        private static string ClassifyQuotaReadRepeat<T>(Func<T> retry)
+        {
+            try
+            {
+                retry();
+                return "readable";
+            }
+            catch (FileNotFoundException)
+            {
+                return "missing";
+            }
+            catch (DirectoryNotFoundException)
+            {
+                return "missing";
+            }
+            catch (Exception repeatError)
+            {
+                return ClassifyPersistentQuotaRepeat(repeatError);
+            }
+        }
+
+        private static string ClassifyPersistentQuotaRepeat(Exception error)
+        {
+            return NormalizeQuotaRepeat("persistent-" + ClassifyQuotaMonitorError(error));
+        }
+
+        private static T ReadQuotaOperation<T>(string operation, Func<T> read, bool repeatDiagnostic = false, Func<T> repeatRead = null)
+        {
+            try { return read(); }
+            catch (FileNotFoundException) { throw; }
+            catch (DirectoryNotFoundException) { throw; }
+            catch (Exception error)
+            {
+                throw new QuotaMonitorContextException(
+                    null,
+                    operation,
+                    null,
+                    repeatDiagnostic ? ClassifyQuotaReadRepeat(repeatRead ?? read) : "none",
+                    error);
+            }
+        }
+
+        private static string QuotaMonitorRoot(Exception error)
+        {
+            QuotaMonitorContextException context = error as QuotaMonitorContextException;
+            return context == null ? "unknown" : context.Root;
+        }
+
+        private static string QuotaMonitorScope(Exception error)
+        {
+            QuotaMonitorContextException context = error as QuotaMonitorContextException;
+            return context == null ? "none" : context.Scope;
+        }
+
+        private static string QuotaMonitorOperation(Exception error)
+        {
+            QuotaMonitorContextException context = error as QuotaMonitorContextException;
+            return context == null ? "unknown" : context.Operation;
+        }
+
+        private static string QuotaMonitorRepeat(Exception error)
+        {
+            QuotaMonitorContextException context = error as QuotaMonitorContextException;
+            return context == null ? "none" : context.Repeat;
+        }
+
+        private static string ClassifyQuotaScope(
+            string quotaLabel,
+            string quotaRoot,
+            string directory)
+        {
+            bool bootstrapAggregate = String.Equals(
+                quotaLabel,
+                "bootstrap aggregate",
+                StringComparison.Ordinal);
+            bool harnessAggregate = String.Equals(
+                quotaLabel,
+                "harness execution aggregate",
+                StringComparison.Ordinal);
+            if ((!bootstrapAggregate && !harnessAggregate) ||
+                String.IsNullOrWhiteSpace(quotaRoot) ||
+                String.IsNullOrWhiteSpace(directory))
+            {
+                return "none";
+            }
+            string root = quotaRoot.Replace('/', '\\').TrimEnd('\\');
+            string current = directory.Replace('/', '\\').TrimEnd('\\');
+            if (String.Equals(current, root, StringComparison.OrdinalIgnoreCase))
+            {
+                return "root";
+            }
+            string prefix = root + "\\";
+            if (!current.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+            {
+                return "none";
+            }
+            string[] segments = current.Substring(prefix.Length).Split(
+                new char[] { '\\' },
+                StringSplitOptions.RemoveEmptyEntries);
+            if (segments.Length == 0)
+            {
+                return "other";
+            }
+            string first = segments[0];
+            if (harnessAggregate)
+            {
+                switch (first.ToLowerInvariant())
+                {
+                    case "home": return "home";
+                    case "tmp": return "temp";
+                    case "cache": return "cache";
+                    case "data": return "data";
+                    case "pnpm-store": return "pnpm-store";
+                    case "cargo-home": return "cargo-home";
+                    case "checkouts": return "checkouts";
+                    case "build": return "build";
+                    case "packages": return "packages";
+                    case "bin": return "bin";
+                }
+                if (first.StartsWith("native-", StringComparison.OrdinalIgnoreCase)) return "native";
+                if (first.StartsWith("compatibility-", StringComparison.OrdinalIgnoreCase)) return "compatibility";
+                return "other";
+            }
+            if (String.Equals(first, "profile", StringComparison.OrdinalIgnoreCase)) return "profile";
+            if (String.Equals(first, "temp", StringComparison.OrdinalIgnoreCase)) return "temp";
+            if (String.Equals(first, "status-staging", StringComparison.OrdinalIgnoreCase)) return "status-staging";
+            if (String.Equals(first, "workspace", StringComparison.OrdinalIgnoreCase)) return "workspace";
+            if (String.Equals(first, "downloads", StringComparison.OrdinalIgnoreCase)) return "downloads";
+            if (String.Equals(first, "rustup", StringComparison.OrdinalIgnoreCase)) return "rustup";
+            if (String.Equals(first, "pnpm-store", StringComparison.OrdinalIgnoreCase)) return "pnpm-store";
+            if (String.Equals(first, "npm-cache", StringComparison.OrdinalIgnoreCase)) return "npm-cache";
+            if (String.Equals(first, "counterparts", StringComparison.OrdinalIgnoreCase)) return "counterparts";
+            if (String.Equals(first, "tools", StringComparison.OrdinalIgnoreCase))
+            {
+                if (segments.Length > 1)
+                {
+                    if (String.Equals(segments[1], "git", StringComparison.OrdinalIgnoreCase)) return "tools-git";
+                    if (String.Equals(segments[1], "node", StringComparison.OrdinalIgnoreCase)) return "tools-node";
+                    if (String.Equals(segments[1], "pnpm", StringComparison.OrdinalIgnoreCase)) return "tools-pnpm";
+                }
+                return "tools-other";
+            }
+            if (String.Equals(first, "cargo", StringComparison.OrdinalIgnoreCase))
+            {
+                if (segments.Length > 1)
+                {
+                    if (String.Equals(segments[1], "registry", StringComparison.OrdinalIgnoreCase)) return "cargo-registry";
+                    if (String.Equals(segments[1], "git", StringComparison.OrdinalIgnoreCase)) return "cargo-git";
+                }
+                return "cargo-other";
+            }
+            return "other";
+        }
+
+        private static string ClassifyQuotaMonitorError(Exception error)
+        {
+            QuotaMonitorContextException context = error as QuotaMonitorContextException;
+            if (context != null) return context.Category;
+            if (error is QuotaEntryBoundException) return "entry-bound";
+            if (error is UnauthorizedAccessException) return "access-denied";
+            if (error is OverflowException) return "arithmetic-overflow";
+            IOException ioError = error as IOException;
+            if (ioError != null) return ClassifyQuotaIoError(ioError);
+            return "unexpected";
+        }
+
+        private static string ClassifyQuotaIoError(IOException error)
+        {
+            if ((error.HResult & HRESULT_WIN32_MASK) != HRESULT_WIN32_PREFIX)
+            {
+                return "io";
+            }
+            switch (error.HResult & 0xffff)
+            {
+                case ERROR_FILE_NOT_FOUND: return "io-file-not-found";
+                case ERROR_PATH_NOT_FOUND: return "io-path-not-found";
+                case ERROR_SHARING_VIOLATION: return "io-sharing-violation";
+                case ERROR_LOCK_VIOLATION: return "io-lock-violation";
+                case ERROR_FILENAME_EXCED_RANGE: return "io-name-too-long";
+                case ERROR_DIRECTORY: return "io-invalid-directory";
+                case ERROR_DELETE_PENDING: return "io-delete-pending";
+                default: return "io";
+            }
+        }
+
         private sealed class DirectoryQuotaFailureState : IDisposable
         {
             private readonly object syncRoot = new object();
@@ -6932,6 +9079,36 @@ namespace OpenCoven
                 new ManualResetEventSlim(false);
             private string quotaLabel;
             private bool monitorError;
+            private string monitorErrorCategory;
+            private string monitorErrorRoot;
+            private string monitorErrorScope;
+            private string monitorErrorOperation;
+            private string monitorErrorRepeat;
+
+            internal string MonitorErrorRoot
+            {
+                get { lock (syncRoot) { return monitorErrorRoot; } }
+            }
+
+            internal string MonitorErrorOperation
+            {
+                get { lock (syncRoot) { return monitorErrorOperation; } }
+            }
+
+            internal string MonitorErrorScope
+            {
+                get { lock (syncRoot) { return monitorErrorScope; } }
+            }
+
+            internal string MonitorErrorCategory
+            {
+                get { lock (syncRoot) { return monitorErrorCategory; } }
+            }
+
+            internal string MonitorErrorRepeat
+            {
+                get { lock (syncRoot) { return monitorErrorRepeat; } }
+            }
 
             internal bool IsSet
             {
@@ -6975,13 +9152,18 @@ namespace OpenCoven
                 }
             }
 
-            internal void RecordMonitorError()
+            internal void RecordMonitorError(Exception error)
             {
                 lock (syncRoot)
                 {
                     if (!signal.IsSet)
                     {
                         monitorError = true;
+                        monitorErrorCategory = ClassifyQuotaMonitorError(error);
+                        monitorErrorRoot = QuotaMonitorRoot(error);
+                        monitorErrorScope = QuotaMonitorScope(error);
+                        monitorErrorOperation = QuotaMonitorOperation(error);
+                        monitorErrorRepeat = QuotaMonitorRepeat(error);
                         signal.Set();
                     }
                 }

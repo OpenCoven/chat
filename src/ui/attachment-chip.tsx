@@ -1,4 +1,4 @@
-import { Icon } from '../demo/minimal-icons';
+import { Icon } from '../design/minimal-icons';
 import { Button } from './button';
 import { Progress } from './progress';
 import { cn } from './utils';

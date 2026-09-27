@@ -1,4 +1,4 @@
-use std::process;
+use std::{ffi::OsString, process};
 
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
 use hmac::{Hmac, Mac};
@@ -29,6 +29,34 @@ const GRANT_ID_DOMAIN: &[u8] = b"opencoven-chat-phase1-keyring-cleanup-id-v1\0";
 const PROCESS_ID_DOMAIN: &[u8] = b"opencoven-chat-phase1-keyring-cleanup-process-v1\0";
 const MARKER_VERSION: u32 = 1;
 const MAX_MARKER_BYTES: usize = 16 * 1024;
+const CLEANUP_HOME_ENV: &str = "OPENCOVEN_PHASE1_CONFORMANCE_CLEANUP_HOME";
+
+fn marker_home_from(
+    cleanup_home: Option<OsString>,
+    ambient_home: Option<OsString>,
+) -> Option<OsString> {
+    cleanup_home.or(ambient_home)
+}
+
+#[cfg(any(windows, test))]
+fn marker_home_uses_profile_identity(cleanup_home: &Option<OsString>) -> bool {
+    cleanup_home.is_some()
+}
+
+fn marker_home() -> Option<OsString> {
+    marker_home_from(std::env::var_os(CLEANUP_HOME_ENV), std::env::var_os("HOME"))
+}
+
+#[derive(Debug, PartialEq, Eq)]
+enum MarkerIdentityError {
+    Home,
+    DirectoryCreate,
+    DirectoryOpen,
+    DirectoryMetadata,
+    DirectoryTrust,
+    Sync,
+    Identity,
+}
 
 #[derive(Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -78,15 +106,34 @@ pub(crate) fn issue(
     accounts: &[String],
     process_secret: &[u8; GRANT_BYTES],
 ) -> Result<String, KeyringError> {
-    validate_service(service)?;
+    validate_service(service).map_err(|error| match error {
+        KeyringError::Unavailable => KeyringError::CleanupGrantServiceUnavailable,
+        other => other,
+    })?;
     validate_conformance_cleanup_accounts(accounts)?;
-    let storage_identity = marker_io::identity().map_err(|_| KeyringError::Unavailable)?;
+    let storage_identity = marker_io::identity().map_err(|error| match error {
+        MarkerIdentityError::Home => KeyringError::CleanupGrantMarkerHomeUnavailable,
+        MarkerIdentityError::DirectoryCreate => {
+            KeyringError::CleanupGrantMarkerDirectoryCreateUnavailable
+        }
+        MarkerIdentityError::DirectoryOpen => {
+            KeyringError::CleanupGrantMarkerDirectoryOpenUnavailable
+        }
+        MarkerIdentityError::DirectoryMetadata => {
+            KeyringError::CleanupGrantMarkerDirectoryMetadataUnavailable
+        }
+        MarkerIdentityError::DirectoryTrust => {
+            KeyringError::CleanupGrantMarkerDirectoryTrustUnavailable
+        }
+        MarkerIdentityError::Sync => KeyringError::CleanupGrantMarkerSyncUnavailable,
+        MarkerIdentityError::Identity => KeyringError::CleanupGrantMarkerIdentityUnavailable,
+    })?;
     #[cfg(windows)]
     marker_io::test_hook("issue-storage-identity").map_err(|_| KeyringError::Unavailable)?;
 
     for _ in 0..4 {
         let mut grant = Zeroizing::new([0_u8; GRANT_BYTES]);
-        getrandom::fill(grant.as_mut()).map_err(|_| KeyringError::Unavailable)?;
+        getrandom::fill(grant.as_mut()).map_err(|_| KeyringError::CleanupGrantRandomUnavailable)?;
         let grant_id = grant_id(grant.as_ref());
         let payload = CleanupGrantPayload {
             version: MARKER_VERSION,
@@ -110,10 +157,12 @@ pub(crate) fn issue(
         match marker_io::publish(&grant_id, &marker_bytes, &storage_identity) {
             Ok(()) => return Ok(URL_SAFE_NO_PAD.encode(grant.as_ref())),
             Err(marker_io::PublishError::Collision) => continue,
-            Err(marker_io::PublishError::Unavailable) => return Err(KeyringError::Unavailable),
+            Err(marker_io::PublishError::Unavailable) => {
+                return Err(KeyringError::CleanupGrantMarkerPublishUnavailable);
+            }
         }
     }
-    Err(KeyringError::Unavailable)
+    Err(KeyringError::CleanupGrantCollisionExhausted)
 }
 
 pub(crate) fn prepare(
@@ -254,7 +303,6 @@ fn constant_time_eq(left: &[u8], right: &[u8]) -> bool {
 #[cfg(unix)]
 mod marker_io {
     use std::{
-        env,
         ffi::CString,
         fs::{self, File, OpenOptions},
         io::{Read, Write},
@@ -265,7 +313,7 @@ mod marker_io {
         path::{Component, PathBuf},
     };
 
-    use super::MAX_MARKER_BYTES;
+    use super::{MarkerIdentityError, MAX_MARKER_BYTES};
 
     const DIRECTORY_NAMES: [&str; 3] = [".coven", "chat", "phase1-cleanup-grants-v1"];
 
@@ -333,37 +381,40 @@ mod marker_io {
     }
 
     impl MarkerDirectory {
-        fn open() -> Result<Self, ()> {
-            let home = env::var_os("HOME").ok_or(())?;
-            let home = PathBuf::from(home);
+        fn open() -> Result<Self, MarkerIdentityError> {
+            let home = super::marker_home().ok_or(MarkerIdentityError::Home)?;
+            Self::open_at(PathBuf::from(home))
+        }
+
+        fn open_at(home: PathBuf) -> Result<Self, MarkerIdentityError> {
             if !home.is_absolute()
                 || home
                     .components()
                     .any(|component| matches!(component, Component::ParentDir | Component::CurDir))
             {
-                return Err(());
+                return Err(MarkerIdentityError::Home);
             }
-            let initial = fs::symlink_metadata(&home).map_err(|_| ())?;
-            validate_directory(&initial)?;
+            let initial = fs::symlink_metadata(&home).map_err(|_| MarkerIdentityError::Home)?;
+            validate_home_directory(&initial)?;
             let mut current = OpenOptions::new()
                 .read(true)
                 .custom_flags(libc::O_DIRECTORY | libc::O_NOFOLLOW | libc::O_CLOEXEC)
                 .open(&home)
-                .map_err(|_| ())?;
-            let opened = current.metadata().map_err(|_| ())?;
-            validate_directory(&opened)?;
+                .map_err(|_| MarkerIdentityError::Home)?;
+            let opened = current.metadata().map_err(|_| MarkerIdentityError::Home)?;
+            validate_home_directory(&opened)?;
             if initial.dev() != opened.dev() || initial.ino() != opened.ino() {
-                return Err(());
+                return Err(MarkerIdentityError::Home);
             }
 
             for name in DIRECTORY_NAMES {
-                let name = CString::new(name).map_err(|_| ())?;
+                let name = CString::new(name).map_err(|_| MarkerIdentityError::DirectoryCreate)?;
                 let created =
                     unsafe { libc::mkdirat(current.as_raw_fd(), name.as_ptr(), 0o700) } == 0;
                 if !created {
                     let error = std::io::Error::last_os_error();
                     if error.kind() != std::io::ErrorKind::AlreadyExists {
-                        return Err(());
+                        return Err(MarkerIdentityError::DirectoryCreate);
                     }
                 }
                 let descriptor = unsafe {
@@ -374,17 +425,22 @@ mod marker_io {
                     )
                 };
                 if descriptor < 0 {
-                    return Err(());
+                    return Err(MarkerIdentityError::DirectoryOpen);
                 }
                 let next = unsafe { File::from_raw_fd(descriptor) };
-                validate_directory(&next.metadata().map_err(|_| ())?)?;
+                let metadata = next
+                    .metadata()
+                    .map_err(|_| MarkerIdentityError::DirectoryMetadata)?;
+                validate_directory(&metadata).map_err(|_| MarkerIdentityError::DirectoryTrust)?;
                 if created {
-                    next.sync_all().map_err(|_| ())?;
-                    current.sync_all().map_err(|_| ())?;
+                    next.sync_all().map_err(|_| MarkerIdentityError::Sync)?;
+                    current.sync_all().map_err(|_| MarkerIdentityError::Sync)?;
                 }
                 current = next;
             }
-            let metadata = current.metadata().map_err(|_| ())?;
+            let metadata = current
+                .metadata()
+                .map_err(|_| MarkerIdentityError::Identity)?;
             Ok(Self {
                 file: current,
                 identity: format!("{:x}:{:x}", metadata.dev(), metadata.ino()),
@@ -483,10 +539,13 @@ mod marker_io {
         }
     }
 
-    pub(super) fn identity() -> Result<String, PublishError> {
-        MarkerDirectory::open()
-            .map(|directory| directory.identity)
-            .map_err(|_| PublishError::Unavailable)
+    pub(super) fn identity() -> Result<String, MarkerIdentityError> {
+        MarkerDirectory::open().map(|directory| directory.identity)
+    }
+
+    #[cfg(test)]
+    pub(super) fn identity_at(home: &std::path::Path) -> Result<String, MarkerIdentityError> {
+        MarkerDirectory::open_at(home.to_path_buf()).map(|directory| directory.identity)
     }
 
     pub(super) fn publish(
@@ -601,6 +660,17 @@ mod marker_io {
         Ok(())
     }
 
+    fn validate_home_directory(metadata: &fs::Metadata) -> Result<(), MarkerIdentityError> {
+        if metadata.file_type().is_symlink()
+            || !metadata.is_dir()
+            || metadata.uid() != unsafe { libc::geteuid() }
+            || metadata.mode() & 0o022 != 0
+        {
+            return Err(MarkerIdentityError::Home);
+        }
+        Ok(())
+    }
+
     fn validate_file(metadata: &fs::Metadata, expected_len: Option<u64>) -> Result<(), ()> {
         if metadata.file_type().is_symlink()
             || !metadata.is_file()
@@ -649,7 +719,7 @@ mod marker_io {
         },
     };
 
-    use super::MAX_MARKER_BYTES;
+    use super::{MarkerIdentityError, MAX_MARKER_BYTES};
 
     const DIRECTORY_NAMES: [&str; 3] = [".coven", "chat", "phase1-cleanup-grants-v1"];
     const TEST_HOOK_ENV: &str = "OPENCOVEN_PHASE1_CONFORMANCE_CLEANUP_TEST_HOOK";
@@ -663,6 +733,165 @@ mod marker_io {
 
     pub(super) enum HoldError {
         Rejected,
+    }
+
+    #[cfg(test)]
+    mod owner_cleanup_tests {
+        use super::*;
+
+        struct Home(PathBuf);
+        impl Home {
+            fn new() -> Self {
+                let path = std::env::temp_dir()
+                    .join(format!("coven-owner-cleanup-{}", uuid::Uuid::new_v4()));
+                create_private_directory(&path).unwrap();
+                Self(path)
+            }
+            fn directory(&self) -> MarkerDirectory {
+                let mut chain =
+                    vec![
+                        pin_directory(self.0.clone(), WindowsDirectoryOwner::CurrentUser).unwrap(),
+                    ];
+                let mut path = self.0.clone();
+                for name in DIRECTORY_NAMES {
+                    path.push(name);
+                    match create_private_directory(&path) {
+                        Ok(()) => {}
+                        Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {}
+                        Err(error) => panic!("fixture directory: {error}"),
+                    }
+                    chain.push(
+                        pin_directory(path.clone(), WindowsDirectoryOwner::CurrentUser).unwrap(),
+                    );
+                }
+                MarkerDirectory {
+                    identity: chain_identity(&chain),
+                    chain,
+                    path,
+                }
+            }
+            fn grant(&self, name: &str) -> MarkerLease {
+                let directory = self.directory();
+                let path = directory.path(name);
+                if !path.exists() {
+                    write_private_test_file(&path, b"grant").unwrap();
+                }
+                let file = open_existing(&path).unwrap();
+                let identity = validate_handle(&file, false).unwrap();
+                MarkerLease {
+                    directory,
+                    path,
+                    file,
+                    identity,
+                    length: 5,
+                }
+            }
+        }
+        impl Drop for Home {
+            fn drop(&mut self) {
+                let _ = fs::remove_dir_all(&self.0);
+            }
+        }
+
+        #[test]
+        fn consumed_sole_grant_removes_empty_owned_directories() {
+            let home = Home::new();
+            home.grant("sole.json").consume().unwrap();
+            assert!(home.0.is_dir());
+            assert!(!home.0.join(".coven").exists());
+        }
+
+        #[test]
+        fn pruning_preserves_other_grants_and_parent_content() {
+            let home = Home::new();
+            let first = home.grant("first.json");
+            let second = home.grant("second.json");
+            let sentinel = home.0.join(".coven").join("unrelated.bin");
+            write_private_test_file(&sentinel, b"keep").unwrap();
+            first.consume().unwrap();
+            assert!(second.path.exists());
+            second.consume().unwrap();
+            assert_eq!(fs::read(&sentinel).unwrap(), b"keep");
+            assert!(!home.0.join(".coven/chat").exists());
+        }
+
+        #[test]
+        fn replaced_directory_after_pin_release_is_preserved() {
+            let home = Home::new();
+            let directory = home.directory();
+            let MarkerDirectory { mut chain, .. } = directory;
+            let target = chain.pop().unwrap();
+            let identity = target.identity;
+            let path = target.path;
+            drop(target.file);
+            let retained = path.with_extension("retained");
+            fs::rename(&path, &retained).unwrap();
+            create_private_directory(&path).unwrap();
+            let parent = &chain.last().unwrap().file;
+            assert!(remove_empty_owned_directory(
+                parent,
+                std::ffi::OsStr::new(DIRECTORY_NAMES[2]),
+                identity,
+                WindowsDirectoryOwner::CurrentUser
+            )
+            .is_err());
+            assert!(path.is_dir());
+            assert!(retained.is_dir());
+        }
+
+        #[test]
+        fn replaced_marker_is_rejected_without_deleting_either_file() {
+            let home = Home::new();
+            let lease = home.grant("replaced.json");
+            let original = lease.path.with_extension("retained");
+            fs::rename(&lease.path, &original).unwrap();
+            write_private_test_file(&lease.path, b"other").unwrap();
+            let replacement = lease.path.clone();
+            assert!(lease.consume().is_err());
+            assert_eq!(fs::read(original).unwrap(), b"grant");
+            assert_eq!(fs::read(replacement).unwrap(), b"other");
+        }
+
+        #[test]
+        fn blocked_marker_deletion_preserves_retryable_grant() {
+            let home = Home::new();
+            let lease = home.grant("retry.json");
+            let blocker = OpenOptions::new()
+                .read(true)
+                .share_mode(FILE_SHARE_READ | FILE_SHARE_WRITE)
+                .open(&lease.path)
+                .unwrap();
+            let path = lease.path.clone();
+            assert!(lease.consume().is_err());
+            assert_eq!(fs::read(&path).unwrap(), b"grant");
+            drop(blocker);
+            home.grant("retry.json").consume().unwrap();
+            assert!(!path.exists());
+            assert!(!home.0.join(".coven").exists());
+        }
+
+        #[test]
+        fn nonempty_grant_directory_preserves_unrelated_content() {
+            let home = Home::new();
+            let lease = home.grant("sole.json");
+            let sentinel = lease.directory.path("unrelated.bin");
+            write_private_test_file(&sentinel, b"keep").unwrap();
+            lease.consume().unwrap();
+            assert_eq!(fs::read(&sentinel).unwrap(), b"keep");
+            assert!(home.0.join(".coven/chat/phase1-cleanup-grants-v1").is_dir());
+        }
+
+        #[test]
+        fn competing_directory_pin_does_not_turn_consumption_into_rejection() {
+            let home = Home::new();
+            let grant = home.grant("held.json");
+            let path = grant.path.clone();
+            let held = open_directory(&grant.directory.path).unwrap();
+            grant.consume().unwrap();
+            assert!(!path.exists());
+            assert!(home.0.join(".coven/chat/phase1-cleanup-grants-v1").exists());
+            drop(held);
+        }
     }
 
     struct LocalSecurityDescriptor(PSECURITY_DESCRIPTOR);
@@ -681,6 +910,13 @@ mod marker_io {
         path: PathBuf,
         file: File,
         identity: crate::cave::WindowsPrivatePathMetadata,
+        owner: WindowsDirectoryOwner,
+    }
+
+    #[derive(Clone, Copy)]
+    enum WindowsDirectoryOwner {
+        Trusted,
+        CurrentUser,
     }
 
     struct MarkerDirectory {
@@ -701,42 +937,180 @@ mod marker_io {
         pub(super) fn consume(self) -> Result<(), ()> {
             self.directory.revalidate()?;
             let held = validate_handle(&self.file, false)?;
-            if held != self.identity || held.links != 1 {
-                return Err(());
-            }
-            if self.file.metadata().map_err(|_| ())?.len() != self.length {
-                return Err(());
-            }
-            let reopened = open_existing(&self.path)?;
-            if validate_handle(&reopened, false)? != self.identity {
-                return Err(());
-            }
-
-            let consumed_path = self.directory.path(&random_name(".consumed-")?);
-            move_write_through(&self.path, &consumed_path).map_err(|_| ())?;
-            self.directory.revalidate()?;
-            let consumed = match open_existing(&consumed_path) {
-                Ok(file) => file,
-                Err(()) => {
-                    let _ = move_write_through(&consumed_path, &self.path);
-                    return Err(());
-                }
-            };
-            if validate_handle(&consumed, false)? != self.identity
-                || consumed.metadata().map_err(|_| ())?.len() != self.length
+            if held != self.identity
+                || held.links != 1
+                || self.file.metadata().map_err(|_| ())?.len() != self.length
             {
-                let _ = move_write_through(&consumed_path, &self.path);
                 return Err(());
             }
-            let _ = fs::remove_file(&consumed_path);
-            let _ = self.directory.revalidate();
+            let parent = &self.directory.chain.last().ok_or(())?.file;
+            let name = self.path.file_name().ok_or(())?;
+            let marker = open_relative_for_deletion(parent, name, false)?;
+            if validate_handle(&marker, false)? != self.identity
+                || marker.metadata().map_err(|_| ())?.len() != self.length
+            {
+                return Err(());
+            }
+            // The disposition commits single-use consumption. Any later failure to
+            // prune empty directories must not make the consumed grant retryable.
+            mark_for_deletion(&marker)?;
+            drop(marker);
+            drop(self.file);
+            self.directory.prune_empty_owned_directories();
             Ok(())
         }
     }
 
+    #[repr(C)]
+    struct UnicodeName {
+        length: u16,
+        maximum_length: u16,
+        buffer: *mut u16,
+    }
+
+    #[repr(C)]
+    struct RelativeObjectAttributes {
+        length: u32,
+        root_directory: *mut std::ffi::c_void,
+        object_name: *mut UnicodeName,
+        attributes: u32,
+        security_descriptor: *mut std::ffi::c_void,
+        security_quality_of_service: *mut std::ffi::c_void,
+    }
+
+    #[repr(C)]
+    struct IoStatusBlock {
+        status_or_pointer: usize,
+        information: usize,
+    }
+
+    #[link(name = "ntdll")]
+    extern "system" {
+        fn NtOpenFile(
+            handle: *mut *mut std::ffi::c_void,
+            access: u32,
+            attributes: *mut RelativeObjectAttributes,
+            status: *mut IoStatusBlock,
+            share: u32,
+            options: u32,
+        ) -> i32;
+    }
+
+    fn open_relative_for_deletion(
+        parent: &File,
+        name: &std::ffi::OsStr,
+        directory: bool,
+    ) -> Result<File, ()> {
+        let mut wide: Vec<u16> = name.encode_wide().collect();
+        if wide.is_empty()
+            || wide.iter().any(|c| matches!(*c, 0 | 47 | 58 | 92))
+            || name == "."
+            || name == ".."
+        {
+            return Err(());
+        }
+        let length = u16::try_from(wide.len().checked_mul(2).ok_or(())?).map_err(|_| ())?;
+        let mut name = UnicodeName {
+            length,
+            maximum_length: length,
+            buffer: wide.as_mut_ptr(),
+        };
+        let mut attributes = RelativeObjectAttributes {
+            length: std::mem::size_of::<RelativeObjectAttributes>() as u32,
+            root_directory: parent.as_raw_handle(),
+            object_name: &mut name,
+            attributes: 0x1000, // OBJ_DONT_REPARSE
+            security_descriptor: std::ptr::null_mut(),
+            security_quality_of_service: std::ptr::null_mut(),
+        };
+        let mut status = IoStatusBlock {
+            status_or_pointer: 0,
+            information: 0,
+        };
+        let mut handle = std::ptr::null_mut();
+        // DELETE | READ_CONTROL | FILE_READ_ATTRIBUTES | SYNCHRONIZE.
+        // Keep delete sharing disabled while identity is checked and disposition set.
+        let result = unsafe {
+            NtOpenFile(
+                &mut handle,
+                0x0013_0080,
+                &mut attributes,
+                &mut status,
+                FILE_SHARE_READ | FILE_SHARE_WRITE,
+                0x0020_0020 | if directory { 0x1 } else { 0x40 },
+            )
+        };
+        if result < 0 {
+            return Err(());
+        }
+        Ok(unsafe { File::from_raw_handle(handle) })
+    }
+
+    fn mark_for_deletion(file: &File) -> Result<(), ()> {
+        use windows_sys::Win32::Storage::FileSystem::{
+            FileDispositionInfo, SetFileInformationByHandle, FILE_DISPOSITION_INFO,
+        };
+        let disposition = FILE_DISPOSITION_INFO { DeleteFile: true };
+        if unsafe {
+            SetFileInformationByHandle(
+                file.as_raw_handle(),
+                FileDispositionInfo,
+                (&disposition as *const FILE_DISPOSITION_INFO).cast(),
+                std::mem::size_of::<FILE_DISPOSITION_INFO>() as u32,
+            )
+        } == 0
+        {
+            Err(())
+        } else {
+            Ok(())
+        }
+    }
+
+    fn remove_empty_owned_directory(
+        parent: &File,
+        name: &std::ffi::OsStr,
+        identity: crate::cave::WindowsPrivatePathMetadata,
+        owner: WindowsDirectoryOwner,
+    ) -> Result<(), ()> {
+        let file = open_relative_for_deletion(parent, name, true)?;
+        if validate_directory_handle(&file, owner)? != identity {
+            return Err(());
+        }
+        mark_for_deletion(&file)
+    }
+
     impl MarkerDirectory {
+        fn prune_empty_owned_directories(mut self) {
+            // The profile home is never a pruning target. Parents remain pinned
+            // while each literal child is reopened relative to its parent handle.
+            while self.chain.len() > 1 {
+                let index = self.chain.len() - 2;
+                let target = self.chain.pop().expect("owned directory");
+                let identity = target.identity;
+                let owner = target.owner;
+                drop(target.file);
+                let parent = &self.chain.last().expect("retained parent").file;
+                if remove_empty_owned_directory(
+                    parent,
+                    std::ffi::OsStr::new(DIRECTORY_NAMES[index]),
+                    identity,
+                    owner,
+                )
+                .is_err()
+                {
+                    break;
+                }
+            }
+        }
+
         fn open() -> Result<Self, ()> {
-            let home = env::var_os("HOME").ok_or(())?;
+            let cleanup_home = std::env::var_os(super::CLEANUP_HOME_ENV);
+            let home_owner = if super::marker_home_uses_profile_identity(&cleanup_home) {
+                WindowsDirectoryOwner::Trusted
+            } else {
+                WindowsDirectoryOwner::CurrentUser
+            };
+            let home = super::marker_home_from(cleanup_home, std::env::var_os("HOME")).ok_or(())?;
             let home = PathBuf::from(home);
             if !home.is_absolute()
                 || home
@@ -745,7 +1119,7 @@ mod marker_io {
             {
                 return Err(());
             }
-            let mut chain = vec![pin_directory(home.clone())?];
+            let mut chain = vec![pin_directory(home.clone(), home_owner)?];
             let mut current = home;
             for name in DIRECTORY_NAMES {
                 current.push(name);
@@ -754,7 +1128,10 @@ mod marker_io {
                     Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {}
                     Err(_) => return Err(()),
                 }
-                chain.push(pin_directory(current.clone())?);
+                chain.push(pin_directory(
+                    current.clone(),
+                    WindowsDirectoryOwner::CurrentUser,
+                )?);
             }
             let identity = chain_identity(&chain);
             let directory = Self {
@@ -772,12 +1149,12 @@ mod marker_io {
 
         fn revalidate(&self) -> Result<(), ()> {
             for pinned in &self.chain {
-                let held = validate_directory_handle(&pinned.file)?;
+                let held = validate_directory_handle(&pinned.file, pinned.owner)?;
                 if held != pinned.identity {
                     return Err(());
                 }
                 let reopened = open_directory(&pinned.path)?;
-                let reopened_identity = validate_directory_handle(&reopened)?;
+                let reopened_identity = validate_directory_handle(&reopened, pinned.owner)?;
                 if reopened_identity != pinned.identity {
                     return Err(());
                 }
@@ -786,10 +1163,10 @@ mod marker_io {
         }
     }
 
-    pub(super) fn identity() -> Result<String, PublishError> {
+    pub(super) fn identity() -> Result<String, MarkerIdentityError> {
         MarkerDirectory::open()
             .map(|directory| directory.identity)
-            .map_err(|_| PublishError::Unavailable)
+            .map_err(|_| MarkerIdentityError::Identity)
     }
 
     pub(super) fn publish(
@@ -1009,13 +1386,14 @@ mod marker_io {
             .map_err(|_| ())
     }
 
-    fn pin_directory(path: PathBuf) -> Result<PinnedDirectory, ()> {
+    fn pin_directory(path: PathBuf, owner: WindowsDirectoryOwner) -> Result<PinnedDirectory, ()> {
         let file = open_directory(&path)?;
-        let identity = validate_directory_handle(&file)?;
+        let identity = validate_directory_handle(&file, owner)?;
         Ok(PinnedDirectory {
             path,
             file,
             identity,
+            owner,
         })
     }
 
@@ -1032,8 +1410,16 @@ mod marker_io {
 
     fn validate_directory_handle(
         file: &File,
+        owner: WindowsDirectoryOwner,
     ) -> Result<crate::cave::WindowsPrivatePathMetadata, ()> {
-        crate::cave::validate_windows_private_handle(file.as_raw_handle() as _, true)
+        match owner {
+            WindowsDirectoryOwner::Trusted => {
+                crate::cave::validate_windows_trusted_directory_handle(file.as_raw_handle() as _)
+            }
+            WindowsDirectoryOwner::CurrentUser => {
+                crate::cave::validate_windows_private_handle(file.as_raw_handle() as _, true)
+            }
+        }
     }
 
     fn validate_handle(
@@ -1111,6 +1497,8 @@ mod marker_io {
 
 #[cfg(all(not(unix), not(windows)))]
 mod marker_io {
+    use super::MarkerIdentityError;
+
     pub(super) enum PublishError {
         Collision,
         Unavailable,
@@ -1128,8 +1516,8 @@ mod marker_io {
         }
     }
 
-    pub(super) fn identity() -> Result<String, PublishError> {
-        Err(PublishError::Unavailable)
+    pub(super) fn identity() -> Result<String, MarkerIdentityError> {
+        Err(MarkerIdentityError::Identity)
     }
 
     pub(super) fn publish(
@@ -1142,5 +1530,109 @@ mod marker_io {
 
     pub(super) fn hold(_grant_id: &str) -> Result<(Vec<u8>, String, MarkerLease), HoldError> {
         Err(HoldError::Rejected)
+    }
+}
+
+#[cfg(all(test, unix))]
+mod tests {
+    use std::{
+        fs,
+        os::unix::fs::PermissionsExt,
+        path::PathBuf,
+        sync::atomic::{AtomicU64, Ordering},
+        time::{SystemTime, UNIX_EPOCH},
+    };
+
+    use super::{
+        marker_home_from, marker_home_uses_profile_identity, marker_io, MarkerIdentityError,
+    };
+
+    struct TestHome(PathBuf);
+
+    impl TestHome {
+        fn new(mode: u32) -> Self {
+            static NEXT_HOME: AtomicU64 = AtomicU64::new(0);
+            let nonce = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .expect("clock must follow Unix epoch")
+                .as_nanos();
+            let sequence = NEXT_HOME.fetch_add(1, Ordering::Relaxed);
+            let path = std::env::temp_dir().join(format!(
+                "opencoven-cleanup-marker-home-{}-{nonce}-{sequence}",
+                std::process::id()
+            ));
+            fs::create_dir(&path).expect("test home must be created");
+            fs::set_permissions(&path, fs::Permissions::from_mode(mode))
+                .expect("test home mode must be set");
+            Self(path)
+        }
+    }
+
+    impl Drop for TestHome {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.0);
+        }
+    }
+
+    #[test]
+    fn conformance_cleanup_home_overrides_the_ambient_home() {
+        let isolated = std::ffi::OsString::from("/isolated");
+        let ambient = std::ffi::OsString::from("/ambient");
+
+        assert_eq!(
+            marker_home_from(Some(isolated.clone()), Some(ambient)),
+            Some(isolated)
+        );
+    }
+
+    #[test]
+    fn only_an_explicit_cleanup_home_uses_the_windows_profile_identity() {
+        assert!(marker_home_uses_profile_identity(&Some(
+            std::ffi::OsString::from(r"C:\Users\Coven"),
+        )));
+        assert!(!marker_home_uses_profile_identity(&None));
+    }
+
+    #[test]
+    fn marker_identity_accepts_an_owned_non_writable_traversable_home() {
+        let home = TestHome::new(0o755);
+
+        assert!(marker_io::identity_at(&home.0).is_ok());
+    }
+
+    #[test]
+    fn marker_identity_rejects_a_group_writable_home() {
+        let home = TestHome::new(0o770);
+
+        assert_eq!(
+            marker_io::identity_at(&home.0),
+            Err(MarkerIdentityError::Home)
+        );
+    }
+
+    #[test]
+    fn marker_identity_classifies_an_unsafe_existing_marker_directory() {
+        let home = TestHome::new(0o700);
+        let coven = home.0.join(".coven");
+        fs::create_dir(&coven).expect("marker parent must be created");
+        fs::set_permissions(&coven, fs::Permissions::from_mode(0o755))
+            .expect("marker parent mode must be set");
+
+        assert_eq!(
+            marker_io::identity_at(&home.0),
+            Err(MarkerIdentityError::DirectoryTrust)
+        );
+    }
+
+    #[test]
+    fn marker_identity_classifies_an_existing_marker_file() {
+        let home = TestHome::new(0o700);
+        fs::write(home.0.join(".coven"), b"not a directory")
+            .expect("marker parent file must be created");
+
+        assert_eq!(
+            marker_io::identity_at(&home.0),
+            Err(MarkerIdentityError::DirectoryOpen)
+        );
     }
 }

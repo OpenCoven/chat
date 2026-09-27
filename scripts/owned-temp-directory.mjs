@@ -167,23 +167,41 @@ function assertOwnedRootStillMatches(context) {
   }
 }
 
+const cleanupFailureCategories = new WeakMap();
+
+export function ownedTempCleanupFailureCategory(error) {
+  return cleanupFailureCategories.get(error) ?? 'unknown';
+}
+
+function cleanupOperation(category, operation) {
+  try {
+    return operation();
+  } catch (error) {
+    if ((typeof error === 'object' && error !== null) || typeof error === 'function') {
+      cleanupFailureCategories.set(error, category);
+    }
+    throw error;
+  }
+}
+
 function removePathWithoutFollowingSymlinks(path) {
-  const stats = lstatIfExists(path);
+  const stats = cleanupOperation('entry-stat', () => lstatIfExists(path));
 
   if (stats === undefined) {
     return;
   }
 
   if (stats.isSymbolicLink() || !stats.isDirectory()) {
-    unlinkSync(path);
+    cleanupOperation('leaf-remove', () => unlinkSync(path));
     return;
   }
 
-  for (const entry of readdirSync(path)) {
+  const entries = cleanupOperation('directory-enumerate', () => readdirSync(path));
+  for (const entry of entries) {
     removePathWithoutFollowingSymlinks(resolve(path, entry));
   }
 
-  rmdirSync(path);
+  cleanupOperation('directory-remove', () => rmdirSync(path));
 }
 
 export function createOwnedTempDirectory({ prefix, childSegments = [] } = {}) {
@@ -196,33 +214,79 @@ export function createOwnedShortTempDirectory({ prefix, childSegments = [] } = {
   return createOwnedTempDirectoryIn(parentPath, { prefix, childSegments });
 }
 
+/**
+ * Windows briefly denies renaming a directory right after the processes that
+ * worked in it exit: a handle held by process teardown or a file scanner
+ * outlives them. The protected Windows lane caught this as `root-rename` with
+ * `0x80070005` at 0 s, the same rename succeeding 3 s later with no process
+ * left in the root and no file still open. Retry only those transient codes,
+ * only on Windows, for a bounded time; every other failure is immediate.
+ * The identity and ownership checks after the rename are unchanged.
+ */
+const transientRenameCodes = new Set(['EPERM', 'EACCES', 'EBUSY']);
+const renameRetryBudgetMs = 30_000;
+const renameRetryMaxDelayMs = 2_000;
+
+function sleepSync(milliseconds) {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, milliseconds);
+}
+
+export function renameWithTransientRetry(
+  from,
+  to,
+  { platform = process.platform, sleep = sleepSync, budgetMs = renameRetryBudgetMs } = {},
+) {
+  let waited = 0;
+  let delay = 100;
+  for (;;) {
+    try {
+      renameSync(from, to);
+      return;
+    } catch (error) {
+      const transient =
+        platform === 'win32' &&
+        error instanceof Error &&
+        'code' in error &&
+        transientRenameCodes.has(error.code);
+      if (!transient || waited + delay > budgetMs) {
+        throw error;
+      }
+      sleep(delay);
+      waited += delay;
+      delay = Math.min(delay * 2, renameRetryMaxDelayMs);
+    }
+  }
+}
+
 export function cleanupOwnedTempRoot(context) {
-  assertOwnedRootStillMatches(context);
+  cleanupOperation('root-precondition', () => assertOwnedRootStillMatches(context));
 
   const deletingRoot = resolve(
     context.parentPath,
     `${basename(context.rootPath)}.deleting-${process.pid}-${randomUUID()}`,
   );
 
-  renameSync(context.rootPath, deletingRoot);
+  cleanupOperation('root-rename', () => renameWithTransientRetry(context.rootPath, deletingRoot));
 
-  const renamedStats = lstatSync(deletingRoot);
+  cleanupOperation('root-postrename', () => {
+    const renamedStats = lstatSync(deletingRoot);
 
-  if (renamedStats.isSymbolicLink()) {
-    throw new Error(`Owned temp cleanup root must not be a symlink: ${deletingRoot}`);
-  }
+    if (renamedStats.isSymbolicLink()) {
+      throw new Error(`Owned temp cleanup root must not be a symlink: ${deletingRoot}`);
+    }
 
-  if (!renamedStats.isDirectory()) {
-    throw new Error(`Owned temp cleanup root must be a directory: ${deletingRoot}`);
-  }
+    if (!renamedStats.isDirectory()) {
+      throw new Error(`Owned temp cleanup root must be a directory: ${deletingRoot}`);
+    }
 
-  if (renamedStats.dev !== context.rootDevice || renamedStats.ino !== context.rootInode) {
-    throw new Error(`Owned temp cleanup root changed identity after rename: ${deletingRoot}`);
-  }
+    if (renamedStats.dev !== context.rootDevice || renamedStats.ino !== context.rootInode) {
+      throw new Error(`Owned temp cleanup root changed identity after rename: ${deletingRoot}`);
+    }
 
-  // The rename moved a directory; confirm it is still ours before the
-  // recursive delete, which is the only irreversible step in this file.
-  assertOwnershipStamp(deletingRoot, context, 'after rename');
+    // The rename moved a directory; confirm it is still ours before the
+    // recursive delete, which is the only irreversible step in this file.
+    assertOwnershipStamp(deletingRoot, context, 'after rename');
+  });
 
   removePathWithoutFollowingSymlinks(deletingRoot);
 }

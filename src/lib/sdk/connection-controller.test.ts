@@ -66,7 +66,7 @@ type RateLimitCalls = {
   credentialStatuses: number;
 };
 
-function healthEnvelope(instanceId = CAVE_INSTANCE_ID, minimumClientVersion = '0.1.0') {
+function healthEnvelope(instanceId = CAVE_INSTANCE_ID, minimumClientVersion = '0.0.1') {
   return {
     apiVersion: '1.0',
     minimumClientVersion,

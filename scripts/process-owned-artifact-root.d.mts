@@ -24,3 +24,18 @@ export function createProcessOwnedArtifactRoot(options: {
   terminationGraceMs?: number;
   shortPath?: boolean;
 }): ProcessOwnedArtifactRoot;
+
+export function processCleanupFailureCategory(
+  error: unknown,
+):
+  | ReturnType<typeof import('./owned-temp-directory.mjs').ownedTempCleanupFailureCategory>
+  | 'child-terminate'
+  | 'supervisor-wait'
+  | 'child-kill'
+  | 'child-reap'
+  | 'tracked-set-changed'
+  | 'multiple';
+
+export const PROCESS_CLEANUP_FAILURE_CATEGORIES: readonly ReturnType<
+  typeof processCleanupFailureCategory
+>[];

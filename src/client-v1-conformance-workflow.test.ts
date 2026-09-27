@@ -1,15 +1,19 @@
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { createRequire } from 'node:module';
+import { tmpdir } from 'node:os';
 import { dirname, relative, resolve } from 'node:path';
-import { fileURLToPath, pathToFileURL } from 'node:url';
-
+import { fileURLToPath } from 'node:url';
 import * as ts from 'typescript';
-import { describe, expect, test } from 'vitest';
+import { afterAll, describe, expect, test } from 'vitest';
+import { decodeWindowsSupervisorSource } from '../scripts/windows-supervisor-source.mjs';
 
 const projectRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const workflowPath = resolve(projectRoot, '.github', 'workflows', 'client-v1-conformance.yml');
+const contractCanaryPath = resolve(projectRoot, 'scripts', 'contract-canary.mjs');
 const harnessPath = resolve(projectRoot, 'scripts', 'phase1-conformance.mjs');
+const schemaV2ProducerPath = resolve(projectRoot, 'scripts', 'phase1-schema-v2-producer.mjs');
 const windowsSupervisorBuildPath = resolve(
   projectRoot,
   'scripts',
@@ -32,6 +36,8 @@ const validatorInputExpression = '${' + '{ inputs.validator_revision }}';
 const protectedValidatorExpression = '${' + '{ vars.CLIENT_V1_CONFORMANCE_VALIDATOR_REVISION }}';
 const githubRepositoryExpression = '${' + '{ github.repository }}';
 const githubShaExpression = '${' + '{ github.sha }}';
+const resolvedProducerExpression = '${' + "{ steps['resolve'].outputs.revision }}";
+const producerRevisionExpression = '${' + "{ needs['producer-revision'].outputs.revision }}";
 const expressionOpening = '${' + '{';
 const uploadedSupervisorArtifactIdExpression =
   '${' + "{ steps['upload-supervisor'].outputs['artifact-id'] }}";
@@ -43,13 +49,18 @@ const attestBuildProvenanceAction =
   'actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8';
 const reviewedWindowsPins = {
   OPENCOVEN_WINDOWS_IMAGE_OS: 'win25-vs2026',
-  OPENCOVEN_WINDOWS_IMAGE_VERSION: '20260824.214.3',
-  OPENCOVEN_WINDOWS_BUILD: '26100.33296',
+  OPENCOVEN_WINDOWS_IMAGE_VERSION: '20260922.246.2',
+  OPENCOVEN_WINDOWS_PREVIOUS_IMAGE_VERSION: '20260907.229.1',
+  OPENCOVEN_WINDOWS_BUILD: '26100.33438',
   OPENCOVEN_WINDOWS_KERNEL32_VERSION: '10.0.26100.33296',
-  OPENCOVEN_WINDOWS_POWERSHELL_VERSION: '7.6.5',
+  OPENCOVEN_WINDOWS_POWERSHELL_VERSION: '7.6.6',
   OPENCOVEN_WINDOWS_POWERSHELL_PATH: 'C:\\Program Files\\PowerShell\\7\\pwsh.exe',
-  OPENCOVEN_WINDOWS_DOTNET_VERSION: '10.0.11',
-  OPENCOVEN_WINDOWS_VS_VERSION: '18.9.12112.369',
+  OPENCOVEN_WINDOWS_DOTNET_VERSION: '10.0.12',
+  OPENCOVEN_WINDOWS_VS_VERSION: '18.10.12210.168',
+  OPENCOVEN_WINDOWS_PREVIOUS_VS_VERSION: '18.9.12120.119',
+  OPENCOVEN_WINDOWS_PREVIOUS_BUILD: '26100.33296',
+  OPENCOVEN_WINDOWS_PREVIOUS_POWERSHELL_VERSION: '7.6.5',
+  OPENCOVEN_WINDOWS_PREVIOUS_DOTNET_VERSION: '10.0.11',
   OPENCOVEN_WINDOWS_VS_PATH: 'C:\\Program Files\\Microsoft Visual Studio\\18\\Enterprise',
   OPENCOVEN_WINDOWS_MSVC_VERSION: '14.44.35207',
   OPENCOVEN_WINDOWS_MSVC_PATH:
@@ -79,21 +90,27 @@ function workflowStep(workflow: string, name: string): string {
 }
 
 function embeddedWindowsSupervisorSource(workflow: string): string {
-  const startMarker = "          $jobSupervisorSource = @'\n";
-  const endMarker = "\n          '@\n";
+  const startMarker = '          # BEGIN bounded Windows supervisor source v1';
+  const endMarker = '          # END bounded Windows supervisor source v1';
+  expect(workflow.split(startMarker)).toHaveLength(2);
+  expect(workflow.split(endMarker)).toHaveLength(2);
   const start = workflow.indexOf(startMarker);
-  if (start < 0) {
-    throw new Error('missing inline Windows Job Object supervisor source');
-  }
-  const end = workflow.indexOf(endMarker, start + startMarker.length);
-  if (end < 0) {
-    throw new Error('unterminated inline Windows Job Object supervisor source');
-  }
-  return `${workflow
-    .slice(start + startMarker.length, end)
+  const end = workflow.indexOf(endMarker, start) + endMarker.length;
+  const block = workflow
+    .slice(start, end)
     .split('\n')
-    .map((line) => line.replace(/^ {10}/u, ''))
-    .join('\n')}\n`;
+    .map((line) => line.slice(10))
+    .join('\n');
+  const source = readFileSync(resolve(projectRoot, 'scripts/windows-job-supervisor.cs'));
+  expect(workflow.slice(end)).toMatch(
+    /^\n {10}Add-Type -TypeDefinition \$jobSupervisorSource -Language CSharp\n/u,
+  );
+  expect(workflow.match(/\$jobSupervisorSource\s*=/gu)).toHaveLength(1);
+  expect(workflow.match(/Add-Type -TypeDefinition \$jobSupervisorSource/gu)).toHaveLength(1);
+  return decodeWindowsSupervisorSource(block, {
+    size: source.length,
+    sha256: createHash('sha256').update(source).digest('hex'),
+  }).toString('utf8');
 }
 
 function embeddedWindowsChildBootstrapSource(workflow: string): string {
@@ -128,12 +145,22 @@ function extractPowerShellFunction(source: string, name: string): string {
 }
 
 function workflowRunBody(step: string): string {
-  const marker = '        run: |\n';
-  const start = step.indexOf(marker);
-  if (start < 0) {
-    throw new Error('workflow step has no literal run body');
+  const literalMarker = '        run: |\n';
+  const literalStart = step.indexOf(literalMarker);
+  if (literalStart >= 0) {
+    return step.slice(literalStart + literalMarker.length);
   }
-  return step.slice(start + marker.length);
+  const quotedMarker = '        run: ';
+  const quotedStart = step.indexOf(quotedMarker);
+  if (quotedStart >= 0) {
+    const run: unknown = JSON.parse(step.slice(quotedStart + quotedMarker.length));
+    if (typeof run !== 'string') throw new Error('workflow run body is not a string');
+    return run
+      .split('\n')
+      .map((line) => (line ? `          ${line}` : line))
+      .join('\n');
+  }
+  throw new Error('workflow step has no supported run body');
 }
 
 function workflowStepEnvironment(step: string): string {
@@ -160,6 +187,16 @@ function workflowJob(workflow: string, name: string): string {
 function countOccurrences(value: string, expected: string): number {
   return value.split(expected).length - 1;
 }
+
+const windowsDirectoryOwnershipGuardStub = `
+Add-Type -TypeDefinition @'
+namespace OpenCoven {
+  public static class WindowsJobSupervisor {
+    public static void RequireCurrentIdentityOwnsIsolatedDirectory(string path) {}
+  }
+}
+'@
+`;
 
 function staticLocalMjsModuleGraph(entryPath: string): string[] {
   const modules = new Set<string>();
@@ -216,7 +253,25 @@ function verifyExactMainRefConstraint(label: string, job: string): void {
   }
 }
 
+function verifyResolvedProducerRevision(job: string, workflow: string): void {
+  if (
+    !job.includes('git merge-base --is-ancestor "$requested" "$OPENCOVEN_DISPATCH_SHA"') ||
+    !job.includes('OPENCOVEN_DISPATCH_SHA: ' + githubShaExpression) ||
+    !job.includes('revision: ' + resolvedProducerExpression)
+  ) {
+    throw new Error('producer revision job does not verify ancestry of the dispatch ref');
+  }
+  if (
+    workflow.includes(
+      'ref: ' + githubShaExpression.replace('github.sha', 'inputs.producer_revision'),
+    )
+  ) {
+    throw new Error('producer revision input is checked out without verification');
+  }
+}
+
 function verifyHardenedWorkflowGraph(workflow: string): void {
+  const producerRevision = workflowJob(workflow, 'producer-revision');
   const windowsSupervisor = workflowJob(workflow, 'windows-supervisor');
   const producer = workflowJob(workflow, 'platform-conformance');
   const validation = workflowJob(workflow, 'validate-conformance-artifacts');
@@ -224,6 +279,7 @@ function verifyHardenedWorkflowGraph(workflow: string): void {
   const aggregate = workflowJob(workflow, 'aggregate-conformance');
 
   for (const [label, job] of [
+    ['producer revision', producerRevision],
     ['windows supervisor', windowsSupervisor],
     ['producer', producer],
     ['validator', validation],
@@ -233,7 +289,10 @@ function verifyHardenedWorkflowGraph(workflow: string): void {
     verifyExactMainRefConstraint(label, job);
   }
 
+  verifyResolvedProducerRevision(producerRevision, workflow);
+
   for (const [label, job] of [
+    ['producer revision', producerRevision],
     ['windows supervisor', windowsSupervisor],
     ['producer', producer],
     ['validator', validation],
@@ -344,11 +403,18 @@ function verifyHardenedWorkflowGraph(workflow: string): void {
 }
 
 async function workflowFixture() {
-  const { verifyProtectedWorkflow } = await import(
-    pathToFileURL(resolve(validatorRoot, 'scripts', 'github-conformance-evidence.mjs')).href
+  // Load the external committed validator with Node, outside Vite's module resolver.
+  const { verifyProtectedWorkflow } = createRequire(import.meta.url)(
+    resolve(validatorRoot, 'scripts', 'github-conformance-evidence.mjs'),
   );
   const workflow = readFileSync(workflowPath, 'utf8');
   const harness = readFileSync(harnessPath);
+  const frozenLock = JSON.parse(
+    readFileSync(
+      resolve(validatorRoot, 'conformance', 'client-v1-cross-repository-lock.json'),
+      'utf8',
+    ),
+  );
   const producerCommit = 'f'.repeat(40);
   const producer = {
     status: 'compatible',
@@ -369,6 +435,7 @@ async function workflowFixture() {
     command: 'test:phase1-conformance',
     recordSchemaVersion: 2,
     workflow: {
+      ...frozenLock.evidenceProducer.workflow,
       name: 'client-v1 conformance',
       path: '.github/workflows/client-v1-conformance.yml',
       size: Buffer.byteLength(workflow, 'utf8'),
@@ -406,6 +473,10 @@ async function workflowFixture() {
 }
 
 describe('client-v1 conformance workflow bootstrap', () => {
+  test('fits the GitHub Actions 500 KiB workflow file limit', () => {
+    expect(readFileSync(workflowPath).byteLength).toBeLessThanOrEqual(500 * 1024);
+  });
+
   test('pins the exact checked-in Phase 1 harness bytes', () => {
     const workflow = readFileSync(workflowPath, 'utf8');
     const harness = readFileSync(harnessPath);
@@ -423,7 +494,9 @@ describe('client-v1 conformance workflow bootstrap', () => {
     const workflow = readFileSync(workflowPath, 'utf8');
     const unixProducerCommand = readFileSync(unixProducerCommandPath, 'utf8');
 
-    expect(workflow.match(/ {10}fetch-depth: 0/gu)).toHaveLength(2);
+    // four full checkouts: producer-revision resolution, the supervisor build,
+    // the Windows bootstrap workspace and the Unix workspace.
+    expect(workflow.match(/ {10}fetch-depth: 0/gu)).toHaveLength(4);
     expect(workflow).toContain('scripts/executable-resolution.mjs');
     expect(workflow).toContain('resolveExecutableInvocation');
     expect(workflow).toContain("      GIT_CONFIG_COUNT: '1'");
@@ -462,9 +535,13 @@ describe('client-v1 conformance workflow bootstrap', () => {
       '--coven-root "$OPENCOVEN_UNIX_WORKSPACE/.phase1-counterparts/coven"',
     );
     expect(workflow).toContain('function Checkout-ExactRepository');
+    expect(workflow).toContain('[Parameter()][switch]$FetchHistory');
+    expect(workflow).toContain('if (-not $FetchHistory) {');
     expect(workflow).toContain("-Label 'SDK candidate'");
     expect(workflow).toContain("-Label 'SDK validator'");
-    expect(workflow).toContain("-Label 'Cave authority'");
+    expect(workflow).toMatch(
+      /-Destination \$caveRoot `\n {12}-Label 'Cave authority' `\n {12}-FetchHistory/u,
+    );
     expect(workflow).toContain("-Label 'Coven authority'");
   });
 
@@ -478,13 +555,15 @@ describe('client-v1 conformance workflow bootstrap', () => {
     const childEnvironmentStart = bootstrap.indexOf('$childEnvironment = [ordered]@{');
     const childEnvironmentEnd = bootstrap.indexOf('\n            }', childEnvironmentStart);
     const childEnvironment = bootstrap.slice(childEnvironmentStart, childEnvironmentEnd);
+    const childNodeRoot =
+      "$childNodeRoot = Join-Path $bootstrapRoot 'tools\\node\\node-v24.18.1-win-x64'";
 
     expect(workflow).toContain('  windows-supervisor:');
     expect(workflow).toContain(
-      "  windows-supervisor:\n    name: build-windows-supervisor\n    if: github.ref == 'refs/heads/main'",
+      "  windows-supervisor:\n    name: build-windows-supervisor\n    if: github.ref == 'refs/heads/main'\n    needs: producer-revision",
     );
     expect(workflow).toContain('    runs-on: macos-latest');
-    expect(workflow).toContain('    needs: windows-supervisor');
+    expect(workflow).toContain('    needs: [producer-revision, windows-supervisor]');
     expect(workflow).toContain('        run: bash scripts/phase1-windows-supervisor-build.sh');
     expect(workflow).toContain('          name: phase1-process-supervisor-win32-x64');
     expect(workflow).toContain(`artifact_id: ${uploadedSupervisorArtifactIdExpression}`);
@@ -501,6 +580,12 @@ describe('client-v1 conformance workflow bootstrap', () => {
     );
     expect(childEnvironment).not.toContain('OPENCOVEN_WINDOWS_GITHUB_TOKEN');
     expect(childEnvironment).not.toContain('github.token');
+    expect(bootstrap).toContain(childNodeRoot);
+    expect(bootstrap.indexOf(childNodeRoot)).toBeLessThan(childEnvironmentStart);
+    expect(childEnvironment).toContain(
+      'PATH = "$childNodeRoot;$([IO.Path]::GetDirectoryName($trustedPwsh));C:\\Windows\\System32;C:\\Windows"',
+    );
+    expect(childEnvironment).not.toContain('PATH = "$nodeRoot;');
     expect(workflow).not.toContain('      - name: Install frozen Windows supervisor');
     expect(workflow).not.toContain(
       '        run: pwsh -NoProfile -File scripts/phase1-windows-supervisor-install.ps1',
@@ -515,10 +600,222 @@ describe('client-v1 conformance workflow bootstrap', () => {
     expect(installScript).toContain('[IO.FileAttributes]::ReparsePoint');
     expect(installScript).toContain('OPENCOVEN_PHASE1_WINDOWS_SUPERVISOR_PATH=$destination');
   });
+
+  test('restores the exact PATHEXT policy inside the isolated Windows profile', () => {
+    const workflow = readFileSync(workflowPath, 'utf8');
+    const childBootstrap = embeddedWindowsChildBootstrapSource(workflow);
+    const assignment = '$env:PATHEXT = ".COM;.EXE;.BAT;.CMD"';
+
+    expect(countOccurrences(childBootstrap, assignment)).toBe(1);
+    expect(childBootstrap.indexOf(assignment)).toBeLessThan(
+      childBootstrap.indexOf('function Assert-NoReparsePath'),
+    );
+  });
+
+  test('validates all frozen Chat source pins before fetching', () => {
+    const cases = [
+      { repository: 'OpenCoven/chat', revision: 'a'.repeat(40), result: 'accepted' },
+      { repository: 'OpenCoven/other', revision: 'a'.repeat(40), result: 'rejected' },
+      { repository: 'OpenCoven/chat', revision: '--upload-pack=unexpected', result: 'rejected' },
+      { repository: 'OpenCoven/chat', revision: 'A'.repeat(40), result: 'rejected' },
+    ];
+    const childBootstrap = embeddedWindowsChildBootstrapSource(readFileSync(workflowPath, 'utf8'));
+    const lockStart = childBootstrap.indexOf('$phase1Lock = Get-Content');
+    const validationStart = childBootstrap.indexOf('if (', lockStart);
+    const validationEnd = childBootstrap.indexOf('\nInvoke-Checked', validationStart);
+    expect(validationStart).toBeGreaterThan(lockStart);
+    expect(validationEnd).toBeGreaterThan(validationStart);
+    const encodedLock = readFileSync(resolve(projectRoot, 'phase1-conformance.lock.json')).toString(
+      'base64',
+    );
+    const encodedCases = Buffer.from(JSON.stringify(cases)).toString('base64');
+    // Share one bounded PowerShell startup across every case, including cold CI images.
+    const script = `
+$ErrorActionPreference = 'Stop'
+$phase1Lock = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('${encodedLock}')) | ConvertFrom-Json
+$cases = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('${encodedCases}')) | ConvertFrom-Json
+$results = @(foreach ($case in $cases) {
+  $phase1Lock.chat = $case
+  try {
+${childBootstrap.slice(validationStart, validationEnd)}
+    'accepted'
+  } catch {
+    'rejected'
+  }
+})
+[Console]::Out.Write(($results | ConvertTo-Json -Compress))
+`;
+    const result = execFileSync(
+      'pwsh',
+      ['-NoLogo', '-NoProfile', '-NonInteractive', '-Command', script],
+      {
+        encoding: 'utf8',
+        timeout: 25_000,
+      },
+    );
+    expect(JSON.parse(result)).toEqual(cases.map((entry) => entry.result));
+  }, 30_000);
+
+  test.each([
+    ['harness', 'opencoven-phase1-harness'],
+    ['frozen source', 'opencoven-phase1-chat-source'],
+  ])(
+    'retains the locked %s authority under a tag copied through nested isolated clones',
+    (label, tag) => {
+      const workflow = readFileSync(workflowPath, 'utf8');
+      const childBootstrap = embeddedWindowsChildBootstrapSource(workflow);
+      const fetchLabel = `-Label 'Chat ${label} exact-SHA fetch'`;
+      const authorityLabel = `-Label 'Chat ${label} authority ref'`;
+      const fetchLabelIndex = childBootstrap.indexOf(fetchLabel);
+      const authorityLabelIndex = childBootstrap.indexOf(authorityLabel);
+      const authorityStart = childBootstrap.lastIndexOf('Invoke-Checked `', fetchLabelIndex);
+      const authorityEnd = childBootstrap.indexOf('\n\n$counterpartsRoot', authorityLabelIndex);
+
+      expect(fetchLabelIndex).toBeGreaterThan(-1);
+      expect(authorityLabelIndex).toBeGreaterThan(fetchLabelIndex);
+      expect(authorityStart).toBeGreaterThan(-1);
+      expect(authorityEnd).toBeGreaterThan(authorityLabelIndex);
+      const authorityFetch = childBootstrap.slice(authorityStart, authorityEnd);
+
+      expect(authorityFetch).toContain(`'refs/tags/${tag}'`);
+      expect(authorityFetch).not.toContain(`'refs/heads/${tag}'`);
+      expect(authorityFetch).not.toContain(`'refs/opencoven/${tag}'`);
+    },
+  );
+});
+
+function producerRevisionScript(workflow: string): string {
+  const job = workflowJob(workflow, 'producer-revision');
+  const marker = '        run: |\n';
+  const start = job.indexOf(marker);
+  if (start < 0) {
+    throw new Error('producer-revision job does not define a resolve script');
+  }
+  const lines: string[] = [];
+  for (const line of job.slice(start + marker.length).split('\n')) {
+    if (line.trim() !== '' && !line.startsWith('          ')) break;
+    lines.push(line.slice(10));
+  }
+  return lines.join('\n');
+}
+
+type ResolveOutcome = { status: number; revision: string; stderr: string };
+
+function runProducerResolve(
+  script: string,
+  repository: string,
+  dispatchSha: string,
+  requested: string | undefined,
+): ResolveOutcome {
+  const outputPath = resolve(repository, 'github-output');
+  writeFileSync(outputPath, '');
+  const result = spawnSync('bash', ['-c', script], {
+    cwd: repository,
+    encoding: 'utf8',
+    timeout: 20_000,
+    env: {
+      ...process.env,
+      GITHUB_OUTPUT: outputPath,
+      OPENCOVEN_DISPATCH_SHA: dispatchSha,
+      ...(requested === undefined ? {} : { OPENCOVEN_PRODUCER_REVISION_INPUT: requested }),
+    },
+  });
+  const emitted = readFileSync(outputPath, 'utf8');
+  const match = /^revision=([0-9a-f]{40})$/mu.exec(emitted);
+  return {
+    status: result.status ?? -1,
+    revision: match?.[1] ?? '',
+    stderr: result.stderr ?? '',
+  };
+}
+
+describe('producer revision ancestry gate', () => {
+  const script = producerRevisionScript(readFileSync(workflowPath, 'utf8'));
+  const repository = mkdtempSync(resolve(tmpdir(), 'opencoven-producer-ref-'));
+  const git = (...args: string[]) =>
+    execFileSync('git', args, {
+      cwd: repository,
+      encoding: 'utf8',
+      timeout: 20_000,
+      env: {
+        ...process.env,
+        GIT_AUTHOR_NAME: 'Conformance',
+        GIT_AUTHOR_EMAIL: 'conformance@example.invalid',
+        GIT_COMMITTER_NAME: 'Conformance',
+        GIT_COMMITTER_EMAIL: 'conformance@example.invalid',
+      },
+    }).trim();
+
+  git('init', '--quiet', '--initial-branch=main', '.');
+  git('-c', 'commit.gpgsign=false', 'commit', '--quiet', '--allow-empty', '-m', 'base');
+  const merged = git('rev-parse', 'HEAD');
+  git('-c', 'commit.gpgsign=false', 'commit', '--quiet', '--allow-empty', '-m', 'tip');
+  const tip = git('rev-parse', 'HEAD');
+  git('checkout', '--quiet', '-b', 'unmerged', merged);
+  git('-c', 'commit.gpgsign=false', 'commit', '--quiet', '--allow-empty', '-m', 'unmerged');
+  const unmerged = git('rev-parse', 'HEAD');
+  git('checkout', '--quiet', 'main');
+
+  afterAll(() => {
+    rmSync(repository, { force: true, recursive: true });
+  });
+
+  test('defaults to the dispatch tip when no revision is requested', () => {
+    const outcome = runProducerResolve(script, repository, tip, undefined);
+    expect(outcome.status).toBe(0);
+    expect(outcome.revision).toBe(tip);
+  });
+
+  test('accepts an exact merged ancestor of the dispatch tip', () => {
+    const outcome = runProducerResolve(script, repository, tip, merged);
+    expect(outcome.status).toBe(0);
+    expect(outcome.revision).toBe(merged);
+  });
+
+  test('accepts the dispatch tip named explicitly', () => {
+    const outcome = runProducerResolve(script, repository, tip, tip);
+    expect(outcome.status).toBe(0);
+    expect(outcome.revision).toBe(tip);
+  });
+
+  test('refuses a commit that is not merged into the dispatch tip', () => {
+    const outcome = runProducerResolve(script, repository, tip, unmerged);
+    expect(outcome.status).toBe(1);
+    expect(outcome.revision).toBe('');
+    expect(outcome.stderr).toContain('only merged revisions may be validated');
+  });
+
+  test('refuses a descendant of the dispatch tip', () => {
+    const outcome = runProducerResolve(script, repository, merged, tip);
+    expect(outcome.status).toBe(1);
+    expect(outcome.revision).toBe('');
+    expect(outcome.stderr).toContain('only merged revisions may be validated');
+  });
+
+  test.each([
+    ['an abbreviated revision', (value: string) => value.slice(0, 12)],
+    // Fixed rather than derived: an all-digit fixture SHA would upper-case to
+    // itself and silently stop exercising the lowercase rule.
+    ['an uppercase revision', () => 'ABCDEF' + '0'.repeat(34)],
+    ['a ref name rather than a commit', () => 'main'],
+    ['an empty revision', () => ' '],
+  ])('refuses %s', (_label, transform) => {
+    const outcome = runProducerResolve(script, repository, tip, transform(merged));
+    expect(outcome.status).toBe(1);
+    expect(outcome.revision).toBe('');
+    expect(outcome.stderr).toContain('exact lowercase 40-hex commit');
+  });
+
+  test('refuses a well-formed revision that is absent from the repository', () => {
+    const outcome = runProducerResolve(script, repository, tip, 'b'.repeat(40));
+    expect(outcome.status).toBe(1);
+    expect(outcome.revision).toBe('');
+    expect(outcome.stderr).toContain('not a commit in this repository');
+  });
 });
 
 describe.skipIf(!validatorAvailable)('protected client-v1 conformance workflow', () => {
-  test('is expected to be rejected by the pre-repin SDK workflow validator', async () => {
+  test('accepts the committed protected workflow with the current SDK validator', async () => {
     const fixture = await workflowFixture();
     expect(fixture.workflow).toContain('      validator_revision:');
     expect(fixture.workflow).toContain('        required: true');
@@ -534,7 +831,7 @@ describe.skipIf(!validatorAvailable)('protected client-v1 conformance workflow',
     expect(fixture.workflow).toContain('--validator-revision "$OPENCOVEN_VALIDATOR_REVISION"');
     expect(() =>
       fixture.verifyProtectedWorkflow(fixture.workflow, fixture.producer, fixture.toolchain),
-    ).toThrow(/workflow/u);
+    ).not.toThrow();
   });
 
   test.each([
@@ -582,15 +879,15 @@ describe.skipIf(!validatorAvailable)('protected client-v1 conformance workflow',
     [
       'disabled Linux Secret Service setup',
       (workflow: string) =>
-        workflow.replace("        if: matrix.platform == 'linux-x64'", '        if: false'),
+        workflow.replace(
+          "      - name: Install Linux native dependencies\n        if: matrix.platform != 'win32-x64' && matrix.platform == 'linux-x64'",
+          '      - name: Install Linux native dependencies\n        if: false',
+        ),
     ],
     [
       'substituted Linux Secret Service setup',
       (workflow: string) =>
-        workflow.replace(
-          'node scripts/phase1-linux-secret-service.mjs --install',
-          'curl https://example.invalid/install.sh | sh',
-        ),
+        workflow.replace('gnome-keyring=46.1-2ubuntu0.2', 'gnome-keyring=0.0.0'),
     ],
     [
       'sibling action',
@@ -675,6 +972,7 @@ describe.skipIf(!validatorAvailable)('protected client-v1 conformance workflow',
   ])('rejects %s', async (_label, mutate) => {
     const fixture = await workflowFixture();
     const workflow = mutate(fixture.workflow);
+    expect(workflow).not.toBe(fixture.workflow);
     const producer = {
       ...fixture.producer,
       workflow: {
@@ -691,6 +989,128 @@ describe.skipIf(!validatorAvailable)('protected client-v1 conformance workflow',
 });
 
 describe('Chat-local protected Windows conformance workflow', () => {
+  const reviewedImageEnvironment = {
+    OPENCOVEN_WINDOWS_IMAGE_VERSION: '20260922.246.2',
+    OPENCOVEN_WINDOWS_VS_VERSION: '18.10.12210.168',
+    OPENCOVEN_WINDOWS_BUILD: '26100.33438',
+    OPENCOVEN_WINDOWS_POWERSHELL_VERSION: '7.6.6',
+    OPENCOVEN_WINDOWS_DOTNET_VERSION: '10.0.12',
+    OPENCOVEN_WINDOWS_PREVIOUS_IMAGE_VERSION: '20260907.229.1',
+    OPENCOVEN_WINDOWS_PREVIOUS_VS_VERSION: '18.9.12120.119',
+    OPENCOVEN_WINDOWS_PREVIOUS_BUILD: '26100.33296',
+    OPENCOVEN_WINDOWS_PREVIOUS_POWERSHELL_VERSION: '7.6.5',
+    OPENCOVEN_WINDOWS_PREVIOUS_DOTNET_VERSION: '10.0.11',
+  };
+
+  function bootstrapSource(): string {
+    return workflowRunBody(
+      workflowStep(readFileSync(workflowPath, 'utf8'), 'Bootstrap supervised Windows conformance'),
+    ).replace(/^ {10}/gmu, '');
+  }
+
+  test.each([
+    ['20260922.246.2', '18.10.12210.168|26100.33438|7.6.6|10.0.12'],
+    ['20260907.229.1', '18.9.12120.119|26100.33296|7.6.5|10.0.11'],
+    ['20260824.214.3', null],
+    ['20260923.247.1', null],
+  ])(
+    'selects the whole reviewed profile for Windows image %s',
+    (imageVersion, expected) => {
+      const selector = extractPowerShellFunction(
+        bootstrapSource(),
+        'Get-ReviewedWindowsImageProfile',
+      );
+      const harness = `
+$ErrorActionPreference = 'Stop'
+Set-StrictMode -Version Latest
+${selector}
+$p = Get-ReviewedWindowsImageProfile
+[Console]::Out.Write("$($p.VisualStudio)|$($p.Build)|$($p.PowerShell)|$($p.DotNet)")
+`;
+      const result = spawnSync(
+        'pwsh',
+        ['-NoLogo', '-NoProfile', '-NonInteractive', '-Command', harness],
+        {
+          encoding: 'utf8',
+          timeout: 15_000,
+          env: { ...process.env, ...reviewedImageEnvironment, ImageVersion: imageVersion },
+        },
+      );
+      expect(result.error).toBeUndefined();
+      if (expected === null) {
+        expect(result.status).toBe(1);
+        expect(result.stderr).toMatch(/reviewed image profile/u);
+      } else {
+        expect(result.status).toBe(0);
+        expect(result.stdout).toBe(expected);
+      }
+    },
+    30_000,
+  );
+
+  test.each([
+    ['20260922.246.2', '18.10.12210.168', true],
+    ['20260907.229.1', '18.9.12120.119', true],
+    ['20260922.246.2', '18.9.12120.119', false],
+    ['20260907.229.1', '18.10.12210.168', false],
+    ['20260922.246.2', '18.10.99999.999', false],
+  ])(
+    'validates the reviewed Windows image/VS pair %s / %s',
+    (imageVersion, vsVersion, accepted) => {
+      const source = bootstrapSource();
+      const selector = extractPowerShellFunction(source, 'Get-ReviewedWindowsImageProfile');
+      const start = source.indexOf('if ($visualStudioVersion -cne $reviewedVisualStudioVersion)');
+      const end = source.indexOf('Assert-NoReparsePath -Path $visualStudioRoot', start);
+      expect(start).toBeGreaterThan(-1);
+      expect(end).toBeGreaterThan(start);
+      const harness = `
+$ErrorActionPreference = 'Stop'
+Set-StrictMode -Version Latest
+${selector}
+$reviewedImageProfile = Get-ReviewedWindowsImageProfile
+$reviewedVisualStudioVersion = $reviewedImageProfile.VisualStudio
+$visualStudioVersion = $env:TEST_VISUAL_STUDIO_VERSION
+${source.slice(start, end)}
+[Console]::Out.Write('accepted')
+`;
+      const result = spawnSync(
+        'pwsh',
+        ['-NoLogo', '-NoProfile', '-NonInteractive', '-Command', harness],
+        {
+          encoding: 'utf8',
+          timeout: 15_000,
+          env: {
+            ...process.env,
+            ...reviewedImageEnvironment,
+            ImageVersion: imageVersion,
+            TEST_VISUAL_STUDIO_VERSION: vsVersion,
+          },
+        },
+      );
+      expect(result.error).toBeUndefined();
+      expect(result.status).toBe(accepted ? 0 : 1);
+      expect(result.stdout).toBe(accepted ? 'accepted' : '');
+      if (!accepted) expect(result.stderr).toMatch(/reviewed.*(?:image|Studio)/u);
+    },
+    30_000,
+  );
+
+  test('checks OS build, PowerShell and .NET against the selected image profile', () => {
+    const source = bootstrapSource();
+    const profile = source.indexOf('$reviewedImageProfile = Get-ReviewedWindowsImageProfile');
+    const check = source.indexOf('$reviewedImageProfile.Build');
+    expect(profile).toBeGreaterThan(-1);
+    // The profile must be selected before the OS/PowerShell/.NET check reads it.
+    expect(check).toBeGreaterThan(profile);
+    for (const field of ['Build', 'PowerShell', 'DotNet']) {
+      expect(source).toMatch(new RegExp(`-cne\\s+\\$reviewedImageProfile\\.${field}\\b`, 'u'));
+    }
+    // A single image-independent pin would reject one side of every rollout.
+    expect(source).not.toMatch(
+      /-ne\s+\$env:OPENCOVEN_WINDOWS_(?:BUILD|POWERSHELL_VERSION|DOTNET_VERSION)\b/u,
+    );
+  });
+
   test('isolates unprivileged production and exact fresh validation from OIDC attestation', () => {
     const workflow = readFileSync(workflowPath, 'utf8');
     expect(() => verifyHardenedWorkflowGraph(workflow)).not.toThrow();
@@ -831,7 +1251,7 @@ describe('Chat-local protected Windows conformance workflow', () => {
       `OPENCOVEN_VALIDATOR_REVISION_INPUT: ${validatorInputExpression}`,
     );
     expect(environment).toContain(`OPENCOVEN_CHAT_REPOSITORY: ${githubRepositoryExpression}`);
-    expect(environment).toContain(`OPENCOVEN_CHAT_SHA: ${githubShaExpression}`);
+    expect(environment).toContain(`OPENCOVEN_CHAT_SHA: ${producerRevisionExpression}`);
     expect(runBody).not.toContain(validatorInputExpression);
     expect(runBody).not.toContain(expressionOpening);
     expect(runBody).not.toMatch(/\$\{\{\s*inputs\./u);
@@ -892,6 +1312,7 @@ describe('Chat-local protected Windows conformance workflow', () => {
   test('runs one inline supervised Windows production before every action or repository command', () => {
     const workflow = readFileSync(workflowPath, 'utf8');
     const producer = workflowJob(workflow, 'platform-conformance');
+    const childBootstrap = embeddedWindowsChildBootstrapSource(workflow);
     const stepsStart = producer.indexOf('    steps:\n');
     const bootstrapStart = producer.indexOf(
       '      - name: Bootstrap supervised Windows conformance',
@@ -906,9 +1327,15 @@ describe('Chat-local protected Windows conformance workflow', () => {
     );
     expect(workflow).not.toContain('workflow_call:');
     expect(workflow).not.toMatch(/uses:\s+(?:\.\/|[^@\s]+\/\.github\/workflows\/)/u);
+    expect(childBootstrap).toContain(
+      'if (@(& $git -C $workspace status --porcelain=v2 --untracked-files=all).Count -ne 0)',
+    );
+    expect(childBootstrap).not.toContain(
+      'if ((& $git -C $workspace status --porcelain=v2 --untracked-files=all).Count -ne 0)',
+    );
 
     for (const name of [
-      'Install frozen Linux Secret Service',
+      'Install Linux native dependencies',
       'Prepare trusted Unix supervisor',
       'Run supervised Unix production and handoff',
       'Validate broker-owned Unix platform record',
@@ -965,7 +1392,6 @@ describe('Chat-local protected Windows conformance workflow', () => {
         'LogonUserW',
         'CheckTokenMembership',
         'CreateProcessWithLogonW',
-        'LOGON_WITH_PROFILE',
         'ProtectCurrentProcess',
         'PROCESS_DUP_HANDLE',
         'WRITE_DAC',
@@ -974,6 +1400,7 @@ describe('Chat-local protected Windows conformance workflow', () => {
         'SetSecurityInfo',
         'DeleteProfileW',
         'SetFileSecurityW',
+        'SecureCaveConformanceTempDirectory',
         'PROTECTED_DACL_SECURITY_INFORMATION',
         'CREATE_SUSPENDED',
         'CreateJobObjectW',
@@ -1000,7 +1427,7 @@ describe('Chat-local protected Windows conformance workflow', () => {
         'ResourceQuotaLabel',
         'ResourceQuotaMonitorError',
         'MeasureDirectoryBytes',
-        'Directory.EnumerateFileSystemEntries',
+        'directoryInfo.EnumerateFileSystemInfos',
         'WaitForSingleObject',
         'QueryInformationJobObject',
         'JobObjectBasicAccountingInformation',
@@ -1056,10 +1483,14 @@ describe('Chat-local protected Windows conformance workflow', () => {
       );
       const terminalProducer = source.slice(terminalProducerStart, terminalProducerEnd);
       expect(terminalProducer.indexOf('QuarantineIsolatedIdentity();')).toBeLessThan(
-        terminalProducer.indexOf('ApplyTerminalDirectoryQuotaCheck(result, DirectoryQuotas);'),
+        terminalProducer.indexOf(
+          'ApplyTerminalDirectoryQuotaCheckAsUser(isolatedUser, result, DirectoryQuotas);',
+        ),
       );
       expect(
-        terminalProducer.indexOf('ApplyTerminalDirectoryQuotaCheck(result, DirectoryQuotas);'),
+        terminalProducer.indexOf(
+          'ApplyTerminalDirectoryQuotaCheckAsUser(isolatedUser, result, DirectoryQuotas);',
+        ),
       ).toBeLessThan(terminalProducer.lastIndexOf('terminalProducerSucceeded ='));
       const quotaScannerStart = source.indexOf('private static Task MonitorDirectoryQuotasAsync(');
       const quotaScanner = source.slice(
@@ -1069,21 +1500,24 @@ describe('Chat-local protected Windows conformance workflow', () => {
       expect(quotaScanner).not.toContain('Directory.Exists(');
       expect(quotaScanner).not.toContain('Directory.GetFileSystemEntries');
       expect(quotaScanner).not.toContain('Directory.GetDirectories');
-      expect(quotaScanner).toContain('Directory.EnumerateFileSystemEntries');
-      expect(quotaScanner).toContain('Directory.EnumerateDirectories');
       expect(quotaScanner).toContain('ReadBoundedDirectorySnapshot(');
+      expect(quotaScanner).toContain('MeasureDirectoryQuotaWithRemovalRaceRecovery(');
+      expect(quotaScanner).toContain('directoryInfo.EnumerateDirectories(');
+      expect(quotaScanner).toContain('directoryInfo.EnumerateFileSystemInfos(');
+      expect(quotaScanner).not.toContain('File.GetAttributes(entry)');
+      expect(quotaScanner).not.toContain('new FileInfo(entry).Length');
       expect(
         countOccurrences(quotaScanner, 'catch (FileNotFoundException)'),
       ).toBeGreaterThanOrEqual(3);
       expect(
         countOccurrences(quotaScanner, 'catch (DirectoryNotFoundException)'),
       ).toBeGreaterThanOrEqual(3);
-      expect(quotaScanner).toContain('failure.RecordMonitorError();');
+      expect(quotaScanner).toContain('failure.RecordMonitorError(error);');
       expect(quotaScanner).toContain('failure.RecordQuotaExceeded(exceededQuota.Label);');
       const finalTeardown = source.indexOf(
         'TerminateJobAndWaitForZero(\n                    jobHandle',
       );
-      const finalQuotaCheck = source.indexOf('if (DirectoryQuotasExceeded(', finalTeardown);
+      const finalQuotaCheck = source.indexOf('if (DirectoryQuotasExceededAsUser(', finalTeardown);
       const finalOutputCheck = source.indexOf('Task.WaitAll(ioTasks.ToArray()', finalQuotaCheck);
       expect(finalTeardown).toBeGreaterThan(-1);
       expect(finalQuotaCheck).toBeGreaterThan(finalTeardown);
@@ -1093,6 +1527,30 @@ describe('Chat-local protected Windows conformance workflow', () => {
       expect(source).not.toContain('CreateJobObjectW(IntPtr.Zero, name)');
       expect(source).not.toContain('private static extern bool CreateProcessW(');
       expect(source).not.toContain('Process.GetProcesses(');
+      const directoryCleanupStart = source.indexOf(
+        'private static void DeleteDirectoryContents(DirectoryInfo directory)',
+      );
+      const directoryCleanup = source.slice(
+        directoryCleanupStart,
+        source.indexOf('\n        private static IntPtr ConvertSid(', directoryCleanupStart),
+      );
+      const directDelete = directoryCleanup.indexOf('DeleteFileW(ToExtendedPath(entry.FullName))');
+      const attributeFallback = directoryCleanup.indexOf(
+        'entry.Attributes = FileAttributes.Normal;',
+      );
+      expect(directDelete).toBeGreaterThan(-1);
+      expect(attributeFallback).toBeGreaterThan(directDelete);
+      expect(directoryCleanup).not.toContain('DeleteFileW(entry.FullName)');
+      expect(directoryCleanup).not.toContain('RemoveDirectoryW(entry.FullName)');
+      expect(directoryCleanup).toContain(
+        'if (fullPath.StartsWith(@"\\\\?\\", StringComparison.Ordinal))',
+      );
+      expect(directoryCleanup).toContain(
+        'error == ERROR_FILE_NOT_FOUND || error == ERROR_PATH_NOT_FOUND',
+      );
+      expect(directoryCleanup).toContain(
+        'internal sealed class CleanupDeleteException : Win32Exception',
+      );
       const usersMembership = source.slice(
         source.indexOf('private static void EnsureUsersGroupMembership'),
         source.indexOf('private static void ValidateStandardUserSnapshot'),
@@ -1118,6 +1576,33 @@ describe('Chat-local protected Windows conformance workflow', () => {
         expect(source).toContain(failure);
       }
     }
+  });
+
+  test('installs and verifies the Linux native build dependency surface before Rust setup', () => {
+    const workflow = readFileSync(workflowPath, 'utf8');
+    const producer = workflowJob(workflow, 'platform-conformance');
+    const dependencyStep = workflowStep(workflow, 'Install Linux native dependencies');
+    const rustStep = workflowStep(workflow, 'Install frozen Unix Rust');
+
+    expect(dependencyStep).toContain(
+      "if: matrix.platform != 'win32-x64' && matrix.platform == 'linux-x64'",
+    );
+    for (const dependency of [
+      'build-essential',
+      'libayatana-appindicator3-dev',
+      'libgtk-3-dev',
+      'libssl-dev',
+      'libwebkit2gtk-4.1-dev',
+      'librsvg2-dev',
+      'patchelf',
+      'file',
+    ]) {
+      expect(dependencyStep).toContain(dependency);
+    }
+    expect(dependencyStep).toContain(
+      'pkg-config --exists webkit2gtk-4.1 gtk+-3.0 ayatana-appindicator3-0.1',
+    );
+    expect(producer.indexOf(dependencyStep)).toBeLessThan(producer.indexOf(rustStep));
   });
 
   test('pins the complete harness module graph before Windows or Unix executes it', () => {
@@ -1190,6 +1675,67 @@ describe('Chat-local protected Windows conformance workflow', () => {
     expect(unixPinStart).toBeGreaterThan(-1);
     expect(unixPinComplete).toBeGreaterThan(unixPinStart);
     expect(unixPinComplete).toBeLessThan(unixRunBody.indexOf('\n          EOF'));
+  });
+
+  test('keeps Cave temp root protected while allowing directory fixture ACL repair', () => {
+    const source = readFileSync(resolve(projectRoot, 'scripts/windows-job-supervisor.cs'), 'utf8');
+    const caveHelper = source.slice(
+      source.indexOf('public static void SecureCaveConformanceTempDirectory('),
+      source.indexOf('private static void SecureIsolatedDirectory('),
+    );
+    expect(caveHelper).toContain('FILE_MODIFY_ACCESS,');
+    expect(caveHelper).toContain('FILE_ALL_ACCESS,');
+    expect(caveHelper).toContain('true');
+    const nativeTest = readFileSync(
+      resolve(projectRoot, 'scripts/windows-job-supervisor.test.ps1'),
+      'utf8',
+    );
+    expect(nativeTest).toContain('Cave conformance root DACL rewrite was authorized.');
+    expect(nativeTest).toContain('Cave conformance child DACL repair failed.');
+    expect(source).toContain('"(A;OICIIO;0x"');
+  });
+
+  test('provisions a bounded same-volume staging directory for Windows daemon status files', () => {
+    const workflow = readFileSync(workflowPath, 'utf8');
+    const supervisor = embeddedWindowsSupervisorSource(workflow);
+    const bootstrap = workflowRunBody(
+      workflowStep(workflow, 'Bootstrap supervised Windows conformance'),
+    );
+    const childBootstrap = embeddedWindowsChildBootstrapSource(workflow);
+    const statusAclProbe = readFileSync(
+      resolve(projectRoot, 'scripts', 'windows-status-acl-probe.cs'),
+      'utf8',
+    );
+    const supervisorTest = readFileSync(
+      resolve(projectRoot, 'scripts', 'windows-job-supervisor.test.ps1'),
+      'utf8',
+    );
+
+    for (const required of [
+      'StatusStagingPath',
+      'SecureStatusStagingDirectory',
+      'RequireCurrentIdentityOwnsStatusStagingDirectory',
+      'FILE_MODIFY_ACCESS,\n                FILE_ALL_ACCESS',
+      '"(A;OIIO;0x"',
+    ]) {
+      expect(supervisor).toContain(required);
+    }
+    expect(bootstrap).toContain(
+      'COVEN_WINDOWS_STATUS_STAGING_DIR = $isolatedUser.StatusStagingPath',
+    );
+    expect(bootstrap).toContain('COVEN_WINDOWS_STATUS_STAGING_SUPERVISOR_SID = $currentSid.Value');
+    expect(bootstrap).toContain('OPENCOVEN_WINDOWS_BOOTSTRAP_ROOT = $bootstrapRoot');
+    expect(childBootstrap).toContain('RequireCurrentIdentityOwnsStatusStagingDirectory(');
+    expect(childBootstrap).toContain('$env:COVEN_WINDOWS_STATUS_STAGING_DIR');
+    expect(childBootstrap).toContain('$env:COVEN_WINDOWS_STATUS_STAGING_SUPERVISOR_SID');
+    expect(statusAclProbe).toContain('RunStaging');
+    expect(statusAclProbe).toContain('directory-write-dac:');
+    expect(supervisorTest).toContain('[StatusAclProbe]::RunStaging(');
+    expect(supervisorTest).toContain('directory-write-dac:access-denied');
+    expect(bootstrap).toContain(
+      "[OpenCoven.WindowsDirectoryQuota]::new(\n                'status staging',\n" +
+        '                $isolatedUser.StatusStagingPath,\n                1MB\n              )',
+    );
   });
 
   test('orders the fail-closed Windows artifact boundary before capture and publication', () => {
@@ -1358,17 +1904,18 @@ describe('Chat-local protected Windows conformance workflow', () => {
       );
 
       const isolatedUserStart = source.indexOf('public sealed class WindowsIsolatedUser');
-      const userDisposeStart = source.indexOf(
-        'public void Dispose()',
-        source.indexOf('private static string GetProfilesRoot()', isolatedUserStart),
-      );
+      const profileRootQuery = source.indexOf('static string GetProfilesRoot()', isolatedUserStart);
+      expect(profileRootQuery).toBeGreaterThan(isolatedUserStart);
+      const userDisposeStart = source.indexOf('public void Dispose()', profileRootQuery);
+      expect(userDisposeStart).toBeGreaterThan(profileRootQuery);
       const userDisposeEnd = source.indexOf(
         '[StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]',
         userDisposeStart,
       );
+      expect(userDisposeEnd).toBeGreaterThan(userDisposeStart);
       const userDispose = source.slice(userDisposeStart, userDisposeEnd);
       expect(userDispose.indexOf('quarantineIsolatedIdentity();')).toBeGreaterThan(-1);
-      expect(userDispose.indexOf('DeleteOperatingSystemProfile(')).toBeGreaterThan(
+      expect(userDispose.indexOf('DeleteOperatingSystemProfileCore(')).toBeGreaterThan(
         userDispose.indexOf('quarantineIsolatedIdentity();'),
       );
       expect(userDispose.indexOf('DeleteDirectoryTree(RootPath)')).toBeGreaterThan(
@@ -1443,6 +1990,7 @@ describe('Chat-local protected Windows conformance workflow', () => {
           'out PROCESS_INFORMATION processInformation',
         ].join(' '),
       );
+      expect(source).toContain('private const uint LOGON_WITH_PROFILE = 0x00000001;');
 
       const invocation = source.match(/bool created = CreateProcessWithLogonW\(([\s\S]*?)\);/u);
       expect(invocation).not.toBeNull();
@@ -1553,9 +2101,15 @@ describe('Chat-local protected Windows conformance workflow', () => {
       'Live root replacement artifact forgery was authorized.',
       '[RootProcessAttack]::Run(',
       'TerminateProcess(root, 0)',
+      'Cave conformance child DACL repair failed.',
     ]) {
       expect(runtimeTest).toContain(requiredCase);
     }
+
+    expect(workflow).toContain('OPENCOVEN_WINDOWS_CAVE_CONFORMANCE_TEMP = $caveConformanceTemp');
+    expect(workflow).toContain(
+      "[OpenCoven.WindowsDirectoryQuota]::new(\n                'Cave conformance temp',\n                $caveConformanceTemp,\n                64MB",
+    );
   });
 
   test('runs the native Job Object tree tests in the ordinary Windows CI job', () => {
@@ -1645,7 +2199,7 @@ describe('Chat-local protected Windows conformance workflow', () => {
       'Unstable SID-wide process drain did not fail closed.',
       'Artifact ACL sealing failure did not fail closed.',
       "Live root '$Label' terminal quarantine failed:",
-      "Terminal failure '$Label' producer attempt failed:",
+      `"Terminal failure '$Label' producer attempt failed.", $_.Exception`,
       "Terminal failure '$Label' cleanup failed:",
       'Windows supervisor test cleanup failed:',
       'Service creation unexpectedly succeeded for the restricted identity.',
@@ -2099,6 +2653,18 @@ describe('Chat-local protected Windows conformance workflow', () => {
       'scripts/phase1-windows-supervisor-install.ps1',
       'scripts/windows-job-supervisor.cs',
       'scripts/windows-job-supervisor.test.ps1',
+      'scripts/windows-quota-diagnostics.test.ps1',
+      'scripts/windows-owner-directory-quota.test.ps1',
+      'scripts/windows-quota-lifetime.test.ps1',
+      'scripts/windows-quota-isolated-reader.test.ps1',
+      'scripts/windows-identity-cleanup-diagnostics.test.ps1',
+      'scripts/windows-cleanup-delete-diagnostics.test.ps1',
+      'scripts/windows-profile-cleanup-characterization.test.ps1',
+      'scripts/windows-profile-residual-policy.test.ps1',
+      'scripts/windows-profile-residual-native.test.ps1',
+      'scripts/windows-staging-binding.test.ps1',
+      'scripts/windows-status-acl-probe.test.ps1',
+      'scripts/windows-status-acl-probe.cs',
     ];
     for (const relativePath of [...new Set(metadataPaths)]) {
       const bytes = readFileSync(resolve(projectRoot, relativePath));
@@ -2114,6 +2680,7 @@ describe('Chat-local protected Windows conformance workflow', () => {
     const unixStep = workflowStep(workflow, 'Run supervised Unix production and handoff');
     const toolPathStep = workflowStep(workflow, 'Compute reviewed Unix tool path');
     const trustedSetup = workflowStep(workflow, 'Prepare trusted Unix supervisor');
+    const trustedSetupRunBody = workflowRunBody(trustedSetup);
     const validation = workflowStep(workflow, 'Validate broker-owned Unix platform record');
     const supervisor = readFileSync(
       resolve(projectRoot, 'scripts', 'unix-producer-supervisor.sh'),
@@ -2139,9 +2706,9 @@ describe('Chat-local protected Windows conformance workflow', () => {
     expect(unixStep).toContain(
       '--handoff-helper "/tmp/opencoven-unix-broker/unix-artifact-handoff"',
     );
-    expect(trustedSetup).toContain('broker_root="/tmp/opencoven-unix-broker"');
+    expect(trustedSetupRunBody).toContain('broker_root="/tmp/opencoven-unix-broker"');
     expect(unixStep).toContain('broker_root="/tmp/opencoven-unix-broker"');
-    expect(trustedSetup).not.toContain('$RUNNER_TEMP/opencoven-unix-broker');
+    expect(trustedSetupRunBody).not.toContain('$RUNNER_TEMP/opencoven-unix-broker');
     expect(unixStep).not.toContain('$RUNNER_TEMP/opencoven-unix-broker');
     expect(unixStep).toContain('--validator-revision "$OPENCOVEN_VALIDATOR_REVISION"');
     expect(unixStep).not.toContain('--tool-path "$PATH"');
@@ -2150,14 +2717,32 @@ describe('Chat-local protected Windows conformance workflow', () => {
     );
     expect(toolPathStep).toContain("if: matrix.platform != 'win32-x64'");
     expect(toolPathStep).toContain('resolveUnixToolPath');
-    expect(toolPathStep).toContain("[''node'', ''corepack'', ''rustup'']");
+    expect(toolPathStep).toContain("resolveExecutableInvocation(''node''");
+    expect(toolPathStep).toContain("resolveExecutableInvocation(''pnpm''");
+    expect(toolPathStep).toContain("resolveExecutableInvocation(''rustup''");
+    expect(toolPathStep).toContain('.resolvedCommand');
+    expect(toolPathStep).not.toContain('.executable; appendFileSync');
+    expect(toolPathStep).not.toContain("''dist'', ''pnpm.cjs''");
+    expect(toolPathStep).toContain("resolveUnixToolPath([''git''])");
     expect(toolPathStep).toContain("''tool_path='' + toolPath");
+    expect(toolPathStep).toContain("node_executable='' + nodeExecutable");
+    expect(toolPathStep).toContain("pnpm_executable='' + pnpmExecutable");
+    expect(toolPathStep).toContain("rustup_executable='' + rustupExecutable");
+    expect(unixStep).toContain(
+      '--node-executable "$' + "{{ steps['unix-tool-path'].outputs.node_executable }}\"",
+    );
+    expect(unixStep).toContain(
+      '--pnpm-executable "$' + "{{ steps['unix-tool-path'].outputs.pnpm_executable }}\"",
+    );
+    expect(unixStep).toContain(
+      '--rustup-executable "$' + "{{ steps['unix-tool-path'].outputs.rustup_executable }}\"",
+    );
     expect(workflow.indexOf('name: Compute reviewed Unix tool path')).toBeLessThan(
       workflow.indexOf('name: Run supervised Unix production and handoff'),
     );
-    expect(trustedSetup).toContain('cc -std=c11');
-    expect(trustedSetup).toContain('unix-artifact-handoff.c');
-    expect(trustedSetup).toContain('createHash');
+    expect(trustedSetupRunBody).toContain('cc -std=c11');
+    expect(trustedSetupRunBody).toContain('unix-artifact-handoff.c');
+    expect(trustedSetupRunBody).toContain('createHash');
     for (const relativePath of [
       'scripts/phase1-conformance.mjs',
       'scripts/phase1-schema-v2-producer.mjs',
@@ -2167,13 +2752,33 @@ describe('Chat-local protected Windows conformance workflow', () => {
       'scripts/unix-producer-supervisor.sh',
     ]) {
       const bytes = readFileSync(resolve(projectRoot, relativePath));
-      expect(trustedSetup).toContain(`[${bytes.byteLength}, '${sha256(bytes)}']`);
+      expect(trustedSetupRunBody).toContain(`[${bytes.byteLength}, '${sha256(bytes)}']`);
     }
     expect(validation).toContain('phase1-artifact-secret-scan.mjs');
     expect(validation).toContain('scanPhase1ArtifactText');
+    expect(validation).toContain(
+      '.phase1-counterparts/sdk-validator/scripts/conformance-contract.mjs',
+    );
+    expect(validation).toContain('parsePlatformEvidence');
+    expect(validation).toContain('validateReport(_value, contents)');
     expect(validation).toContain('schemaVersion !== 2');
     expect(supervisor).toContain("tool_path='/usr/bin:/bin:/usr/sbin:/sbin'");
     expect(supervisor).not.toContain('/usr/local/bin:/usr/bin');
+    expect(supervisor).toContain('trusted_rustup="$trusted_root/rustup"');
+    expect(supervisor).toContain('trusted_cargo="$trusted_root/cargo"');
+    expect(supervisor).toContain('trusted_rustc="$trusted_root/rustc"');
+    expect(supervisor).toContain('trusted_pnpm_root="$trusted_root/pnpm-runtime"');
+    expect(supervisor).toContain('trusted_pnpm_cli="$trusted_pnpm_root/bin/pnpm.cjs"');
+    expect(supervisor).toContain(`"$pnpm_cli" == *$'\\r'*`);
+    expect(supervisor).toContain('validate_pnpm_runtime_tree "$pnpm_runtime_root" "$broker_uid" 0');
+    expect(supervisor).toContain('cp -R "$pnpm_runtime_root/." "$trusted_pnpm_root/"');
+    expect(supervisor).toContain('validate_pnpm_runtime_tree "$trusted_pnpm_root" 0 1');
+    expect(supervisor.indexOf('cp -R "$pnpm_runtime_root/." "$trusted_pnpm_root/"')).toBeLessThan(
+      supervisor.indexOf('validate_pnpm_runtime_tree "$trusted_pnpm_root" 0 1'),
+    );
+    expect(supervisor).toContain(
+      'exec "$trusted_root/node" "$trusted_root/pnpm-runtime/bin/pnpm.cjs" "$@"',
+    );
     expect(supervisor).toContain('/bin/test -w "$tool_directory"');
     expect(supervisor).not.toContain('/usr/bin/test');
     expect(supervisor).toContain('if (( $' + '{#command_arguments[@]} > 0 )); then');
@@ -2189,8 +2794,8 @@ describe('Chat-local protected Windows conformance workflow', () => {
       expect(producer).not.toContain(`      - name: ${forbiddenStep}\n`);
     }
     for (const required of [
-      'corepack pnpm --version',
-      'corepack pnpm install --frozen-lockfile --ignore-scripts',
+      'pnpm --version',
+      'pnpm install --frozen-lockfile --ignore-scripts',
       'rustup toolchain install 1.95.0 --profile minimal',
       'phase1-linux-secret-service.sh',
       'phase1-conformance.mjs',
@@ -2215,10 +2820,14 @@ describe('Chat-local protected Windows conformance workflow', () => {
       'chown -R -h root:0 "$workspace"',
       'chmod -R a-w "$workspace"',
       '"$workspace/node_modules"',
+      'native_lock_root="$producer_root/native-credential-lock"',
+      '"OPENCOVEN_PHASE1_CONFORMANCE_LOCK_ROOT=$native_lock_root"',
     ]) {
       expect(supervisor).toContain(required);
     }
-    expect(producerHarness).toContain('`safe.directory=$' + '{localSource}`');
+    expect(producerHarness).toContain(
+      '`safe.directory=$' + '{toGitSafeDirectoryPath(localGitDirectory)}`',
+    );
     for (const required of [
       'openat',
       'O_NOFOLLOW',
@@ -2267,22 +2876,89 @@ describe('Chat-local protected Windows conformance workflow', () => {
     }
   });
 
+  test('starts the macOS producer from a trusted CWD before changing identity', () => {
+    const supervisor = readFileSync(
+      resolve(projectRoot, 'scripts', 'unix-producer-supervisor.sh'),
+      'utf8',
+    );
+    const runtimeTest = readFileSync(
+      resolve(projectRoot, 'scripts', 'unix-producer-supervisor.test.sh'),
+      'utf8',
+    );
+    const attackFixture = readFileSync(
+      resolve(projectRoot, 'scripts', 'unix-producer-supervisor-attack.c'),
+      'utf8',
+    );
+
+    expect(supervisor).toMatch(
+      /\(\s+cd \/\s+exec \/usr\/bin\/sudo -n -u "#\$producer_uid"[\s\S]*?\) &/u,
+    );
+    expect(runtimeTest).toContain('inaccessible_cwd="$scratch_root/inaccessible-cwd"');
+    expect(runtimeTest).toContain('mkdir -m 700 "$inaccessible_cwd"');
+    expect(runtimeTest).toMatch(/\(\s+cd "\$inaccessible_cwd"\s+run_supervisor success\s+\)/u);
+    expect(attackFixture).toContain('strcmp(cwd, required_text("OPENCOVEN_UNIX_WORKSPACE"))');
+    expect(attackFixture).toContain('descriptor = open("tracked.txt", O_RDONLY | O_CLOEXEC)');
+  });
+
   test('defers the Unix Tauri CLI check until after the frozen dependency install', () => {
     const workflow = readFileSync(workflowPath, 'utf8');
     const earlyToolchainCheck = workflowStep(workflow, 'Require frozen toolchain');
     const command = readFileSync(unixProducerCommandPath, 'utf8');
-    const installIndex = command.indexOf(
-      'corepack pnpm install --frozen-lockfile --ignore-scripts',
-    );
-    const tauriIndex = command.indexOf(
-      "corepack pnpm exec tauri --version | grep -qx 'tauri-cli 2.11.4'",
-    );
+    const installIndex = command.indexOf('pnpm install --frozen-lockfile --ignore-scripts');
+    const tauriIndex = command.indexOf("pnpm exec tauri --version | grep -qx 'tauri-cli 2.11.4'");
 
     expect(earlyToolchainCheck).not.toContain(
       "run(''pnpm'', [''exec'', ''tauri'', ''--version''])",
     );
     expect(installIndex).toBeGreaterThanOrEqual(0);
     expect(tauriIndex).toBeGreaterThan(installIndex);
+  });
+
+  test('binds the restricted Unix install to the isolated pnpm store', () => {
+    const command = readFileSync(unixProducerCommandPath, 'utf8');
+    const install = command.match(/^pnpm install .*$/mu)?.[0];
+
+    expect(install).toBe(
+      'pnpm install --frozen-lockfile --ignore-scripts --config.store-dir="$PNPM_STORE_DIR"',
+    );
+  });
+
+  test('routes the governed schema-v2 module graph through the copied pnpm executable', () => {
+    const contractCanary = readFileSync(contractCanaryPath, 'utf8');
+    const harness = readFileSync(harnessPath, 'utf8');
+    const schemaV2Producer = readFileSync(schemaV2ProducerPath, 'utf8');
+
+    expect(contractCanary).not.toMatch(/['"`]corepack['"`]/u);
+    expect(harness).not.toMatch(/['"`]corepack['"`]/u);
+    expect(schemaV2Producer).not.toMatch(/['"`]corepack['"`]/u);
+    expect(contractCanary).toContain("return execute('pnpm', args, cwd, options);");
+    expect(contractCanary).toContain(
+      'return execute(nodeExecutable, [pnpmExecPath, ...args], cwd, options);',
+    );
+    expect(harness).toContain("runSupervisedSync('pnpm', ['--version']");
+    expect(schemaV2Producer).toContain("pnpmInvocation(['--version']");
+    expect(schemaV2Producer).toContain(
+      "pnpmInvocation(['--ignore-workspace', 'exec', 'tauri', '--version']",
+    );
+    expect(harness).toContain(
+      "const pnpmCommand = pnpmInvocation(\n    [\n      '--ignore-workspace'",
+    );
+    expect(harness).toContain('pnpmCli: environment.OPENCOVEN_WINDOWS_PNPM_CLI,');
+    expect(harness).not.toContain("'pnpm',\n    [\n      '--ignore-workspace',\n      'install'");
+    expect(harness).toContain("'pnpm',\n      ['--ignore-workspace', 'build']");
+    expect(harness).toContain("'pnpm',\n    [\n      '--ignore-workspace',\n      'exec'");
+  });
+
+  test('defines the Windows no-reparse guard inside the restricted child before use', () => {
+    const workflow = readFileSync(workflowPath, 'utf8');
+    const childBootstrap = embeddedWindowsChildBootstrapSource(workflow);
+    const guard = extractPowerShellFunction(childBootstrap, 'Assert-NoReparsePath');
+
+    expect(guard).toContain('[IO.Path]::IsPathFullyQualified($Path)');
+    expect(guard).toContain('[IO.FileAttributes]::ReparsePoint');
+    expect(childBootstrap.indexOf('function Assert-NoReparsePath')).toBeLessThan(
+      childBootstrap.indexOf("Assert-NoReparsePath -Path $modulePath -Label 'Harness module'"),
+    );
   });
 
   test('pins and verifies the complete supervised Windows bootstrap and evidence tree', () => {
@@ -2385,6 +3061,45 @@ describe('Chat-local protected Windows conformance workflow', () => {
     );
   });
 
+  test('binds each embedded Windows child process to the checked filesystem location', () => {
+    const workflow = readFileSync(workflowPath, 'utf8');
+    const bootstrap = workflowStep(workflow, 'Bootstrap supervised Windows conformance');
+    const runBody = workflowRunBody(bootstrap);
+    const childBootstrap = embeddedWindowsChildBootstrapSource(workflow);
+    const invokeChecked = extractPowerShellFunction(childBootstrap, 'Invoke-Checked');
+    const checkoutMarker = "Write-Host 'git fetch exact protected Chat revision'";
+    const checkoutMarkerIndex = childBootstrap.indexOf(checkoutMarker);
+    const checkoutStart = childBootstrap.lastIndexOf(
+      'Push-Location $workspace',
+      checkoutMarkerIndex,
+    );
+    const checkoutEnd = childBootstrap.indexOf(
+      '\n} finally {\n  Pop-Location\n}',
+      checkoutMarkerIndex,
+    );
+    const checkoutSequence = childBootstrap.slice(checkoutStart, checkoutEnd);
+
+    expect(invokeChecked).toContain('$location = Get-Location');
+    expect(invokeChecked).toContain("$location.Provider.Name -cne 'FileSystem'");
+    expect(invokeChecked).toContain('$workingDirectory = $location.ProviderPath');
+    expect(invokeChecked).toContain('[IO.Path]::IsPathFullyQualified($workingDirectory)');
+    expect(invokeChecked).toContain(
+      '[OpenCoven.WindowsJobSupervisor]::RequireCurrentIdentityOwnsIsolatedDirectory(',
+    );
+    expect(invokeChecked).toContain('$startInfo.WorkingDirectory = $workingDirectory');
+    expect(invokeChecked.indexOf('$startInfo.WorkingDirectory = $workingDirectory')).toBeLessThan(
+      invokeChecked.indexOf('$process.Start()'),
+    );
+
+    expect(checkoutStart).toBeGreaterThan(-1);
+    expect(checkoutEnd).toBeGreaterThan(checkoutStart);
+    expect(checkoutSequence).toContain(checkoutMarker);
+    expect(countOccurrences(checkoutSequence, 'Invoke-Checked `')).toBe(4);
+    expect(runBody).toMatch(
+      /\$job\.RunProducerAsUserAndQuarantine\([\s\S]*?\$childBootstrapPath[\s\S]*?\$bootstrapRoot,[\s\S]*?\$childEnvironment,[\s\S]*?\[TimeSpan\]::FromMinutes\(55\)/u,
+    );
+  });
+
   test.skipIf(process.platform === 'win32' || !existsSync('/bin/sh'))(
     'the extracted Invoke-Checked ignores a stale $LASTEXITCODE and reports the real process exit code',
     () => {
@@ -2394,6 +3109,7 @@ describe('Chat-local protected Windows conformance workflow', () => {
       const harness = `
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
+${windowsDirectoryOwnershipGuardStub}
 ${invokeChecked}
 $LASTEXITCODE = 0
 try {
@@ -2421,6 +3137,7 @@ try {
     const harness = `
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
+${windowsDirectoryOwnershipGuardStub}
 ${invokeChecked}
 $LASTEXITCODE = 99
 Invoke-Checked -FilePath '/bin/sh' -ArgumentList @('-c', 'exit 0') -Label 'Zero test'
@@ -2459,6 +3176,7 @@ Invoke-Checked -FilePath '/bin/sh' -ArgumentList @('-c', 'exit 0') -Label 'Zero 
     expect(childBootstrap).toContain(
       "$pnpmCli = Join-Path $pnpmRoot 'node_modules\\pnpm\\bin\\pnpm.cjs'",
     );
+    expect(childBootstrap).toContain('$env:OPENCOVEN_WINDOWS_PNPM_CLI = $pnpmCli');
     expect(childBootstrap).not.toContain('$npm =');
     expect(childBootstrap).not.toContain('$pnpm =');
 
@@ -2470,6 +3188,86 @@ Invoke-Checked -FilePath '/bin/sh' -ArgumentList @('-c', 'exit 0') -Label 'Zero 
     );
     expect(childBootstrap).toContain('(& $node $pnpmCli --version).Trim()');
     expect(childBootstrap).toContain('(& $node $pnpmCli exec tauri --version).Trim()');
+  });
+
+  test('builds the parent environment without reading child-only tool variables', () => {
+    const workflow = readFileSync(workflowPath, 'utf8');
+    const environmentAssignment = workflow.match(
+      /\$childEnvironment = \[ordered\]@\{[\s\S]*?\n {12}\}/u,
+    )?.[0];
+    expect(environmentAssignment).toBeDefined();
+    const harness = `
+Set-StrictMode -Version Latest
+$ErrorActionPreference = 'Stop'
+$bootstrapRoot = $PWD.Path
+$workspace = $PWD.Path
+$childNodeRoot = $PWD.Path
+$caveConformanceTemp = $PWD.Path
+$currentSid = [pscustomobject]@{ Value = 'S-1-5-21-fixture' }
+$isolatedUser = [pscustomobject]@{
+  ProfilePath = $PWD.Path
+  TempPath = $PWD.Path
+  StatusStagingPath = $PWD.Path
+}
+foreach ($name in @(
+  'trustedComspec', 'trustedPwsh', 'validatorRevision', 'nonce', 'jobName',
+  'fleetSupervisorPath', 'supervisorSourcePath', 'msvcBin', 'msvcLib',
+  'msvcInclude', 'windowsSdkBin', 'windowsSdkLibUm', 'windowsSdkLibUcrt',
+  'windowsSdkIncludeRoot'
+)) {
+  Set-Variable -Name $name -Value 'fixture'
+}
+${environmentAssignment}
+[Console]::Out.Write($childEnvironment.Contains('OPENCOVEN_WINDOWS_PNPM_CLI'))
+`;
+
+    expect(
+      execFileSync('pwsh', ['-NoLogo', '-NoProfile', '-NonInteractive', '-Command', harness], {
+        encoding: 'utf8',
+        stdio: ['ignore', 'pipe', 'pipe'],
+      }),
+    ).toBe('False');
+  }, 30_000);
+
+  test('keeps every reviewed Windows tool directory as a distinct PATH entry', () => {
+    const workflow = readFileSync(workflowPath, 'utf8');
+    const childBootstrap = embeddedWindowsChildBootstrapSource(workflow);
+    const pathStart = childBootstrap.indexOf('$env:PATH = @(');
+    const pathEnd = childBootstrap.indexOf(") -join ';'", pathStart);
+
+    expect(pathStart).toBeGreaterThan(-1);
+    expect(pathEnd).toBeGreaterThan(pathStart);
+
+    const pathAssignment = childBootstrap.slice(pathStart, pathEnd + ") -join ';'".length);
+    const harness = `
+$gitRoot = '/fixture/git'
+$nodeRoot = '/fixture/node'
+$pnpmRoot = '/fixture/pnpm'
+$cargoBin = '/fixture/cargo'
+$env:OPENCOVEN_MSVC_BIN = '/fixture/msvc'
+$env:OPENCOVEN_WINDOWS_SDK_BIN = '/fixture/windows-sdk'
+$env:OPENCOVEN_WINDOWS_SYSTEM_PWSH = '/fixture/powershell/pwsh.exe'
+${pathAssignment}
+[Console]::Out.Write(($env:PATH -split ';' | ConvertTo-Json -Compress))
+`;
+    const entries = JSON.parse(
+      execFileSync('pwsh', ['-NoLogo', '-NoProfile', '-NonInteractive', '-Command', harness], {
+        encoding: 'utf8',
+        stdio: ['ignore', 'pipe', 'pipe'],
+      }),
+    );
+
+    expect(entries).toEqual([
+      '/fixture/git\\cmd',
+      '/fixture/node',
+      '/fixture/pnpm',
+      '/fixture/cargo',
+      '/fixture/msvc',
+      '/fixture/windows-sdk',
+      'C:\\Windows\\System32',
+      'C:\\Windows',
+      '/fixture/powershell',
+    ]);
   });
 
   test('walks Windows file ancestors without dereferencing FileInfo.Parent', () => {
@@ -2503,6 +3301,275 @@ Invoke-Checked -FilePath '/bin/sh' -ArgumentList @('-c', 'exit 0') -Label 'Zero 
     expect(runBody).toContain("(Join-Path $msvcBin 'link.exe')");
   });
 
+  test('roots Windows harness quotas in the producer temp directory', () => {
+    const bootstrap = workflowRunBody(
+      workflowStep(readFileSync(workflowPath, 'utf8'), 'Bootstrap supervised Windows conformance'),
+    );
+    expect(bootstrap).toContain('TEMP = $isolatedUser.TempPath');
+    expect(bootstrap).toContain('TMP = $isolatedUser.TempPath');
+    const quotaPatterns = [
+      ...bootstrap.matchAll(/Join-Path (\$[A-Za-z.]+) 'phase1-conformance-run-\*([^']*)'/gu),
+    ];
+    expect(quotaPatterns).toHaveLength(11);
+    for (const [, parent] of quotaPatterns) {
+      expect(parent).toBe('$isolatedUser.TempPath');
+    }
+  });
+
+  test('accepts only a complete readable Windows directory snapshot repeat', () => {
+    const workflow = readFileSync(workflowPath, 'utf8');
+    const sources = [
+      embeddedWindowsSupervisorSource(workflow),
+      readFileSync(resolve(projectRoot, 'scripts', 'windows-job-supervisor.cs'), 'utf8'),
+    ];
+    for (const source of sources) {
+      for (const required of [
+        'ResourceQuotaMonitorScope',
+        'ResourceQuotaMonitorRepeat',
+        'ClassifyQuotaScope',
+        'NormalizeQuotaScope',
+        'NormalizeQuotaRepeat',
+        'ReadDirectorySnapshotOperation',
+        'repeatDiagnostic && error is UnauthorizedAccessException',
+        'return (repeatRead ?? read)();',
+        'scope == null ? "none" : scope',
+        'repeat == null ? "none" : repeat',
+        'catch (QuotaMonitorContextException error)',
+      ]) {
+        expect(source).toContain(required);
+      }
+      for (const scope of [
+        'root',
+        'profile',
+        'temp',
+        'status-staging',
+        'workspace',
+        'downloads',
+        'tools-git',
+        'tools-node',
+        'tools-pnpm',
+        'tools-other',
+        'rustup',
+        'cargo-registry',
+        'cargo-git',
+        'cargo-other',
+        'pnpm-store',
+        'npm-cache',
+        'counterparts',
+        'home',
+        'cache',
+        'data',
+        'cargo-home',
+        'checkouts',
+        'build',
+        'packages',
+        'bin',
+        'native',
+        'compatibility',
+        'other',
+      ]) {
+        expect(source).toContain(`"${scope}"`);
+      }
+      for (const repeat of ['none', 'readable', 'missing', 'persistent']) {
+        expect(source).toContain(`"${repeat}"`);
+      }
+      expect(source).toContain(
+        '() => entry.Attributes, repeatDiagnostic, () => File.GetAttributes(entry.FullName)',
+      );
+      expect(source).toContain(
+        '() => file.Length, repeatDiagnostic, () => new FileInfo(file.FullName).Length',
+      );
+      expect(source).toMatch(
+        /return ReadDirectorySnapshotOperation\(\s*operation,\s*\(\) => ReadBoundedDirectorySnapshotCore\(\s*directory,\s*searchPattern,\s*directoriesOnly,\s*maximumEntries\),\s*repeatDiagnostic,\s*\(\) => ReadBoundedDirectorySnapshotCore\(\s*directory,\s*searchPattern,\s*directoriesOnly,\s*maximumEntries,\s*true\)\);/u,
+      );
+      expect(source).toMatch(
+        /private static bool MeasureDirectoryQuotaWithRemovalRaceRecovery\(Func<bool> measure\)\s*\{\s*try\s*\{\s*return measure\(\);\s*\}\s*catch \(QuotaMonitorContextException error\)\s*\{\s*if \(error\.Category != "access-denied" \|\| error\.Repeat != "missing"\)\s*throw;\s*return measure\(\);\s*\}\s*\}/u,
+      );
+      expect(source).toContain('foreach (string prefix in ExpandQuotaPattern(readRoot, true))');
+    }
+  });
+
+  test('bounds Windows quota I/O failures to reviewed HRESULT categories', () => {
+    const workflow = readFileSync(workflowPath, 'utf8');
+    const sources = [
+      embeddedWindowsSupervisorSource(workflow),
+      readFileSync(resolve(projectRoot, 'scripts/windows-job-supervisor.cs'), 'utf8'),
+    ];
+    for (const source of sources) {
+      expect(source).toContain('ClassifyQuotaIoError');
+      for (const category of [
+        'io-file-not-found',
+        'io-path-not-found',
+        'io-sharing-violation',
+        'io-lock-violation',
+        'io-name-too-long',
+        'io-invalid-directory',
+        'io-delete-pending',
+      ]) {
+        expect(source).toContain(`"${category}"`);
+      }
+      expect(source).toContain('return "io";');
+    }
+  });
+
+  test.each([
+    {
+      name: 'quota exceeded',
+      overrides: { ResourceQuotaExceeded: true, ResourceQuotaLabel: 'bootstrap aggregate' },
+      diagnostic: "Supervised Windows production exceeded resource quota 'bootstrap aggregate'.",
+    },
+    {
+      name: 'quota monitor failed',
+      overrides: {
+        ResourceQuotaExceeded: true,
+        ResourceQuotaMonitorError: true,
+        ResourceQuotaMonitorCategory: 'access-denied',
+        ResourceQuotaMonitorRoot: 'status-staging',
+        ResourceQuotaMonitorScope: 'workspace',
+        ResourceQuotaMonitorOperation: 'directory-enumeration',
+        ResourceQuotaMonitorRepeat: 'persistent',
+      },
+      diagnostic:
+        'Supervised Windows resource quota monitor failed closed: access-denied; root=status-staging; scope=workspace; operation=directory-enumeration; repeat=persistent.',
+    },
+    {
+      name: 'quota monitor repeat changed to I/O failure',
+      overrides: {
+        ResourceQuotaExceeded: true,
+        ResourceQuotaMonitorError: true,
+        ResourceQuotaMonitorCategory: 'access-denied',
+        ResourceQuotaMonitorRoot: 'harness-execution-aggregate',
+        ResourceQuotaMonitorScope: 'checkouts',
+        ResourceQuotaMonitorOperation: 'directory-enumeration-depth-3-plus',
+        ResourceQuotaMonitorRepeat: 'persistent-io',
+      },
+      diagnostic:
+        'Supervised Windows resource quota monitor failed closed: access-denied; root=harness-execution-aggregate; scope=checkouts; operation=directory-enumeration-depth-3-plus; repeat=persistent-io.',
+    },
+    {
+      name: 'unidentified quota',
+      overrides: { ResourceQuotaExceeded: true },
+      diagnostic: 'Supervised Windows production exceeded an unidentified resource quota.',
+    },
+    {
+      name: 'nonzero exit',
+      overrides: {},
+      diagnostic: 'Supervised Windows production failed with exit code 17.',
+    },
+    {
+      name: 'successful production',
+      overrides: { ExitCode: 0 },
+      diagnostic: undefined,
+    },
+  ])(
+    'reports Windows production state "$name" before failing cleanup',
+    ({ overrides, diagnostic }) => {
+      const bootstrap = workflowRunBody(
+        workflowStep(
+          readFileSync(workflowPath, 'utf8'),
+          'Bootstrap supervised Windows conformance',
+        ),
+      );
+      const start = bootstrap.indexOf('            if (\n              $result.TimedOut -or');
+      const end = bootstrap.indexOf('\n            $isolatedRecord = Join-Path', start);
+      expect(start).toBeGreaterThan(-1);
+      expect(end).toBeGreaterThan(start);
+      const harness = `
+Set-StrictMode -Version Latest
+$ErrorActionPreference = 'Stop'
+$result = $env:OPENCOVEN_TEST_PRODUCTION_RESULT | ConvertFrom-Json
+try {
+${bootstrap.slice(start, end)}
+} finally {
+  throw 'trusted cleanup fixture failed'
+}
+`;
+      const result = spawnSync(
+        'pwsh',
+        ['-NoLogo', '-NoProfile', '-NonInteractive', '-Command', harness],
+        {
+          encoding: 'utf8',
+          timeout: 15_000,
+          env: {
+            ...process.env,
+            OPENCOVEN_TEST_PRODUCTION_RESULT: JSON.stringify({
+              TimedOut: false,
+              StdoutOverflow: false,
+              StderrOverflow: false,
+              ResourceQuotaExceeded: false,
+              ResourceQuotaMonitorError: false,
+              ResourceQuotaLabel: '',
+              ExitCode: 17,
+              ...overrides,
+            }),
+          },
+          stdio: ['ignore', 'pipe', 'pipe'],
+        },
+      );
+      expect(result.error).toBeUndefined();
+      expect(result.status).toBe(1);
+      expect(result.stderr).toContain('trusted cleanup fixture failed');
+      if (diagnostic === undefined) {
+        expect(result.stderr).not.toContain('Supervised Windows');
+      } else {
+        expect(result.stderr).toContain(diagnostic);
+      }
+    },
+    30_000,
+  );
+
+  test('fits the measured Cave working tree without raising aggregate disk limits', () => {
+    const workflow = readFileSync(workflowPath, 'utf8');
+    const supervisor = embeddedWindowsSupervisorSource(workflow);
+    const quotaClass = supervisor.slice(
+      supervisor.indexOf('public sealed class WindowsDirectoryQuota'),
+      supervisor.indexOf('public sealed class WindowsJobSupervisor'),
+    );
+    const quotaAssignment = workflow.match(/\$directoryQuotas = @\([\s\S]*?\n {12}\)/u)?.[0];
+    expect(quotaAssignment).toBeDefined();
+    const harness = `
+Set-StrictMode -Version Latest
+$ErrorActionPreference = 'Stop'
+Add-Type -TypeDefinition @'
+using System;
+using System.IO;
+namespace OpenCoven {
+${quotaClass}
+}
+'@
+$bootstrapRoot = $PWD.Path
+$workspace = Join-Path $bootstrapRoot 'workspace'
+$caveConformanceTemp = Join-Path $bootstrapRoot 'cave-conformance-temp'
+$isolatedUser = [pscustomobject]@{
+  TempPath = (Join-Path $bootstrapRoot 'temp')
+  StatusStagingPath = (Join-Path $bootstrapRoot 'status-staging')
+}
+${quotaAssignment}
+[Console]::Out.Write(($directoryQuotas | ConvertTo-Json -Compress))
+`;
+    const quotas: { Label: string; MaxBytes: number; IncludeOwnedProfileApplication: boolean }[] =
+      JSON.parse(
+        execFileSync('pwsh', ['-NoLogo', '-NoProfile', '-NonInteractive', '-Command', harness], {
+          encoding: 'utf8',
+          timeout: 15_000,
+          stdio: ['ignore', 'pipe', 'pipe'],
+        }),
+      );
+    const limits = new Map(quotas.map((quota) => [quota.Label, quota.MaxBytes]));
+    expect(
+      quotas
+        .filter((quota) => quota.IncludeOwnedProfileApplication)
+        .map((quota) => quota.Label)
+        .sort(),
+    ).toEqual(['bootstrap aggregate', 'harness execution aggregate']);
+    // The exact d20d83c build measured this many bytes in node_modules plus .next.
+    expect(limits.get('Cave checkout')).toBeGreaterThan(3_405_969_113);
+    expect(limits.get('bootstrap aggregate')).toBe(12 * 1024 ** 3);
+    expect(limits.get('Cave conformance temp')).toBe(64 * 1024 ** 2);
+    expect(limits.get('harness execution aggregate')).toBe(10 * 1024 ** 3);
+    expect(limits.get('harness build roots')).toBe(4 * 1024 ** 3);
+  }, 30_000);
+
   test('guards each Windows network and bootstrap phase with reviewed quotas', () => {
     const bootstrap = workflowRunBody(
       workflowStep(readFileSync(workflowPath, 'utf8'), 'Bootstrap supervised Windows conformance'),
@@ -2517,13 +3584,13 @@ Invoke-Checked -FilePath '/bin/sh' -ArgumentList @('-c', 'exit 0') -Label 'Zero 
       "Join-Path $bootstrapRoot 'cargo\\git'",
       "Join-Path $bootstrapRoot 'pnpm-store'",
       "Join-Path $workspace '.git\\objects'",
-      "Join-Path $bootstrapRoot 'phase1-conformance-run-*\\checkouts\\sdk'",
-      "Join-Path $bootstrapRoot 'phase1-conformance-run-*\\checkouts\\chat'",
-      "Join-Path $bootstrapRoot 'phase1-conformance-run-*\\checkouts\\cave'",
-      "Join-Path $bootstrapRoot 'phase1-conformance-run-*\\checkouts\\coven'",
-      "Join-Path $bootstrapRoot 'phase1-conformance-run-*\\checkouts\\validator'",
-      "Join-Path $bootstrapRoot 'phase1-conformance-run-*\\checkouts\\producer'",
-      "Join-Path $bootstrapRoot 'phase1-conformance-run-*\\build'",
+      "Join-Path $isolatedUser.TempPath 'phase1-conformance-run-*\\checkouts\\sdk'",
+      "Join-Path $isolatedUser.TempPath 'phase1-conformance-run-*\\checkouts\\chat'",
+      "Join-Path $isolatedUser.TempPath 'phase1-conformance-run-*\\checkouts\\cave'",
+      "Join-Path $isolatedUser.TempPath 'phase1-conformance-run-*\\checkouts\\coven'",
+      "Join-Path $isolatedUser.TempPath 'phase1-conformance-run-*\\checkouts\\validator'",
+      "Join-Path $isolatedUser.TempPath 'phase1-conformance-run-*\\checkouts\\producer'",
+      "Join-Path $isolatedUser.TempPath 'phase1-conformance-run-*\\build'",
     ];
     for (const quotaRoot of requiredQuotaRoots) {
       expect(bootstrap).toContain(quotaRoot);
@@ -2535,7 +3602,7 @@ Invoke-Checked -FilePath '/bin/sh' -ArgumentList @('-c', 'exit 0') -Label 'Zero 
       ['protected Chat Git objects', '512MB'],
       ['SDK checkout', '768MB'],
       ['Chat checkout', '768MB'],
-      ['Cave checkout', '768MB'],
+      ['Cave checkout', '4GB'],
       ['Coven checkout', '768MB'],
       ['validator checkout', '768MB'],
       ['producer checkout', '768MB'],
@@ -2555,7 +3622,9 @@ Invoke-Checked -FilePath '/bin/sh' -ArgumentList @('-c', 'exit 0') -Label 'Zero 
     }
     expect(bootstrap).toContain('$job.RunProducerAsUserAndQuarantine(');
     expect(bootstrap).toContain('$directoryQuotas');
-    expect(bootstrap).toContain('Supervised Windows resource quota monitor failed closed.');
+    expect(bootstrap).toContain(
+      'Supervised Windows resource quota monitor failed closed: $($result.ResourceQuotaMonitorCategory); root=$($result.ResourceQuotaMonitorRoot); scope=$($result.ResourceQuotaMonitorScope); operation=$($result.ResourceQuotaMonitorOperation); repeat=$($result.ResourceQuotaMonitorRepeat).',
+    );
     expect(bootstrap).toContain(
       "Supervised Windows production exceeded resource quota '$($result.ResourceQuotaLabel)'.",
     );

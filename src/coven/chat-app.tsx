@@ -1,0 +1,685 @@
+import { useEffect, useMemo, useRef, useState } from 'react';
+import {
+  type ChatLifecycle,
+  type CovenFamiliar,
+  type CovenRunEvent,
+  type CovenRuntime,
+  type CovenSession,
+  createCovenRuntime,
+} from '../lib/coven-runtime';
+import { defaultScreenRelay, type ScreenRelay } from '../lib/screen-relay';
+import { type SetWindowTitle, setWindowTitle } from '../lib/window-title';
+import { type ChatAttachment, MAX_ATTACHMENTS, readAttachments } from './attachments';
+import { ChatLayout } from './chat-layout';
+import { projectEvents } from './events';
+
+const defaultRuntime = createCovenRuntime();
+const STORAGE_KEY = 'opencoven.chat.navigation.v1';
+/** One transcript update per frame keeps long streams smooth. */
+const STREAM_FLUSH_MS = 16;
+/** The host's cap on how far back one chat can be read (see `MAX_HISTORY_DEPTH`). */
+const MAX_HISTORY_DEPTH = 4;
+type Navigation = { familiarId: string; sessionId: string; drafts: Record<string, string> };
+type LastRun = { ms: number; outcome: 'reply' | 'error' | 'stopped' };
+function errorText(error: unknown) {
+  return error instanceof Error ? error.message : String(error);
+}
+function readNavigation(): {
+  navigation: Navigation;
+  error: string;
+  restored: boolean;
+  writable: boolean;
+} {
+  const empty = { familiarId: '', sessionId: '', drafts: {} };
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (raw === null) return { navigation: empty, error: '', restored: false, writable: true };
+    const value: unknown = JSON.parse(raw);
+    if (
+      typeof value !== 'object' ||
+      !value ||
+      !('familiarId' in value) ||
+      typeof value.familiarId !== 'string' ||
+      !('sessionId' in value) ||
+      typeof value.sessionId !== 'string'
+    ) {
+      throw new Error('Saved chat navigation is invalid. The saved value has not been deleted.');
+    }
+    const navigation = { familiarId: value.familiarId, sessionId: value.sessionId, drafts: {} };
+    // Drafts are conversation content and never belong in browser storage
+    // (SECURITY.md); overwrite any plaintext left behind by earlier builds.
+    if ('drafts' in value) writeNavigation(navigation);
+    return { navigation, error: '', restored: true, writable: true };
+  } catch (error) {
+    return {
+      navigation: empty,
+      error: `Cannot restore saved navigation: ${errorText(error)}`,
+      restored: false,
+      writable: false,
+    };
+  }
+}
+function writeNavigation(navigation: Navigation) {
+  localStorage.setItem(
+    STORAGE_KEY,
+    JSON.stringify({ familiarId: navigation.familiarId, sessionId: navigation.sessionId }),
+  );
+}
+function draftKey(navigation: Navigation) {
+  return JSON.stringify([navigation.familiarId, '']);
+}
+
+function selectCanonical(
+  previous: Navigation,
+  familiars: readonly CovenFamiliar[],
+  sessions: readonly CovenSession[],
+  archived: boolean,
+): Navigation {
+  const eligible = familiars.filter(
+    (familiar) =>
+      Boolean(sessions.find((session) => session.familiarId === familiar.id)?.archived) ===
+      archived,
+  );
+  const familiarId = eligible.some((item) => item.id === previous.familiarId)
+    ? previous.familiarId
+    : (eligible[0]?.id ?? '');
+  const head = sessions.find((session) => session.familiarId === familiarId);
+  const next = { ...previous, familiarId, sessionId: head?.id ?? '' };
+  const key = draftKey(next);
+  const oldKey = JSON.stringify([familiarId, next.sessionId]);
+  if (
+    next.sessionId &&
+    previous.sessionId === next.sessionId &&
+    next.drafts[key] === undefined &&
+    next.drafts[oldKey] !== undefined
+  ) {
+    next.drafts = { ...next.drafts, [key]: next.drafts[oldKey] ?? '' };
+  }
+  return next;
+}
+
+export function ChatApp({
+  runtime = defaultRuntime,
+  screen = defaultScreenRelay,
+  onWindowTitle = setWindowTitle,
+}: {
+  runtime?: CovenRuntime;
+  screen?: ScreenRelay;
+  onWindowTitle?: SetWindowTitle;
+}) {
+  const [saved] = useState(readNavigation);
+  const [navigation, setNavigation] = useState(saved.navigation);
+  const navigationRef = useRef(navigation);
+  const [familiars, setFamiliars] = useState<CovenFamiliar[]>([]);
+  const [sessions, setSessions] = useState<CovenSession[]>([]);
+  const [events, setEvents] = useState<CovenRunEvent[]>([]);
+  // The host holds only the newest part of this chat's history; nothing failed.
+  const [partial, setPartial] = useState(false);
+  // How far back the open chat has been read. Tied to the chat, so opening
+  // another one starts from the usual budget again.
+  const [history, setHistory] = useState({ session: '', depth: 1 });
+  const depth = history.session === navigation.sessionId ? history.depth : 1;
+  // A history read that failed can be asked for again without a full refresh.
+  // The offer is tied to that failure's own text, so dismissing it or any
+  // later, unrelated error withdraws the offer.
+  const [readError, setReadError] = useState('');
+  const [reads, setReads] = useState(0);
+  const [runOutputs, setRunOutputs] = useState<
+    Record<string, { events: CovenRunEvent[]; error: string; sessionId: string }>
+  >({});
+  const [status, setStatus] = useState('Checking local Coven...');
+  const [available, setAvailable] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(saved.error);
+  const [busy, setBusy] = useState(false);
+  // The familiar the active run addresses. Selection may move while a run is
+  // live, and the layout must not credit the run to whichever familiar is shown.
+  const [runFamiliarId, setRunFamiliarId] = useState('');
+  const [runStartedAt, setRunStartedAt] = useState(0);
+  // How each familiar's most recent run in this window ended, and how long it took.
+  const [lastRuns, setLastRuns] = useState<Record<string, LastRun>>({});
+  // Runs that ended while another familiar was shown, until that familiar is
+  // opened again: the sidebar row says a reply arrived or the run failed.
+  const [finished, setFinished] = useState<Record<string, 'reply' | 'error'>>({});
+  // The draft key whose failed run's input is exactly what the composer holds
+  // again, so Try again resends that input and nothing else. Any edit clears it.
+  const [retryKey, setRetryKey] = useState('');
+  const draftVersions = useRef<Record<string, number>>({});
+  const [cancelling, setCancelling] = useState(false);
+  const [archived, setArchived] = useState(false);
+  const archivedRef = useRef(false);
+  const [changingLifecycle, setChangingLifecycle] = useState(false);
+  const lifecyclePending = useRef<symbol | null>(null);
+  const [attachments, setAttachments] = useState<Record<string, ChatAttachment[]>>({});
+  const attachmentRef = useRef(attachments);
+  const [attaching, setAttaching] = useState(false);
+  const selecting = useRef(false);
+  const [refresh, setRefresh] = useState(0);
+  const lifetime = useRef(0);
+  const readId = useRef(0);
+  const activeRun = useRef<{ id: string; cancelRequested: boolean } | null>(null);
+
+  function navigate(next: Navigation) {
+    navigationRef.current = next;
+    setNavigation(next);
+    if (!saved.writable) return;
+    try {
+      writeNavigation(next);
+    } catch (failure) {
+      setError(`Navigation is only remembered until this window closes: ${errorText(failure)}`);
+    }
+  }
+
+  // biome-ignore lint/correctness/useExhaustiveDependencies: refresh explicitly restarts CLI discovery.
+  useEffect(() => {
+    const life = ++lifetime.current;
+    activeRun.current = null;
+    lifecyclePending.current = null;
+    setChangingLifecycle(false);
+    setBusy(false);
+    setRunFamiliarId('');
+    setRunStartedAt(0);
+    // lastRuns survives a refresh: it describes this window, not this load.
+    setFinished({});
+    setCancelling(false);
+    setLoading(true);
+    setAvailable(false);
+    setEvents([]);
+    setRunOutputs({});
+    async function start() {
+      try {
+        const health = await runtime.status();
+        if (lifetime.current !== life) return;
+        if (!health.available) {
+          setStatus(
+            health.error ?? 'Install the Coven CLI, then reopen the desktop app and refresh.',
+          );
+          setFamiliars([]);
+          setSessions([]);
+          return;
+        }
+        const [nextFamiliars, nextSessions] = await Promise.all([
+          runtime.listFamiliars(),
+          runtime.listSessions(),
+        ]);
+        if (lifetime.current !== life) return;
+        setFamiliars(nextFamiliars);
+        setSessions(nextSessions);
+        setAvailable(true);
+        setStatus(`Coven ${health.version ?? 'CLI'} · local sessions`);
+        navigate(
+          selectCanonical(navigationRef.current, nextFamiliars, nextSessions, archivedRef.current),
+        );
+      } catch (failure) {
+        if (lifetime.current === life) {
+          setError(errorText(failure));
+          setStatus(
+            'Coven could not be loaded. Check your CLI installation and configuration, then refresh.',
+          );
+        }
+      } finally {
+        if (lifetime.current === life) setLoading(false);
+      }
+    }
+    void start();
+    return () => {
+      ++lifetime.current;
+      ++readId.current;
+      const run = activeRun.current;
+      if (run && !run.cancelRequested) {
+        run.cancelRequested = true;
+        void runtime
+          .cancel(run.id)
+          .catch((failure: unknown) =>
+            console.error('Coven cancellation on close failed:', failure),
+          );
+      }
+    };
+  }, [runtime, refresh]);
+
+  // biome-ignore lint/correctness/useExhaustiveDependencies: `reads` explicitly asks for the history again.
+  useEffect(() => {
+    const request = ++readId.current;
+    // Reading further back keeps what is on screen until the longer history
+    // arrives; a different chat starts empty.
+    if (depth === 1) {
+      setEvents([]);
+      setPartial(false);
+    }
+    setReadError('');
+    if (!available || !navigation.sessionId) {
+      if (available) setLoading(false);
+      return;
+    }
+    setLoading(true);
+    const reading =
+      depth > 1
+        ? runtime.readSession(navigation.sessionId, depth)
+        : runtime.readSession(navigation.sessionId);
+    void reading
+      .then((result) => {
+        if (readId.current !== request) return;
+        setEvents(result.events);
+        setRunOutputs((previous) =>
+          Object.fromEntries(
+            Object.entries(previous).map(([key, output]) => [
+              key,
+              output.sessionId === result.session.id ? { ...output, events: [] } : output,
+            ]),
+          ),
+        );
+        setPartial(Boolean(result.hasMore));
+      })
+      .catch((failure: unknown) => {
+        if (readId.current !== request) return;
+        const text = errorText(failure);
+        setError(text);
+        setReadError(text);
+      })
+      .finally(() => {
+        if (readId.current === request) setLoading(false);
+      });
+    return () => {
+      ++readId.current;
+    };
+  }, [runtime, available, navigation.sessionId, reads, depth]);
+
+  async function send() {
+    const current = navigationRef.current;
+    if (lifecyclePending.current) return;
+    if (sessions.some((session) => session.id === current.sessionId && session.archived)) {
+      setError('Restore this archived chat before sending a message.');
+      return;
+    }
+    if (!current.familiarId) {
+      setError('Select a familiar before sending a message.');
+      return;
+    }
+    const key = draftKey(current);
+    const prompt = current.drafts[key] ?? '';
+    const selectedFiles = attachmentRef.current[key] ?? [];
+    if (
+      activeRun.current ||
+      selecting.current ||
+      !available ||
+      loading ||
+      (!prompt.trim() && !selectedFiles.length)
+    ) {
+      return;
+    }
+    const run = { id: crypto.randomUUID(), cancelRequested: false };
+    activeRun.current = run;
+    setRetryKey('');
+    const draftVersion = draftVersions.current[key] ?? 0;
+    navigate({ ...current, drafts: { ...current.drafts, [key]: '' } });
+    attachmentRef.current = { ...attachmentRef.current, [key]: [] };
+    setAttachments(attachmentRef.current);
+    const life = lifetime.current;
+    setBusy(true);
+    setRunFamiliarId(current.familiarId);
+    const startedAt = Date.now();
+    setRunStartedAt(startedAt);
+    setError('');
+    const previousOutput = runOutputs[key]?.events ?? [];
+    let streamed: CovenRunEvent[] = [];
+    let streamedSession = '';
+    let flush: ReturnType<typeof setTimeout> | null = null;
+    let completed = false;
+    let outcome: 'reply' | 'error' | '' = '';
+    function publish(nextEvents: CovenRunEvent[], runError = '', sessionId = streamedSession) {
+      if (flush) {
+        clearTimeout(flush);
+        flush = null;
+      }
+      if (lifetime.current !== life || activeRun.current !== run) return;
+      setRunOutputs((previous) => ({
+        ...previous,
+        [key]: {
+          events: [...previousOutput, ...nextEvents],
+          error: runError,
+          sessionId: sessionId || current.sessionId,
+        },
+      }));
+    }
+    publish([]);
+    try {
+      const result = await runtime.send(
+        {
+          runId: run.id,
+          prompt,
+          ...(selectedFiles.length
+            ? { attachments: selectedFiles.map(({ name, bytes }) => ({ name, bytes })) }
+            : {}),
+          ...(current.sessionId ? { sessionId: current.sessionId } : {}),
+          ...(current.familiarId ? { familiarId: current.familiarId } : {}),
+        },
+        (event) => {
+          if (lifetime.current !== life || activeRun.current !== run) return;
+          // Append in place and publish a snapshot at most once per frame, so
+          // a long stream costs O(n) copying per frame rather than per event.
+          streamed.push(event);
+          if (
+            ((event.type === 'system' && event.subtype === 'init') || event.type === 'result') &&
+            typeof event.session_id === 'string'
+          )
+            streamedSession = event.session_id;
+          flush ??= setTimeout(() => {
+            flush = null;
+            publish(streamed.slice());
+          }, STREAM_FLUSH_MS);
+        },
+      );
+      if (lifetime.current !== life) return;
+      const projected = projectEvents(result.events);
+      if (result.events.length) {
+        streamed = result.events;
+        streamedSession = projected.sessionId;
+      }
+      publish(streamed.slice(), projected.error);
+      if (projected.error) throw new Error(projected.error);
+      completed = !run.cancelRequested;
+      if (completed) outcome = 'reply';
+    } catch (failure) {
+      publish(streamed.slice(), errorText(failure));
+      if (!run.cancelRequested) outcome = 'error';
+    } finally {
+      // The run is over here; the session reload below is not part of it.
+      const finishedAt = Date.now();
+      if (lifetime.current === life) {
+        if (!completed) {
+          const latest = navigationRef.current;
+          const untouched = (draftVersions.current[key] ?? 0) === draftVersion;
+          if (untouched && latest.drafts[key] === '')
+            navigate({ ...latest, drafts: { ...latest.drafts, [key]: prompt } });
+          attachmentRef.current = { ...attachmentRef.current, [key]: selectedFiles };
+          setAttachments(attachmentRef.current);
+          // A draft typed during the run is the reader's, not the failed input.
+          setRetryKey(untouched ? key : '');
+        }
+        try {
+          // Initialization persists the canonical sibling even if the run fails or is cancelled.
+          const nextSessions = await runtime.listSessions();
+          if (lifetime.current === life) {
+            setSessions(nextSessions);
+            navigate(
+              selectCanonical(navigationRef.current, familiars, nextSessions, archivedRef.current),
+            );
+          }
+        } catch (failure) {
+          if (lifetime.current === life) {
+            setError(
+              `Could not reload this familiar's chat: ${errorText(failure)}. Reopen the familiar before sending again.`,
+            );
+            setAvailable(false);
+          }
+        }
+      }
+      if (activeRun.current === run) activeRun.current = null;
+      if (lifetime.current === life) {
+        setBusy(false);
+        setRunFamiliarId('');
+        setRunStartedAt(0);
+        setCancelling(false);
+        setLastRuns((previous) => ({
+          ...previous,
+          [current.familiarId]: { ms: finishedAt - startedAt, outcome: outcome || 'stopped' },
+        }));
+        if (outcome && navigationRef.current.familiarId !== current.familiarId) {
+          const result = outcome;
+          setFinished((previous) => ({ ...previous, [current.familiarId]: result }));
+        }
+      }
+    }
+  }
+
+  async function cancel() {
+    const run = activeRun.current;
+    if (!run || run.cancelRequested) return;
+    run.cancelRequested = true;
+    const life = lifetime.current;
+    setCancelling(true);
+    try {
+      await runtime.cancel(run.id);
+    } catch (failure) {
+      if (lifetime.current === life && activeRun.current === run) {
+        run.cancelRequested = false;
+        setCancelling(false);
+        setError(errorText(failure));
+      }
+    }
+  }
+
+  async function attach(files: File[]) {
+    if (lifecyclePending.current || selecting.current || activeRun.current || files.length === 0)
+      return;
+    const key = draftKey(navigationRef.current);
+    selecting.current = true;
+    setRetryKey('');
+    setAttaching(true);
+    try {
+      const existing = attachmentRef.current[key] ?? [];
+      if (existing.length + files.length > MAX_ATTACHMENTS)
+        throw new Error('Attach at most 4 files per message.');
+      const added = await readAttachments(files);
+      attachmentRef.current = { ...attachmentRef.current, [key]: [...existing, ...added] };
+      setAttachments(attachmentRef.current);
+      setError('');
+    } catch (failure) {
+      setError(errorText(failure));
+    } finally {
+      selecting.current = false;
+      setAttaching(false);
+    }
+  }
+
+  async function changeLifecycle(next: ChatLifecycle) {
+    const current = navigationRef.current;
+    if (
+      !available ||
+      !current.sessionId ||
+      lifecyclePending.current ||
+      activeRun.current ||
+      selecting.current ||
+      loading
+    )
+      return;
+    const operation = Symbol('chat-lifecycle');
+    lifecyclePending.current = operation;
+    setChangingLifecycle(true);
+    const life = lifetime.current;
+    ++readId.current;
+    setError('');
+    try {
+      await runtime.changeChatLifecycle(current.sessionId, next);
+      if (lifetime.current !== life) return;
+      const nextSessions =
+        next === 'deleted'
+          ? sessions.filter((item) => item.id !== current.sessionId)
+          : sessions.map((item) =>
+              item.id === current.sessionId ? { ...item, archived: next === 'archived' } : item,
+            );
+      setSessions(nextSessions);
+      const latest = navigationRef.current;
+      const drafts = { ...latest.drafts };
+      const suffix = `,${JSON.stringify(current.sessionId)}]`;
+      if (next === 'deleted') {
+        delete drafts[draftKey(current)];
+        delete attachmentRef.current[draftKey(current)];
+        // Canonical draft keys are [familiarId, sessionId] JSON tuples.
+        for (const key of Object.keys(drafts)) {
+          if (key.endsWith(suffix)) delete drafts[key];
+        }
+        for (const key of Object.keys(attachmentRef.current)) {
+          if (key.endsWith(suffix)) delete attachmentRef.current[key];
+        }
+        setAttachments({ ...attachmentRef.current });
+      }
+      // New-chat runs begin under an empty navigation key; their output still belongs to
+      // the eventual native session and must not reappear on the now-empty composer.
+      setRunOutputs((previous) =>
+        Object.fromEntries(
+          Object.entries(previous).filter(
+            ([key, output]) =>
+              key !== draftKey(current) &&
+              output.sessionId !== current.sessionId &&
+              !key.endsWith(suffix),
+          ),
+        ),
+      );
+      setEvents([]);
+      navigate(
+        selectCanonical({ ...latest, drafts }, familiars, nextSessions, archivedRef.current),
+      );
+    } catch (failure) {
+      if (lifetime.current === life) setError(errorText(failure));
+    } finally {
+      if (lifecyclePending.current === operation) lifecyclePending.current = null;
+      if (lifetime.current === life) setChangingLifecycle(false);
+    }
+  }
+
+  // Rows remind the reader of unsent text; keys are per familiar (see draftKey).
+  const drafts = useMemo(() => {
+    const byFamiliar: Record<string, string> = {};
+    for (const familiar of familiars) {
+      const text = navigation.drafts[draftKey({ ...navigation, familiarId: familiar.id })];
+      if (text?.trim()) byFamiliar[familiar.id] = text;
+    }
+    return byFamiliar;
+  }, [familiars, navigation]);
+  const liveEvents = runOutputs[draftKey(navigation)]?.events;
+  const messages = useMemo(
+    () => projectEvents(liveEvents ? [...events, ...liveEvents] : events).messages,
+    [events, liveEvents],
+  );
+
+  return (
+    <ChatLayout
+      archivedFilter={archived}
+      onArchivedFilter={(value) => {
+        if (lifecyclePending.current) return;
+        archivedRef.current = value;
+        setArchived(value);
+        navigate(selectCanonical(navigationRef.current, familiars, sessions, value));
+      }}
+      selectedArchived={sessions.some((item) => item.id === navigation.sessionId && item.archived)}
+      readOnly={sessions.some((item) => item.id === navigation.sessionId && item.archived)}
+      lifecycleBusy={changingLifecycle}
+      // A failed refresh leaves the last known lists visible for context but
+      // never mutable: lifecycle stays locked until the runtime is available.
+      lifecycleLocked={!available}
+      onLifecycle={(next) => void changeLifecycle(next)}
+      attachments={attachments[draftKey(navigation)] ?? []}
+      attaching={attaching}
+      onAttach={(files) => void attach(files)}
+      onRemoveAttachment={(id) => {
+        if (activeRun.current || selecting.current || lifecyclePending.current) return;
+        const key = draftKey(navigationRef.current);
+        setRetryKey('');
+        attachmentRef.current = {
+          ...attachmentRef.current,
+          [key]: (attachmentRef.current[key] ?? []).filter((file) => file.id !== id),
+        };
+        setAttachments(attachmentRef.current);
+      }}
+      familiars={familiars.map((item) => ({
+        id: item.id,
+        name: item.displayName || item.name,
+        description: item.description,
+        workspace: item.workspace,
+        projectAccess: item.projectAccess,
+        projectAccessUnavailable: item.projectAccessUnavailable,
+        avatarUrl:
+          'avatarUrl' in item && typeof item.avatarUrl === 'string' ? item.avatarUrl : undefined,
+      }))}
+      sessions={sessions}
+      screen={screen}
+      onWindowTitle={onWindowTitle}
+      messages={messages}
+      familiarId={navigation.familiarId}
+      sessionId={navigation.sessionId}
+      draft={navigation.drafts[draftKey(navigation)] ?? ''}
+      drafts={drafts}
+      status={
+        saved.writable
+          ? status
+          : `${status}\nSaved navigation could not be restored and is preserved unchanged. Drafts are memory-only until you recover the saved navigation outside this app and reopen this window.`
+      }
+      connected={available}
+      ready={
+        available &&
+        Boolean(navigation.familiarId) &&
+        !changingLifecycle &&
+        !sessions.some((item) => item.id === navigation.sessionId && item.archived)
+      }
+      busy={busy}
+      runFamiliarId={runFamiliarId}
+      partialHistory={partial}
+      {...(partial && depth < MAX_HISTORY_DEPTH && !busy && !loading
+        ? {
+            onLoadEarlier: () =>
+              setHistory({ session: navigationRef.current.sessionId, depth: depth + 1 }),
+          }
+        : {})}
+      {...(readError && error === readError && !busy
+        ? {
+            onReloadChat: () => {
+              setError('');
+              setReads((n) => n + 1);
+            },
+          }
+        : {})}
+      runStartedAt={runStartedAt}
+      {...(lastRuns[navigation.familiarId] ? { lastRun: lastRuns[navigation.familiarId] } : {})}
+      finished={finished}
+      loading={loading}
+      cancelling={cancelling}
+      error={error || runOutputs[draftKey(navigation)]?.error || ''}
+      // A failed run restores what it was sent; the notice can send it again.
+      {...(runOutputs[draftKey(navigation)]?.error && !busy && retryKey === draftKey(navigation)
+        ? { onRetry: () => void send() }
+        : {})}
+      onDismissError={() => {
+        setError('');
+        const key = draftKey(navigationRef.current);
+        setRunOutputs((previous) => {
+          const output = previous[key];
+          return output?.error ? { ...previous, [key]: { ...output, error: '' } } : previous;
+        });
+      }}
+      onFamiliar={(id) => {
+        if (lifecyclePending.current) return;
+        setError('');
+        setFinished((previous) => {
+          if (!(id in previous)) return previous;
+          const { [id]: _seen, ...rest } = previous;
+          return rest;
+        });
+        navigate(
+          selectCanonical(
+            { ...navigationRef.current, familiarId: id },
+            familiars,
+            sessions,
+            archivedRef.current,
+          ),
+        );
+      }}
+      onDraft={(value) => {
+        if (lifecyclePending.current) return;
+        const latest = navigationRef.current;
+        const key = draftKey(latest);
+        draftVersions.current[key] = (draftVersions.current[key] ?? 0) + 1;
+        setRetryKey('');
+        navigate({ ...latest, drafts: { ...latest.drafts, [draftKey(latest)]: value } });
+      }}
+      onSend={() => void send()}
+      onCancel={() => void cancel()}
+      onRefresh={() => {
+        if (!activeRun.current && !lifecyclePending.current) {
+          setError('');
+          setRefresh((value) => value + 1);
+        }
+      }}
+    />
+  );
+}

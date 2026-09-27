@@ -29,23 +29,23 @@ const repositoryKeys = ['chat', 'sdk', 'cave', 'coven'];
 const canonicalSdkArtifacts = Object.freeze([
   {
     packageName: '@opencoven/sdk-core',
-    releaseFile: 'tarballs/core/opencoven-sdk-core-0.1.0.tgz',
-    vendorFile: 'sdk-core-0.1.0.tgz',
+    releaseFile: 'tarballs/core/opencoven-sdk-core-0.0.1.tgz',
+    vendorFile: 'sdk-core-0.0.1.tgz',
   },
   {
     packageName: '@opencoven/cave-client',
-    releaseFile: 'tarballs/cave/opencoven-cave-client-0.1.0.tgz',
-    vendorFile: 'cave-client-0.1.0.tgz',
+    releaseFile: 'tarballs/cave/opencoven-cave-client-0.0.1.tgz',
+    vendorFile: 'cave-client-0.0.1.tgz',
   },
   {
     packageName: '@opencoven/coven-client',
-    releaseFile: 'tarballs/coven/opencoven-coven-client-0.1.0.tgz',
-    vendorFile: 'coven-client-0.1.0.tgz',
+    releaseFile: 'tarballs/coven/opencoven-coven-client-0.0.1.tgz',
+    vendorFile: 'coven-client-0.0.1.tgz',
   },
   {
     packageName: '@opencoven/sdk',
-    releaseFile: 'tarballs/sdk/opencoven-sdk-0.1.0.tgz',
-    vendorFile: 'sdk-0.1.0.tgz',
+    releaseFile: 'tarballs/sdk/opencoven-sdk-0.0.1.tgz',
+    vendorFile: 'sdk-0.0.1.tgz',
   },
 ]);
 const productionChatAuthorityPaths = Object.freeze([
@@ -103,11 +103,12 @@ const expectedRepositories = Object.freeze({
   coven: 'OpenCoven/coven',
   harness: 'OpenCoven/chat',
 });
+export const gitNullDevice = process.platform === 'win32' ? 'NUL' : devNull;
 const gitConfigurationOverrides = [
   '-c',
   'core.excludesFile=',
   '-c',
-  `core.attributesFile=${devNull}`,
+  `core.attributesFile=${gitNullDevice}`,
   '-c',
   'core.fsmonitor=false',
   '-c',
@@ -115,9 +116,9 @@ const gitConfigurationOverrides = [
   '-c',
   'credential.helper=',
   '-c',
-  `core.askPass=${devNull}`,
+  `core.askPass=${gitNullDevice}`,
   '-c',
-  `core.sshCommand=${devNull}`,
+  `core.sshCommand=${gitNullDevice}`,
   '-c',
   'http.proxy=',
   '-c',
@@ -153,16 +154,16 @@ export function createGitEnvironment(inheritedEnvironment = process.env) {
   environment.GIT_ATTR_NOSYSTEM = '1';
   environment.GIT_ATTR_SOURCE = 'HEAD';
   environment.GIT_ALLOW_PROTOCOL = '';
-  environment.GIT_ASKPASS = devNull;
-  environment.GIT_CONFIG_GLOBAL = devNull;
+  environment.GIT_ASKPASS = gitNullDevice;
+  environment.GIT_CONFIG_GLOBAL = gitNullDevice;
   environment.GIT_CONFIG_NOSYSTEM = '1';
   environment.GIT_NO_LAZY_FETCH = '1';
   environment.GIT_NO_REPLACE_OBJECTS = '1';
   environment.GIT_OPTIONAL_LOCKS = '0';
-  environment.GIT_SSH = devNull;
-  environment.GIT_SSH_COMMAND = devNull;
+  environment.GIT_SSH = gitNullDevice;
+  environment.GIT_SSH_COMMAND = gitNullDevice;
   environment.GIT_TERMINAL_PROMPT = '0';
-  environment.SSH_ASKPASS = devNull;
+  environment.SSH_ASKPASS = gitNullDevice;
   return environment;
 }
 
@@ -170,6 +171,37 @@ export function createGitCheckoutEnvironment(inheritedEnvironment = process.env)
   const environment = createGitEnvironment(inheritedEnvironment);
   delete environment.GIT_ATTR_SOURCE;
   return environment;
+}
+
+export function toGitSafeDirectoryPath(path) {
+  // Git compares safe.directory entries against its own real paths, which always
+  // use forward slashes. Native Windows separators never match those entries.
+  return path.replaceAll('\\', '/');
+}
+
+export function resolveLocalGitDirectory(repositoryRoot) {
+  const metadataPath = resolve(repositoryRoot, '.git');
+  const metadataStats = lstatSync(metadataPath);
+
+  if (metadataStats.isSymbolicLink()) {
+    throw new Error('Local Git metadata must not be a symbolic link.');
+  }
+  if (metadataStats.isDirectory()) {
+    return realpathSync(metadataPath);
+  }
+  if (!metadataStats.isFile() || metadataStats.size < 1 || metadataStats.size > 4096) {
+    throw new Error('Local Git metadata is not a supported directory or gitfile.');
+  }
+
+  const match = /^gitdir: ([^\0\r\n]+)\r?\n?$/u.exec(readFileSync(metadataPath, 'utf8'));
+  if (match === null) {
+    throw new Error('Local Git metadata gitfile is malformed.');
+  }
+  const gitDirectory = realpathSync(resolve(dirname(metadataPath), match[1]));
+  if (!statSync(gitDirectory).isDirectory()) {
+    throw new Error('Local Git metadata gitfile does not identify a directory.');
+  }
+  return gitDirectory;
 }
 
 function requireRecord(value, label) {
@@ -307,7 +339,7 @@ function normalizeRelease(value) {
     'release.sdkManifest must contain exactly version and sha256.',
   );
   if (
-    manifest.version !== '0.1.0' ||
+    manifest.version !== '0.0.1' ||
     typeof manifest.sha256 !== 'string' ||
     !digestPattern.test(manifest.sha256)
   ) {
@@ -344,7 +376,7 @@ function normalizeRelease(value) {
   if (createHash('sha256').update(canonicalManifest).digest('hex') !== manifest.sha256) {
     throw new Error('release SDK manifest digest does not match canonical package metadata.');
   }
-  if (release.caveVersion !== '0.3.12' || release.covenVersion !== '0.1.0') {
+  if (release.caveVersion !== '0.4.2' || release.covenVersion !== '0.1.0') {
     throw new Error('release authority versions are invalid.');
   }
   const consumerLock = normalizeFileArtifact(
@@ -630,7 +662,7 @@ function runAuthorityGit(repositoryRoot, args) {
     [
       ...gitConfigurationOverrides,
       '-c',
-      `safe.directory=${repositoryRoot}`,
+      `safe.directory=${toGitSafeDirectoryPath(repositoryRoot)}`,
       '-C',
       repositoryRoot,
       ...args,
@@ -873,6 +905,10 @@ function createRepositoryVerificationContext(label, limits) {
   };
 }
 
+export function hasPrivateDirectoryMode(mode, platform = process.platform) {
+  return platform === 'win32' || (mode & 0o077) === 0;
+}
+
 function remainingGitTimeout(context) {
   const remainingMilliseconds = Math.floor(context.deadline - performance.now());
 
@@ -896,7 +932,7 @@ function createInertHooksDirectory(label) {
     if (
       !hooksStats.isDirectory() ||
       hooksStats.isSymbolicLink() ||
-      (hooksStats.mode & 0o077) !== 0 ||
+      !hasPrivateDirectoryMode(hooksStats.mode) ||
       !ownedByProcess ||
       readdirSync(hooksPath).length !== 0
     ) {

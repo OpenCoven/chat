@@ -1,11 +1,11 @@
 import { type KeyboardEvent as ReactKeyboardEvent, type ReactNode, type Ref, useId } from 'react';
 
-import { Icon } from '../demo/minimal-icons';
+import { Icon } from '../design/minimal-icons';
 import { AttachmentChip, type AttachmentState } from './attachment-chip';
 import { Button } from './button';
 import type { CompletionCommand } from './completion-palette';
 import { SendControl } from './send-control';
-import { Textarea } from './textarea';
+import { Textarea, type TextareaProps } from './textarea';
 import { cn, type Density } from './utils';
 
 /**
@@ -40,12 +40,26 @@ export type ComposerWarning = Readonly<{
   onClick?: () => void;
 }>;
 
+export type ComposerTextareaProps = Pick<
+  TextareaProps,
+  | 'onSelect'
+  | 'onFocus'
+  | 'onBlur'
+  | 'onCompositionStart'
+  | 'onCompositionEnd'
+  | 'aria-controls'
+  | 'aria-expanded'
+  | 'aria-autocomplete'
+  | 'aria-activedescendant'
+>;
+
 export type ComposerProps = Readonly<{
   value: string;
   onValueChange: (value: string) => void;
   attachments?: readonly ComposerAttachment[];
   onRemoveAttachment?: (id: string) => void;
   onSend?: () => void;
+  allowAttachmentOnly?: boolean;
   running?: boolean;
   onStop?: () => void;
   density?: Density;
@@ -54,9 +68,11 @@ export type ComposerProps = Readonly<{
   label?: string;
   placeholder?: string;
   textareaRef?: Ref<HTMLTextAreaElement>;
+  textareaProps?: ComposerTextareaProps;
   /** Runs before the composer's own key handling; call `preventDefault` to claim a key. */
   onKeyDown?: (event: ReactKeyboardEvent<HTMLTextAreaElement>) => void;
   onAttach?: () => void;
+  attachmentIcon?: 'paperclip' | 'plus';
   /** Opens the host's inline command menu (the same list the caret offers). */
   onOpenCommands?: () => void;
   commands?: readonly CompletionCommand[];
@@ -73,6 +89,7 @@ export function Composer({
   attachments = [],
   onRemoveAttachment,
   onSend,
+  allowAttachmentOnly = false,
   running = false,
   onStop,
   density = 'default',
@@ -80,8 +97,10 @@ export function Composer({
   label = 'Message',
   placeholder = 'Type a message, or / for commands.',
   textareaRef,
+  textareaProps,
   onKeyDown,
   onAttach,
+  attachmentIcon = 'paperclip',
   onOpenCommands,
   commands,
   onSelectCommand,
@@ -92,11 +111,11 @@ export function Composer({
 }: ComposerProps) {
   const id = useId();
   const fieldId = `composer-${id}`;
-  const ready = value.trim().length > 0;
+  const ready = value.trim().length > 0 || (allowAttachmentOnly && attachments.length > 0);
 
   function handleKeyDown(event: ReactKeyboardEvent<HTMLTextAreaElement>) {
     onKeyDown?.(event);
-    if (event.defaultPrevented) {
+    if (event.defaultPrevented || event.nativeEvent.isComposing || event.keyCode === 229) {
       return;
     }
     if (event.key === 'Enter' && !event.shiftKey) {
@@ -131,7 +150,7 @@ export function Composer({
             title="Attach"
             onClick={onAttach}
           >
-            <Icon name="paperclip" size={15} />
+            <Icon name={attachmentIcon} size={15} />
           </Button>
         ) : null}
         {onOpenCommands ? (
@@ -164,6 +183,7 @@ export function Composer({
         ) : null}
       </div>
       <Textarea
+        {...textareaProps}
         id={fieldId}
         ref={textareaRef}
         value={value}

@@ -36,18 +36,140 @@ function Write-ExceptionChain {
     $Failure
   }
   $depth = 0
-  while ($null -ne $exception -and $depth -lt 12) {
+  $sidProbeAttempted = $false
+  $pending = [Collections.Generic.Queue[Exception]]::new()
+  if ($null -ne $exception) { $pending.Enqueue($exception) }
+  while ($pending.Count -gt 0 -and $depth -lt 12) {
+    $exception = $pending.Dequeue()
     Write-Host "cause[$depth] $($exception.GetType().FullName): $($exception.Message)"
-    if ($exception -is [AggregateException]) {
-      $index = 0
-      foreach ($inner in $exception.InnerExceptions) {
-        Write-Host "  aggregate[$index] $($inner.GetType().FullName): $($inner.Message)"
-        $index++
+    if ($exception -is [ComponentModel.Win32Exception]) {
+      Write-Host "native-error[$depth]=$($exception.NativeErrorCode)"
+    }
+    if (-not $sidProbeAttempted -and
+        $exception.Message -match '^WTS process primary token SID query was ambiguous for process ([0-9]+) in session ([0-9]+)\.$') {
+      $sidProbeAttempted = $true
+      # One observation only, after failure; no SID output or acceptance change.
+      try {
+        $processId = [uint32]::Parse($Matches[1], [Globalization.CultureInfo]::InvariantCulture)
+        $queryMethod = [OpenCoven.WindowsJobSupervisor].GetMethod(
+          'QueryProcessPrimaryTokenSid', [Reflection.BindingFlags]'NonPublic,Static'
+        )
+        $querySid = [Delegate]::CreateDelegate([Func[IntPtr, string]], $queryMethod)
+        $observation = [OpenCoven.WindowsProcessSidDiagnostics]::Describe($processId, $querySid)
+        Write-Host "wts-null-sid-observation: $observation"
+      } catch {
+        Write-Host 'wts-null-sid-observation: probe-failed'
       }
     }
-    $exception = $exception.InnerException
     $depth++
+    if ($exception -is [AggregateException]) {
+      foreach ($inner in $exception.InnerExceptions) {
+        if ($pending.Count -ge (12 - $depth)) { break }
+        $pending.Enqueue($inner)
+      }
+    } elseif ($null -ne $exception.InnerException -and
+              $pending.Count -lt (12 - $depth)) {
+      $pending.Enqueue($exception.InnerException)
+    }
   }
+}
+
+function Get-NativeInstallationFailureCategory {
+  param([AllowNull()][AllowEmptyString()][string]$OutputText)
+  $pattern = '^installation-roundtrip: (response-timeout|response-invalid|custody-invalid|grant-invalid|installation-invalid|installation-changed|custody-changed|native-exit-failed|unexpected-stderr|(?:app_installation_id|conformance_native_custody_state|conformance_issue_native_custody_cleanup|conformance_cleanup_native_custody)-failed|app_installation_id-(?:installation_(?:lock|entry|read|write|persistence)_unavailable|secure_store_unavailable|keychain_failure|credential_missing)|conformance_issue_native_custody_cleanup-(?:cleanup_grant_(?:rejected|collision_exhausted|(?:service|process_secret|random|marker_(?:home|directory_create|directory_open|directory_metadata|directory_trust|sync|identity|publish))_unavailable)|secure_store_unavailable|keychain_failure))$'
+  if ($null -ne $OutputText -and $OutputText.Trim() -cmatch $pattern) {
+    return $Matches[1]
+  }
+  return 'unclassified'
+}
+
+function Get-NativeInstallationFailureReport {
+  param([AllowNull()][AllowEmptyString()][string]$OutputText)
+  $category = Get-NativeInstallationFailureCategory $OutputText
+  $environment = 'unavailable'
+  $lines = @(([string]$OutputText).Trim() -split '\r?\n')
+  if ($lines.Count -eq 2 -and $lines[1] -cmatch '^installation-environment: (hive=(?:present|absent|unavailable);persistence=(?:none|session|local|enterprise|no-logon-session|unavailable|unrecognized))$') {
+    $environment = $Matches[1]
+    $category = Get-NativeInstallationFailureCategory $lines[0]
+    if ($category -ceq 'unclassified') { $environment = 'unavailable' }
+  }
+  return [pscustomobject]@{ Category = $category; Environment = $environment }
+}
+
+function Read-NativeInstallationEnvironment {
+  try {
+    if (-not ('NativeInstallationEnvironmentProbe' -as [type])) {
+      Add-Type -TypeDefinition @'
+using System;
+using System.Runtime.InteropServices;
+using System.Security.Principal;
+using Microsoft.Win32;
+public static class NativeInstallationEnvironmentProbe {
+    [DllImport("advapi32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    static extern bool CredGetSessionTypes(uint count, [Out] uint[] maximumPersist);
+
+    public static string PersistenceCategory(uint value) {
+        switch (value) {
+            case 0: return "none";
+            case 1: return "session";
+            case 2: return "local";
+            case 3: return "enterprise";
+            default: return "unrecognized";
+        }
+    }
+
+    public static string Read() {
+        string hive = "unavailable";
+        string persistence = "unavailable";
+        try {
+            using (WindowsIdentity identity = WindowsIdentity.GetCurrent()) {
+                if (identity.User != null) {
+                    using (RegistryKey key = Registry.Users.OpenSubKey(identity.User.Value, false)) {
+                        hive = key == null ? "absent" : "present";
+                    }
+                }
+            }
+        } catch { }
+        try {
+            // CRED_TYPE_MAXIMUM = 7; CRED_TYPE_GENERIC = 1.
+            uint[] maximumPersist = new uint[7];
+            if (CredGetSessionTypes((uint)maximumPersist.Length, maximumPersist)) {
+                persistence = PersistenceCategory(maximumPersist[1]);
+            } else if (Marshal.GetLastWin32Error() == 1312) {
+                persistence = "no-logon-session";
+            }
+        } catch { }
+        return "hive=" + hive + ";persistence=" + persistence;
+    }
+}
+'@
+    }
+    return [NativeInstallationEnvironmentProbe]::Read()
+  } catch {
+    return 'hive=unavailable;persistence=unavailable'
+  }
+}
+
+function Read-NativeInstallationRetainedEnvironment($User) {
+  try {
+    # Initialize the exact same read-only native probe used by the child.
+    Read-NativeInstallationEnvironment | Out-Null
+    $method = $User.GetType().GetMethod('RunQuotaRead', [Reflection.BindingFlags]'NonPublic,Instance')
+    $reader = [Delegate]::CreateDelegate([Func[string]], [NativeInstallationEnvironmentProbe].GetMethod('Read'))
+    $value = $method.MakeGenericMethod([string]).Invoke($User, [object[]]@($reader))
+    if ($value -cmatch '\Ahive=(present|absent|unavailable);persistence=(none|session|local|enterprise|no-logon-session|unavailable|unrecognized)\z') {
+      return $value
+    }
+  } catch { }
+  return 'hive=unavailable;persistence=unavailable'
+}
+
+function Format-NativeInstallationCapabilityComparison([string]$Retained, [string]$Child) {
+  $pattern = '\Ahive=(present|absent|unavailable);persistence=(none|session|local|enterprise|no-logon-session|unavailable|unrecognized)\z'
+  if ($Retained -cnotmatch $pattern) { $Retained = 'unavailable' }
+  if ($Child -cnotmatch $pattern) { $Child = 'unavailable' }
+  return "Native installation capability comparison: retained=$Retained;child=$Child"
 }
 
 trap {
@@ -72,6 +194,40 @@ if (-not (Test-Path -LiteralPath $sourcePath -PathType Leaf)) {
   throw 'Reviewed Windows Job Object supervisor source is missing.'
 }
 Add-Type -TypeDefinition ([IO.File]::ReadAllText($sourcePath)) -Language CSharp
+& (Join-Path $PSScriptRoot 'windows-process-termination-race.test.ps1')
+& (Join-Path $PSScriptRoot 'windows-process-sid-diagnostics.test.ps1')
+& (Join-Path $PSScriptRoot 'windows-quota-diagnostics.test.ps1')
+& (Join-Path $PSScriptRoot 'windows-owner-directory-quota.test.ps1')
+& (Join-Path $PSScriptRoot 'windows-quota-delete-pending.test.ps1')
+& (Join-Path $PSScriptRoot 'windows-quota-lifetime.test.ps1')
+& (Join-Path $PSScriptRoot 'windows-quota-isolated-reader.test.ps1')
+& (Join-Path $PSScriptRoot 'windows-identity-cleanup-diagnostics.test.ps1')
+& (Join-Path $PSScriptRoot 'windows-cleanup-delete-diagnostics.test.ps1')
+& (Join-Path $PSScriptRoot 'windows-profile-cleanup-characterization.test.ps1')
+& (Join-Path $PSScriptRoot 'windows-staging-binding.test.ps1')
+& (Join-Path $PSScriptRoot 'windows-status-acl-probe.test.ps1')
+
+# Exercise the real diagnostic through a nested failure report without failing
+# the suite or changing any process. The observed handle is this test process.
+$diagnosticFailure = [InvalidOperationException]::new(
+  'Synthetic terminal quarantine failure.',
+  [AggregateException]::new([Exception[]]@(
+    [InvalidOperationException]::new('Synthetic producer failure.'),
+    [InvalidOperationException]::new(
+      "WTS process primary token SID query was ambiguous for process $PID in session 1."
+    ),
+    [InvalidOperationException]::new(
+      "WTS process primary token SID query was ambiguous for process $PID in session 1."
+    )
+  ))
+)
+$diagnosticOutput = @(Write-ExceptionChain -Failure $diagnosticFailure 6>&1)
+$observations = @($diagnosticOutput | ForEach-Object { $_.ToString() } |
+  Where-Object { $_.StartsWith('wts-null-sid-observation:') })
+if ($observations.Count -ne 1 -or
+    $observations[0] -cne 'wts-null-sid-observation: live-token-readable') {
+  throw 'Nested WTS failure reporting did not observe the live test process exactly once.'
+}
 
 $createProcessWithLogon = [OpenCoven.WindowsJobSupervisor].GetMethod(
   'CreateProcessWithLogonW',
@@ -1184,6 +1340,13 @@ if (
 Write-Host "Windows isolated account validation: $($isolatedUser.ValidationSummary)"
 $ephemeralUserName = $isolatedUser.UserName
 $ephemeralProfilePath = $isolatedUser.OperatingSystemProfilePath
+$caveConformanceTemp = Join-Path $isolatedUser.RootPath 'cave-conformance-temp'
+[IO.Directory]::CreateDirectory($caveConformanceTemp) | Out-Null
+[OpenCoven.WindowsJobSupervisor]::SecureCaveConformanceTempDirectory(
+  $caveConformanceTemp,
+  $isolatedUser.Sid,
+  [Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+)
 $operatorPrivateRoot = Join-Path (
   [IO.Path]::GetTempPath()
 ) "opencoven-supervisor-private-$PID-$([Guid]::NewGuid().ToString('N'))"
@@ -1198,6 +1361,8 @@ $childEnvironment = @{
   LOCALAPPDATA = (Join-Path $isolatedUser.ProfilePath 'AppData\Local')
   TEMP = $isolatedUser.TempPath
   TMP = $isolatedUser.TempPath
+  COVEN_WINDOWS_STATUS_STAGING_DIR = $isolatedUser.StatusStagingPath
+  OPENCOVEN_WINDOWS_CAVE_CONFORMANCE_TEMP = $caveConformanceTemp
   GITHUB_WORKSPACE = $isolatedUser.WorkspacePath
   OPENCOVEN_WINDOWS_BOOTSTRAP_ROOT = $isolatedUser.RootPath
   OPENCOVEN_WINDOWS_SYSTEM_PWSH = $trustedPwsh
@@ -1218,6 +1383,16 @@ function New-IsolatedTestContext {
   $contextEnvironment.LOCALAPPDATA = Join-Path $contextUser.ProfilePath 'AppData\Local'
   $contextEnvironment.TEMP = $contextUser.TempPath
   $contextEnvironment.TMP = $contextUser.TempPath
+  $contextEnvironment.COVEN_WINDOWS_STATUS_STAGING_DIR = $contextUser.StatusStagingPath
+  $contextCaveConformanceTemp = Join-Path $contextUser.RootPath 'cave-conformance-temp'
+  [IO.Directory]::CreateDirectory($contextCaveConformanceTemp) | Out-Null
+  [OpenCoven.WindowsJobSupervisor]::SecureCaveConformanceTempDirectory(
+    $contextCaveConformanceTemp,
+    $contextUser.Sid,
+    [Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+  )
+  $contextEnvironment.OPENCOVEN_WINDOWS_CAVE_CONFORMANCE_TEMP =
+    $contextCaveConformanceTemp
   $contextEnvironment.GITHUB_WORKSPACE = $contextUser.WorkspacePath
   $contextEnvironment.OPENCOVEN_WINDOWS_BOOTSTRAP_ROOT = $contextUser.RootPath
   return [pscustomobject]@{
@@ -1234,6 +1409,7 @@ function Remove-IsolatedTestContext {
   }
 }
 
+$primarySupervisorFailure = $null
 try {
   [IO.Directory]::CreateDirectory($operatorPrivateRoot) | Out-Null
   [OpenCoven.WindowsJobSupervisor]::ProtectSupervisorDirectory($operatorPrivateRoot)
@@ -1542,6 +1718,16 @@ public static class ScmDenialProbe
 '@,
     [Text.UTF8Encoding]::new($false)
   )
+  $statusAclProbeSource = Join-Path $root 'windows-status-acl-probe.cs'
+  [IO.File]::Copy(
+    (Join-Path $PSScriptRoot 'windows-status-acl-probe.cs'),
+    $statusAclProbeSource
+  )
+  if (-not ('StatusAclProbe' -as [type])) { Add-Type -Path $statusAclProbeSource }
+  $statusAclControl = [StatusAclProbe]::RunControl([IO.Path]::GetTempPath())
+  if ($statusAclControl -cne "combined:success`nowner-only:success`ndacl-only:success") {
+    throw "Ordinary-directory status ACL control failed: $statusAclControl"
+  }
   $accessProbeScript = Join-Path $root 'job-access-probe.ps1'
   [IO.File]::WriteAllText(
     $accessProbeScript,
@@ -1554,9 +1740,29 @@ Add-Type -TypeDefinition ([IO.File]::ReadAllText('$($accessProbeSource.Replace("
   [long]`$env:OPENCOVEN_WINDOWS_SUPERVISOR_JOB_HANDLE
 )
 [JobAccessProbe]::Run(`$env:OPENCOVEN_ACCESS_PROBE_JOB)
+Add-Type -Path '$($statusAclProbeSource.Replace("'", "''"))'
+`$statusAclResult = [StatusAclProbe]::Run(
+  `$env:TEMP,
+  `$env:OPENCOVEN_STATUS_ACL_SUPERVISOR_SID
+)
+Write-Output "status-acl-probe:`n`$statusAclResult"
+`$statusStagingAclResult = [StatusAclProbe]::RunStaging(
+  `$env:COVEN_WINDOWS_STATUS_STAGING_DIR,
+  `$env:OPENCOVEN_STATUS_ACL_SUPERVISOR_SID
+)
+if (
+  `$statusStagingAclResult -cne
+    "directory-write-dac:access-denied`ncombined:success`nowner-only:success`ndacl-only:success"
+) {
+  throw "Status staging ACL probe failed: `$statusStagingAclResult"
+}
+
 `$root = [IO.Path]::GetFullPath(`$env:OPENCOVEN_WINDOWS_BOOTSTRAP_ROOT)
 `$profile = [IO.Path]::GetFullPath(`$env:USERPROFILE)
 `$temp = [IO.Path]::GetFullPath(`$env:TEMP)
+`$statusStaging = [IO.Path]::GetFullPath(`$env:COVEN_WINDOWS_STATUS_STAGING_DIR)
+`$caveConformanceTemp =
+  [IO.Path]::GetFullPath(`$env:OPENCOVEN_WINDOWS_CAVE_CONFORMANCE_TEMP)
 `$workspace = [IO.Path]::GetFullPath(`$env:GITHUB_WORKSPACE)
 if (-not `$profile.StartsWith("`$root\", [StringComparison]::OrdinalIgnoreCase)) {
   throw 'Restricted user profile is outside the isolated root.'
@@ -1567,8 +1773,74 @@ if (-not `$temp.StartsWith("`$root\", [StringComparison]::OrdinalIgnoreCase)) {
 if (-not `$workspace.StartsWith("`$root\", [StringComparison]::OrdinalIgnoreCase)) {
   throw 'Restricted user workspace is outside the isolated root.'
 }
+if (-not `$statusStaging.StartsWith("`$root\", [StringComparison]::OrdinalIgnoreCase)) {
+  throw 'Restricted status staging directory is outside the isolated root.'
+}
+if (-not `$caveConformanceTemp.StartsWith("`$root\", [StringComparison]::OrdinalIgnoreCase)) {
+  throw 'Restricted Cave conformance temp directory is outside the isolated root.'
+}
 foreach (`$directory in @(`$root, `$profile, `$temp, `$workspace)) {
   [OpenCoven.WindowsJobSupervisor]::RequireCurrentIdentityOwnsIsolatedDirectory(`$directory)
+}
+[OpenCoven.WindowsJobSupervisor]::RequireCurrentIdentityOwnsStatusStagingDirectory(
+  `$statusStaging,
+  `$env:OPENCOVEN_STATUS_ACL_SUPERVISOR_SID
+)
+`$caveRootAclDenied = `$false
+try {
+  `$rootAcl = [IO.FileSystemAclExtensions]::GetAccessControl(
+    [IO.DirectoryInfo]::new(`$caveConformanceTemp),
+    [Security.AccessControl.AccessControlSections]::Access
+  )
+  `$rootAcl.AddAccessRule(
+    [Security.AccessControl.FileSystemAccessRule]::new(
+      [Security.Principal.WindowsIdentity]::GetCurrent().User,
+      [Security.AccessControl.FileSystemRights]::FullControl,
+      [Security.AccessControl.AccessControlType]::Allow
+    )
+  )
+  [IO.FileSystemAclExtensions]::SetAccessControl(
+    [IO.DirectoryInfo]::new(`$caveConformanceTemp),
+    `$rootAcl
+  )
+} catch [UnauthorizedAccessException] {
+  `$caveRootAclDenied = `$true
+}
+if (-not `$caveRootAclDenied) {
+  throw 'Cave conformance root DACL rewrite was authorized.'
+}
+`$caveAclProbe = Join-Path `$caveConformanceTemp "acl-repair-$([Guid]::NewGuid().ToString('N'))"
+[IO.Directory]::CreateDirectory(`$caveAclProbe) | Out-Null
+try {
+  `$caveAcl = [IO.FileSystemAclExtensions]::GetAccessControl(
+    [IO.DirectoryInfo]::new(`$caveAclProbe),
+    [Security.AccessControl.AccessControlSections]::Access
+  )
+  `$caveAcl.SetAccessRuleProtection(`$true, `$false)
+  foreach (`$sid in @(
+    [Security.Principal.WindowsIdentity]::GetCurrent().User,
+    [Security.Principal.SecurityIdentifier]::new('S-1-5-18'),
+    [Security.Principal.SecurityIdentifier]::new('S-1-5-32-544')
+  )) {
+    `$caveAcl.AddAccessRule(
+      [Security.AccessControl.FileSystemAccessRule]::new(
+        `$sid,
+        [Security.AccessControl.FileSystemRights]::FullControl,
+        [Security.AccessControl.InheritanceFlags]::ContainerInherit -bor
+          [Security.AccessControl.InheritanceFlags]::ObjectInherit,
+        [Security.AccessControl.PropagationFlags]::None,
+        [Security.AccessControl.AccessControlType]::Allow
+      )
+    )
+  }
+  [IO.FileSystemAclExtensions]::SetAccessControl(
+    [IO.DirectoryInfo]::new(`$caveAclProbe),
+    `$caveAcl
+  )
+} catch {
+  throw "Cave conformance child DACL repair failed."
+} finally {
+  [IO.Directory]::Delete(`$caveAclProbe, `$true)
 }
 `$operatorDenied = `$false
 try {
@@ -1645,6 +1917,13 @@ if (-not `$wmiDenied) {
     "Local\OpenCoven.Chat.SupervisorTest.$([Guid]::NewGuid().ToString('N'))"
   $accessEnvironment = $childEnvironment.Clone()
   $accessEnvironment.OPENCOVEN_ACCESS_PROBE_JOB = $accessJobName
+  $statusAclIdentity = [Security.Principal.WindowsIdentity]::GetCurrent()
+  try {
+    $accessEnvironment.OPENCOVEN_STATUS_ACL_SUPERVISOR_SID = $statusAclIdentity.User.Value
+  } finally {
+    $statusAclIdentity.Dispose()
+  }
+
   $accessEnvironment.OPENCOVEN_DENIAL_SERVICE_NAME =
     "OpenCovenSupervisorTest$([Guid]::NewGuid().ToString('N'))"
   $accessEnvironment.OPENCOVEN_DENIAL_WMI_FILTER_NAME =
@@ -1664,6 +1943,19 @@ if (-not `$wmiDenied) {
     if ($accessResult.ExitCode -ne 0) {
       throw "Protected Job Object DACL runtime probe failed: $($accessResult.Stderr)"
     }
+    $statusAclLines = $accessResult.Stdout.Trim() -split '\r?\n'
+    if ($statusAclLines.Count -ne 4 -or $statusAclLines[0] -cne 'status-acl-probe:') {
+      throw 'Status ACL probe result shape was invalid.'
+    }
+    $statusAclLabels = @('combined', 'owner-only', 'dacl-only')
+    for ($index = 0; $index -lt 3; $index++) {
+      $expected = $statusAclLabels[$index] + ':access-denied'
+      if ($statusAclLines[$index + 1] -cne $expected) {
+        throw "Restricted status ACL probe changed: $($statusAclLines[$index + 1])"
+      }
+      Write-Host "status-acl.$($statusAclLines[$index + 1])"
+    }
+
   } finally {
     $accessJob.Dispose()
   }
@@ -4271,7 +4563,9 @@ Start-Sleep -Seconds 300
             $directoryQuotas
           )
         } catch {
-          throw "Terminal failure '$Label' producer attempt failed: $($_.Exception.ToString())"
+          throw [InvalidOperationException]::new(
+            "Terminal failure '$Label' producer attempt failed.", $_.Exception
+          )
         }
         if (
           $Mode -eq 'stdout-overflow' -and
@@ -4451,12 +4745,27 @@ Start-Sleep -Seconds 300
 
   $timeoutContext = New-IsolatedTestContext -Label 'terminal-timeout'
   $timeoutJob = $null
+  $timeoutRoot = $timeoutContext.User.RootPath
+  $timeoutStatusFile = Join-Path `
+    $timeoutContext.User.StatusStagingPath `
+    'owner-only-timeout.tmp'
   try {
     $timeoutPids = Join-Path $timeoutContext.User.RootPath 'timeout-pids.txt'
     $timeoutScript = Join-Path $timeoutContext.User.RootPath 'timeout.ps1'
     [IO.File]::WriteAllText(
       $timeoutScript,
       @"
+`$statusFile = '$($timeoutStatusFile.Replace("'", "''"))'
+[IO.File]::WriteAllBytes(`$statusFile, [byte[]](1, 2, 3, 4))
+`$statusSecurity = [Security.AccessControl.FileSecurity]::new()
+`$statusSecurity.SetSecurityDescriptorSddlForm(
+  'D:P(A;;GA;;;OW)',
+  [Security.AccessControl.AccessControlSections]::Access
+)
+[IO.FileSystemAclExtensions]::SetAccessControl(
+  [IO.FileInfo]::new(`$statusFile),
+  `$statusSecurity
+)
 `$grandchild = Start-Process -FilePath '$($trustedPwsh.Replace("'", "''"))' -ArgumentList @('-NoProfile','-Command','Start-Sleep -Seconds 300') -PassThru
 [IO.File]::WriteAllText('$($timeoutPids.Replace("'", "''"))', "`$PID`n`$(`$grandchild.Id)`n")
 Start-Sleep -Seconds 300
@@ -4475,10 +4784,34 @@ Start-Sleep -Seconds 300
       $timeoutContext.Environment,
       [TimeSpan]::FromSeconds(8),
       1MB,
-      1MB
+      1MB,
+      [OpenCoven.WindowsDirectoryQuota[]]@(
+        [OpenCoven.WindowsDirectoryQuota]::new(
+          'timeout status staging',
+          $timeoutContext.User.StatusStagingPath,
+          1MB
+        )
+      )
     )
     if (-not $result.TimedOut -or $result.ExitCode -eq 0) {
       throw 'Timed-out supervised tree did not fail closed.'
+    }
+    if ($result.ResourceQuotaMonitorError) {
+      throw 'Owner-only status file blocked directory quota accounting.'
+    }
+    $timeoutStatusEntries = @(
+      [IO.DirectoryInfo]::new(
+        $timeoutContext.User.StatusStagingPath
+      ).EnumerateFileSystemInfos(
+        'owner-only-timeout.tmp',
+        [IO.SearchOption]::TopDirectoryOnly
+      )
+    )
+    if (
+      $timeoutStatusEntries.Count -ne 1 -or
+      $timeoutStatusEntries[0].Name -cne 'owner-only-timeout.tmp'
+    ) {
+      throw 'Timed-out producer did not leave the owner-only status file.'
     }
     if (-not $timeoutJob.IsQuarantineComplete) {
       throw 'Timed-out producer terminal quarantine did not complete.'
@@ -4493,6 +4826,9 @@ Start-Sleep -Seconds 300
       $timeoutJob.Dispose()
     }
     Remove-IsolatedTestContext -Context $timeoutContext
+    if ([IO.Directory]::Exists($timeoutRoot)) {
+      throw 'Owner-only status file prevented isolated root cleanup.'
+    }
   }
 
   $closePid = Join-Path $root 'close-pid.txt'
@@ -4999,6 +5335,299 @@ Add-Type -TypeDefinition ([IO.File]::ReadAllText('$($sourcePath.Replace("'", "''
         if ($validNative.ExitCode -ne 0 -or $validNative.Stdout -ne '' -or $validNative.Stderr -ne '') {
           throw 'Valid native Job binding did not reach native RPC startup.'
         }
+
+        $nativeDiscoveryNonce = '33333333333333333333333333333333'
+        $nativeDiscoveryJobName =
+          "Local\OpenCoven.Chat.Conformance.$nativeDiscoveryNonce"
+        $nativeDiscoveryEnvironment = $childEnvironment.Clone()
+        $nativeDiscoveryEnvironment.OPENCOVEN_PHASE1_SCHEMA_V2_EVIDENCE = '1'
+        $nativeDiscoveryEnvironment.OPENCOVEN_WINDOWS_JOB_REQUIRED = '1'
+        $nativeDiscoveryEnvironment.OPENCOVEN_WINDOWS_JOB_NONCE = $nativeDiscoveryNonce
+        $nativeDiscoveryEnvironment.OPENCOVEN_WINDOWS_JOB_NAME = $nativeDiscoveryJobName
+        $nativeDiscoveryJob = [OpenCoven.WindowsJobSupervisor]::Create(
+          $nativeDiscoveryJobName,
+          $isolatedUser
+        )
+        try {
+          $nativeProfileOwnerScript = Join-Path $root 'native-profile-owner.ps1'
+          [IO.File]::WriteAllText($nativeProfileOwnerScript, @'
+$ErrorActionPreference = 'Stop'
+Add-Type -TypeDefinition @"
+using System;
+using System.Text;
+using System.Runtime.InteropServices;
+public static class NativeProfileOwnerProbe {
+    [DllImport("kernel32.dll")] static extern IntPtr GetCurrentProcess();
+    [DllImport("kernel32.dll")] static extern bool CloseHandle(IntPtr handle);
+    [DllImport("advapi32.dll", SetLastError = true)]
+    static extern bool OpenProcessToken(IntPtr process, uint access, out IntPtr token);
+    [DllImport("userenv.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    static extern bool GetUserProfileDirectoryW(IntPtr token, StringBuilder path, ref uint size);
+    public static string Read() {
+        IntPtr token;
+        if (!OpenProcessToken(GetCurrentProcess(), 8, out token))
+            throw new InvalidOperationException("Token profile probe failed.");
+        try {
+            uint size = 0;
+            GetUserProfileDirectoryW(token, null, ref size);
+            if (size == 0 || size > 32768)
+                throw new InvalidOperationException("Token profile size invalid.");
+            var path = new StringBuilder((int)size);
+            if (!GetUserProfileDirectoryW(token, path, ref size))
+                throw new InvalidOperationException("Token profile query failed.");
+            return path.ToString();
+        } finally { CloseHandle(token); }
+    }
+}
+"@
+$profileOwner = (Get-Acl -LiteralPath ([NativeProfileOwnerProbe]::Read())).GetOwner(
+  [Security.Principal.SecurityIdentifier]
+).Value
+$currentIdentity = [Security.Principal.WindowsIdentity]::GetCurrent()
+try {
+  if ($profileOwner -eq $currentIdentity.User.Value -or
+      $profileOwner -notin @('S-1-5-18', 'S-1-5-32-544')) {
+    throw 'Native discovery regression requires a SYSTEM or Administrators profile owner.'
+  }
+} finally { $currentIdentity.Dispose() }
+'@, [Text.UTF8Encoding]::new($false))
+          # Keep the owner probe and native RPC in independent Job lifetimes.
+          $nativeProfileOwnerNonce = '44444444444444444444444444444444'
+          $nativeProfileOwnerJobName =
+            "Local\OpenCoven.Chat.Conformance.$nativeProfileOwnerNonce"
+          $nativeProfileOwnerEnvironment = $nativeDiscoveryEnvironment.Clone()
+          $nativeProfileOwnerEnvironment.OPENCOVEN_WINDOWS_JOB_NONCE = $nativeProfileOwnerNonce
+          $nativeProfileOwnerEnvironment.OPENCOVEN_WINDOWS_JOB_NAME = $nativeProfileOwnerJobName
+          $nativeProfileOwnerJob = [OpenCoven.WindowsJobSupervisor]::Create(
+            $nativeProfileOwnerJobName,
+            $isolatedUser
+          )
+          try {
+            $nativeProfileOwner = $nativeProfileOwnerJob.RunAsUser(
+              $isolatedUser,
+              $trustedPwsh,
+              "-NoLogo -NoProfile -NonInteractive -File `"$nativeProfileOwnerScript`"",
+              $root,
+              $nativeProfileOwnerEnvironment,
+              [TimeSpan]::FromSeconds(30),
+              1MB,
+              1MB
+            )
+            if ($nativeProfileOwner.ExitCode -ne 0 -or
+                $nativeProfileOwner.Stdout -ne '' -or $nativeProfileOwner.Stderr -ne '') {
+              throw 'Native discovery token-profile owner assertion failed.'
+            }
+          } finally {
+            $nativeProfileOwnerJob.Dispose()
+          }
+          $nativeDiscoveryRequest = [Text.UTF8Encoding]::new($false).GetBytes(
+            '{"id":"discovery","command":"cave_read_discovery","args":{"operation":{"attemptId":"op1-1787900000000-1-00000000000000000000000000000000","timeoutMs":1000}}}' +
+              "`n"
+          )
+          $nativeDiscovery = $nativeDiscoveryJob.RunAsUserWithStandardInput(
+            $isolatedUser,
+            $nativeRpc,
+            '',
+            $root,
+            $nativeDiscoveryEnvironment,
+            [TimeSpan]::FromSeconds(30),
+            1MB,
+            1MB,
+            $nativeDiscoveryRequest
+          )
+          if ($nativeDiscovery.ExitCode -ne 0 -or $nativeDiscovery.Stderr -ne '') {
+            throw 'Native discovery profile-root regression probe failed.'
+          }
+          $nativeDiscoveryResponse = $nativeDiscovery.Stdout | ConvertFrom-Json
+          if (
+            $nativeDiscoveryResponse.id -cne 'discovery' -or
+            $nativeDiscoveryResponse.ok -ne $false -or
+            $nativeDiscoveryResponse.error.code -cne 'cave_discovery_not_found'
+          ) {
+            throw 'Native discovery rejected the isolated Windows profile root.'
+          }
+        } finally {
+          $nativeDiscoveryJob.Dispose()
+        }
+
+        # Exercise actual credential creation under the same restricted logon and Job.
+        $installationScript = Join-Path $root 'native-installation-roundtrip.ps1'
+        [IO.File]::WriteAllText($installationScript, @'
+$ErrorActionPreference = 'Stop'
+Set-StrictMode -Version Latest
+trap {
+  $category = Get-NativeInstallationFailureCategory $_.Exception.Message
+  [Console]::Out.WriteLine("installation-roundtrip: $category")
+  exit 1
+}
+$start = [Diagnostics.ProcessStartInfo]::new($env:OPENCOVEN_NATIVE_TEST_BINARY)
+$installationEnvironmentSnapshot = Read-NativeInstallationEnvironment
+$start.UseShellExecute = $false
+$start.RedirectStandardInput = $true
+$start.RedirectStandardOutput = $true
+$start.RedirectStandardError = $true
+$process = [Diagnostics.Process]::Start($start)
+$stderr = $process.StandardError.ReadToEndAsync()
+$grant = $null
+$terminalSuccess = $false
+$primaryFailure = $null
+$secondaryFailure = $null
+function Invoke-InstallationRpc([string]$command, [hashtable]$arguments = @{}) {
+  $request = @{ id = $command; command = $command; args = $arguments }
+  $process.StandardInput.WriteLine(($request | ConvertTo-Json -Compress -Depth 8))
+  $process.StandardInput.Flush()
+  $read = $process.StandardOutput.ReadLineAsync()
+  if (-not $read.Wait(10000)) { throw 'installation-roundtrip: response-timeout' }
+  $line = $read.Result
+  if ($null -eq $line -or $line.Length -gt 65536) {
+    throw 'installation-roundtrip: response-invalid'
+  }
+  try { $response = $line | ConvertFrom-Json }
+  catch { throw 'installation-roundtrip: response-invalid' }
+  if ($response.id -cne $command -or $response.ok -ne $true) {
+    # The shared allowlist binds every native subtype to its expected command.
+    if ($response.id -ceq $command -and $response.error.code -is [string]) {
+      $category = Get-NativeInstallationFailureCategory "installation-roundtrip: $command-$($response.error.code)"
+      if ($category -cne 'unclassified') {
+        throw "installation-roundtrip: $category"
+      }
+    }
+    throw "installation-roundtrip: $command-failed"
+  }
+  return $response.result
+}
+function Assert-EmptyCustody($proof) {
+  if ($proof.backend -cne 'windows-credential-manager' -or
+      $proof.available -ne $true -or $proof.empty -ne $true -or
+      $proof.stateSha256 -cnotmatch '^[0-9a-f]{64}$') {
+    throw 'installation-roundtrip: custody-invalid'
+  }
+}
+try {
+  $before = Invoke-InstallationRpc 'conformance_native_custody_state' @{ instanceIds = @() }
+  Assert-EmptyCustody $before
+  $issued = Invoke-InstallationRpc 'conformance_issue_native_custody_cleanup' @{ instanceIds = @() }
+  $grant = $issued.grant
+  if ($grant -cnotmatch '^[A-Za-z0-9_-]{43}$') { throw 'installation-roundtrip: grant-invalid' }
+  $first = Invoke-InstallationRpc 'app_installation_id'
+  if ($first -cnotmatch '^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$') {
+    throw 'installation-roundtrip: installation-invalid'
+  }
+  $second = Invoke-InstallationRpc 'app_installation_id'
+  if ($first -cne $second) { throw 'installation-roundtrip: installation-changed' }
+  $cleaned = Invoke-InstallationRpc 'conformance_cleanup_native_custody' @{ grant = $grant }
+  $grant = $null
+  Assert-EmptyCustody $cleaned
+  $after = Invoke-InstallationRpc 'conformance_native_custody_state' @{ instanceIds = @() }
+  Assert-EmptyCustody $after
+  if ($before.stateSha256 -cne $after.stateSha256) { throw 'installation-roundtrip: custody-changed' }
+} catch {
+  $primaryFailure = Get-NativeInstallationFailureCategory $_.Exception.Message
+} finally {
+  try {
+    if ($null -ne $grant -and -not $process.HasExited) {
+      $null = Invoke-InstallationRpc 'conformance_cleanup_native_custody' @{ grant = $grant }
+    }
+  } catch {
+    $secondaryFailure = Get-NativeInstallationFailureCategory $_.Exception.Message
+  }
+  try {
+    $process.StandardInput.Close()
+    if ($process.WaitForExit(10000)) {
+      $terminalSuccess = $process.ExitCode -eq 0
+    } else {
+      $process.Kill($true)
+      $null = $process.WaitForExit(10000)
+    }
+  } catch {
+    if ($null -eq $secondaryFailure) { $secondaryFailure = 'native-exit-failed' }
+  } finally {
+    try { $process.Dispose() } catch {
+      if ($null -eq $secondaryFailure) { $secondaryFailure = 'native-exit-failed' }
+    }
+  }
+}
+if (-not $terminalSuccess -and $null -eq $secondaryFailure) {
+  $secondaryFailure = 'native-exit-failed'
+}
+try {
+  if (-not $stderr.Wait(10000) -or $stderr.Result -ne '') {
+    if ($null -eq $secondaryFailure) { $secondaryFailure = 'unexpected-stderr' }
+  }
+} catch {
+  if ($null -eq $secondaryFailure) { $secondaryFailure = 'unexpected-stderr' }
+}
+if ($null -ne $primaryFailure -or $null -ne $secondaryFailure) {
+  if ($null -eq $primaryFailure) {
+    $primaryFailure = $secondaryFailure
+    $secondaryFailure = $null
+  }
+  [Console]::Out.WriteLine("installation-roundtrip: $primaryFailure")
+  [Console]::Out.WriteLine('installation-environment: ' + $installationEnvironmentSnapshot)
+  if ($null -ne $secondaryFailure) {
+    [Console]::Error.WriteLine("installation-roundtrip: $secondaryFailure")
+  }
+  exit 1
+}
+Write-Output 'installation-roundtrip: passed'
+'@, [Text.UTF8Encoding]::new($false))
+        # Prepend the exact tested classifier instead of maintaining a child copy.
+        $classifierSource = "function Get-NativeInstallationFailureCategory {`n" +
+          ${function:Get-NativeInstallationFailureCategory}.ToString() + "`n}`n"
+        $classifierSource += "function Read-NativeInstallationEnvironment {`n" +
+          ${function:Read-NativeInstallationEnvironment}.ToString() + "`n}`n"
+        [IO.File]::WriteAllText($installationScript,
+          $classifierSource + [IO.File]::ReadAllText($installationScript),
+          [Text.UTF8Encoding]::new($false))
+        $installationNonce = [Guid]::NewGuid().ToString('N')
+        $installationJobName = "Local\OpenCoven.Chat.Conformance.$installationNonce"
+        $installationEnvironment = $validNativeEnvironment.Clone()
+        $installationEnvironment.OPENCOVEN_WINDOWS_JOB_NONCE = $installationNonce
+        $installationEnvironment.OPENCOVEN_WINDOWS_JOB_NAME = $installationJobName
+        $installationEnvironment.OPENCOVEN_NATIVE_TEST_BINARY = $nativeRpc
+        $installationEnvironment.OPENCOVEN_PHASE1_CONFORMANCE_NATIVE_PROVIDER_PRESET = 'system-native'
+        $installationEnvironment.OPENCOVEN_PHASE1_CONFORMANCE_KEYRING_SERVICE =
+          "ai.opencoven.chat.phase1.$installationNonce"
+        # Match nativeScenarioHomes: explicit cleanup homes require the trusted OS profile.
+        $installationEnvironment.OPENCOVEN_PHASE1_CONFORMANCE_CLEANUP_HOME = $isolatedUser.OperatingSystemProfilePath
+        $installationJob = [OpenCoven.WindowsJobSupervisor]::Create($installationJobName, $isolatedUser)
+        $retainedInstallationEnvironment = Read-NativeInstallationRetainedEnvironment $isolatedUser
+        $primaryInstallationFailure = $null
+        try {
+          $installationResult = $installationJob.RunProducerAsUserAndQuarantine(
+            $isolatedUser, $trustedPwsh,
+            "-NoLogo -NoProfile -NonInteractive -File `"$installationScript`"",
+            $root, $installationEnvironment, [TimeSpan]::FromSeconds(120), 1MB, 1MB
+          )
+          if ($installationResult.ExitCode -ne 0 -or $installationResult.Stderr -ne '' -or
+              $installationResult.Stdout.Trim() -cne 'installation-roundtrip: passed') {
+            $report = Get-NativeInstallationFailureReport $installationResult.Stdout
+            Write-Host (Format-NativeInstallationCapabilityComparison $retainedInstallationEnvironment $report.Environment)
+            $category = $report.Category
+            $secondary = if ($installationResult.Stderr -eq '') { 'none' } else {
+              Get-NativeInstallationFailureCategory $installationResult.Stderr
+            }
+            throw "Restricted native installation roundtrip failed: $category; secondary: $secondary; environment: $($report.Environment)"
+          }
+          if (-not $installationJob.IsQuarantineComplete) {
+            throw 'Restricted native installation quarantine incomplete.'
+          }
+          Write-Output 'Restricted native installation roundtrip and quarantine passed.'
+        } catch {
+          $primaryInstallationFailure = $_.Exception
+          throw
+        } finally {
+          try { $installationJob.Dispose() } catch {
+            if ($null -ne $primaryInstallationFailure) {
+              throw [AggregateException]::new(
+                'Windows installation test and disposal failed.',
+                [Exception[]]@($primaryInstallationFailure, $_.Exception)
+              )
+            }
+            throw
+          }
+        }
+
       } finally {
         $jobB.Dispose()
         $jobA.Dispose()
@@ -5008,6 +5637,9 @@ Add-Type -TypeDefinition ([IO.File]::ReadAllText('$($sourcePath.Replace("'", "''
     $membershipB.Dispose()
     $membershipA.Dispose()
   }
+} catch {
+  $primarySupervisorFailure = $_.Exception
+  throw
 } finally {
   $cleanupErrors = [Collections.Generic.List[Exception]]::new()
   try {
@@ -5023,6 +5655,10 @@ Add-Type -TypeDefinition ([IO.File]::ReadAllText('$($sourcePath.Replace("'", "''
     }
   }
   if ($cleanupErrors.Count -ne 0) {
+    if ($null -ne $primarySupervisorFailure) {
+      [Exception[]]$failures = @($primarySupervisorFailure) + $cleanupErrors.ToArray()
+      throw [AggregateException]::new('Windows supervisor test and cleanup failed.', $failures)
+    }
     $cleanupDetails = (
       $cleanupErrors |
         ForEach-Object { $_.ToString() }
@@ -5039,3 +5675,8 @@ if ([IO.Directory]::Exists($ephemeralProfilePath)) {
 if ([IO.Directory]::Exists($root)) {
   throw 'Ephemeral bootstrap root survived cleanup.'
 }
+
+# Each fresh context replaces the supervisor process ACL with its own SID.
+# Run after the parent context probes and cleanup so that their boundary stays intact.
+& (Join-Path $PSScriptRoot 'windows-profile-lifecycle.test.ps1')
+& (Join-Path $PSScriptRoot 'windows-profile-application.test.ps1')

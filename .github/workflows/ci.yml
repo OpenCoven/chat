@@ -2,27 +2,15 @@ name: CI
 
 on:
   pull_request:
+    # ci:full is commonly applied after the PR is opened.
+    types: [opened, synchronize, reopened, labeled]
   push:
+    branches:
+      - main
 
-# Both triggers fire for a branch with an open pull request, so every commit
-# started two full runs of this workflow: the same suites executed twice, for
-# the same commit, at double the cost. One run per branch is enough.
-#
-# This does not explain the runs that hung and held a runner until GitHub's
-# six-hour limit. That was first attributed to the two runs racing for the
-# preview server's fixed port, and the attribution was wrong: with concurrency
-# in place and only one run, the job still stalled. The cause was apt-get, in
-# two different jobs that had nothing in common except calling it, and it is
-# addressed by the prebuilt image rather than here.
-#
-# The group name has to match across both events, which `github.ref` does not:
-# a push gives `refs/heads/name` and a pull_request gives `refs/pull/N/merge`.
-# `head_ref` is the source branch on a pull_request and empty on a push, so
-# falling back to `ref_name` yields the same bare branch name for both.
-#
-# main is exempt from cancellation. Cancelling there would abandon the
-# verification of a merge that has already landed, which is the one place the
-# result still matters after the fact.
+# Validate feature branches through pull requests and retain main-push verification.
+# Creating and cancelling a second run for the same commit leaves cancelled
+# required checks that can prevent a fully passing pull request from merging.
 concurrency:
   group: ${{ github.workflow }}-${{ github.head_ref || github.ref_name }}
   cancel-in-progress: ${{ github.ref_name != 'main' }}
@@ -40,6 +28,7 @@ jobs:
     timeout-minutes: 5
     outputs:
       docs_only: ${{ steps.classify.outputs.docs_only }}
+      product_only: ${{ steps.classify.outputs.product_only }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
@@ -64,6 +53,7 @@ jobs:
             || ! git cat-file -e "${BASE}^{commit}" 2>/dev/null; then
             echo "No usable base commit; treating this as a code change."
             echo "docs_only=false" >> "$GITHUB_OUTPUT"
+            echo "product_only=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
 
@@ -72,6 +62,7 @@ jobs:
           if [ -z "${files}" ]; then
             echo "No files changed; treating this as a code change."
             echo "docs_only=false" >> "$GITHUB_OUTPUT"
+            echo "product_only=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
 
@@ -94,9 +85,29 @@ jobs:
           echo "docs_only=${docs_only}"
           echo "docs_only=${docs_only}" >> "$GITHUB_OUTPUT"
 
+          # The heavy Vitest suites exercise the conformance harness: they
+          # import scripts/*.mjs and read the locks, src-tauri, tools and this
+          # workflow. A change confined to the chat UI, the browser suite, or
+          # prose cannot alter their result, so those files are the allowlist
+          # and everything else -- including a new top-level path nobody has
+          # classified yet -- keeps the suites running. main always runs them.
+          product_only=true
+          while IFS= read -r file; do
+            case "${file}" in
+              src/coven/*|src/design/*|src/ui/*|src/lib/*|src/main.tsx|src/styles.css|src/styles.test.ts|e2e/*|docs/*|*.md) ;;
+              *) product_only=false ;;
+            esac
+          done <<EOF
+          ${files}
+          EOF
+
+          echo "product_only=${product_only}"
+          echo "product_only=${product_only}" >> "$GITHUB_OUTPUT"
+
   web:
     name: Web checks
     runs-on: ubuntu-latest
+    needs: changes
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
@@ -114,12 +125,50 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm lint
       - run: pnpm typecheck
-      - run: pnpm test:unit
+      - run: pnpm test:unit:normal
+      # The heavy suites took 134 of the 233 seconds this step spent on a
+      # pull request that changed one capability file. They test the
+      # conformance scripts, not the app, so they run when the harness could
+      # have moved and on every push to main, where drift would surface.
+      - name: Heavy Phase 1 suites
+        if: github.event_name == 'push' || needs.changes.outputs.product_only != 'true'
+        run: pnpm test:unit:heavy
+      # The lock test verifies digests against a detached checkout of the
+      # authority, which is self-consistent however far main moves on, so it
+      # cannot see a content merge whose repin was never made. That is how
+      # three governed files drifted for four merges without a red build.
+      #
+      # A pull request is allowed to drift: the repin follows the merge, and
+      # cannot name a merge commit that does not exist yet. Main is not.
+      - name: Phase 1 authority is current
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Execute the authority's guard and imports, never the unpinned copy.
+          # Clear inherited Git settings before reading the lock or archive.
+          authority_git() {
+            env -i PATH="$PATH" HOME="$RUNNER_TEMP" \
+              GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1 \
+              GIT_NO_REPLACE_OBJECTS=1 GIT_NO_LAZY_FETCH=1 \
+              GIT_TERMINAL_PROMPT=0 GIT_ALLOW_PROTOCOL= \
+              git "$@"
+          }
+          authority=$(authority_git show HEAD:phase1-conformance.lock.json | jq -er '.harnessAuthority.revision')
+          [[ "$authority" =~ ^[0-9a-f]{40}$ ]]
+          pinned=$(mktemp -d)
+          trap 'rm -rf "$pinned"' EXIT
+          authority_git archive "$authority" scripts/ | tar -x -C "$pinned"
+          node "$pinned/scripts/phase1-authority-freshness.mjs" HEAD "$GITHUB_WORKSPACE"
 
   e2e:
     name: E2E
     runs-on: ubuntu-latest
-    needs: [web, changes]
+    # Nothing here consumes web's output; waiting for it only serialised the
+    # two longest Linux jobs behind the lint. Linux minutes on a branch that
+    # then fails lint are the price of a shorter critical path on every
+    # branch that does not.
+    needs: changes
     # A documentation change cannot fail a browser test. This job took twenty
     # minutes to time out on a two-commit docs branch, twice, which is the
     # entire argument for the condition.
@@ -128,7 +177,7 @@ jobs:
     # no longer downloads a browser or calls apt. That removed the step that
     # hung five times. See .github/ci-image/Dockerfile.
     container:
-      image: ghcr.io/opencoven/chat-ci@sha256:da7790204dc362185b6fcc74356255c97f03436afd876c3e2921714e3586f7ca
+      image: ghcr.io/opencoven/chat-ci@sha256:5d1dd0a735bff26bfd4599228451caf8db331df72662f86a16815cd944afb89d
       # A package published by a workflow starts out private regardless of the
       # repository's visibility, so the pull is authenticated rather than
       # relying on it being public.
@@ -163,7 +212,6 @@ jobs:
   contract-canary:
     name: Contract canary
     runs-on: ubuntu-latest
-    needs: web
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
@@ -425,14 +473,16 @@ jobs:
   desktop:
     name: Desktop build
     runs-on: ubuntu-latest
-    needs: [web, changes]
+    # Independent of web for the same reason as e2e: this is the longest job
+    # a pull request runs, and it was starting only after the second longest.
+    needs: changes
     if: needs.changes.outputs.docs_only != 'true'
     # The apt-get that used to open this job is now baked into the image. It
     # hung for forty-seven minutes on 19 August with no timeout to stop it,
     # which is how the cause was finally identified: a second job, sharing no
     # code with the first, stuck on the same kind of step.
     container:
-      image: ghcr.io/opencoven/chat-ci@sha256:da7790204dc362185b6fcc74356255c97f03436afd876c3e2921714e3586f7ca
+      image: ghcr.io/opencoven/chat-ci@sha256:5d1dd0a735bff26bfd4599228451caf8db331df72662f86a16815cd944afb89d
       credentials:
         username: ${{ github.actor }}
         password: ${{ secrets.GITHUB_TOKEN }}
@@ -456,7 +506,47 @@ jobs:
         with:
           toolchain: 1.95.0
       - run: pnpm install --frozen-lockfile
+      - name: Verify maintained GLib source and optimized iterator regression
+        run: |
+          set -eu
+          ulimit -c 0
+          curl --proto '=https' --tlsv1.2 --fail --location \
+            https://static.crates.io/crates/glib/glib-0.18.5.crate \
+            --output "$RUNNER_TEMP/glib-0.18.5.crate"
+          node scripts/verify-glib-backport.mjs "$RUNNER_TEMP/glib-0.18.5.crate" --test
+      - name: Verify the patched Linux dependency graph
+        run: |
+          set -eu
+          cargo metadata --manifest-path src-tauri/Cargo.toml --locked \
+            --filter-platform x86_64-unknown-linux-gnu --format-version 1 \
+            > "$RUNNER_TEMP/chat-native-metadata.json"
+          node --input-type=module <<'EOF'
+          import assert from 'node:assert/strict';
+          import { readFileSync, realpathSync } from 'node:fs';
+          import { resolve } from 'node:path';
+
+          const metadata = JSON.parse(readFileSync(
+            resolve(process.env.RUNNER_TEMP, 'chat-native-metadata.json'), 'utf8',
+          ));
+          const glib = metadata.packages.filter((entry) => entry.name === 'glib');
+          assert.equal(glib.length, 1, 'The native graph must contain exactly one GLib');
+          assert.equal(glib[0].version, '0.18.5');
+          assert.equal(glib[0].source, null, 'GLib must resolve to the maintained source');
+          assert.equal(realpathSync(glib[0].manifest_path),
+            realpathSync('vendor/glib-0.18.5/Cargo.toml'));
+          for (const name of ['glib-sys', 'glib-macros', 'gobject-sys', 'gio-sys']) {
+            const siblings = metadata.packages.filter((entry) => entry.name === name);
+            assert.equal(siblings.length, 1, `Unexpected ${name} source graph`);
+            assert.equal(siblings[0].source, 'registry+https://github.com/rust-lang/crates.io-index');
+          }
+          console.log('Linux graph: one maintained glib 0.18.5; sys/macro siblings remain registry packages.');
+          EOF
       - run: pnpm app:build
+      - name: Run optimized Linux native regressions
+        run: >-
+          cargo test --manifest-path src-tauri/Cargo.toml --locked --release
+          --features phase1-conformance --lib
+          --test coven_health_process_boundary --test phase1_native_rpc
 
   rust:
     name: Rust
@@ -593,11 +683,36 @@ jobs:
       - run: cargo test --manifest-path src-tauri/Cargo.toml --features phase1-conformance --lib
       - run: corepack pnpm test:native-e2e
 
+  windows-profile-residual:
+    name: Windows profile residual cleanup
+    runs-on: windows-2025
+    needs: changes
+    if: >-
+      needs.changes.outputs.docs_only != 'true'
+      && ((github.event_name == 'push' && github.ref == 'refs/heads/main')
+      || contains(github.event.pull_request.labels.*.name, 'ci:full'))
+    # Keep the additional identity lifecycles out of the nearly full
+    # twenty-minute supervisor job; production deadlines are unchanged.
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - name: Test residual cleanup policy
+        shell: pwsh
+        run: pwsh -NoLogo -NoProfile -NonInteractive -File scripts/windows-profile-residual-policy.test.ps1
+      - name: Test authorized native profile cleanup
+        shell: pwsh
+        run: pwsh -NoLogo -NoProfile -NonInteractive -File scripts/windows-profile-residual-native.test.ps1
+
   unix-supervisor:
     name: Unix producer supervisor (${{ matrix.platform }})
     runs-on: ${{ matrix.runner }}
     needs: changes
-    if: needs.changes.outputs.docs_only != 'true'
+    # Keep this matrix enabled for docs-only changes: skipping it before
+    # expansion omits the required linux-x64 check context.
     permissions:
       contents: read
     timeout-minutes: 15
@@ -627,11 +742,11 @@ jobs:
     # Windows bills at twice the Linux rate, and this job needs the artifact
     # `rust` produces, so it follows the same gate.
     if: >-
-      always() && needs.rust.result == 'success'
+      !cancelled() && needs.rust.result == 'success'
       && needs.changes.outputs.docs_only != 'true'
       && ((github.event_name == 'push' && github.ref == 'refs/heads/main')
       || contains(github.event.pull_request.labels.*.name, 'ci:full'))
-    timeout-minutes: 20
+    timeout-minutes: 30
     permissions:
       contents: read
     steps:
@@ -645,6 +760,8 @@ jobs:
       - uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c # stable
         with:
           toolchain: 1.95.0
+      - name: Test native Windows cleanup grant ownership
+        run: cargo test --manifest-path src-tauri/Cargo.toml --locked --features phase1-conformance --lib cleanup_grant::marker_io::owner_cleanup_tests
       - name: Build phase1 native RPC
         run: cargo build --manifest-path src-tauri/Cargo.toml --features phase1-conformance --bin phase1-native-rpc
       - name: Test Windows Job Object supervision
@@ -680,9 +797,21 @@ jobs:
           node-version-file: .node-version
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+      - name: Verify bounded supervisor source on Windows
+        run: corepack pnpm@10.34.0 --ignore-workspace exec vitest run src/windows-supervisor-source.test.ts
+      - name: Reproduce shallow Windows authority checkout
+        run: >-
+          corepack pnpm@10.34.0 --ignore-workspace exec vitest run
+          --config vitest.heavy.config.ts src/phase1-conformance.test.ts
+          -t "clones an exact protected tag from a shallow Windows source"
       - name: Run real Windows supervisor behavior
         shell: pwsh
         env:
           OPENCOVEN_PHASE1_WINDOWS_SUPERVISOR_PATH: C:\OpenCoven\conformance\phase1-process-supervisor.exe
         run: corepack pnpm@10.34.0 --ignore-workspace exec vitest run --config vitest.heavy.config.ts src/phase1-windows-supervisor.test.ts
+      - name: Verify bounded Cave startup diagnostic transport
+        run: >-
+          corepack pnpm@10.34.0 --ignore-workspace exec vitest run
+          --config vitest.heavy.config.ts src/phase1-conformance.test.ts
+          -t "schema-v2 bounded Cave startup exit details"
       - run: corepack pnpm test:native-e2e

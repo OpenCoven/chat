@@ -1,7 +1,7 @@
 import { execFileSync } from 'node:child_process';
-import { createHash } from 'node:crypto';
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { resolve } from 'node:path';
+import { runInNewContext } from 'node:vm';
 
 type CapabilityFile = {
   $schema?: string;
@@ -52,6 +52,23 @@ type ContractCanaryLock = {
 };
 
 const projectRoot = process.cwd();
+const covenRuntimeCommands = [
+  'coven_runtime_status',
+  'coven_runtime_familiars',
+  'coven_runtime_sessions',
+  'coven_runtime_chat_lifecycle',
+  'coven_runtime_read',
+  'coven_runtime_send',
+  'coven_runtime_cancel',
+];
+// The screen relay is the one place the webview may name a network
+// destination: a WebSocket upgrade the host performs itself, forwarding
+// opaque frames for the VNC viewer. See src-tauri/src/screen_relay.rs.
+const screenRelayCommands = [
+  'coven_screen_connect',
+  'coven_screen_send',
+  'coven_screen_disconnect',
+];
 
 function readText(relativePath: string) {
   return readFileSync(resolve(projectRoot, relativePath), 'utf8');
@@ -141,58 +158,68 @@ describe('Phase 1 specification guards', () => {
     expect(output).toContain('/.worktrees');
   });
 
+  it('uses the same frozen consumer checkout revisions as phase-1 production', () => {
+    const canary = readJson<ContractCanaryLock>('contract-canary.lock.json');
+    const phase1 = readJson<{ sdk: { revision: string }; cave: { revision: string } }>(
+      'phase1-conformance.lock.json',
+    );
+
+    expect(canary.sdk.revision).toBe(phase1.sdk.revision);
+    expect(canary.cave.revision).toBe(phase1.cave.revision);
+  });
+
   it('tracks reviewed counterpart revisions in repository content', () => {
     const lock = readJson<ContractCanaryLock>('contract-canary.lock.json');
 
     expect(lock.version).toBe(4);
     expect(lock.sdk.repository).toBe('OpenCoven/sdk');
     expect(lock.cave.repository).toBe('OpenCoven/coven-cave');
-    expect(lock.sdk.revision).toBe('acc38488f00860d246c3c553375634d64806eabb');
-    expect(lock.cave.revision).toBe('6325fc4c1154c7d7398074a9760a2e2dc323b424');
+    expect(lock.sdk.revision).toBe('cd10a3fa1d9900e0dbcb04bbb2477140854fba1d');
+    expect(lock.cave.revision).toBe('ecdcdcf8a75b62bb912ec48215ae20ab0809a181');
     expect(lock.sdk.releaseManifest).toEqual({
       file: 'release-manifest.json',
-      version: '0.1.0',
-      sha256: 'b248f2d945f77e22d0dee1644e9131aa7d2a20db2f30d06206a974d7a4262dec',
+      version: '0.0.1',
+      sha256: '72041bfe9a236d709ea3fe26d32b871f17c7c5183e2991cd0229063ade730cb4',
     });
     expect(lock.sdk.artifacts).toEqual({
       core: {
         packageName: '@opencoven/sdk-core',
-        version: '0.1.0',
-        releaseFile: 'tarballs/core/opencoven-sdk-core-0.1.0.tgz',
-        vendorFile: 'sdk-core-0.1.0.tgz',
-        size: 33332,
-        sha256: 'dc86c6d4c88dc8273272b70d2014d2b62c80ae7368c9cf1e8eb78440f5fcc9c4',
+        version: '0.0.1',
+        releaseFile: 'tarballs/core/opencoven-sdk-core-0.0.1.tgz',
+        vendorFile: 'sdk-core-0.0.1.tgz',
+        size: 33308,
+        sha256: '5f41291d303cf25e5ff4a3c40d0169f025f7e218da8637fc905935524b5e4e2b',
       },
       cave: {
         packageName: '@opencoven/cave-client',
-        version: '0.1.0',
-        releaseFile: 'tarballs/cave/opencoven-cave-client-0.1.0.tgz',
-        vendorFile: 'cave-client-0.1.0.tgz',
-        size: 85426,
-        sha256: 'de16ce13f2e3be0f6555cfc4413ca3c8f8f1a94f980261a6857c025615e7a14a',
+        version: '0.0.1',
+        releaseFile: 'tarballs/cave/opencoven-cave-client-0.0.1.tgz',
+        vendorFile: 'cave-client-0.0.1.tgz',
+        size: 89873,
+        sha256: '7389376ebc40ff59d942957339769d4dbdb566e25adef9a9deb372581b39a245',
       },
       coven: {
         packageName: '@opencoven/coven-client',
-        version: '0.1.0',
-        releaseFile: 'tarballs/coven/opencoven-coven-client-0.1.0.tgz',
-        vendorFile: 'coven-client-0.1.0.tgz',
-        size: 33009,
-        sha256: 'cba09410aeae9670173a1f7bfe3174b5dd610873358944ed0955c86ac56a3aa1',
+        version: '0.0.1',
+        releaseFile: 'tarballs/coven/opencoven-coven-client-0.0.1.tgz',
+        vendorFile: 'coven-client-0.0.1.tgz',
+        size: 102172,
+        sha256: '4162dd685f78c8703497cba65f68a2f0c28fc640bb7da64b0dc9462c74f357dc',
       },
       sdk: {
         packageName: '@opencoven/sdk',
-        version: '0.1.0',
-        releaseFile: 'tarballs/sdk/opencoven-sdk-0.1.0.tgz',
-        vendorFile: 'sdk-0.1.0.tgz',
-        size: 15833,
-        sha256: 'eee7557feeaf4719d0cb990a66fdddf62270dbbeb05cfe7e35efbfe22827d04f',
+        version: '0.0.1',
+        releaseFile: 'tarballs/sdk/opencoven-sdk-0.0.1.tgz',
+        vendorFile: 'sdk-0.0.1.tgz',
+        size: 16783,
+        sha256: '68b258d21eb61360588c41db528d4b37e4594ddd82dac04cdf6477728161e43a',
       },
     });
     expect(lock.cave.artifacts).toEqual({
       contractFixture: {
         path: 'src/lib/server/client-v1/contract-fixture.json',
         digestPath: 'src/lib/server/client-v1/contract-fixture.sha256',
-        sha256: 'c0b1af2442409f8b26bbf0cf2a5fac467d23e5f56d2c966a9428c4b3e830a186',
+        sha256: '0c03baea9c21f0985df41eef3c5ae5223497b9081c665b53ddecab36598f5ede',
       },
       hpkeVectors: {
         path: 'src/lib/server/client-v1/hpke-bound-v1-vectors.json',
@@ -208,28 +235,20 @@ describe('Phase 1 specification guards', () => {
     ) as CapabilityFile;
 
     expect(capability.windows).toEqual(['main']);
+    // The chat UI invokes only the coven_runtime_* commands. The Cave adapter
+    // and identity commands remain registered for their native and conformance
+    // coverage, but the webview must not be able to reach them.
+    // Beyond the app's own commands, the window may set its own title and
+    // nothing else from Tauri core: no other window, webview or app control.
     expect(capability.permissions).toEqual([
-      'allow-app-identity',
-      'allow-app-installation-id',
-      'allow-cave-read-discovery',
-      'allow-cave-cancel-operation',
-      'allow-cave-launch',
-      'allow-cave-health',
-      'allow-coven-health',
-      'allow-cave-pairing-create',
-      'allow-cave-pairing-poll',
-      'allow-cave-pairing-exchange',
-      'allow-cave-reset-pairing',
-      'allow-cave-credential-status',
-      'allow-cave-forget-credential',
-      'allow-cave-list-familiars',
-      'allow-cave-list-projects',
-      'allow-cave-list-conversations',
-      'allow-cave-get-conversation',
-      'allow-cave-list-conversation-messages',
-      'allow-cave-familiar-contract',
-      'allow-cave-familiar-analytics',
+      ...[...covenRuntimeCommands, ...screenRelayCommands].map(
+        (command) => `allow-${command.replaceAll('_', '-')}`,
+      ),
+      'core:window:allow-set-title',
     ]);
+    for (const command of registeredCommandNames(readText('src-tauri/src/commands.rs'))) {
+      expect(capability.permissions).not.toContain(`allow-${command.replaceAll('_', '-')}`);
+    }
 
     for (const permission of capability.permissions) {
       expect(typeof permission).toBe('string');
@@ -386,7 +405,7 @@ describe('Phase 1 specification guards', () => {
       ?.job;
 
     expect(webJob).toMatch(/actions\/checkout@[0-9a-f]{40}[^\n]*\n {8}with:\n {10}fetch-depth: 0/u);
-    expect(webJob).toContain('- run: pnpm test:unit');
+    expect(webJob).toContain('- run: pnpm test:unit:normal');
   });
 
   it('fetches the locked harness revision for protected platform evidence', () => {
@@ -438,11 +457,7 @@ describe('Phase 1 specification guards', () => {
       expect(attributes).toContain(`${path}: eol: lf`);
       const authority = lock.harnessAuthority.files.find((file) => file.path === path);
       expect(authority, `${path} must be bound by harness authority.`).toBeDefined();
-      expect(
-        createHash('sha256')
-          .update(readFileSync(resolve(projectRoot, path)))
-          .digest('hex'),
-      ).toBe(authority?.sha256);
+      // Binding, not freshness: see the note in the next test.
     }
   });
 
@@ -458,6 +473,14 @@ describe('Phase 1 specification guards', () => {
       lock.harnessAuthority.productionDeltas.map((entry) => [entry.path, entry]),
     );
 
+    // These assert that each helper is bound by harness authority. They do not
+    // compare working-tree bytes to the lock's digest, and must not: under the
+    // two-PR rule in docs/phase1-conformance.md a content PR changes a governed
+    // file and leaves the lock alone, so a working-tree comparison fails every
+    // content PR for these four files and makes the supervisor unrepairable
+    // (OpenCoven/chat#219). The lock test checks each digest against the
+    // authority's own tree, and scripts/phase1-authority-freshness.mjs turns
+    // `main` red when shipped bytes leave the authority behind.
     for (const path of [
       'scripts/unix-artifact-handoff.c',
       'scripts/unix-producer-command.sh',
@@ -466,11 +489,6 @@ describe('Phase 1 specification guards', () => {
     ]) {
       const authority = harnessFiles.get(path);
       expect(authority, `${path} must be bound by harness authority.`).toBeDefined();
-      expect(
-        createHash('sha256')
-          .update(readFileSync(resolve(projectRoot, path)))
-          .digest('hex'),
-      ).toBe(authority?.sha256);
     }
 
     for (const path of [
@@ -692,6 +710,8 @@ describe('Phase 1 specification guards', () => {
   it('keeps the generated desktop schema aligned with the reviewed command table', () => {
     const schema = readText('src-tauri/gen/schemas/desktop-schema.json');
     const expectedCommands = [
+      ...covenRuntimeCommands,
+      ...screenRelayCommands,
       'app_identity',
       'app_installation_id',
       'cave_read_discovery',
@@ -754,7 +774,11 @@ describe('Phase 1 specification guards', () => {
     ];
 
     expect(registeredCommandNames(commands)).toEqual(expected);
-    expect(invokeHandlerCommandNames(lib)).toEqual(expected);
+    expect(invokeHandlerCommandNames(lib)).toEqual([
+      ...covenRuntimeCommands.map((command) => `coven_runtime::${command}`),
+      ...screenRelayCommands.map((command) => `screen_relay::${command}`),
+      ...expected,
+    ]);
 
     for (const command of expected) {
       expect(lib).toContain(command);
@@ -795,6 +819,30 @@ describe('Phase 1 specification guards', () => {
       );
     }
     expect(commands).not.toMatch(/\b(?:origin|endpoint|url):\s*String/);
+  });
+
+  it('keeps the screen relay a bounded WebSocket forwarder rather than a request bridge', () => {
+    const relay = readText('src-tauri/src/screen_relay.rs');
+    for (const command of screenRelayCommands) {
+      expect(relay).toMatch(new RegExp(`pub\\(crate\\)\\s+(?:async\\s+)?fn\\s+${command}\\s*\\(`));
+    }
+    // Only ws/wss targets, refused before any request is built.
+    expect(relay).toMatch(/"ws" => "http",\s*"wss" => "https",\s*_ => return Err/);
+    // The host adds nothing the webview chose: no header, cookie or
+    // credential parameters exist on any command.
+    expect(relay).not.toMatch(
+      /fn\s+coven_screen_\w+\([^)]*(?:header|cookie|token|bearer|credential)/i,
+    );
+    // No HTTP response body ever crosses to the webview.
+    expect(relay).not.toMatch(/\.(?:text|bytes|json)\(\)/);
+    // Bounded in every direction, and at most two screens per window.
+    expect(relay).toMatch(/MAX_SESSIONS: usize = 2;/);
+    expect(relay).toMatch(/MAX_DOWNSTREAM: usize = 16 \* 1024 \* 1024;/);
+    expect(relay).toMatch(/MAX_UPSTREAM: usize = 64 \* 1024;/);
+    expect(relay).toMatch(/CONNECT_TIMEOUT: Duration/);
+    // Failures never echo the address, which may carry an access token.
+    expect(relay).toMatch(/error\.without_url\(\)/);
+    expect(relay).toMatch(/redirect\(reqwest::redirect::Policy::none\(\)\)/);
   });
 
   it('derives native identity name and identifier from tauri.conf.json', () => {
@@ -892,10 +940,10 @@ describe('Phase 1 specification guards', () => {
     const boundary = readText('src/lib/sdk/native-boundary.ts');
 
     expect(packageManifest.dependencies?.['@opencoven/cave-client']).toMatch(
-      /^file:vendor\/opencoven-sdk\/cave-client-0\.1\.0\.tgz$/,
+      /^file:vendor\/opencoven-sdk\/cave-client-0\.0\.1\.tgz$/,
     );
     expect(packageManifest.dependencies?.['@opencoven/sdk-core']).toMatch(
-      /^file:vendor\/opencoven-sdk\/sdk-core-0\.1\.0\.tgz$/,
+      /^file:vendor\/opencoven-sdk\/sdk-core-0\.0\.1\.tgz$/,
     );
     expect(boundary).toContain("from '@opencoven/cave-client/managed'");
     expect(boundary).toContain("from '@opencoven/sdk-core/browser'");
@@ -925,6 +973,25 @@ describe('Phase 1 specification guards', () => {
     ]) {
       expect(dockerfile, `${dependency} must be baked into the CI image`).toContain(dependency);
     }
+  });
+
+  it('verifies the maintained GLib source and optimized Linux behavior before acceptance', () => {
+    const workflow = readText('.github/workflows/ci.yml');
+    const desktop = workflow.slice(workflow.indexOf('\n  desktop:'), workflow.indexOf('\n  rust:'));
+    const sourceCheck =
+      'node scripts/verify-glib-backport.mjs "$RUNNER_TEMP/glib-0.18.5.crate" --test';
+
+    expect(desktop).toContain(sourceCheck);
+    expect(desktop.indexOf(sourceCheck)).toBeLessThan(desktop.indexOf('pnpm app:build'));
+    expect(desktop).toContain('--filter-platform x86_64-unknown-linux-gnu');
+    expect(desktop).toContain('assert.equal(glib[0].source, null');
+    expect(desktop).toContain("realpathSync('vendor/glib-0.18.5/Cargo.toml')");
+    expect(desktop).toContain('cargo test --manifest-path src-tauri/Cargo.toml --locked --release');
+    expect(desktop).toContain('--features phase1-conformance --lib');
+    expect(desktop).toContain('--test coven_health_process_boundary --test phase1_native_rpc');
+    expect(readText('src-tauri/Cargo.toml')).toContain(
+      '[patch.crates-io]\nglib = { path = "../vendor/glib-0.18.5" }',
+    );
   });
 
   it('installs no system packages while a pull request is waiting on it', () => {
@@ -1060,9 +1127,15 @@ describe('Phase 1 specification guards', () => {
       'phase1-conformance',
       'desktop',
       'rust',
-      'unix-supervisor',
+      'windows-profile-residual',
       'windows-supervisor-behavior',
     ]);
+
+    // A job-level skip prevents matrix expansion and omits the required Linux
+    // context. Keep the native Unix check enabled even for prose-only changes.
+    const unixJob = jobs.get('unix-supervisor') ?? '';
+    expect(unixJob).not.toMatch(/^ {4}if:/m);
+    expect(unixJob).toContain('run: bash scripts/unix-producer-supervisor.test.sh');
 
     // Prose is not the only minute worth not spending. macOS bills at ten
     // times the Linux rate and Windows at twice it, so those runners also wait
@@ -1076,6 +1149,7 @@ describe('Phase 1 specification guards', () => {
       'rust',
       'unix-supervisor',
       'windows-supervisor-behavior',
+      'windows-profile-residual',
     ]) {
       const job = jobs.get(name) ?? '';
       expect(job).toContain("github.event_name == 'push' && github.ref == 'refs/heads/main'");
@@ -1087,6 +1161,40 @@ describe('Phase 1 specification guards', () => {
     expect(workflow).toContain('No usable base commit; treating this as a code change.');
     expect(workflow).toContain('No files changed; treating this as a code change.');
     expect(workflow).toMatch(/\*\) docs_only=false ;;/);
+  });
+
+  it.each([
+    [
+      'chat UI, browser suite and prose',
+      'src/coven/chat-app.tsx\ne2e/app.spec.ts\nREADME.md',
+      'true',
+    ],
+    ['the unmounted SDK boundary', 'src/lib/sdk/query-adapter.ts', 'true'],
+    ['a conformance script', 'scripts/phase1-conformance.mjs', 'false'],
+    ['the native backend', 'src-tauri/src/lib.rs', 'false'],
+    ['the conformance lock', 'phase1-conformance.lock.json', 'false'],
+    ['a heavy suite file', 'src/phase1-conformance.test.ts', 'false'],
+    ['a root guard test', 'src/specification-guards.test.ts', 'false'],
+    ['this workflow', '.github/workflows/ci.yml', 'false'],
+    ['the package manifest', 'package.json', 'false'],
+    ['the Vitest setup file', 'src/test/setup.ts', 'false'],
+    ['a path nobody has classified', 'somewhere-new/index.ts', 'false'],
+    [
+      'a UI file alongside a script',
+      'src/coven/chat-app.tsx\nscripts/supervised-exec.mjs',
+      'false',
+    ],
+  ])('classifies a diff touching %s for the heavy suites', (_name, files, expected) => {
+    // The guard above pins the step condition; this runs the classification
+    // itself, so a typo in the allowlist cannot silently skip the suites for a
+    // harness-affecting change. The case statement is lifted verbatim from the
+    // workflow so the test cannot drift from what CI executes.
+    const workflow = readText('.github/workflows/ci.yml');
+    const block = workflow.match(/\n {10}product_only=true\n(?<body>[\s\S]*?)\n {10}done <<EOF\n/u)
+      ?.groups?.body;
+    expect(block).toBeDefined();
+    const script = `product_only=true\n${(block ?? '').replaceAll(/^ {10}/gmu, '')}\ndone <<EOF\n${files}\nEOF\necho "$product_only"`;
+    expect(execFileSync('bash', ['-c', script], { encoding: 'utf8' }).trim()).toBe(expected);
   });
 
   it('proposes an image bump only after running the suites inside the new image', () => {
@@ -1112,21 +1220,16 @@ describe('Phase 1 specification guards', () => {
     expect(workflow).toContain("github.ref_name == 'main'");
   });
 
-  it('uses the default token for git-data writes and the bump token only for PR creation', () => {
+  it('requires a workflow-authorized token for image proposals', () => {
     const workflow = readText('.github/workflows/ci-image.yml');
     const propose = workflow.slice(workflow.indexOf('\n  propose:'));
-
-    expect(propose).toContain('contents: write');
-    expect(propose).toContain('pull-requests: write');
-    expect(propose).toContain('GH_TOKEN: $' + '{{ secrets.GITHUB_TOKEN }}');
-    expect(propose).toContain(
-      'PR_TOKEN: $' + '{{ secrets.CI_IMAGE_BUMP_TOKEN || secrets.GITHUB_TOKEN }}',
-    );
-    expect(propose).toContain('Pull requests: write on this repository');
-    expect(propose).toContain('GH_TOKEN="$' + '{PR_TOKEN}" gh pr create');
-    expect(propose).not.toContain(
-      'GH_TOKEN: $' + '{{ secrets.CI_IMAGE_BUMP_TOKEN || secrets.GITHUB_TOKEN }}',
-    );
+    expect(propose).toContain('contents: read');
+    expect(propose).toContain('GH_TOKEN: $' + '{{ secrets.CI_IMAGE_BUMP_TOKEN }}');
+    expect(propose).toContain('persist-credentials: false');
+    expect(propose).toContain('Contents, Workflows, and');
+    expect(propose).toContain('Pull requests: write');
+    expect(propose).not.toContain('|| secrets.GITHUB_TOKEN');
+    expect(propose).toContain('node scripts/ci-image-proposal.mjs');
   });
 
   it('decides the image bump on contents rather than on a layer digest', () => {
@@ -1147,10 +1250,10 @@ describe('Phase 1 specification guards', () => {
     // unverified commit in the history -- arriving weekly, forever. Commits
     // written through the contents API are signed by GitHub.
     const workflow = readText('.github/workflows/ci-image.yml');
-    const proposeBlock = workflow.slice(workflow.indexOf('\n  propose:'));
-
+    const proposeBlock = readText('scripts/ci-image-proposal.mjs');
+    expect(workflow).toContain('node scripts/ci-image-proposal.mjs');
     expect(proposeBlock).toContain('/contents/.github/workflows/ci.yml');
-    expect(proposeBlock).toMatch(/-X PUT/);
+    expect(proposeBlock).toContain("api('PUT', filePath");
 
     // Comments stripped, because the comment explaining why `git commit` is
     // not used here necessarily contains the words `git commit`.
@@ -1193,6 +1296,81 @@ describe('Phase 1 specification guards', () => {
     // main still verifies every merge to completion.
     expect(workflow).toContain('cancel-in-progress: ${' + "{ github.ref_name != 'main' }}");
   });
+
+  it('cancels superseded Windows supervision without dropping its eligibility gates', () => {
+    const workflow = readText('.github/workflows/ci.yml');
+    const job = workflow.split('\n  windows-supervisor-behavior:\n')[1];
+    expect(job).toBeDefined();
+    const condition = job?.match(/\n {4}if: >-\n([\s\S]*?)\n {4}timeout-minutes:/)?.[1];
+    expect(condition?.trim()).toBe(
+      "!cancelled() && needs.rust.result == 'success'\n" +
+        "      && needs.changes.outputs.docs_only != 'true'\n" +
+        "      && ((github.event_name == 'push' && github.ref == 'refs/heads/main')\n" +
+        "      || contains(github.event.pull_request.labels.*.name, 'ci:full'))",
+    );
+    // Cancellation must not remove the independent conformance cleanup steps.
+    expect(workflow).toContain(
+      "if: always() && hashFiles('test-results/phase1-conformance/report.json') != ''",
+    );
+    expect(workflow).toContain(
+      "if: always() && steps.secret-scan.outcome == 'success' && steps.phase1-keychain-cleanup.outcome == 'success'",
+    );
+    expect(workflow.match(/^ {8}if: always\(\)$/gm)).toHaveLength(2);
+  });
+
+  it.each([
+    ['labelled PR', 'success', false, false, 'pull_request', 'refs/pull/308/merge', true, true],
+    ['failed Rust', 'failure', false, false, 'pull_request', 'refs/pull/308/merge', true, false],
+    ['skipped Rust', 'skipped', false, false, 'pull_request', 'refs/pull/308/merge', true, false],
+    [
+      'cancelled Rust',
+      'cancelled',
+      false,
+      false,
+      'pull_request',
+      'refs/pull/308/merge',
+      true,
+      false,
+    ],
+    ['cancelled PR', 'success', true, false, 'pull_request', 'refs/pull/308/merge', true, false],
+    ['docs-only PR', 'success', false, true, 'pull_request', 'refs/pull/308/merge', true, false],
+    ['unlabelled PR', 'success', false, false, 'pull_request', 'refs/pull/308/merge', false, false],
+    ['main push', 'success', false, false, 'push', 'refs/heads/main', false, true],
+    ['main with failed Rust', 'failure', false, false, 'push', 'refs/heads/main', false, false],
+    ['cancelled main', 'success', true, false, 'push', 'refs/heads/main', false, false],
+    ['feature push', 'success', false, false, 'push', 'refs/heads/feature', false, false],
+  ] as const)(
+    'evaluates Windows supervision eligibility for %s',
+    (_name, rust, cancelled, docsOnly, eventName, ref, full, expected) => {
+      const workflow = readText('.github/workflows/ci.yml');
+      const job = workflow.split('\n  windows-supervisor-behavior:\n')[1];
+      const condition = job?.match(/\n {4}if: >-\n([\s\S]*?)\n {4}timeout-minutes:/)?.[1];
+      expect(condition).toBeDefined();
+      if (!condition) throw new Error('Missing Windows supervision condition');
+      // Evaluate this boolean/string subset, not GitHub cancellation scheduling.
+      // The exact-expression guard above prevents unsupported syntax drifting in.
+      const expression = condition.replace(
+        'github.event.pull_request.labels.*.name',
+        'github.event.pull_request.labels.map(label => label.name)',
+      );
+      const result: unknown = runInNewContext(
+        expression,
+        {
+          always: () => true,
+          cancelled: () => cancelled,
+          contains: (values: string[], value: string) => values.includes(value),
+          needs: { rust: { result: rust }, changes: { outputs: { docs_only: String(docsOnly) } } },
+          github: {
+            event_name: eventName,
+            ref,
+            event: { pull_request: { labels: full ? [{ name: 'ci:full' }] : [] } },
+          },
+        },
+        { timeout: 1000 },
+      );
+      expect(result).toBe(expected);
+    },
+  );
 
   it('reads counterpart repositories with a token that does not depend on their visibility', () => {
     // The default GITHUB_TOKEN is scoped to this repository, so it can only
@@ -1309,6 +1487,8 @@ describe('Phase 1 specification guards', () => {
     );
     expect(canaryScript).toContain('contract-canary.lock.json');
     expect(canaryScript).toContain('create-release-artifacts.mjs');
+    expect(canaryScript).toContain('createConformanceArtifacts');
+    expect(canaryScript).toContain('requireConformanceEvidence: false');
     expect(canaryScript).toContain('Generated SDK release manifest');
     expect(canaryScript).toContain('verify-contracts.mjs');
     expect(canaryScript).toContain('parseVerifiedCaveContractFixture');
@@ -1389,7 +1569,7 @@ describe('Phase 1 specification guards', () => {
       'node ./scripts/phase1-artifact-secret-scan.mjs --artifact-root ./test-results/phase1-conformance',
     );
     expect(readText('scripts/phase1-conformance.mjs')).toContain(
-      "['pnpm@10.34.0', '--ignore-workspace', 'build']",
+      "'pnpm', ['--ignore-workspace', 'build']",
     );
     expect(readText('scripts/phase1-conformance.mjs')).toContain(
       'NODE_OPTIONS: caveBuildNodeOptions',
@@ -1431,7 +1611,18 @@ describe('Phase 1 specification guards', () => {
     }
     expect(heavyConfig).toContain('fileParallelism: false');
     expect(heavyConfig).toContain('maxWorkers: 1');
-    expect(workflow.match(/pnpm test:unit/g)).toHaveLength(1);
+    // The normal suite runs on every branch; the heavy suites run when the
+    // harness could have moved and on every push to main. Each runs once.
+    expect(workflow.match(/- run: pnpm test:unit:normal/g)).toHaveLength(1);
+    expect(workflow.match(/run: pnpm test:unit:heavy/g)).toHaveLength(1);
+    expect(workflow).toContain(
+      '      - name: Heavy Phase 1 suites\n' +
+        "        if: github.event_name == 'push' || needs.changes.outputs.product_only != 'true'\n" +
+        '        run: pnpm test:unit:heavy',
+    );
+    expect(
+      workflow.match(/^ {2}web:\n(?<job>[\s\S]*?)(?=\n {2}[a-z][\w-]*:\n)/m)?.groups?.job,
+    ).toContain('needs: changes');
   });
 
   it('documents immutable Phase 1 conformance separately from the Phase 0 canary', () => {
@@ -1453,7 +1644,9 @@ describe('Phase 1 specification guards', () => {
     expect(guide).toContain('darwin-arm64');
     expect(guide).toContain('win32-x64');
     expect(guide).toContain('completed');
-    expect(guide).toMatch(/VC\.14\.44\.17\.14\.x86\.x64` component version\s+`18\.9\.12009\.81/u);
+    expect(guide).toMatch(
+      /VC\.14\.44\.17\.14\.x86\.x64` component version is\s+`18\.9\.12009\.81` on `20260907\.229\.1` and\s+`18\.10\.12020\.329` on `20260922\.246\.2`/u,
+    );
     expect(guide).toMatch(/compiler toolset directory version remains\s+`14\.44\.35207/u);
     expect(guide).not.toContain('VC\\Tools\\MSVC\\14.50.35717');
     expect(guide).not.toContain('VC\\Tools\\MSVC\\14.44.35211');

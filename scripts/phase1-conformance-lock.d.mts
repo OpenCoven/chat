@@ -6,9 +6,12 @@ export type Phase1LockEntry = {
 export function createGitEnvironment(
   inheritedEnvironment?: NodeJS.ProcessEnv,
 ): Record<string, string>;
+export const gitNullDevice: string;
 export function createGitCheckoutEnvironment(
   inheritedEnvironment?: NodeJS.ProcessEnv,
 ): Record<string, string>;
+export function toGitSafeDirectoryPath(path: string): string;
+export function hasPrivateDirectoryMode(mode: number, platform?: NodeJS.Platform): boolean;
 export function assertCleanPhase1Checkout(
   repositoryRoot: string,
   label?: string,

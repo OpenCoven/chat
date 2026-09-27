@@ -5,12 +5,19 @@ import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { once } from 'node:events';
 import {
   chmodSync,
+  closeSync,
   existsSync,
+  constants as fsConstants,
+  fstatSync,
   lstatSync,
   mkdirSync,
+  openSync,
   readdirSync,
   readFileSync,
+  readSync,
   realpathSync,
+  renameSync,
+  rmSync,
   statSync,
   writeFileSync,
 } from 'node:fs';
@@ -18,7 +25,9 @@ import { createServer, request as httpRequest } from 'node:http';
 import { devNull, homedir } from 'node:os';
 import { delimiter, dirname, isAbsolute, resolve, win32 as windowsPath } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { stripVTControlCharacters } from 'node:util';
 
+import { FROZEN_PACKED_CONSUMER_STAGES } from './contract-canary.mjs';
 import {
   APPROVED_PHASE1_DIAGNOSTIC_IDS,
   REQUIRED_PHASE1_ASSERTION_IDS,
@@ -33,8 +42,11 @@ import {
   assertPhase1ProducerAuthority,
   createGitCheckoutEnvironment,
   createGitEnvironment,
+  gitNullDevice,
   readPhase1CheckoutIdentity,
   requirePhase1HarnessAuthorityVerification,
+  resolveLocalGitDirectory,
+  toGitSafeDirectoryPath,
 } from './phase1-conformance-lock.mjs';
 import {
   buildIsolationEvidence,
@@ -53,7 +65,11 @@ import {
   serializeValidatedSchemaV2PlatformEvidence,
   verifySchemaV2ProducerCheckout,
 } from './phase1-schema-v2-evidence.mjs';
-import { createProcessOwnedArtifactRoot } from './process-owned-artifact-root.mjs';
+import {
+  createProcessOwnedArtifactRoot,
+  PROCESS_CLEANUP_FAILURE_CATEGORIES,
+  processCleanupFailureCategory,
+} from './process-owned-artifact-root.mjs';
 
 const projectRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const defaultRetainedReport = resolve(
@@ -67,25 +83,685 @@ const revocationConfirmationDelayMs = 550;
 const commandTimeoutMs = 20 * 60_000;
 export const cargoBuildTimeoutMs = 45 * 60_000;
 const rpcTimeoutMs = 10_000;
+export function caveLaunchRpcTimeoutForPlatform(_platform = process.platform) {
+  // Preserve the reviewed native readiness deadline plus the RPC transport budget.
+  return 30_000 + rpcTimeoutMs;
+}
+const caveLaunchRpcTimeoutMs = caveLaunchRpcTimeoutForPlatform();
 const caveConformanceTimeoutMs = 15 * 60_000;
+const caveBuildNodeOptions = '--max-old-space-size=6144';
+const caveBuildReportedCpuTotal = '2';
 const ownedProcessGroupsSupported = process.platform !== 'win32';
+const cavePublicationCategories = Object.freeze([
+  'not-observed',
+  'output-limit',
+  'disabled-other',
+  'root-owner-unverified',
+  'root-owner-shared',
+  'target-owner-unverified',
+  'target-owner-shared',
+  'root-not-directory',
+  'root-symlink',
+  'target-not-file',
+  'endpoint-invalid',
+  'authority-init',
+]);
+const cavePublisherCodes = new Set(cavePublicationCategories.slice(2));
+export const NATIVE_LAUNCH_PUBLICATION_DIAGNOSTICS = Object.freeze(
+  [...cavePublicationCategories, 'drain-timeout', 'drain-unavailable'].map(
+    (category) => `phase1.native-scenarios.launch.discovery-not-found.publication.${category}`,
+  ),
+);
+const nativeLaunchPublicationFailures = new WeakMap();
+const nativeRpcFailureCategories = new WeakMap();
+const nativeInstallationResponseCategories = new Map([
+  ['secure_store_unavailable', 'secure-store-unavailable'],
+  ['installation_custody_unsupported', 'custody-unsupported'],
+  ['installation_lock_unavailable', 'lock-unavailable'],
+  ['installation_entry_unavailable', 'entry-unavailable'],
+  ['installation_read_unavailable', 'read-unavailable'],
+  ['installation_write_unavailable', 'write-unavailable'],
+  ['installation_persistence_unavailable', 'persistence-unavailable'],
+  ['keychain_failure', 'keychain-failure'],
+  ['credential_missing', 'credential-missing'],
+]);
+
+function nativeRpcFailure(message, category) {
+  const failure = new Error(message);
+  nativeRpcFailureCategories.set(failure, category);
+  return failure;
+}
+
+const nativeLaunchPublicationResponses = new WeakMap();
+export const CAVE_STARTUP_EXIT_DIAGNOSTICS = Object.freeze(
+  ['zero', 'nonzero', 'signal', 'windows-crash', 'unknown'].flatMap((exit) =>
+    [
+      'not-observed',
+      'output-limit',
+      'address-in-use',
+      'access-denied',
+      'out-of-memory',
+      'module-not-found',
+      'other',
+    ].map((stderr) => `phase1.cave-authority.startup.exit.status.${exit}.stderr.${stderr}`),
+  ),
+);
+const caveStartupExitDiagnosticSet = new Set(CAVE_STARTUP_EXIT_DIAGNOSTICS);
+export const CAVE_DISCOVERY_FAILURE_DIAGNOSTICS = Object.freeze(
+  [
+    'not-found',
+    'access-denied',
+    'operation-not-permitted',
+    'not-directory',
+    'other-read-error',
+    'invalid-json',
+    'invalid-shape',
+  ].flatMap((read) =>
+    cavePublicationCategories.map(
+      (publication) =>
+        `phase1.cave-authority.startup.discovery.missing.read.${read}.publication.${publication}`,
+    ),
+  ),
+);
+const caveDiscoveryFailureDiagnosticSet = new Set(CAVE_DISCOVERY_FAILURE_DIAGNOSTICS);
 const approvedDiagnosticSet = new Set(APPROVED_PHASE1_DIAGNOSTIC_IDS);
+const schemaV2NativeFailureStages = new Set([
+  'fixture-daemon',
+  'fixture',
+  'rpc-start',
+  'native-preflight',
+  'native-preflight-custody-rpc',
+  'native-preflight-custody-proof',
+  'native-preflight-installation-rpc',
+  'native-preflight-installation-secure-store-unavailable',
+  'native-preflight-installation-custody-unsupported',
+  'native-preflight-installation-lock-unavailable',
+  'native-preflight-installation-entry-unavailable',
+  'native-preflight-installation-read-unavailable',
+  'native-preflight-installation-write-unavailable',
+  'native-preflight-installation-persistence-unavailable',
+  'native-preflight-installation-keychain-failure',
+  'native-preflight-installation-credential-missing',
+  'native-preflight-installation-response-rejected',
+  'native-preflight-installation-timeout',
+  'native-preflight-installation-transport-closed',
+  'native-preflight-installation-input-failed',
+  'native-preflight-installation-unexpected-type-error',
+  'native-preflight-installation-unexpected-error',
+  'native-preflight-installation-unexpected-value',
+  'native-preflight-installation-id',
+  'launch',
+  'pairing',
+  'pairing-recovery',
+  'pairing-denial',
+  'restart',
+  'restart-launch',
+  'restart-discovery',
+  'restart-health',
+  'restart-status',
+  'reads',
+  'reconciliation',
+  'revocation',
+  'revocation-delete',
+  'revocation-initial-status',
+  'revocation-rediscovery',
+  'revocation-health',
+  'revocation-status',
+  'revocation-repair',
+  'stale-discovery',
+  'cleanup',
+  'cleanup-grant',
+  'cleanup-custody',
+  'cleanup-rpc',
+  'cleanup-fixture-daemon',
+  'missing-keychain',
+  'isolation-proof',
+]);
+export const SCHEMA_V2_NATIVE_FAILURE_DIAGNOSTICS = Object.freeze(
+  [...schemaV2NativeFailureStages].map((stage) => `phase1.native-scenarios.${stage}`),
+);
+const boundedSpawnErrorCodes = ['ENOENT', 'EACCES', 'EPERM', 'EINVAL', 'E2BIG', 'ENOMEM'];
+const cargoBuildFailureCategories = [
+  'timeout',
+  'output-limit',
+  'spawn',
+  'supervisor',
+  'native-dependency',
+  'dependency-fetch',
+  'resource.memory',
+  'resource.disk',
+  'resource.killed',
+  'process.crash',
+  'no-output',
+  'linker',
+  'build-script',
+  'compile',
+  'unknown',
+];
+const covenRustObservationDiagnostics = new Map([
+  [
+    'discovery::tests::legacy_v1_case_check_rejects_sensitive_or_unverifiable_ancestors',
+    'legacy-case',
+  ],
+  [
+    'discovery::tests::recorded_windows_pipe_candidates_accept_only_coven_stable_or_legacy_shapes',
+    'pipe-shapes',
+  ],
+  [
+    'discovery::tests::recorded_daemon_status_rejects_a_stable_pipe_for_another_profile',
+    'profile-pipe',
+  ],
+  [
+    'discovery::tests::windows_security_inspection_waits_are_finite_and_preserve_submillisecond_budget',
+    'inspection-wait',
+  ],
+  [
+    'discovery::tests::status_file_reader_allows_an_atomic_status_replacement',
+    'status-replacement',
+  ],
+]);
+const cleanupGrantFailureCategories = [
+  'service-unavailable',
+  'process-secret-unavailable',
+  'random-unavailable',
+  'marker-home-unavailable',
+  'marker-directory-unavailable',
+  'marker-directory-create-unavailable',
+  'marker-directory-open-unavailable',
+  'marker-directory-metadata-unavailable',
+  'marker-directory-trust-unavailable',
+  'marker-sync-unavailable',
+  'marker-identity-unavailable',
+  'marker-publish-unavailable',
+  'collision-exhausted',
+  'secure-store-unavailable',
+  'keychain-failure',
+  'cleanup-grant-rejected',
+  'invalid-native-input',
+  'timeout',
+  'process',
+  'response',
+  'unknown',
+];
+const pairingRpcFailureCodes = new Set([
+  'invalid_request',
+  'unauthorized',
+  'scope_denied',
+  'not_found',
+  'conflict',
+  'rate_limited',
+  'pairing_pending',
+  'pairing_denied',
+  'pairing_expired',
+  'incompatible_version',
+  'service_unavailable',
+  'reconcile_required',
+  'internal_error',
+  'invalid_response',
+  'timeout',
+  'stale_discovery_handle',
+  'invalid_native_response',
+  'invalid_native_input',
+  'secure_store_unavailable',
+  'keychain_failure',
+]);
+const pairingMessageCategories = new Map([
+  ['native RPC closed before responding', 'rpc-closed'],
+  ['no native authority handle', 'authority-handle'],
+  ['native pairing creation omitted its request ID', 'creation-response'],
+  ['native pairing did not begin pending', 'pending-status'],
+  ['native pairing was not approved', 'approved-status'],
+  ['native pairing exchange returned an unsafe result', 'exchange-response'],
+]);
+const pairingFailureCategories = [
+  ...pairingMessageCategories.values(),
+  ...['create', 'poll', 'exchange'].flatMap((operation) =>
+    [...pairingRpcFailureCodes].map((code) => `${operation}.${code.replaceAll('_', '-')}`),
+  ),
+  'admin-http-3xx',
+  'admin-http-4xx',
+  'admin-http-5xx',
+  'unknown',
+];
+const launchFailureBoundaries = new Set(['initial-discovery', 'launch-rpc', 'discovery', 'health']);
+const launchRpcFailureCodes = new Set([
+  'connection_state_unavailable',
+  'cave_launch_in_progress',
+  'stale_connection_attempt',
+  'cave_exited',
+  'invalid_native_response',
+  'reconcile_required',
+]);
+const launchStageFailureCodes = new Set([
+  'cave_launch_spawn_timeout',
+  'cave_launch_worker_unavailable',
+  'cave_launch_worker_closed',
+  'cave_launch_discovery_not_found',
+  'cave_launch_discovery_unavailable',
+  'cave_launch_discovery_rejected',
+  'cave_launch_health_unavailable',
+  'cave_launch_revalidation_unavailable',
+]);
+const launchFailureCategories = [
+  'service-unavailable',
+  ...[...launchStageFailureCodes].map((code) =>
+    code.replace(/^cave_launch_/u, '').replaceAll('_', '-'),
+  ),
+  ...[...launchRpcFailureCodes].map((code) => `rpc-${code.replaceAll('_', '-')}`),
+  ...[...launchFailureBoundaries].map((boundary) => `${boundary}-unknown`),
+  'initial-discovery-timeout',
+  'discovery-rpc-timeout',
+  'not-installed',
+  'configuration-invalid',
+  'process',
+  'timeout',
+  'rpc-closed',
+  'initial-discovery',
+  'initial-present',
+  'initial-unavailable',
+  'initial-unsafe',
+  'initial-unsafe-probe-profile-type',
+  'initial-unsafe-probe-profile-reparse',
+  'initial-unsafe-probe-profile-owner',
+  'initial-unsafe-probe-profile-owner-acl',
+  'initial-unsafe-probe-profile-owner-acl-unavailable',
+  'initial-unsafe-probe-profile-acl',
+  'initial-unsafe-probe-profile-missing',
+  'initial-unsafe-probe-profile-unavailable',
+  'initial-unsafe-probe-coven-type',
+  'initial-unsafe-probe-coven-reparse',
+  'initial-unsafe-probe-coven-owner',
+  'initial-unsafe-probe-coven-owner-acl',
+  'initial-unsafe-probe-coven-owner-acl-unavailable',
+  'initial-unsafe-probe-coven-acl',
+  'initial-unsafe-probe-coven-missing',
+  'initial-unsafe-probe-coven-unavailable',
+  'initial-unsafe-probe-cave-type',
+  'initial-unsafe-probe-cave-reparse',
+  'initial-unsafe-probe-cave-owner',
+  'initial-unsafe-probe-cave-owner-acl',
+  'initial-unsafe-probe-cave-owner-acl-unavailable',
+  'initial-unsafe-probe-cave-acl',
+  'initial-unsafe-probe-cave-missing',
+  'initial-unsafe-probe-cave-unavailable',
+  'initial-unsafe-probe-directories-safe',
+  'initial-unsafe-probe-unknown',
+
+  'initial-invalid',
+  'initial-body-limit',
+  'initial-service',
+  'initial-unknown',
+  'discovery-timeout',
+  'health',
+  'health-envelope',
+  'unknown',
+];
+const cleanupCustodyFailureCategories = [
+  'secure-store-unavailable',
+  'keychain-failure',
+  'cleanup-grant-rejected',
+  'backend-unavailable',
+  'lock-unavailable',
+  'lock-process-unavailable',
+  'lock-path-unavailable',
+  'lock-file-unavailable',
+  'lock-contended',
+  'installation-delete-unavailable',
+  'credential-delete-unavailable',
+  'invalid-native-input',
+  'timeout',
+  'process',
+  'proof',
+  'unknown',
+];
+export const SCHEMA_V2_FINALIZATION_OPERATIONS = Object.freeze([
+  'failure-assertions',
+  'native-cleanup-assertions',
+  'required-assertions',
+  'execution-cleanup-assertions',
+]);
+const finalizationOperationSet = new Set(SCHEMA_V2_FINALIZATION_OPERATIONS);
+const finalizationDiagnostic = (operation) =>
+  `phase1.stage.schema-v2-production.operation.${operation}`;
+// A required Phase 1 assertion that does not pass leaves the primary report in a
+// non-passing state, which the evidence builder rejects only as the opaque
+// `phase1.stage.evidence-authority.build.failed`. Windows reached that stage for
+// the first time in protected run 35704479061 and the category named no cause
+// (OpenCoven/chat#219). Name the assertion instead. Both halves come from frozen
+// sets - the required assertion IDs and the report's two non-passing statuses -
+// so the category stays bounded and carries no free text.
+const primaryReportAssertionKeys = new Map(
+  REQUIRED_PHASE1_ASSERTION_IDS.map((id) => [id, id.slice('phase1.'.length)]),
+);
+const primaryReportAssertionDiagnostics = Object.freeze([
+  ...['failed', 'blocked'].flatMap((status) =>
+    [...primaryReportAssertionKeys.values()].map(
+      (key) => `phase1.stage.evidence-authority.report.assertions.${status}.${key}`,
+    ),
+  ),
+  'phase1.stage.evidence-authority.report.assertions.unknown',
+]);
+
+// The non-schema-v2 runner already tracks this scenario by stage, and
+// `runtimeScenarioFailureDiagnostic` already prefers a stage-specific
+// `phase1.coven-identity.<stage>` when the assertion carries one. The schema-v2
+// scenario recorded only the flat `phase1.integration.coven-identity-failed`,
+// so protected run 35752778995 named the failing assertion but not the step of
+// the daemon handshake that failed (OpenCoven/chat#219). These are the stages
+// this scenario can reach; a test pins them to the runner's classifier.
+const covenIdentityScenarioStages = Object.freeze([
+  'daemon-ready',
+  'rpc-start',
+  'unavailable-health',
+  'result',
+]);
+const covenIdentityScenarioStageSet = new Set(covenIdentityScenarioStages);
+// Recorded assertion diagnostics specific enough to name instead of the
+// assertion. Generic ones such as `phase1.assertion.failed` stay out: they say
+// less than the assertion name does.
+const preferredAssertionDiagnostics = new Set([
+  ...covenIdentityScenarioStages.map((stage) => `phase1.coven-identity.${stage}`),
+  'phase1.coven-identity.unknown',
+]);
+export const covenIdentityScenarioDiagnostic = (stage) =>
+  covenIdentityScenarioStageSet.has(stage)
+    ? `phase1.coven-identity.${stage}`
+    : 'phase1.coven-identity.unknown';
+
 const publicFailureDiagnosticSet = new Set([
+  ...SCHEMA_V2_FINALIZATION_OPERATIONS.map(finalizationDiagnostic),
+  'phase1.stage.schema-v2-production.operation.invalid',
   ...APPROVED_PHASE1_DIAGNOSTIC_IDS,
+  'phase1.stage.invocation.windows-executable-path',
+  'phase1.stage.invocation.windows-path-extensions',
+  'phase1.operator-fingerprint.failed',
+  'phase1.stage.schema-v2-production.failed',
+  'phase1.stage.schema-v2-production.authorization-scrub',
+  'phase1.stage.schema-v2-production.lock-version',
+  'phase1.stage.schema-v2-production.platform',
+  'phase1.stage.execution-root.failed',
+  'phase1.stage.environment.failed',
   'phase1.stage.checkouts.failed',
+  'phase1.stage.checkouts.chat.failed',
+  'phase1.stage.checkouts.sdk.failed',
+  'phase1.stage.checkouts.cave.failed',
+  'phase1.stage.checkouts.coven.failed',
+  'phase1.stage.checkouts.integrity.failed',
+  'phase1.stage.checkouts.validator.failed',
+  'phase1.stage.checkouts.producer.failed',
   'phase1.stage.evidence-authority.failed',
+  'phase1.stage.evidence-authority.producer',
+  'phase1.stage.evidence-authority.validator',
+  'phase1.stage.evidence-authority.compatibility',
+  'phase1.stage.evidence-authority.lock',
+  'phase1.stage.evidence-authority.checkout',
+  'phase1.stage.evidence-authority.artifacts',
+  'phase1.stage.evidence-authority.identities',
+  'phase1.stage.evidence-authority.report.failed',
+  'phase1.stage.evidence-authority.operator-state.failed',
+  'phase1.stage.evidence-authority.isolation.failed',
+  'phase1.stage.evidence-authority.isolation.opaque-ids.invalid',
+  'phase1.stage.evidence-authority.isolation.opaque-ids.duplicate',
+  'phase1.stage.evidence-authority.isolation.native-credential-store.invalid',
+  'phase1.stage.evidence-authority.isolation.native-credential-store.changed',
+  'phase1.stage.evidence-authority.isolation.operator.cave-home.invalid',
+  'phase1.stage.evidence-authority.isolation.operator.cave-home.path',
+  'phase1.stage.evidence-authority.isolation.operator.cave-home.changed',
+  'phase1.stage.evidence-authority.isolation.operator.coven-home.invalid',
+  'phase1.stage.evidence-authority.isolation.operator.coven-home.path',
+  'phase1.stage.evidence-authority.isolation.operator.coven-home.changed',
+  'phase1.stage.evidence-authority.isolation.operator.projects.invalid',
+  'phase1.stage.evidence-authority.isolation.operator.projects.path',
+  'phase1.stage.evidence-authority.isolation.operator.projects.changed',
+  'phase1.stage.evidence-authority.assertions.failed',
+  ...primaryReportAssertionDiagnostics,
+  'phase1.stage.evidence-authority.build.failed',
+  'phase1.stage.evidence-authority.build.environment',
+  'phase1.stage.evidence-authority.build.cave-record',
+  'phase1.stage.evidence-authority.build.cave-record.identity.platform',
+  'phase1.stage.evidence-authority.build.cave-record.identity.commit',
+  'phase1.stage.evidence-authority.build.cave-record.identity.cave-version',
+  'phase1.stage.evidence-authority.build.cave-record.identity.node-version',
+  'phase1.stage.evidence-authority.build.cave-record.timing.invalid',
+  'phase1.stage.evidence-authority.build.cave-record.timing.before-run',
+  'phase1.stage.evidence-authority.build.cave-record.timing.after-run',
+  'phase1.stage.evidence-authority.build.cave-record.assertions.shape',
+  'phase1.stage.evidence-authority.build.cave-record.assertions.count',
+  'phase1.stage.evidence-authority.build.cave-record.assertions.unexpected',
+  'phase1.stage.evidence-authority.build.cave-record.assertions.duplicate',
+  'phase1.stage.evidence-authority.build.cave-record.assertions.result',
+  'phase1.stage.evidence-authority.build.cave-record.assertions.detail',
+  'phase1.stage.evidence-authority.build.isolation',
+  'phase1.stage.evidence-authority.build.assertions',
+  'phase1.stage.evidence-authority.serialize.failed',
+  'phase1.stage.evidence-authority.scan.failed',
+  'phase1.stage.evidence-authority.retain.failed',
   'phase1.stage.toolchain.failed',
+  'phase1.stage.toolchain.pnpm',
+  'phase1.stage.toolchain.rust',
+  'phase1.stage.toolchain.tauri',
+  'phase1.stage.toolchain.metadata',
   'phase1.stage.packaging.failed',
+  'phase1.packaging.frozen-consumer.failed',
+  ...FROZEN_PACKED_CONSUMER_STAGES.map(
+    (stage) => `phase1.packaging.frozen-consumer.${stage}.failed`,
+  ),
+  'phase1.packaging.cave-install.failed',
+  'phase1.packaging.cave-build.failed',
+  'phase1.packaging.cave-build.exit-nonzero',
+  'phase1.packaging.cave-build.timeout',
+  'phase1.packaging.cave-build.output-limit',
+  'phase1.packaging.cave-build.spawn',
+  'phase1.packaging.cave-build.supervisor',
+  'phase1.packaging.cave-build.phase.prebuild',
+  'phase1.packaging.cave-build.phase.conformance-wrapper',
+  'phase1.packaging.cave-build.phase.next-build',
+  'phase1.packaging.cave-build.phase.next-build.resource',
+  'phase1.packaging.cave-build.phase.next-build.resource.spawn',
+  'phase1.packaging.cave-build.phase.next-build.resource.memory',
+  'phase1.packaging.cave-build.phase.next-build.resource.memory.heap',
+  'phase1.packaging.cave-build.phase.next-build.resource.memory.allocation',
+  'phase1.packaging.cave-build.phase.next-build.resource.killed',
+  'phase1.packaging.cave-build.phase.next-build.compile',
+  'phase1.packaging.cave-build.phase.next-build.compile.permission',
+  'phase1.packaging.cave-build.phase.next-build.compile.font-fetch',
+  'phase1.packaging.cave-build.phase.next-build.compile.module-resolution',
+  'phase1.packaging.cave-build.phase.next-build.compile.native-module',
+  'phase1.packaging.cave-build.phase.next-build.compile.plugin',
+  'phase1.packaging.cave-build.phase.next-build.compile.plugin.syntax',
+  'phase1.packaging.cave-build.phase.next-build.compile.plugin.type',
+  'phase1.packaging.cave-build.phase.next-build.compile.plugin.reference',
+  'phase1.packaging.cave-build.phase.next-build.compile.plugin.range',
+  'phase1.packaging.cave-build.phase.next-build.typescript',
+  'phase1.packaging.cave-build.phase.next-build.page-data',
+  'phase1.packaging.cave-build.phase.next-build.static-pages',
+  'phase1.packaging.cave-build.phase.next-build.finalization',
+  'phase1.packaging.cave-build.phase.server-bundle',
+  'phase1.packaging.cave-build.phase.postbuild',
+  'phase1.packaging.cave-build.phase.unknown',
+  'phase1.packaging.chat-install.failed',
+  'phase1.packaging.chat-web-build.failed',
+  'phase1.packaging.chat-native-build.failed',
+  'phase1.packaging.coven-build.failed',
+  ...['phase1.packaging.chat-native-build', 'phase1.packaging.coven-build'].flatMap((base) =>
+    cargoBuildFailureCategories.map((category) => `${base}.${category}`),
+  ),
+  'phase1.packaging.outputs.failed',
   'phase1.stage.runtime-assertions.failed',
+  'phase1.runtime-observations.sdk-install.failed',
+  'phase1.runtime-observations.chat-install.failed',
+  'phase1.runtime-observations.sdk-tests.failed',
+  'phase1.runtime-observations.sdk-tests.command.spawn',
+  'phase1.runtime-observations.sdk-tests.command.tracking',
+  'phase1.runtime-observations.sdk-tests.command.timeout',
+  'phase1.runtime-observations.sdk-tests.command.output-limit',
+  'phase1.runtime-observations.sdk-tests.command.signal',
+  'phase1.runtime-observations.sdk-tests.unknown',
+  'phase1.runtime-observations.sdk-tests.command.spawn.enoent',
+  'phase1.runtime-observations.sdk-tests.command.spawn.eacces',
+  'phase1.runtime-observations.sdk-tests.command.spawn.eperm',
+  'phase1.runtime-observations.sdk-tests.command.spawn.einval',
+  'phase1.runtime-observations.sdk-tests.command.spawn.e2big',
+  'phase1.runtime-observations.sdk-tests.command.spawn.enomem',
+  'phase1.runtime-observations.sdk-tests.report.missing',
+  'phase1.runtime-observations.sdk-tests.report.unreadable',
+  'phase1.runtime-observations.sdk-tests.report.unsafe-file',
+  'phase1.runtime-observations.sdk-tests.report.oversize',
+  'phase1.runtime-observations.sdk-tests.report.invalid-json',
+  'phase1.runtime-observations.sdk-tests.report.malformed',
+  'phase1.runtime-observations.sdk-tests.report.empty',
+  'phase1.runtime-observations.sdk-tests.report.not-successful',
+  'phase1.runtime-observations.sdk-tests.report.claims-success',
+  'phase1.runtime-observations.sdk-tests.report.failed.cave-discovery-pairing',
+  'phase1.runtime-observations.sdk-tests.report.failed.cave-canonical-reads',
+  'phase1.runtime-observations.sdk-tests.report.failed.cave-hpke-bound-v1',
+  'phase1.runtime-observations.sdk-tests.report.failed.cave-managed-native',
+  'phase1.runtime-observations.sdk-tests.report.failed.cave-managed-native-staged',
+  'phase1.runtime-observations.sdk-tests.report.failed.coven-discovery',
+  'phase1.runtime-observations.sdk-tests.report.failed.health-validation',
+  'phase1.runtime-observations.sdk-tests.report.failed.client-contract',
+  'phase1.runtime-observations.sdk-tests.report.failed.native-secret-store',
+  'phase1.runtime-observations.sdk-tests.command.nonzero.report.missing',
+  'phase1.runtime-observations.sdk-tests.command.nonzero.report.unreadable',
+  'phase1.runtime-observations.sdk-tests.command.nonzero.report.unsafe-file',
+  'phase1.runtime-observations.sdk-tests.command.nonzero.report.oversize',
+  'phase1.runtime-observations.sdk-tests.command.nonzero.report.invalid-json',
+  'phase1.runtime-observations.sdk-tests.command.nonzero.report.malformed',
+  'phase1.runtime-observations.sdk-tests.command.nonzero.report.empty',
+  'phase1.runtime-observations.sdk-tests.command.nonzero.report.not-successful',
+  'phase1.runtime-observations.sdk-tests.command.nonzero.report.claims-success',
+  'phase1.runtime-observations.sdk-tests.command.nonzero.report.failed.cave-discovery-pairing',
+  'phase1.runtime-observations.sdk-tests.command.nonzero.report.failed.cave-canonical-reads',
+  'phase1.runtime-observations.sdk-tests.command.nonzero.report.failed.cave-hpke-bound-v1',
+  'phase1.runtime-observations.sdk-tests.command.nonzero.report.failed.cave-managed-native',
+  'phase1.runtime-observations.sdk-tests.command.nonzero.report.failed.cave-managed-native-staged',
+  'phase1.runtime-observations.sdk-tests.command.nonzero.report.failed.coven-discovery',
+  'phase1.runtime-observations.sdk-tests.command.nonzero.report.failed.health-validation',
+  'phase1.runtime-observations.sdk-tests.command.nonzero.report.failed.client-contract',
+  'phase1.runtime-observations.sdk-tests.command.nonzero.report.failed.native-secret-store',
+
+  'phase1.runtime-observations.chat-tests.failed',
+  'phase1.runtime-observations.chat-rust-tests.failed',
+  'phase1.runtime-observations.coven-rust-tests.failed',
+  ...[...covenRustObservationDiagnostics.values()].flatMap((test) =>
+    [
+      ...cargoBuildFailureCategories,
+      ...boundedSpawnErrorCodes.map((code) => `spawn.${code.toLowerCase()}`),
+      'tracking',
+      'test-failed',
+      'not-observed',
+    ].map((category) => `phase1.runtime-observations.coven-rust-tests.${test}.${category}`),
+  ),
+  ...[
+    'setup',
+    'reader-open',
+    'early-result',
+    'result-timeout',
+    'result-disconnected',
+    'writer-error',
+    'writer-error.access-denied',
+    'writer-error.sharing-violation',
+    'writer-error.privilege-not-held',
+    'writer-error.invalid-owner',
+    'writer-error.file-not-found',
+    'writer-error.path-not-found',
+    ...[
+      'create-temporary-file',
+      'write-contents',
+      'write-newline',
+      'sync-temporary-file',
+      'convert-security-descriptor',
+      'open-process-token',
+      'read-process-token',
+      'apply-owner-only-security',
+      'replace-status-file',
+    ].flatMap((operation) =>
+      [
+        'file-not-found',
+        'path-not-found',
+        'access-denied',
+        'sharing-violation',
+        'invalid-owner',
+        'privilege-not-held',
+      ].map((category) => `writer-error.${operation}.${category}`),
+    ),
+    'writer-join',
+    'readback',
+    'content',
+    'cleanup',
+  ].map(
+    (category) =>
+      `phase1.runtime-observations.coven-rust-tests.status-replacement.assertion.${category}`,
+  ),
+  'phase1.runtime-observations.cleanup.failed',
   'phase1.stage.cave-authority.failed',
+  'phase1.cave-authority.timeout',
+  'phase1.cave-authority.output-limit',
+  'phase1.cave-authority.spawn',
+  'phase1.cave-authority.supervisor',
+  'phase1.cave-authority.signal',
+  'phase1.cave-authority.exit-nonzero',
+  'phase1.cave-authority.cleanup',
+  'phase1.cave-authority.startup',
+  'phase1.cave-authority.startup.timeout',
+  'phase1.cave-authority.startup.exit',
+  ...CAVE_STARTUP_EXIT_DIAGNOSTICS,
+  'phase1.cave-authority.startup.health',
+  'phase1.cave-authority.startup.discovery.missing',
+  ...CAVE_DISCOVERY_FAILURE_DIAGNOSTICS,
+  'phase1.cave-authority.startup.discovery.endpoint',
+  'phase1.cave-authority.startup.discovery.pid',
+  'phase1.cave-authority.pairing',
+  'phase1.cave-authority.reads',
+  'phase1.cave-authority.request',
+  'phase1.cave-authority.phase.setup',
+  'phase1.cave-authority.phase.unconfigured',
+  'phase1.cave-authority.phase.configured',
+  'phase1.cave-authority.output.invalid',
+  'phase1.cave-authority.record.read',
+  'phase1.cave-authority.record.invalid',
+  'phase1.cave-authority.assertion.admin',
+  'phase1.cave-authority.assertion.discovery',
+  'phase1.cave-authority.assertion.health',
+  'phase1.cave-authority.assertion.ingress',
+  'phase1.cave-authority.assertion.pairing',
+  'phase1.cave-authority.assertion.reads',
+  'phase1.cave-authority.assertion.revocation',
+  'phase1.cave-authority.assertion.takeover',
+  'phase1.cave-authority.assertion.harness',
+  'phase1.cave-authority.assertion.hpke',
+  'phase1.cave-authority.assertion.multiple',
+  'phase1.cave-authority.assertion.unknown',
   'phase1.stage.native-scenarios.failed',
+  ...SCHEMA_V2_NATIVE_FAILURE_DIAGNOSTICS,
+  ...pairingFailureCategories.map((category) => `phase1.native-scenarios.pairing.${category}`),
+  ...launchFailureCategories.map((category) => `phase1.native-scenarios.launch.${category}`),
+  ...NATIVE_LAUNCH_PUBLICATION_DIAGNOSTICS,
+  ...cleanupGrantFailureCategories.map(
+    (category) => `phase1.native-scenarios.cleanup-grant.${category}`,
+  ),
+  ...cleanupCustodyFailureCategories.map(
+    (category) => `phase1.native-scenarios.cleanup-custody.${category}`,
+  ),
   'phase1.stage.coven-identity.failed',
   'phase1.stage.isolation.failed',
   'phase1.stage.execution-root-cleanup.failed',
+  ...PROCESS_CLEANUP_FAILURE_CATEGORIES.map(
+    (category) => `phase1.stage.execution-root-cleanup.${category}`,
+  ),
 ]);
 const requiredAssertionSet = new Set(REQUIRED_PHASE1_ASSERTION_IDS);
 const approvedCommandFailureReasons = new Set([
   'compile-failed',
+  'compile-font-fetch',
+  'compile-module-resolution',
+  'compile-native-module',
+  'compile-permission',
+  'compile-plugin',
+  'compile-plugin-syntax',
+  'compile-plugin-type',
+  'compile-plugin-reference',
+  'compile-plugin-range',
   'compiler-crash',
   'disk-exhausted',
   'memory-exhausted',
@@ -115,6 +791,84 @@ export function scrubEvidenceAuthorizationEnvironment(environment = process.env)
   return environment;
 }
 
+// The frozen Cave loads its fonts through `next/font/google`, so `next build`
+// downloads roughly ninety font files from Google Fonts. When a font file
+// cannot be downloaded after Turbopack's own retries, the build fails with
+// "Module not found: Can't resolve '@vercel/turbopack-next/internal/font/google/font'",
+// and when the stylesheet request fails it reports "Failed to fetch <family>
+// from Google Fonts". Both were reproduced against frozen Cave ecdcdcf8a by
+// refusing the Google Fonts hosts through a proxy. Before this pattern the
+// first read as `compile.module-resolution`, indistinguishable from a real
+// missing module, and was seen intermittently on Windows and macOS.
+export const caveFontFetchFailurePattern =
+  /can't resolve '@vercel\/turbopack-next\/internal\/font\/google\/font'|failed to fetch [^\n]+ from google fonts/iu;
+
+// A font download failure is a network event outside the candidate, so the
+// Cave build is attempted once more when, and only when, the first attempt
+// failed on that signature. Any other failure, and any second failure, is
+// reported exactly as before.
+export async function retryCaveBuildOnceOnFontFetch(build) {
+  try {
+    return await build();
+  } catch (error) {
+    if (
+      !(error instanceof CommandExecutionError) ||
+      error.result?.reason !== 'compile-font-fetch'
+    ) {
+      throw error;
+    }
+    return build();
+  }
+}
+
+export function schemaV2CaveBuildEnvironment(
+  environment = process.env,
+  platform = process.platform,
+) {
+  const pathApi = platform === 'win32' ? windowsPath : { resolve, isAbsolute };
+  const home = environment.HOME;
+  if (typeof home !== 'string' || home.includes('\0') || !pathApi.isAbsolute(home)) {
+    throw new Error('Cave build requires an absolute execution home.');
+  }
+  // Windows os.homedir() can select USERPROFILE instead of the isolated HOME.
+  // Keep native profile authority intact and explicitly isolate build-time state.
+  const covenHome = pathApi.resolve(home, '.coven');
+  return {
+    ...environment,
+    COVEN_HOME: covenHome,
+    COVEN_CAVE_HOME: pathApi.resolve(covenHome, 'cave'),
+    NODE_OPTIONS: caveBuildNodeOptions,
+    CIRCLE_NODE_TOTAL: caveBuildReportedCpuTotal,
+    COVEN_CAVE_CLIENT_V1_COMPATIBILITY_CONTROL: '1',
+  };
+}
+
+export function schemaV2NativeBuildEnvironment(environment, platform = process.platform) {
+  if (platform !== 'win32') {
+    return environment;
+  }
+  return {
+    ...environment,
+    // These one-shot builds retain dev runtime checks, not debugger or rebuild data.
+    CARGO_PROFILE_DEV_DEBUG: '0',
+    CARGO_INCREMENTAL: '0',
+  };
+}
+
+export function caveAuthorityEnvironment(environment, platform = process.platform) {
+  if (platform !== 'win32' || environment.OPENCOVEN_WINDOWS_CAVE_CONFORMANCE_TEMP === undefined) {
+    return environment;
+  }
+  const temp = environment.OPENCOVEN_WINDOWS_CAVE_CONFORMANCE_TEMP;
+  return { ...environment, TMPDIR: temp, TMP: temp, TEMP: temp };
+}
+
+export function bindMacosKeychainSessionEnvironment(environment, session) {
+  environment.OPENCOVEN_PHASE1_TEST_KEYCHAIN_ISOLATED = '1';
+  environment.PHASE1_TEST_KEYCHAIN = session.keychainPath;
+  return environment;
+}
+
 export function windowsJobBindingEnvironment(
   environment = process.env,
   platform = process.platform,
@@ -127,38 +881,50 @@ export function windowsJobBindingEnvironment(
   const name = environment.OPENCOVEN_WINDOWS_JOB_NAME;
   const systemPwsh = environment.OPENCOVEN_WINDOWS_SYSTEM_PWSH;
   const bootstrapRoot = environment.OPENCOVEN_WINDOWS_BOOTSTRAP_ROOT;
+  const caveConformanceTemp = environment.OPENCOVEN_WINDOWS_CAVE_CONFORMANCE_TEMP;
+  const statusStagingDirectory = environment.COVEN_WINDOWS_STATUS_STAGING_DIR;
+  const statusStagingSupervisorSid = environment.COVEN_WINDOWS_STATUS_STAGING_SUPERVISOR_SID;
+  const statusStagingSidComponents =
+    typeof statusStagingSupervisorSid === 'string' &&
+    statusStagingSupervisorSid.length <= 184 &&
+    /^S-1-[0-9]+(?:-[0-9]+){1,15}$/u.test(statusStagingSupervisorSid)
+      ? statusStagingSupervisorSid.split('-').slice(2).map(BigInt)
+      : null;
   const workspace = environment.OPENCOVEN_WINDOWS_WORKSPACE;
   const artifactDirectory = environment.OPENCOVEN_WINDOWS_ARTIFACT_DIRECTORY;
   const sourceRecord = environment.OPENCOVEN_WINDOWS_SOURCE_RECORD;
+  const pnpmCli = environment.OPENCOVEN_WINDOWS_PNPM_CLI;
   const systemRoot = environment.SYSTEMROOT;
   const windowsDirectory = environment.WINDIR;
   const commandProcessor = environment.COMSPEC;
   const temporaryDirectory = environment.TEMP;
   const secondaryTemporaryDirectory = environment.TMP;
+  const profileRoot = environment.OPENCOVEN_WINDOWS_PROFILE_ROOT;
+  const userProfile = environment.USERPROFILE;
   const executablePath = environment.PATH;
   const pathExtensions = environment.PATHEXT;
   const compilerLibraryPath = environment.LIB;
   const compilerIncludePath = environment.INCLUDE;
   if (required !== '1') {
-    throw new Error('Windows schema-v2 evidence Job Object supervision is required.');
+    throw new Error('phase1.stage.invocation.windows-job-required');
   }
   if (
     typeof nonce !== 'string' ||
     !/^[0-9a-f]{32}$/u.test(nonce) ||
+    statusStagingSidComponents === null ||
+    statusStagingSidComponents[0] > 0xffff_ffff_ffffn ||
+    statusStagingSidComponents.slice(1).some((component) => component > 0xffff_ffffn) ||
     name !== `Local\\OpenCoven.Chat.Conformance.${nonce}`
   ) {
-    throw new Error('Windows Job Object supervision is not nonce-bound.');
+    throw new Error('phase1.stage.invocation.windows-job-identity');
   }
   if (
     typeof systemPwsh !== 'string' ||
     systemPwsh.toLowerCase() !== 'c:\\program files\\powershell\\7\\pwsh.exe'
   ) {
-    throw new Error('Windows Job Object membership requires trusted system PowerShell.');
+    throw new Error('phase1.stage.invocation.windows-powershell');
   }
-  for (const [label, value] of [
-    ['library', compilerLibraryPath],
-    ['include', compilerIncludePath],
-  ]) {
+  for (const value of [compilerLibraryPath, compilerIncludePath]) {
     if (
       typeof value !== 'string' ||
       value.length === 0 ||
@@ -170,16 +936,16 @@ export function windowsJobBindingEnvironment(
           !/^[a-z]:\\/u.test(lower) ||
           lower.includes('\\..\\') ||
           (!lower.startsWith(
-            'c:\\program files\\microsoft visual studio\\2022\\enterprise\\vc\\tools\\msvc\\14.',
+            'c:\\program files\\microsoft visual studio\\18\\enterprise\\vc\\tools\\msvc\\14.',
           ) &&
             !lower.startsWith('c:\\program files (x86)\\windows kits\\10\\'))
         );
       })
     ) {
-      throw new Error(`Windows Job Object ${label} path is outside trusted toolchain roots.`);
+      throw new Error('phase1.stage.invocation.windows-toolchain-path');
     }
   }
-  const requireCanonicalWindowsPath = (value, label) => {
+  const requireCanonicalWindowsPath = (value) => {
     if (
       typeof value !== 'string' ||
       value.length === 0 ||
@@ -189,11 +955,11 @@ export function windowsJobBindingEnvironment(
       !windowsPath.isAbsolute(value) ||
       windowsPath.normalize(value) !== value
     ) {
-      throw new Error(`Windows Job Object ${label} path is invalid.`);
+      throw new Error('phase1.stage.invocation.windows-path');
     }
     return value;
   };
-  const requireDescendant = (root, candidate, label) => {
+  const requireDescendant = (root, candidate) => {
     const relativePath = windowsPath.relative(root, candidate);
     if (
       relativePath.length === 0 ||
@@ -201,25 +967,39 @@ export function windowsJobBindingEnvironment(
       relativePath.startsWith(`..${windowsPath.sep}`) ||
       windowsPath.isAbsolute(relativePath)
     ) {
-      throw new Error(`Windows Job Object ${label} path is outside the bootstrap root.`);
+      throw new Error('phase1.stage.invocation.windows-artifact-binding');
     }
   };
-  const canonicalBootstrapRoot = requireCanonicalWindowsPath(bootstrapRoot, 'bootstrap root');
-  const canonicalWorkspace = requireCanonicalWindowsPath(workspace, 'workspace');
-  const canonicalArtifactDirectory = requireCanonicalWindowsPath(
-    artifactDirectory,
-    'artifact directory',
-  );
-  const canonicalSourceRecord = requireCanonicalWindowsPath(sourceRecord, 'artifact record');
-  const canonicalTemporaryDirectory = requireCanonicalWindowsPath(temporaryDirectory, 'temporary');
+  const canonicalBootstrapRoot = requireCanonicalWindowsPath(bootstrapRoot);
+  const canonicalCaveConformanceTemp = requireCanonicalWindowsPath(caveConformanceTemp);
+  const canonicalWorkspace = requireCanonicalWindowsPath(workspace);
+  const canonicalStatusStagingDirectory = requireCanonicalWindowsPath(statusStagingDirectory);
+  const canonicalArtifactDirectory = requireCanonicalWindowsPath(artifactDirectory);
+  const canonicalSourceRecord = requireCanonicalWindowsPath(sourceRecord);
+  const canonicalPnpmCli = requireCanonicalWindowsPath(pnpmCli);
+  const canonicalTemporaryDirectory = requireCanonicalWindowsPath(temporaryDirectory);
   const canonicalSecondaryTemporaryDirectory = requireCanonicalWindowsPath(
     secondaryTemporaryDirectory,
-    'secondary temporary',
   );
-  requireDescendant(canonicalBootstrapRoot, canonicalWorkspace, 'workspace');
-  requireDescendant(canonicalBootstrapRoot, canonicalTemporaryDirectory, 'temporary');
+  let canonicalProfileRoot;
+  let canonicalUserProfile;
+  try {
+    canonicalProfileRoot = requireCanonicalWindowsPath(profileRoot);
+    canonicalUserProfile = requireCanonicalWindowsPath(userProfile);
+  } catch {
+    throw new Error('phase1.stage.invocation.windows-profile');
+  }
+  requireDescendant(canonicalBootstrapRoot, canonicalWorkspace);
+  requireDescendant(canonicalBootstrapRoot, canonicalCaveConformanceTemp);
+  requireDescendant(canonicalBootstrapRoot, canonicalStatusStagingDirectory);
+  requireDescendant(canonicalBootstrapRoot, canonicalTemporaryDirectory);
+  requireDescendant(canonicalBootstrapRoot, canonicalPnpmCli);
   if (
-    windowsPath.basename(canonicalBootstrapRoot).toLowerCase() !== `opencoven-win32-${nonce}` ||
+    windowsPath.basename(canonicalBootstrapRoot).toLowerCase() !== `oc${nonce.slice(0, 8)}` ||
+    canonicalCaveConformanceTemp.toLowerCase() !==
+      windowsPath.join(canonicalBootstrapRoot, 'cave-conformance-temp').toLowerCase() ||
+    canonicalStatusStagingDirectory.toLowerCase() !==
+      windowsPath.join(canonicalBootstrapRoot, 'status-staging').toLowerCase() ||
     canonicalWorkspace.toLowerCase() !==
       windowsPath.join(canonicalBootstrapRoot, 'workspace').toLowerCase() ||
     canonicalTemporaryDirectory.toLowerCase() !==
@@ -234,7 +1014,7 @@ export function windowsJobBindingEnvironment(
         .toLowerCase() ||
     existsSync(canonicalSourceRecord)
   ) {
-    throw new Error('Windows Job Object artifact or temporary binding is invalid.');
+    throw new Error('phase1.stage.invocation.windows-artifact-binding');
   }
   if (
     typeof systemRoot !== 'string' ||
@@ -244,17 +1024,19 @@ export function windowsJobBindingEnvironment(
     typeof commandProcessor !== 'string' ||
     commandProcessor.toLowerCase() !== 'c:\\windows\\system32\\cmd.exe'
   ) {
-    throw new Error('Windows Job Object base system environment is invalid.');
+    throw new Error('phase1.stage.invocation.windows-os-environment');
   }
   if (
     typeof executablePath !== 'string' ||
     executablePath.length === 0 ||
     executablePath.includes('\0') ||
     executablePath.includes('\n') ||
-    executablePath.includes('\r') ||
-    pathExtensions !== '.COM;.EXE;.BAT;.CMD'
+    executablePath.includes('\r')
   ) {
-    throw new Error('Windows Job Object executable environment is invalid.');
+    throw new Error('phase1.stage.invocation.windows-executable-path');
+  }
+  if (pathExtensions !== '.COM;.EXE;.BAT;.CMD') {
+    throw new Error('phase1.stage.invocation.windows-path-extensions');
   }
   return {
     OPENCOVEN_WINDOWS_JOB_REQUIRED: required,
@@ -262,9 +1044,15 @@ export function windowsJobBindingEnvironment(
     OPENCOVEN_WINDOWS_JOB_NAME: name,
     OPENCOVEN_WINDOWS_SYSTEM_PWSH: systemPwsh,
     OPENCOVEN_WINDOWS_BOOTSTRAP_ROOT: canonicalBootstrapRoot,
+    OPENCOVEN_WINDOWS_CAVE_CONFORMANCE_TEMP: canonicalCaveConformanceTemp,
+    COVEN_WINDOWS_STATUS_STAGING_DIR: canonicalStatusStagingDirectory,
+    COVEN_WINDOWS_STATUS_STAGING_SUPERVISOR_SID: statusStagingSupervisorSid,
     OPENCOVEN_WINDOWS_WORKSPACE: canonicalWorkspace,
     OPENCOVEN_WINDOWS_ARTIFACT_DIRECTORY: canonicalArtifactDirectory,
     OPENCOVEN_WINDOWS_SOURCE_RECORD: canonicalSourceRecord,
+    OPENCOVEN_WINDOWS_PNPM_CLI: canonicalPnpmCli,
+    OPENCOVEN_WINDOWS_PROFILE_ROOT: canonicalProfileRoot,
+    USERPROFILE: canonicalUserProfile,
     SYSTEMROOT: systemRoot,
     WINDIR: windowsDirectory,
     COMSPEC: commandProcessor,
@@ -303,6 +1091,7 @@ export function unixProducerBindingEnvironment(
   const workspace = environment.OPENCOVEN_UNIX_WORKSPACE;
   const artifactDirectory = environment.OPENCOVEN_UNIX_ARTIFACT_DIRECTORY;
   const sourceRecord = environment.OPENCOVEN_UNIX_SOURCE_RECORD;
+  const nativeLockRoot = environment.OPENCOVEN_PHASE1_CONFORMANCE_LOCK_ROOT;
   const canonicalUid = /^(?:0|[1-9][0-9]{0,9})$/u;
   if (
     required !== '1' ||
@@ -345,22 +1134,27 @@ export function unixProducerBindingEnvironment(
   };
   requireCanonicalDirectory(workspace);
   const artifactStats = requireCanonicalDirectory(artifactDirectory);
+  const nativeLockStats = requireCanonicalDirectory(nativeLockRoot);
   const expectedArtifactDirectory = resolve(
     dirname(workspace),
     'producer',
     'workspace',
     '.artifacts',
   );
+  const expectedNativeLockRoot = resolve(dirname(workspace), 'producer', 'native-credential-lock');
   const expectedSourceRecord = resolve(
     artifactDirectory,
     `client-v1-conformance-${evidencePlatform}.json`,
   );
   if (
     artifactDirectory !== expectedArtifactDirectory ||
+    nativeLockRoot !== expectedNativeLockRoot ||
     sourceRecord !== expectedSourceRecord ||
     existsSync(sourceRecord) ||
     artifactStats.uid !== currentUid ||
-    (artifactStats.mode & 0o077) !== 0
+    (artifactStats.mode & 0o077) !== 0 ||
+    nativeLockStats.uid !== currentUid ||
+    (nativeLockStats.mode & 0o777) !== 0o700
   ) {
     fail();
   }
@@ -374,6 +1168,7 @@ export function unixProducerBindingEnvironment(
     OPENCOVEN_UNIX_WORKSPACE: workspace,
     OPENCOVEN_UNIX_ARTIFACT_DIRECTORY: artifactDirectory,
     OPENCOVEN_UNIX_SOURCE_RECORD: sourceRecord,
+    OPENCOVEN_PHASE1_CONFORMANCE_LOCK_ROOT: nativeLockRoot,
   };
   if (platform === 'linux') {
     const producerNonce = producerName.slice(3);
@@ -553,14 +1348,23 @@ function configuredSourceRoot(environmentName) {
 function resolveRepositoryLayout() {
   const gitCommonDirectory = resolve(
     projectRoot,
-    execFileSync('git', ['-c', `safe.directory=${projectRoot}`, 'rev-parse', '--git-common-dir'], {
-      cwd: projectRoot,
-      encoding: 'utf8',
-      maxBuffer: 1024 * 1024,
-      stdio: ['ignore', 'pipe', 'pipe'],
-      timeout: 15_000,
-      killSignal: 'SIGKILL',
-    }).trim(),
+    execFileSync(
+      'git',
+      [
+        '-c',
+        `safe.directory=${toGitSafeDirectoryPath(projectRoot)}`,
+        'rev-parse',
+        '--git-common-dir',
+      ],
+      {
+        cwd: projectRoot,
+        encoding: 'utf8',
+        maxBuffer: 1024 * 1024,
+        stdio: ['ignore', 'pipe', 'pipe'],
+        timeout: 15_000,
+        killSignal: 'SIGKILL',
+      },
+    ).trim(),
   );
   const chatRepositoryRoot = dirname(gitCommonDirectory);
   return {
@@ -594,8 +1398,44 @@ export class CommandExecutionError extends Error {
   }
 }
 
+export function classifyCavePluginEvaluationFailure(output) {
+  const text = stripVTControlCharacters(output);
+  const marker = /error evaluating node\.js code/iu.exec(text);
+  if (marker === null) {
+    return undefined;
+  }
+  const classes = new Set(
+    [
+      ...text
+        .slice(marker.index + marker[0].length)
+        .matchAll(/^[\t ]*([A-Za-z][A-Za-z0-9]{0,63}Error|Error)(?: \[ERR_[A-Z_]+\])?:/gmu),
+    ].map((match) => match[1]),
+  );
+  if (classes.size !== 1) {
+    return undefined;
+  }
+  return new Map([
+    ['SyntaxError', 'syntax'],
+    ['TypeError', 'type'],
+    ['ReferenceError', 'reference'],
+    ['RangeError', 'range'],
+  ]).get([...classes][0]);
+}
+
 export function classifyCavePackageFailure(result) {
   const output = `${result?.stdout ?? ''}\n${result?.stderr ?? ''}`;
+  if (
+    !output.includes('Creating an optimized production build') ||
+    /^> coven-cave@\d+\.\d+\.\d+ (?:build:server|postbuild)(?:\s+.+)?$/mu.test(output) ||
+    [
+      'Compiled successfully',
+      'Collecting page data',
+      'Generating static pages',
+      'Finalizing page optimization',
+    ].some((marker) => output.includes(marker))
+  ) {
+    return undefined;
+  }
   const classifications = [
     [/timeout while receiving message from process/iu, 'turbopack-plugin-timeout'],
     [
@@ -607,9 +1447,779 @@ export function classifyCavePackageFailure(result) {
     [/\b(?:TurbopackInternalError|panic|segmentation fault|bus error)\b/iu, 'compiler-crash'],
     [/\b(?:static|build) worker exited\b/iu, 'worker-exited'],
     [/failed to collect page data/iu, 'page-data-failed'],
+    [/\b(?:EACCES|EPERM)\b|permission denied|operation not permitted/iu, 'compile-permission'],
+    [caveFontFetchFailurePattern, 'compile-font-fetch'],
+    [/module not found|can't resolve|cannot find module/iu, 'compile-module-resolution'],
+    [
+      /failed to load external module|\bdlopen\(|mach-o.*(?:incompatible|not found)|image not found/iu,
+      'compile-native-module',
+    ],
+    [/error evaluating node\.js code|turbopack.*plugin.*(?:failed|error)/iu, 'compile-plugin'],
     [/failed to compile/iu, 'compile-failed'],
   ];
-  return classifications.find(([pattern]) => pattern.test(output))?.[1];
+  const reason = classifications.find(([pattern]) => pattern.test(output))?.[1];
+  const pluginClass =
+    reason === 'compile-plugin' ? classifyCavePluginEvaluationFailure(output) : undefined;
+  return pluginClass === undefined ? reason : `compile-plugin-${pluginClass}`;
+}
+
+const caveBuildDiagnosticByFailureReason = new Map([
+  ['memory-exhausted', 'phase1.packaging.cave-build.phase.next-build.resource.memory'],
+  ['process-killed', 'phase1.packaging.cave-build.phase.next-build.resource.killed'],
+  ['page-data-failed', 'phase1.packaging.cave-build.phase.next-build.page-data'],
+  ['compile-failed', 'phase1.packaging.cave-build.phase.next-build.compile'],
+  ['compile-permission', 'phase1.packaging.cave-build.phase.next-build.compile.permission'],
+  ['compile-font-fetch', 'phase1.packaging.cave-build.phase.next-build.compile.font-fetch'],
+  [
+    'compile-module-resolution',
+    'phase1.packaging.cave-build.phase.next-build.compile.module-resolution',
+  ],
+  ['compile-native-module', 'phase1.packaging.cave-build.phase.next-build.compile.native-module'],
+  ['compile-plugin', 'phase1.packaging.cave-build.phase.next-build.compile.plugin'],
+  ['compile-plugin-syntax', 'phase1.packaging.cave-build.phase.next-build.compile.plugin.syntax'],
+  ['compile-plugin-type', 'phase1.packaging.cave-build.phase.next-build.compile.plugin.type'],
+  [
+    'compile-plugin-reference',
+    'phase1.packaging.cave-build.phase.next-build.compile.plugin.reference',
+  ],
+  ['compile-plugin-range', 'phase1.packaging.cave-build.phase.next-build.compile.plugin.range'],
+  ['compiler-crash', 'phase1.packaging.cave-build.phase.next-build.compile'],
+  ['worker-exited', 'phase1.packaging.cave-build.phase.next-build.compile'],
+  ['turbopack-plugin-timeout', 'phase1.packaging.cave-build.timeout'],
+  ['disk-exhausted', 'phase1.packaging.cave-build.phase.next-build.resource'],
+]);
+
+function classifyCaveBuildFailureDiagnostic(error) {
+  if (!(error instanceof CommandExecutionError)) {
+    return 'phase1.packaging.cave-build.failed';
+  }
+  const reason = error.result?.reason;
+  if (reason === 'timeout') {
+    return 'phase1.packaging.cave-build.timeout';
+  }
+  if (reason === 'stdout-limit' || reason === 'stderr-limit') {
+    return 'phase1.packaging.cave-build.output-limit';
+  }
+  if (reason === 'spawn' || reason === 'tracking') {
+    return 'phase1.packaging.cave-build.spawn';
+  }
+  const classifiedDiagnostic = caveBuildDiagnosticByFailureReason.get(reason);
+  if (classifiedDiagnostic !== undefined) {
+    return classifiedDiagnostic;
+  }
+  if (typeof error.result?.code !== 'number' || error.result.code === 0) {
+    return 'phase1.packaging.cave-build.failed';
+  }
+  const output = stripVTControlCharacters(
+    `${error.result.stdout ?? ''}\n${error.result.stderr ?? ''}`,
+  ).replaceAll('\r\n', '\n');
+  let phase = 'unknown';
+  if (/^> coven-cave@\d+\.\d+\.\d+ postbuild(?:\s+.+)?$/mu.test(output)) {
+    phase = 'postbuild';
+  } else if (/^> coven-cave@\d+\.\d+\.\d+ build:server(?:\s+.+)?$/mu.test(output)) {
+    phase = 'server-bundle';
+  } else if (output.includes('Creating an optimized production build')) {
+    phase = /\bEAGAIN\b/u.test(output)
+      ? 'next-build.resource.spawn'
+      : /\bheap out of memory\b/iu.test(output)
+        ? 'next-build.resource.memory.heap'
+        : /\bENOMEM\b/u.test(output)
+          ? 'next-build.resource.memory.allocation'
+          : /\b(?:Killed(?:: 9)?|SIGKILL)\b/u.test(output)
+            ? 'next-build.resource.killed'
+            : output.includes('Finalizing page optimization')
+              ? 'next-build.finalization'
+              : output.includes('Generating static pages')
+                ? 'next-build.static-pages'
+                : output.includes('Collecting page data')
+                  ? 'next-build.page-data'
+                  : output.includes('Compiled successfully')
+                    ? 'next-build.typescript'
+                    : 'next-build.compile';
+  } else if (/^> coven-cave@\d+\.\d+\.\d+ prebuild(?:\s+.+)?$/mu.test(output)) {
+    phase = 'prebuild';
+  } else if (/^> coven-cave@\d+\.\d+\.\d+ build(?::conformance)?(?:\s+.+)?$/mu.test(output)) {
+    phase = 'conformance-wrapper';
+  }
+  return `phase1.packaging.cave-build.phase.${phase}`;
+}
+
+export function classifyCargoBuildFailureDiagnostic(baseId, error, platform = process.platform) {
+  if (!(error instanceof CommandExecutionError)) {
+    return `${baseId}.unknown`;
+  }
+  const reason = error.result?.reason;
+  if (reason === 'timeout') {
+    return `${baseId}.timeout`;
+  }
+  if (reason === 'stdout-limit' || reason === 'stderr-limit') {
+    return `${baseId}.output-limit`;
+  }
+  if (reason === 'spawn' || reason === 'tracking') {
+    return `${baseId}.spawn`;
+  }
+  if (reason === 'supervisor-termination' || reason === 'termination') {
+    return `${baseId}.supervisor`;
+  }
+
+  const output = stripVTControlCharacters(
+    `${error.result?.stdout ?? ''}\n${error.result?.stderr ?? ''}`,
+  ).toLowerCase();
+  const exitCode = error.result?.code;
+  const signal = error.result?.signal;
+  if (signal === 'SIGKILL') {
+    return `${baseId}.resource.killed`;
+  }
+  if (typeof signal === 'string' && signal.length > 0) {
+    return `${baseId}.process.crash`;
+  }
+  if (typeof exitCode === 'number' && (exitCode < 0 || exitCode >= 0x80000000)) {
+    return `${baseId}.process.crash`;
+  }
+  if (output.trim().length === 0) {
+    return `${baseId}.no-output`;
+  }
+  if (
+    output.includes('out of memory') ||
+    output.includes('failed to allocate memory') ||
+    output.includes('cannot allocate memory') ||
+    output.includes('enomem')
+  ) {
+    return `${baseId}.resource.memory`;
+  }
+  if (
+    output.includes('no space left on device') ||
+    output.includes('not enough space on the disk') ||
+    (platform === 'win32' && output.includes('os error 112')) ||
+    output.includes('enospc')
+  ) {
+    return `${baseId}.resource.disk`;
+  }
+  if (
+    /system library .* required by crate .* was not found/u.test(output) ||
+    output.includes('pkg-config exited with status code') ||
+    /\.pc\b.*(?:not found|needs to be installed)/u.test(output)
+  ) {
+    return `${baseId}.native-dependency`;
+  }
+  if (
+    /failed to get .* as a dependency/u.test(output) ||
+    output.includes('failed to download') ||
+    output.includes('download of ') ||
+    output.includes('failed to fetch') ||
+    output.includes('could not resolve host')
+  ) {
+    return `${baseId}.dependency-fetch`;
+  }
+  if (output.includes('killed: 9') || /signal: 9\b/u.test(output)) {
+    return `${baseId}.resource.killed`;
+  }
+  if (/linking with .* failed/u.test(output) || output.includes('linker command failed')) {
+    return `${baseId}.linker`;
+  }
+  if (output.includes('failed to run custom build command for')) {
+    return `${baseId}.build-script`;
+  }
+  if (/^error\[e\d{4}\]:/mu.test(output) || /^error: could not compile(?:\s|$)/mu.test(output)) {
+    return `${baseId}.compile`;
+  }
+  return `${baseId}.unknown`;
+}
+
+export function classifyCavePreAssertionFailure(output) {
+  const text = stripVTControlCharacters(output);
+  const messages = text
+    .split(/\r?\n/u)
+    .filter((line) => line.startsWith('client-v1-conformance: '))
+    .map((line) => line.slice('client-v1-conformance: '.length));
+  const startupDiagnostics = [
+    ['Cave readiness timed out after 120 seconds.', 'startup.timeout'],
+    ['Cave exited before readiness.', 'startup.exit'],
+    ['Cave health is not ready.', 'startup.health'],
+    ['Client v1 discovery record is not published.', 'startup.discovery.missing'],
+    [
+      'Client v1 discovery endpoint does not match the listening Cave.',
+      'startup.discovery.endpoint',
+    ],
+    ['Client v1 discovery pid does not match the launched Cave.', 'startup.discovery.pid'],
+  ];
+  for (const message of messages) {
+    const startup = startupDiagnostics.find(([prefix]) => message.startsWith(prefix));
+    if (startup !== undefined) {
+      if (startup[1] === 'startup.exit') {
+        const detail =
+          /^Cave exited before readiness\. \[exit=([a-z-]+); stderr=([a-z-]+)\]$/u.exec(message);
+        if (detail) {
+          const diagnostic = `phase1.cave-authority.startup.exit.status.${detail[1]}.stderr.${detail[2]}`;
+          if (caveStartupExitDiagnosticSet.has(diagnostic)) return diagnostic;
+        }
+      }
+      if (startup[1] === 'startup.discovery.missing') {
+        const detail =
+          /^Client v1 discovery record is not published\. \[read=([a-z-]+); publication=([a-z-]+)\]$/u.exec(
+            message,
+          );
+        if (detail) {
+          const diagnostic = `phase1.cave-authority.startup.discovery.missing.read.${detail[1]}.publication.${detail[2]}`;
+          if (caveDiscoveryFailureDiagnosticSet.has(diagnostic)) return diagnostic;
+        }
+      }
+      return `phase1.cave-authority.${startup[1]}`;
+    }
+  }
+  if (
+    messages.some((message) =>
+      [
+        'pairing creation stayed rate limited across two attempts',
+        'pairing creation answered ',
+        'approval answered ',
+        'exchange answered ',
+      ].some((prefix) => message.startsWith(prefix)),
+    )
+  ) {
+    return 'phase1.cave-authority.pairing';
+  }
+  if (messages.some((message) => message.startsWith('paging '))) {
+    return 'phase1.cave-authority.reads';
+  }
+  if (
+    messages.some(
+      (message) =>
+        message === 'request timed out' ||
+        /^(?:connect|read|write) (?:ECONNREFUSED|ECONNRESET|EPIPE|ETIMEDOUT)(?: |$)/u.test(message),
+    )
+  ) {
+    return 'phase1.cave-authority.request';
+  }
+  if (
+    messages.some((message) =>
+      /^(?:EACCES|EBUSY|EPERM): [^,\r\n]+, (?:rmdir|unlink) /u.test(message),
+    )
+  ) {
+    return 'phase1.cave-authority.cleanup';
+  }
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    if (messages[index].startsWith('phase B (admin token configured) on ')) {
+      return 'phase1.cave-authority.phase.configured';
+    }
+    if (messages[index].startsWith('phase A (no admin token) on ')) {
+      return 'phase1.cave-authority.phase.unconfigured';
+    }
+  }
+  return 'phase1.cave-authority.phase.setup';
+}
+
+export function schemaV2FailureDiagnostic(error, activeStage) {
+  if (activeStage === 'phase1.stage.execution-root-cleanup.failed') {
+    return `phase1.stage.execution-root-cleanup.${processCleanupFailureCategory(error)}`;
+  }
+  if (
+    error !== null &&
+    typeof error === 'object' &&
+    'message' in error &&
+    typeof error.message === 'string' &&
+    publicFailureDiagnosticSet.has(error.message)
+  ) {
+    return error.message;
+  }
+  if (activeStage === 'phase1.runtime-observations.coven-rust-tests.failed') {
+    for (const [name, test] of covenRustObservationDiagnostics) {
+      const base = `phase1.runtime-observations.coven-rust-tests.${test}`;
+      if (
+        error instanceof Error &&
+        error.message === `Coven native trust observation tests did not execute ${name}.`
+      ) {
+        return `${base}.not-observed`;
+      }
+      if (
+        error instanceof CommandExecutionError &&
+        error.label === `Coven native trust observation tests ${name}`
+      ) {
+        if (error.result?.reason === 'tracking') {
+          return `${base}.tracking`;
+        }
+        if (
+          error.result?.reason === 'spawn' &&
+          boundedSpawnErrorCodes.includes(error.result?.spawnCode)
+        ) {
+          return `${base}.spawn.${error.result.spawnCode.toLowerCase()}`;
+        }
+        const category = classifyCargoBuildFailureDiagnostic(base, error);
+        if (
+          category === `${base}.unknown` &&
+          error.result?.reason === undefined &&
+          typeof error.result?.code === 'number' &&
+          error.result.code !== 0 &&
+          stripVTControlCharacters(error.result?.stdout ?? '')
+            .split(/\r?\n/u)
+            .some((line) => line.trim() === `test ${name} ... FAILED`)
+        ) {
+          if (test === 'status-replacement') {
+            const lines = stripVTControlCharacters(error.result.stdout ?? '').split(/\r?\n/u);
+            const panic = lines.findIndex(
+              (line) =>
+                line.startsWith(`thread '${name}' `) &&
+                /panicked at .*discovery\.rs:\d+:\d+:$/u.test(line),
+            );
+            const message = panic < 0 ? '' : (lines[panic + 1] ?? '');
+            // Inspect only the structured OS code at the start of this exact writer error.
+            // The localized message and any private trailing output never become diagnostics.
+            const writerRecord =
+              /^replace status after reader closes: Io \{ operation: "failed to write owner-only Windows daemon status(?:: (create-temporary-file|write-contents|write-newline|sync-temporary-file|convert-security-descriptor|open-process-token|read-process-token|apply-owner-only-security|replace-status-file))?", source: Os \{ code: (2|3|5|32|1307|1314), kind: [A-Za-z]+, message: "((?:[^"\\\r\n]|\\(?:[\\"nrt0]|x[0-7][0-9a-fA-F]|u\{[0-9a-fA-F]{1,6}\}))*)" \} \}$/u.exec(
+                message,
+              );
+            const writerOperation = writerRecord?.[1];
+            const writerCode = writerRecord?.[2];
+            // Scan complete escape tokens so a literal backslash before "u" is not
+            // mistaken for a Unicode escape. Rust strings exclude surrogate scalars.
+            const validScalars =
+              writerRecord &&
+              [
+                ...writerRecord[3].matchAll(
+                  /\\(?:[\\"nrt0]|x[0-7][0-9a-fA-F]|u\{([0-9a-fA-F]{1,6})\})/gu,
+                ),
+              ].every((escapeToken) => {
+                if (!escapeToken[1]) return true;
+                const scalar = Number.parseInt(escapeToken[1], 16);
+                return scalar <= 0x10ffff && (scalar < 0xd800 || scalar > 0xdfff);
+              });
+            const writerCategories = {
+              2: 'file-not-found',
+              3: 'path-not-found',
+              5: 'access-denied',
+              32: 'sharing-violation',
+              1307: 'invalid-owner',
+              1314: 'privilege-not-held',
+            };
+            if (writerCode && validScalars) {
+              const operation = writerOperation ? `${writerOperation}.` : '';
+              return `${base}.assertion.writer-error.${operation}${writerCategories[writerCode]}`;
+            }
+            const categories = [
+              [/^(?:create status replacement home|write current status):/u, 'setup'],
+              [/^assertion `left != right` failed: open status reader$/u, 'reader-open'],
+              [/^status replacement should wait for the active reader$/u, 'early-result'],
+              [/^status replacement result: Timeout$/u, 'result-timeout'],
+              [/^status replacement result: Disconnected$/u, 'result-disconnected'],
+              [/^replace status after reader closes:/u, 'writer-error'],
+              [/^status replacement thread:/u, 'writer-join'],
+              [/^read replaced status:/u, 'readback'],
+              [/^assertion `left == right` failed$/u, 'content'],
+              [/^remove status replacement home:/u, 'cleanup'],
+            ];
+            const match = categories.find(([pattern]) => pattern.test(message));
+            if (match) return `${base}.assertion.${match[1]}`;
+          }
+          return `${base}.test-failed`;
+        }
+        return category;
+      }
+    }
+    return activeStage;
+  }
+  if (
+    activeStage === 'phase1.stage.cave-authority.failed' &&
+    error instanceof CommandExecutionError
+  ) {
+    const result = error.result;
+    if (result?.reason === 'timeout') return 'phase1.cave-authority.timeout';
+    if (['stdout-limit', 'stderr-limit'].includes(result?.reason))
+      return 'phase1.cave-authority.output-limit';
+    if (['spawn', 'tracking'].includes(result?.reason)) return 'phase1.cave-authority.spawn';
+    if (['supervisor-termination', 'termination'].includes(result?.reason))
+      return 'phase1.cave-authority.supervisor';
+    if (typeof result?.signal === 'string' && result.signal.length > 0)
+      return 'phase1.cave-authority.signal';
+    if (typeof result?.code === 'number' && result.code !== 0) {
+      let assertions;
+      try {
+        assertions = parseCaveConformanceOutput(`${result.stdout ?? ''}\n${result.stderr ?? ''}`);
+      } catch {
+        return 'phase1.cave-authority.output.invalid';
+      }
+      const failed = [...assertions.entries()].filter(([, status]) => status === 'failed');
+      const categories = new Set(failed.map(([id]) => id.split(/[./]/u, 1)[0]));
+      const allowed = [
+        'admin',
+        'discovery',
+        'health',
+        'ingress',
+        'pairing',
+        'reads',
+        'revocation',
+        'takeover',
+        'harness',
+        'hpke',
+      ];
+      if ([...categories].some((category) => !allowed.includes(category)))
+        return 'phase1.cave-authority.assertion.unknown';
+      if (categories.size > 1) return 'phase1.cave-authority.assertion.multiple';
+      if (categories.size === 1) return `phase1.cave-authority.assertion.${[...categories][0]}`;
+      if (assertions.size === 0) {
+        return classifyCavePreAssertionFailure(`${result.stdout ?? ''}\n${result.stderr ?? ''}`);
+      }
+      return 'phase1.cave-authority.exit-nonzero';
+    }
+  }
+  if (activeStage === 'phase1.packaging.cave-build.failed') {
+    return classifyCaveBuildFailureDiagnostic(error);
+  }
+  if (activeStage === 'phase1.stage.evidence-authority.build.failed') {
+    const message =
+      error !== null &&
+      typeof error === 'object' &&
+      'message' in error &&
+      typeof error.message === 'string'
+        ? error.message
+        : '';
+    if (message.startsWith('Verified environment does not match')) {
+      return 'phase1.stage.evidence-authority.build.environment';
+    }
+    if (message.startsWith('Cave evidence record')) {
+      return 'phase1.stage.evidence-authority.build.cave-record';
+    }
+    if (message.startsWith('Verified isolation')) {
+      return 'phase1.stage.evidence-authority.build.isolation';
+    }
+    if (message.startsWith('Observed ')) {
+      return 'phase1.stage.evidence-authority.build.assertions';
+    }
+  }
+  if (activeStage === 'phase1.stage.toolchain.failed') {
+    if (error instanceof CommandExecutionError) {
+      if (error.label === 'pnpm version verification') {
+        return 'phase1.stage.toolchain.pnpm';
+      }
+      if (error.label === 'Rust version verification') {
+        return 'phase1.stage.toolchain.rust';
+      }
+      if (error.label === 'Tauri version verification') {
+        return 'phase1.stage.toolchain.tauri';
+      }
+    }
+    if (
+      error !== null &&
+      typeof error === 'object' &&
+      'message' in error &&
+      error.message === 'Observed toolchain does not match the SDK frozen contract.'
+    ) {
+      return 'phase1.stage.toolchain.metadata';
+    }
+  }
+  if (
+    activeStage === 'phase1.packaging.chat-native-build.failed' ||
+    activeStage === 'phase1.packaging.coven-build.failed'
+  ) {
+    return classifyCargoBuildFailureDiagnostic(activeStage.slice(0, -'.failed'.length), error);
+  }
+  return activeStage;
+}
+
+// Bookkeeping can fail while unwinding an already classified production error.
+// Preserve that first failure and keep only fixed operation IDs public; private
+// causes remain attached in memory, never copied into the retained report.
+export function runSchemaV2FinalizationOperation(operation, action, primaryFailure) {
+  if (!finalizationOperationSet.has(operation)) {
+    throw new Error('phase1.stage.schema-v2-production.operation.invalid');
+  }
+  try {
+    return action();
+  } catch (cause) {
+    const diagnostic = finalizationDiagnostic(operation);
+    const failure = new Error(diagnostic, { cause });
+    if (primaryFailure !== undefined) {
+      throw new AggregateError(
+        [primaryFailure, failure],
+        schemaV2FailureDiagnostic(primaryFailure, diagnostic),
+      );
+    }
+    throw failure;
+  }
+}
+
+export function runSchemaV2PreflightStage(stage, action) {
+  try {
+    return action();
+  } catch (error) {
+    throw new Error(schemaV2FailureDiagnostic(error, stage), { cause: error });
+  }
+}
+
+export async function runSchemaV2StageAsync(stage, action) {
+  try {
+    return await action();
+  } catch (error) {
+    throw new Error(schemaV2FailureDiagnostic(error, stage), { cause: error });
+  }
+}
+
+export async function observeInitialDiscoverySafety(rpc, outcome, platform) {
+  if (outcome !== 'unsafe' || platform !== 'win32') {
+    return null;
+  }
+  try {
+    return classifyDiscoverySafetyProbe(await rpc.ok('conformance_discovery_safety'));
+  } catch {
+    // Preserve the original failure; never publish the probe's raw error.
+    return 'unknown';
+  }
+}
+
+export function classifyDiscoverySafetyProbe(response) {
+  const directories = response?.directories;
+  if (!Array.isArray(directories) || directories.length < 1 || directories.length > 3) {
+    return 'unknown';
+  }
+  const scopes = ['profile', 'coven', 'cave'];
+  const categories = [
+    'type',
+    'reparse',
+    'owner',
+    'owner-acl',
+    'owner-acl-unavailable',
+    'acl',
+    'missing',
+    'unavailable',
+  ];
+  for (let index = 0; index < directories.length; index += 1) {
+    const entry = directories[index];
+    if (!Array.isArray(entry) || entry.length !== 2 || entry[0] !== scopes[index]) {
+      return 'unknown';
+    }
+    if (entry[1] !== 'safe') {
+      return index === directories.length - 1 && categories.includes(entry[1])
+        ? `${scopes[index]}-${entry[1]}`
+        : 'unknown';
+    }
+  }
+  return directories.length === 3 ? 'directories-safe' : 'unknown';
+}
+
+export function classifyInitialDiscoveryOutcome(response) {
+  if (response?.ok === true) {
+    return 'present';
+  }
+  const code = response?.ok === false ? response.error?.code : undefined;
+  if (code === 'cave_discovery_not_found') {
+    return null;
+  }
+  switch (code) {
+    case 'cave_discovery_unavailable':
+      return 'unavailable';
+    case 'unsafe_discovery_record':
+      return 'unsafe';
+    case 'invalid_discovery_record':
+      return 'invalid';
+    case 'discovery_body_limit':
+      return 'body-limit';
+    case 'service_unavailable':
+      return 'service';
+    default:
+      return 'unknown';
+  }
+}
+
+export function schemaV2NativeFailureDiagnostic(stage, error, launchBoundary) {
+  if (stage === 'pairing') {
+    if (error === undefined) return 'phase1.native-scenarios.pairing';
+    const message =
+      error !== null &&
+      typeof error === 'object' &&
+      'message' in error &&
+      typeof error.message === 'string'
+        ? error.message
+        : '';
+    let category = pairingMessageCategories.get(message) ?? 'unknown';
+    const rpc = /^native RPC cave_pairing_(create|poll|exchange) failed with ([a-z_]+)$/u.exec(
+      message,
+    );
+    const timeout = /^native RPC timed out for cave_pairing_(create|poll|exchange)$/u.exec(message);
+    const admin = /^Cave admin mutation failed with HTTP ([345])[0-9]{2}$/u.exec(message);
+    if (rpc !== null && pairingRpcFailureCodes.has(rpc[2])) {
+      category = `${rpc[1]}.${rpc[2].replaceAll('_', '-')}`;
+    } else if (timeout !== null) {
+      category = `${timeout[1]}.timeout`;
+    } else if (admin !== null) {
+      category = `admin-http-${admin[1]}xx`;
+    }
+    return `phase1.native-scenarios.pairing.${category}`;
+  }
+  if (stage === 'launch') {
+    if (error === undefined) {
+      return 'phase1.native-scenarios.launch';
+    }
+    const message =
+      error !== null &&
+      typeof error === 'object' &&
+      'message' in error &&
+      typeof error.message === 'string'
+        ? error.message
+        : '';
+    const launchFailure =
+      /^native RPC cave_launch failed with (cave_not_installed|cave_launch_configuration_invalid|cave_launch_failed)$/u.exec(
+        message,
+      );
+    if (launchFailure !== null) {
+      return `phase1.native-scenarios.launch.${
+        {
+          cave_not_installed: 'not-installed',
+          cave_launch_configuration_invalid: 'configuration-invalid',
+          cave_launch_failed: 'process',
+        }[launchFailure[1]]
+      }`;
+    }
+    if (message === 'native RPC cave_launch failed with service_unavailable') {
+      return 'phase1.native-scenarios.launch.service-unavailable';
+    }
+    const nativeLaunchFailure = /^native RPC cave_launch failed with ([a-z_]+)$/u.exec(message);
+    if (nativeLaunchFailure !== null && launchStageFailureCodes.has(nativeLaunchFailure[1])) {
+      const publication = nativeLaunchPublicationFailures.get(error);
+      if (
+        nativeLaunchFailure[1] === 'cave_launch_discovery_not_found' &&
+        publication !== undefined
+      ) {
+        return `phase1.native-scenarios.launch.discovery-not-found.publication.${publication}`;
+      }
+      return `phase1.native-scenarios.launch.${nativeLaunchFailure[1]
+        .replace(/^cave_launch_/u, '')
+        .replaceAll('_', '-')}`;
+    }
+    if (nativeLaunchFailure !== null && launchRpcFailureCodes.has(nativeLaunchFailure[1])) {
+      return `phase1.native-scenarios.launch.rpc-${nativeLaunchFailure[1].replaceAll('_', '-')}`;
+    }
+    if (message === 'native RPC timed out for cave_launch') {
+      return 'phase1.native-scenarios.launch.timeout';
+    }
+    if (message === 'native RPC closed before responding') {
+      return 'phase1.native-scenarios.launch.rpc-closed';
+    }
+    if (message === 'native RPC cave_read_discovery did not return cave_discovery_not_found') {
+      return 'phase1.native-scenarios.launch.initial-discovery';
+    }
+    const safetyProbeFailure =
+      /^native RPC initial unsafe follow-up probe ((?:profile|coven|cave)-(?:type|reparse|owner|owner-acl|owner-acl-unavailable|acl|missing|unavailable)|directories-safe|unknown)$/u.exec(
+        message,
+      );
+    if (safetyProbeFailure !== null) {
+      return `phase1.native-scenarios.launch.initial-unsafe-probe-${safetyProbeFailure[1]}`;
+    }
+    const initialDiscoveryFailure =
+      /^native RPC cave_read_discovery initial outcome (present|unavailable|unsafe|invalid|body-limit|service|unknown)$/u.exec(
+        message,
+      );
+    if (initialDiscoveryFailure !== null) {
+      return `phase1.native-scenarios.launch.initial-${initialDiscoveryFailure[1]}`;
+    }
+    if (message === 'native RPC did not discover the launched Cave') {
+      return 'phase1.native-scenarios.launch.discovery-timeout';
+    }
+
+    if (
+      message === 'native RPC timed out for cave_health' ||
+      /^native RPC cave_health failed with (invalid_request|unauthorized|scope_denied|not_found|conflict|rate_limited|pairing_denied|pairing_expired|incompatible_version|service_unavailable|reconcile_required|internal_error|invalid_response|timeout|stale_discovery_handle|invalid_native_response)$/u.test(
+        message,
+      )
+    ) {
+      return 'phase1.native-scenarios.launch.health';
+    }
+    if (message === 'launched Cave returned an invalid health envelope') {
+      return 'phase1.native-scenarios.launch.health-envelope';
+    }
+    if (message === 'native RPC timed out for cave_read_discovery') {
+      if (launchBoundary === 'initial-discovery') {
+        return 'phase1.native-scenarios.launch.initial-discovery-timeout';
+      }
+      if (launchBoundary === 'discovery') {
+        return 'phase1.native-scenarios.launch.discovery-rpc-timeout';
+      }
+    }
+    return launchFailureBoundaries.has(launchBoundary)
+      ? `phase1.native-scenarios.launch.${launchBoundary}-unknown`
+      : 'phase1.native-scenarios.launch.unknown';
+  }
+  if (stage === 'cleanup-grant') {
+    if (error === undefined) {
+      return 'phase1.native-scenarios.cleanup-grant';
+    }
+    const message =
+      error !== null &&
+      typeof error === 'object' &&
+      'message' in error &&
+      typeof error.message === 'string'
+        ? error.message
+        : '';
+    const rpcFailure =
+      /^native RPC conformance_issue_native_custody_cleanup failed with (cleanup_grant_service_unavailable|cleanup_grant_process_secret_unavailable|cleanup_grant_random_unavailable|cleanup_grant_marker_home_unavailable|cleanup_grant_marker_directory_unavailable|cleanup_grant_marker_directory_create_unavailable|cleanup_grant_marker_directory_open_unavailable|cleanup_grant_marker_directory_metadata_unavailable|cleanup_grant_marker_directory_trust_unavailable|cleanup_grant_marker_sync_unavailable|cleanup_grant_marker_identity_unavailable|cleanup_grant_marker_publish_unavailable|cleanup_grant_collision_exhausted|secure_store_unavailable|keychain_failure|cleanup_grant_rejected|invalid_native_input)$/u.exec(
+        message,
+      );
+    if (rpcFailure !== null) {
+      const category =
+        rpcFailure[1] === 'cleanup_grant_rejected'
+          ? rpcFailure[1]
+          : rpcFailure[1].replace(/^cleanup_grant_/u, '');
+      return `phase1.native-scenarios.cleanup-grant.${category.replaceAll('_', '-')}`;
+    }
+    if (message === 'native RPC timed out for conformance_issue_native_custody_cleanup') {
+      return 'phase1.native-scenarios.cleanup-grant.timeout';
+    }
+    if (message === 'native RPC closed before responding') {
+      return 'phase1.native-scenarios.cleanup-grant.process';
+    }
+    if (message === 'Native custody cleanup grant was not canonical.') {
+      return 'phase1.native-scenarios.cleanup-grant.response';
+    }
+    return 'phase1.native-scenarios.cleanup-grant.unknown';
+  }
+  if (stage === 'cleanup-custody') {
+    if (error === undefined) {
+      return 'phase1.native-scenarios.cleanup-custody';
+    }
+    const message =
+      error !== null &&
+      typeof error === 'object' &&
+      'message' in error &&
+      typeof error.message === 'string'
+        ? error.message
+        : '';
+    const cleanupBoundaryFailure =
+      /^native RPC conformance_cleanup_native_custody failed with cleanup_(backend_unavailable|lock_unavailable|lock_process_unavailable|lock_path_unavailable|lock_file_unavailable|lock_contended|installation_delete_unavailable|credential_delete_unavailable)$/u.exec(
+        message,
+      );
+    if (cleanupBoundaryFailure !== null) {
+      return `phase1.native-scenarios.cleanup-custody.${cleanupBoundaryFailure[1].replaceAll('_', '-')}`;
+    }
+    const rpcFailure =
+      /^native RPC conformance_cleanup_native_custody failed with (secure_store_unavailable|keychain_failure|cleanup_grant_rejected|invalid_native_input)$/u.exec(
+        message,
+      );
+    if (rpcFailure !== null) {
+      return `phase1.native-scenarios.cleanup-custody.${rpcFailure[1].replaceAll('_', '-')}`;
+    }
+    if (message === 'native RPC timed out for conformance_cleanup_native_custody') {
+      return 'phase1.native-scenarios.cleanup-custody.timeout';
+    }
+    if (message === 'native RPC closed before responding') {
+      return 'phase1.native-scenarios.cleanup-custody.process';
+    }
+    if (
+      /^Native custody cleanup did not prove an empty available [a-z0-9-]+ backend$/u.test(message)
+    ) {
+      return 'phase1.native-scenarios.cleanup-custody.proof';
+    }
+    return 'phase1.native-scenarios.cleanup-custody.unknown';
+  }
+  return schemaV2NativeFailureStages.has(stage)
+    ? `phase1.native-scenarios.${stage}`
+    : 'phase1.stage.native-scenarios.failed';
+}
+
+export function retainSchemaV2NativeFailure(existingFailure, stage, error, launchBoundary) {
+  return (
+    existingFailure ??
+    new Error(schemaV2NativeFailureDiagnostic(stage, error, launchBoundary), {
+      cause: error,
+    })
+  );
 }
 
 function requireString(value, label) {
@@ -929,9 +2539,8 @@ export function safeEnvironment(rootPath, extra = {}, resolvedCargoPath) {
     chmodSync(path, 0o700);
   }
 
-  const inheritedPath = process.env.PATH ?? '';
+  const inheritedPath = extra.PATH ?? process.env.PATH ?? '';
   const environment = {
-    PATH: inheritedPath ? `${rustToolchainBin}${delimiter}${inheritedPath}` : rustToolchainBin,
     LANG: process.env.LANG ?? 'C.UTF-8',
     LC_ALL: process.env.LC_ALL ?? '',
     HOME: home,
@@ -951,7 +2560,7 @@ export function safeEnvironment(rootPath, extra = {}, resolvedCargoPath) {
     CI: '1',
     NO_COLOR: '1',
     GIT_TERMINAL_PROMPT: '0',
-    GIT_CONFIG_GLOBAL: devNull,
+    GIT_CONFIG_GLOBAL: gitNullDevice,
     GIT_CONFIG_NOSYSTEM: '1',
     GIT_NO_REPLACE_OBJECTS: '1',
     GIT_NO_LAZY_FETCH: '1',
@@ -962,6 +2571,8 @@ export function safeEnvironment(rootPath, extra = {}, resolvedCargoPath) {
     https_proxy: '',
     all_proxy: '',
     ...extra,
+    // Supervisor PATH overrides must not restore Rustup shims ahead of the resolved toolchain.
+    PATH: inheritedPath ? `${rustToolchainBin}${delimiter}${inheritedPath}` : rustToolchainBin,
   };
   for (const name of ['SYSTEMROOT', 'WINDIR', 'COMSPEC', 'PATHEXT']) {
     if (process.env[name] !== undefined) {
@@ -971,6 +2582,35 @@ export function safeEnvironment(rootPath, extra = {}, resolvedCargoPath) {
   return environment;
 }
 
+export function nativeScenarioHomes(artifactRootPath, environment, platform = process.platform) {
+  const pathApi = platform === 'win32' ? windowsPath : { resolve };
+  if (platform !== 'win32') {
+    const isolatedHome = pathApi.resolve(artifactRootPath, 'native-authority-home');
+    const covenHome = pathApi.resolve(isolatedHome, 'coven');
+    return {
+      isolatedHome,
+      covenHome,
+      caveHome: pathApi.resolve(covenHome, 'cave'),
+    };
+  }
+  const profileRoot = environment.OPENCOVEN_WINDOWS_PROFILE_ROOT;
+  if (
+    typeof profileRoot !== 'string' ||
+    profileRoot.length === 0 ||
+    profileRoot.includes('\0') ||
+    !windowsPath.isAbsolute(profileRoot) ||
+    windowsPath.normalize(profileRoot) !== profileRoot
+  ) {
+    throw new Error('phase1.native-scenarios.profile-home');
+  }
+  const covenHome = windowsPath.join(profileRoot, '.coven');
+  return {
+    isolatedHome: profileRoot,
+    covenHome,
+    caveHome: windowsPath.join(covenHome, 'cave'),
+  };
+}
+
 function runCommand(
   artifactRoot,
   label,
@@ -978,8 +2618,14 @@ function runCommand(
   args,
   { cwd, env, timeoutMs = commandTimeoutMs } = {},
 ) {
+  const invocation =
+    command === 'pnpm'
+      ? pnpmInvocation(args, {
+          pnpmCli: (env ?? process.env).OPENCOVEN_WINDOWS_PNPM_CLI,
+        })
+      : { command, args };
   return new Promise((resolveRun, rejectRun) => {
-    const child = spawn(command, args, {
+    const child = spawn(invocation.command, invocation.args, {
       cwd,
       env,
       detached: ownedProcessGroupsSupported,
@@ -1034,8 +2680,15 @@ function runCommand(
         fail({ code: null, signal: 'SIGKILL', stdout: '', stderr: '', reason: 'tracking' });
       }
     });
-    child.once('error', () => {
-      fail({ code: null, signal: null, stdout: '', stderr: '', reason: 'spawn' });
+    child.once('error', (error) => {
+      fail({
+        code: null,
+        signal: null,
+        stdout: '',
+        stderr: '',
+        reason: 'spawn',
+        spawnCode: boundedSpawnErrorCodes.includes(error.code) ? error.code : undefined,
+      });
     });
     child.stdout.on('data', (chunk) => {
       stdoutBytes += chunk.length;
@@ -1100,6 +2753,115 @@ function runCommand(
   });
 }
 
+export function runSchemaV2CommandForTest(artifactRoot, command, args, options) {
+  return runCommand(artifactRoot, 'Schema-v2 test command', command, args, options);
+}
+
+const sdkObservationFiles = [
+  'cave-discovery-pairing',
+  'cave-canonical-reads',
+  'cave-hpke-bound-v1',
+  'cave-managed-native',
+  'cave-managed-native-staged',
+  'coven-discovery',
+  'health-validation',
+  'client-contract',
+  'native-secret-store',
+];
+
+function diagnoseSdkObservationReport(path, rootPath) {
+  let descriptor;
+  let report;
+  try {
+    const before = lstatSync(path);
+    if (before.isSymbolicLink() || !before.isFile()) return 'unsafe-file';
+    const limit = 4 * 1024 * 1024;
+    if (before.size > limit) return 'oversize';
+    descriptor = openSync(
+      path,
+      fsConstants.O_RDONLY | (fsConstants.O_NOFOLLOW ?? 0) | (fsConstants.O_NONBLOCK ?? 0),
+    );
+    const opened = fstatSync(descriptor);
+    if (!opened.isFile() || before.dev !== opened.dev || before.ino !== opened.ino) {
+      return 'unsafe-file';
+    }
+    if (opened.size > limit) return 'oversize';
+    const bytes = Buffer.alloc(limit + 1);
+    let count = 0;
+    while (count < bytes.length) {
+      const read = readSync(descriptor, bytes, count, bytes.length - count, null);
+      if (read === 0) break;
+      count += read;
+    }
+    if (count > limit) return 'oversize';
+    try {
+      report = JSON.parse(bytes.subarray(0, count).toString('utf8'));
+    } catch {
+      return 'invalid-json';
+    }
+  } catch (error) {
+    return error?.code === 'ENOENT' ? 'missing' : 'unreadable';
+  } finally {
+    if (descriptor !== undefined) closeSync(descriptor);
+  }
+  if (
+    !report ||
+    typeof report !== 'object' ||
+    Array.isArray(report) ||
+    typeof report.success !== 'boolean' ||
+    !Array.isArray(report.testResults)
+  )
+    return 'malformed';
+  if (report.testResults.length === 0) return 'empty';
+  if (
+    report.testResults.some(
+      (file) =>
+        !file ||
+        typeof file !== 'object' ||
+        typeof file.name !== 'string' ||
+        !Array.isArray(file.assertionResults) ||
+        typeof file.status !== 'string',
+    )
+  )
+    return 'malformed';
+  const normalize = (value) => value.replaceAll('\\', '/');
+  for (const id of sdkObservationFiles) {
+    const expected = normalize(resolve(rootPath, `tests/${id}.spec.ts`));
+    if (
+      report.testResults.some(
+        (file) =>
+          normalize(file.name) === expected &&
+          (file.status === 'failed' || file.assertionResults.some((a) => a?.status === 'failed')),
+      )
+    ) {
+      return `failed.${id}`;
+    }
+  }
+  return report.success ? 'claims-success' : 'not-successful';
+}
+
+export function classifySdkObservationFailure(error, reportPath, rootPath) {
+  let prefix = 'report';
+  if (error instanceof CommandExecutionError) {
+    const { reason, signal, code, spawnCode } = error.result ?? {};
+    if (reason === 'spawn') {
+      return boundedSpawnErrorCodes.includes(spawnCode)
+        ? `command.spawn.${spawnCode.toLowerCase()}`
+        : 'command.spawn';
+    }
+    if (reason === 'tracking' || reason === 'timeout') return `command.${reason}`;
+    if (reason === 'stdout-limit' || reason === 'stderr-limit') return 'command.output-limit';
+    if (signal) return 'command.signal';
+    if (reason || !Number.isInteger(code) || code === 0) return 'unknown';
+    prefix = 'command.nonzero.report';
+  }
+  try {
+    return `${prefix}.${diagnoseSdkObservationReport(reportPath, rootPath)}`;
+  } catch {
+    return `${prefix}.unreadable`;
+  }
+}
+
 function parseVitestObservationReport(path, label) {
   const stats = lstatSync(path);
   if (stats.isSymbolicLink() || !stats.isFile() || stats.size > 4 * 1024 * 1024) {
@@ -1132,35 +2894,36 @@ function parseVitestObservationReport(path, label) {
   return passed;
 }
 
-async function runVitestObservationSuite({
-  artifactRoot,
-  rootPath,
-  environment,
-  label,
-  files,
-  outputName,
-}) {
+export async function runVitestObservationSuite(
+  { artifactRoot, rootPath, environment, label, files, outputName },
+  executeCommand = runCommand,
+) {
   const outputPath = resolve(artifactRoot.rootPath, outputName);
-  await runCommand(
-    artifactRoot,
-    label,
-    'corepack',
-    [
-      'pnpm@10.34.0',
-      '--ignore-workspace',
-      'exec',
-      'vitest',
-      'run',
-      ...files,
-      '--reporter=json',
-      `--outputFile=${outputPath}`,
-    ],
-    {
-      cwd: rootPath,
-      env: environment,
-    },
-  );
-  return parseVitestObservationReport(outputPath, label);
+  try {
+    await executeCommand(
+      artifactRoot,
+      label,
+      'pnpm',
+      [
+        '--ignore-workspace',
+        'exec',
+        'vitest',
+        'run',
+        ...files,
+        '--reporter=json',
+        `--outputFile=${outputPath}`,
+      ],
+      {
+        cwd: rootPath,
+        env: environment,
+      },
+    );
+    return parseVitestObservationReport(outputPath, label);
+  } catch (error) {
+    if (label !== 'SDK schema-v2 observation tests') throw error;
+    const category = classifySdkObservationFailure(error, outputPath, rootPath);
+    throw new Error(`phase1.runtime-observations.sdk-tests.${category}`, { cause: error });
+  }
 }
 
 function parseCargoPassedTests(output) {
@@ -1222,13 +2985,19 @@ export function normalizeSchemaV2ObservationTests(value) {
   });
 }
 
-export async function runSchemaV2ObservationSuites(artifactRoot, roots, environment, platform) {
+export async function runSchemaV2ObservationSuites(
+  artifactRoot,
+  roots,
+  environment,
+  platform,
+  onStage = () => {},
+) {
   const shortRoot =
     process.platform === 'win32'
       ? undefined
       : createProcessOwnedArtifactRoot({ prefix: 'p1ot', shortPath: true });
   const observationEnvironment = {
-    ...environment,
+    ...schemaV2NativeBuildEnvironment(environment),
     CARGO_TARGET_DIR: resolve(artifactRoot.rootPath, 'build', 'observation-target'),
   };
   const testEnvironment =
@@ -1240,9 +3009,14 @@ export async function runSchemaV2ObservationSuites(artifactRoot, roots, environm
           TMP: shortRoot.rootPath,
           TEMP: shortRoot.rootPath,
         };
+  let observations;
+  let observationFailure;
   try {
+    onStage('phase1.runtime-observations.sdk-install.failed');
     await installPnpm(artifactRoot, roots.sdkRoot, environment, 'SDK observation');
+    onStage('phase1.runtime-observations.chat-install.failed');
     await installPnpm(artifactRoot, roots.producerRoot, environment, 'Chat observation');
+    onStage('phase1.runtime-observations.sdk-tests.failed');
     const sdkTests = await runVitestObservationSuite({
       artifactRoot,
       rootPath: roots.sdkRoot,
@@ -1261,6 +3035,7 @@ export async function runSchemaV2ObservationSuites(artifactRoot, roots, environm
       ],
       outputName: 'sdk-observation-tests.json',
     });
+    onStage('phase1.runtime-observations.chat-tests.failed');
     const chatTests = await runVitestObservationSuite({
       artifactRoot,
       rootPath: roots.producerRoot,
@@ -1283,6 +3058,7 @@ export async function runSchemaV2ObservationSuites(artifactRoot, roots, environm
       'phase1-conformance',
       '--lib',
     ];
+    onStage('phase1.runtime-observations.chat-rust-tests.failed');
     const chatRustTests = await runExactCargoObservationTests({
       artifactRoot,
       rootPath: roots.producerRoot,
@@ -1299,6 +3075,7 @@ export async function runSchemaV2ObservationSuites(artifactRoot, roots, environm
         },
       ],
     });
+    onStage('phase1.runtime-observations.coven-rust-tests.failed');
     const covenLibraryTests =
       platform === 'win32-x64'
         ? [
@@ -1336,17 +3113,35 @@ export async function runSchemaV2ObservationSuites(artifactRoot, roots, environm
             ]),
       ],
     });
-    return normalizeSchemaV2ObservationTests({
+    observations = normalizeSchemaV2ObservationTests({
       sdk: sdkTests,
       chat: chatTests,
       chatRust: chatRustTests,
       covenRust: covenRustTests,
     });
-  } finally {
-    if (shortRoot !== undefined) {
+  } catch (error) {
+    observationFailure = error;
+  }
+  if (shortRoot !== undefined) {
+    if (observationFailure === undefined) {
+      onStage('phase1.runtime-observations.cleanup.failed');
+    }
+    try {
       await shortRoot.cleanup();
+    } catch (cleanupError) {
+      if (observationFailure !== undefined) {
+        throw new AggregateError(
+          [observationFailure, cleanupError],
+          'Schema-v2 observation suite and temporary-root cleanup failed.',
+        );
+      }
+      throw cleanupError;
     }
   }
+  if (observationFailure !== undefined) {
+    throw observationFailure;
+  }
+  return observations;
 }
 
 function sha256File(path) {
@@ -1375,18 +3170,37 @@ function resolveOperatorHomes() {
   return { caveHome, covenHome };
 }
 
-async function collectToolchainMetadata(artifactRoot, environment, expected) {
+export function pnpmInvocation(
+  args,
+  {
+    platform = process.platform,
+    nodePath = process.execPath,
+    pnpmCli = process.env.OPENCOVEN_WINDOWS_PNPM_CLI,
+  } = {},
+) {
+  return platform === 'win32'
+    ? { command: nodePath, args: [pnpmCli, ...args] }
+    : { command: 'pnpm', args };
+}
+
+async function collectToolchainMetadata(artifactRoot, environment, expected, toolchainRoot) {
+  const pnpmCommand = pnpmInvocation(['--version'], {
+    pnpmCli: environment.OPENCOVEN_WINDOWS_PNPM_CLI,
+  });
   const pnpm = await runCommand(
     artifactRoot,
     'pnpm version verification',
-    'corepack',
-    ['pnpm@10.34.0', '--version'],
+    pnpmCommand.command,
+    pnpmCommand.args,
     {
       cwd: projectRoot,
       env: environment,
       timeoutMs: 30_000,
     },
   );
+  const tauriCommand = pnpmInvocation(['--ignore-workspace', 'exec', 'tauri', '--version'], {
+    pnpmCli: environment.OPENCOVEN_WINDOWS_PNPM_CLI,
+  });
   const rust = await runCommand(artifactRoot, 'Rust version verification', 'rustc', ['--version'], {
     cwd: projectRoot,
     env: environment,
@@ -1395,10 +3209,10 @@ async function collectToolchainMetadata(artifactRoot, environment, expected) {
   const tauri = await runCommand(
     artifactRoot,
     'Tauri version verification',
-    'corepack',
-    ['pnpm@10.34.0', '--ignore-workspace', 'exec', 'tauri', '--version'],
+    tauriCommand.command,
+    tauriCommand.args,
     {
-      cwd: projectRoot,
+      cwd: toolchainRoot,
       env: environment,
       timeoutMs: 30_000,
     },
@@ -1456,6 +3270,10 @@ export async function cloneExactCheckout({
     typeof sourceRoot === 'string' && existsSync(sourceRoot) && statSync(sourceRoot).isDirectory()
       ? sourceRoot
       : undefined;
+  const localSourceSafeDirectory =
+    localSource === undefined ? undefined : realpathSync(localSource);
+  const localGitDirectory =
+    localSource === undefined ? undefined : resolveLocalGitDirectory(localSource);
   const source = localSource ?? `https://github.com/${repository}.git`;
   const checkoutEnvironment = createGitCheckoutEnvironment(environment);
   if (localSource !== undefined) {
@@ -1467,7 +3285,9 @@ export async function cloneExactCheckout({
         '-c',
         `core.hooksPath=${devNull}`,
         '-c',
-        `safe.directory=${localSource}`,
+        `safe.directory=${toGitSafeDirectoryPath(localSourceSafeDirectory)}`,
+        '-c',
+        `safe.directory=${toGitSafeDirectoryPath(localGitDirectory)}`,
         'clone',
         '--local',
         '--no-hardlinks',
@@ -1479,7 +3299,6 @@ export async function cloneExactCheckout({
       {
         cwd: projectRoot,
         env: {
-          ...environment,
           ...checkoutEnvironment,
           GIT_ALLOW_PROTOCOL: 'file',
         },
@@ -1494,10 +3313,7 @@ export async function cloneExactCheckout({
       ['-c', `core.hooksPath=${devNull}`, 'init', '--quiet'],
       {
         cwd: destinationRoot,
-        env: {
-          ...environment,
-          ...checkoutEnvironment,
-        },
+        env: checkoutEnvironment,
       },
     );
     await runCommand(
@@ -1507,10 +3323,7 @@ export async function cloneExactCheckout({
       ['-c', `core.hooksPath=${devNull}`, 'remote', 'add', 'origin', source],
       {
         cwd: destinationRoot,
-        env: {
-          ...environment,
-          ...checkoutEnvironment,
-        },
+        env: checkoutEnvironment,
       },
     );
     await runCommand(
@@ -1534,7 +3347,6 @@ export async function cloneExactCheckout({
       {
         cwd: destinationRoot,
         env: {
-          ...environment,
           ...checkoutEnvironment,
           GIT_ALLOW_PROTOCOL: 'https',
         },
@@ -1553,7 +3365,7 @@ export async function cloneExactCheckout({
       '--force',
       localSource === undefined ? 'FETCH_HEAD' : revision,
     ],
-    { cwd: destinationRoot, env: { ...environment, ...checkoutEnvironment } },
+    { cwd: destinationRoot, env: checkoutEnvironment },
   );
 }
 
@@ -1562,7 +3374,14 @@ export function readSchemaV2ProducerIdentity(sourceRoot) {
   const run = (value) =>
     execFileSync(
       'git',
-      ['-c', `safe.directory=${sourceRoot}`, '-C', sourceRoot, 'rev-parse', value],
+      [
+        '-c',
+        `safe.directory=${toGitSafeDirectoryPath(sourceRoot)}`,
+        '-C',
+        sourceRoot,
+        'rev-parse',
+        value,
+      ],
       {
         encoding: 'utf8',
         env: environment,
@@ -1642,67 +3461,84 @@ async function createExactCheckouts(artifactRoot, options, lock, environment) {
     caveRoot: resolve(checkoutsRoot, 'cave'),
     covenRoot: resolve(checkoutsRoot, 'coven'),
   };
-  await cloneExactCheckout({
-    artifactRoot,
-    sourceRoot: options.chatSourceRoot,
-    destinationRoot: roots.chatRoot,
-    repository: lock.chat.repository,
-    revision: lock.chat.revision,
-    environment,
-    label: 'Chat',
+  await runSchemaV2StageAsync('phase1.stage.checkouts.chat.failed', () =>
+    cloneExactCheckout({
+      artifactRoot,
+      sourceRoot: options.chatSourceRoot,
+      destinationRoot: roots.chatRoot,
+      repository: lock.chat.repository,
+      revision: lock.chat.revision,
+      environment,
+      label: 'Chat',
+    }),
+  );
+  await runSchemaV2StageAsync('phase1.stage.checkouts.sdk.failed', () =>
+    cloneExactCheckout({
+      artifactRoot,
+      sourceRoot: options.sdkSourceRoot,
+      destinationRoot: roots.sdkRoot,
+      repository: lock.sdk.repository,
+      revision: lock.sdk.revision,
+      environment,
+      label: 'SDK',
+    }),
+  );
+  await runSchemaV2StageAsync('phase1.stage.checkouts.cave.failed', () =>
+    cloneExactCheckout({
+      artifactRoot,
+      sourceRoot: options.caveSourceRoot,
+      destinationRoot: roots.caveRoot,
+      repository: lock.cave.repository,
+      revision: lock.cave.revision,
+      environment,
+      label: 'Cave',
+    }),
+  );
+  await runSchemaV2StageAsync('phase1.stage.checkouts.coven.failed', () =>
+    cloneExactCheckout({
+      artifactRoot,
+      sourceRoot: options.covenSourceRoot,
+      destinationRoot: roots.covenRoot,
+      repository: lock.coven.repository,
+      revision: lock.coven.revision,
+      environment,
+      label: 'Coven',
+    }),
+  );
+  runSchemaV2PreflightStage('phase1.stage.checkouts.integrity.failed', () => {
+    assertCleanPhase1Checkouts(roots);
+    assertPhase1CheckoutHeads(lock, roots);
   });
-  await cloneExactCheckout({
-    artifactRoot,
-    sourceRoot: options.sdkSourceRoot,
-    destinationRoot: roots.sdkRoot,
-    repository: lock.sdk.repository,
-    revision: lock.sdk.revision,
-    environment,
-    label: 'SDK',
-  });
-  await cloneExactCheckout({
-    artifactRoot,
-    sourceRoot: options.caveSourceRoot,
-    destinationRoot: roots.caveRoot,
-    repository: lock.cave.repository,
-    revision: lock.cave.revision,
-    environment,
-    label: 'Cave',
-  });
-  await cloneExactCheckout({
-    artifactRoot,
-    sourceRoot: options.covenSourceRoot,
-    destinationRoot: roots.covenRoot,
-    repository: lock.coven.repository,
-    revision: lock.coven.revision,
-    environment,
-    label: 'Coven',
-  });
-  assertCleanPhase1Checkouts(roots);
-  assertPhase1CheckoutHeads(lock, roots);
   if (options.platform !== undefined) {
     roots.validatorRoot = resolve(checkoutsRoot, 'validator');
-    await cloneExactCheckout({
-      artifactRoot,
-      sourceRoot: options.sdkValidatorSourceRoot,
-      destinationRoot: roots.validatorRoot,
-      repository: 'OpenCoven/sdk',
-      revision: options.validatorRevision,
-      environment,
-      label: 'SDK validator',
-    });
-    assertCleanPhase1Checkout(roots.validatorRoot, 'SDK validator checkout');
-    const validatorIdentity = readPhase1CheckoutIdentity(
-      roots.validatorRoot,
-      'SDK validator checkout',
+    roots.validatorIdentity = await runSchemaV2StageAsync(
+      'phase1.stage.checkouts.validator.failed',
+      async () => {
+        await cloneExactCheckout({
+          artifactRoot,
+          sourceRoot: options.sdkValidatorSourceRoot,
+          destinationRoot: roots.validatorRoot,
+          repository: 'OpenCoven/sdk',
+          revision: options.validatorRevision,
+          environment,
+          label: 'SDK validator',
+        });
+        assertCleanPhase1Checkout(roots.validatorRoot, 'SDK validator checkout');
+        const validatorIdentity = readPhase1CheckoutIdentity(
+          roots.validatorRoot,
+          'SDK validator checkout',
+        );
+        if (validatorIdentity.revision !== options.validatorRevision) {
+          throw new Error('SDK validator checkout does not match the selected revision.');
+        }
+        return validatorIdentity;
+      },
     );
-    if (validatorIdentity.revision !== options.validatorRevision) {
-      throw new Error('SDK validator checkout does not match the selected revision.');
-    }
-    roots.validatorIdentity = validatorIdentity;
     Object.assign(
       roots,
-      await cloneProducerCheckout(artifactRoot, options.chatSourceRoot, environment),
+      await runSchemaV2StageAsync('phase1.stage.checkouts.producer.failed', () =>
+        cloneProducerCheckout(artifactRoot, options.chatSourceRoot, environment),
+      ),
     );
   }
   return roots;
@@ -1712,77 +3548,117 @@ async function installPnpm(artifactRoot, rootPath, environment, label) {
   await runCommand(
     artifactRoot,
     `${label} dependency install`,
-    'corepack',
-    [
-      'pnpm@10.34.0',
-      'install',
-      '--frozen-lockfile',
-      `--config.store-dir=${environment.PNPM_STORE_DIR}`,
-    ],
+    'pnpm',
+    ['install', '--frozen-lockfile', `--config.store-dir=${environment.PNPM_STORE_DIR}`],
     { cwd: rootPath, env: environment },
   );
 }
 
-async function packageLockedArtifacts(artifactRoot, roots, environment, { schemaV2 = false } = {}) {
+async function packageLockedArtifacts(
+  artifactRoot,
+  roots,
+  environment,
+  { schemaV2 = false, onStage = () => {} } = {},
+) {
   let packedConsumerObservations;
   if (schemaV2) {
+    onStage('phase1.packaging.frozen-consumer.failed');
     const verifierPath = resolve(artifactRoot.rootPath, 'verify-frozen-consumer.mjs');
     const verifierResultPath = resolve(artifactRoot.rootPath, 'verify-frozen-consumer-result.json');
+    const verifierFailurePath = resolve(
+      artifactRoot.rootPath,
+      'verify-frozen-consumer-failure.json',
+    );
     writeFileSync(
       verifierPath,
       [
         `import { writeFileSync } from 'node:fs';`,
-        `import { verifyFrozenPackedConsumer } from ${JSON.stringify(
+        `import { FROZEN_PACKED_CONSUMER_STAGES, verifyFrozenPackedConsumer } from ${JSON.stringify(
           pathToFileURL(resolve(projectRoot, 'scripts', 'contract-canary.mjs')).href,
         )};`,
-        `const result = verifyFrozenPackedConsumer(${JSON.stringify({
+        `let activeStage = FROZEN_PACKED_CONSUMER_STAGES[0];`,
+        `try {`,
+        `  const result = verifyFrozenPackedConsumer({`,
+        `    ...${JSON.stringify({
           chatRoot: roots.producerRoot,
           sdkRoot: roots.sdkRoot,
           caveRoot: roots.caveRoot,
-        })});`,
-        `writeFileSync(${JSON.stringify(verifierResultPath)}, JSON.stringify(result));`,
+        })},`,
+        `    onStage(stage) {`,
+        `      if (!FROZEN_PACKED_CONSUMER_STAGES.includes(stage)) {`,
+        `        throw new Error('Frozen packed consumer reported an unknown stage.');`,
+        `      }`,
+        `      activeStage = stage;`,
+        `    },`,
+        `  });`,
+        `  writeFileSync(${JSON.stringify(verifierResultPath)}, JSON.stringify(result));`,
+        `} catch (error) {`,
+        `  writeFileSync(${JSON.stringify(
+          verifierFailurePath,
+        )}, JSON.stringify({ stage: activeStage }));`,
+        `  throw error;`,
+        `}`,
         '',
       ].join('\n'),
       { mode: 0o600 },
     );
-    await runCommand(
-      artifactRoot,
-      'Frozen packed SDK consumer verification',
-      process.execPath,
-      [verifierPath],
-      {
-        cwd: projectRoot,
-        env: environment,
-        timeoutMs: commandTimeoutMs,
-      },
-    );
+    try {
+      await runCommand(
+        artifactRoot,
+        'Frozen packed SDK consumer verification',
+        process.execPath,
+        [verifierPath],
+        {
+          cwd: projectRoot,
+          env: environment,
+          timeoutMs: commandTimeoutMs,
+        },
+      );
+    } catch (cause) {
+      let failure;
+      try {
+        failure = JSON.parse(readFileSync(verifierFailurePath, 'utf8'));
+      } catch {
+        throw cause;
+      }
+      if (
+        failure === null ||
+        typeof failure !== 'object' ||
+        Array.isArray(failure) ||
+        Object.keys(failure).length !== 1 ||
+        !FROZEN_PACKED_CONSUMER_STAGES.includes(failure.stage)
+      ) {
+        throw cause;
+      }
+      throw new Error(`phase1.packaging.frozen-consumer.${failure.stage}.failed`, { cause });
+    }
     packedConsumerObservations = JSON.parse(
       readFileSync(verifierResultPath, 'utf8'),
     ).observedAssertions;
   }
+  onStage('phase1.packaging.cave-install.failed');
   await installPnpm(artifactRoot, roots.caveRoot, environment, 'Cave');
-  await runCommand(
-    artifactRoot,
-    'Cave conformance package',
-    'corepack',
-    ['pnpm@10.34.0', 'build:conformance'],
-    {
+  onStage('phase1.packaging.cave-build.failed');
+  await retryCaveBuildOnceOnFontFetch(() =>
+    runCommand(artifactRoot, 'Cave conformance package', 'pnpm', ['build'], {
       cwd: roots.caveRoot,
-      env: environment,
-    },
+      env: schemaV2CaveBuildEnvironment(environment),
+    }),
   );
 
+  onStage('phase1.packaging.chat-install.failed');
   await installPnpm(artifactRoot, roots.chatRoot, environment, 'Chat');
-  await runCommand(artifactRoot, 'Chat web package', 'corepack', ['pnpm@10.34.0', 'build'], {
+  onStage('phase1.packaging.chat-web-build.failed');
+  await runCommand(artifactRoot, 'Chat web package', 'pnpm', ['build'], {
     cwd: roots.chatRoot,
     env: environment,
   });
 
   const packageNames = {
-    core: 'sdk-core-0.1.0.tgz',
-    cave: 'cave-client-0.1.0.tgz',
-    coven: 'coven-client-0.1.0.tgz',
-    sdk: 'sdk-0.1.0.tgz',
+    core: 'sdk-core-0.0.1.tgz',
+    cave: 'cave-client-0.0.1.tgz',
+    coven: 'coven-client-0.0.1.tgz',
+    sdk: 'sdk-0.0.1.tgz',
   };
   const frozenTarballs = Object.fromEntries(
     Object.entries(packageNames).map(([key, name]) => [
@@ -1844,6 +3720,10 @@ async function packageLockedArtifacts(artifactRoot, roots, environment, { schema
     );
   }
 
+  const nativeBuildEnvironment = schemaV2
+    ? schemaV2NativeBuildEnvironment(environment)
+    : environment;
+  onStage('phase1.packaging.chat-native-build.failed');
   const chatTarget = resolve(artifactRoot.rootPath, 'build', 'chat-target');
   mkdirSync(chatTarget, { recursive: true, mode: 0o700 });
   await runCommand(
@@ -1862,11 +3742,23 @@ async function packageLockedArtifacts(artifactRoot, roots, environment, { schema
     ],
     {
       cwd: schemaV2 ? roots.producerRoot : roots.chatRoot,
-      env: { ...environment, CARGO_TARGET_DIR: chatTarget },
+      env: { ...nativeBuildEnvironment, CARGO_TARGET_DIR: chatTarget },
       timeoutMs: cargoBuildTimeoutMs,
     },
   );
+  const executableSuffix = process.platform === 'win32' ? '.exe' : '';
+  const nativeBinRoot = resolve(artifactRoot.rootPath, 'bin');
+  mkdirSync(nativeBinRoot, { recursive: true, mode: 0o700 });
+  const nativeRpcPath = resolve(nativeBinRoot, `phase1-native-rpc${executableSuffix}`);
+  const builtNativeRpcPath = resolve(chatTarget, 'debug', `phase1-native-rpc${executableSuffix}`);
+  const nativeRpcStats = lstatSync(builtNativeRpcPath);
+  if (nativeRpcStats.isSymbolicLink() || !nativeRpcStats.isFile()) {
+    throw new Error('Chat native RPC package is not a regular file.');
+  }
+  renameSync(builtNativeRpcPath, nativeRpcPath);
+  rmSync(chatTarget, { recursive: true });
 
+  onStage('phase1.packaging.coven-build.failed');
   const covenTarget = resolve(artifactRoot.rootPath, 'build', 'coven-target');
   mkdirSync(covenTarget, { recursive: true, mode: 0o700 });
   await runCommand(
@@ -1876,14 +3768,21 @@ async function packageLockedArtifacts(artifactRoot, roots, environment, { schema
     ['build', '--locked', '--package', 'coven-cli', '--bin', 'coven'],
     {
       cwd: roots.covenRoot,
-      env: { ...environment, CARGO_TARGET_DIR: covenTarget },
+      env: { ...nativeBuildEnvironment, CARGO_TARGET_DIR: covenTarget },
       timeoutMs: cargoBuildTimeoutMs,
     },
   );
 
-  const executableSuffix = process.platform === 'win32' ? '.exe' : '';
-  const nativeRpcPath = resolve(chatTarget, 'debug', `phase1-native-rpc${executableSuffix}`);
-  const covenBinaryPath = resolve(covenTarget, 'debug', `coven${executableSuffix}`);
+  const covenBinaryPath = resolve(nativeBinRoot, `coven${executableSuffix}`);
+  const builtCovenBinaryPath = resolve(covenTarget, 'debug', `coven${executableSuffix}`);
+  const covenBinaryStats = lstatSync(builtCovenBinaryPath);
+  if (covenBinaryStats.isSymbolicLink() || !covenBinaryStats.isFile()) {
+    throw new Error('Coven CLI package is not a regular file.');
+  }
+  renameSync(builtCovenBinaryPath, covenBinaryPath);
+  rmSync(covenTarget, { recursive: true });
+
+  onStage('phase1.packaging.outputs.failed');
   for (const [label, path] of [
     ['Chat native RPC', nativeRpcPath],
     ['Coven CLI', covenBinaryPath],
@@ -1911,6 +3810,20 @@ async function packageLockedArtifacts(artifactRoot, roots, environment, { schema
   };
 }
 
+export function readCaveAuthorityRecord(path) {
+  let text;
+  try {
+    text = readFileSync(path, 'utf8');
+  } catch (error) {
+    throw new Error('phase1.cave-authority.record.read', { cause: error });
+  }
+  try {
+    return JSON.parse(text);
+  } catch (error) {
+    throw new Error('phase1.cave-authority.record.invalid', { cause: error });
+  }
+}
+
 async function runCaveAuthorityMatrix(artifactRoot, caveRoot, environment) {
   const caveRecordPath = resolve(artifactRoot.rootPath, 'cave-authority-record.json');
   const result = await runCommand(
@@ -1926,13 +3839,19 @@ async function runCaveAuthorityMatrix(artifactRoot, caveRoot, environment) {
     ],
     {
       cwd: caveRoot,
-      env: environment,
+      env: caveAuthorityEnvironment(environment),
       timeoutMs: caveConformanceTimeoutMs,
     },
   );
-  const caveRecord = JSON.parse(readFileSync(caveRecordPath, 'utf8'));
+  const caveRecord = readCaveAuthorityRecord(caveRecordPath);
+  let assertions;
+  try {
+    assertions = parseCaveConformanceOutput(result.stdout);
+  } catch (error) {
+    throw new Error('phase1.cave-authority.output.invalid', { cause: error });
+  }
   return {
-    assertions: parseCaveConformanceOutput(result.stdout),
+    assertions,
     caveRecord,
   };
 }
@@ -2311,7 +4230,12 @@ function writeNativeFixture(caveHome, covenHome, daemonUrl) {
   }
 }
 
-export async function triggerAndWaitForChildClose(child, trigger, timeoutMs = rpcTimeoutMs) {
+export async function triggerAndWaitForChildClose(
+  child,
+  trigger,
+  timeoutMs = rpcTimeoutMs,
+  acceptedExitCode = 0,
+) {
   const closed = once(child, 'close');
   await trigger();
   let timer;
@@ -2322,7 +4246,7 @@ export async function triggerAndWaitForChildClose(child, trigger, timeoutMs = rp
         timer = setTimeout(() => rejectTimeout(new Error('child shutdown timed out')), timeoutMs);
       }),
     ]);
-    assertSuccessfulChildExit(code, signal);
+    assertSuccessfulChildExit(code, signal, acceptedExitCode);
   } finally {
     if (timer !== undefined) {
       clearTimeout(timer);
@@ -2330,8 +4254,18 @@ export async function triggerAndWaitForChildClose(child, trigger, timeoutMs = rp
   }
 }
 
-function assertSuccessfulChildExit(code, signal) {
-  if (code !== 0 || signal !== null) {
+// On Windows, `coven daemon stop` verifies the daemon's identity and then ends
+// it with TerminateProcess(handle, 1) (coven-client transport/windows.rs at the
+// frozen Coven revision), so a daemon stopped that way always exits with 1. On
+// Unix the same command performs an authenticated graceful shutdown and the
+// daemon exits with 0. Requiring 0 everywhere failed the Coven same-user
+// identity assertion on every Windows run at its `result` stage
+// (OpenCoven/chat#219). The code is accepted only as the result of that
+// command having succeeded, and no other nonzero code is.
+export const covenVerifiedStopExitCode = process.platform === 'win32' ? 1 : 0;
+
+function assertSuccessfulChildExit(code, signal, acceptedExitCode = 0) {
+  if (code !== acceptedExitCode || signal !== null) {
     throw new Error(
       signal === null
         ? `child shutdown failed with exit code ${code}`
@@ -2340,15 +4274,156 @@ function assertSuccessfulChildExit(code, signal) {
   }
 }
 
+function createCavePublicationObservation(requestId) {
+  const limit = 8 * 1024;
+  const maximumLineBytes = 256;
+  let observedBytes = 0;
+  let pending = Buffer.alloc(0);
+  let lineOverflow = false;
+  let lineWithinLimit = true;
+  let accepted;
+  let completed;
+  const checkpoint = `[chat] native launch stderr checkpoint: ${createHash('sha256').update(requestId).digest('hex')}`;
+  const result = () => {
+    if (completed === undefined) return undefined;
+    if (completed === 'drain-timeout' || completed === 'drain-unavailable') return completed;
+    return accepted ?? (observedBytes > limit ? 'output-limit' : completed);
+  };
+  const appendPending = (bytes) => {
+    if (bytes.length === 0) return;
+    if (pending.length + bytes.length <= maximumLineBytes) {
+      pending = Buffer.concat([pending, bytes]);
+      return;
+    }
+    lineOverflow = true;
+    if (bytes.length >= maximumLineBytes) {
+      pending = bytes.subarray(bytes.length - maximumLineBytes);
+      return;
+    }
+    pending = Buffer.concat([
+      pending.subarray(pending.length - (maximumLineBytes - bytes.length)),
+      bytes,
+    ]);
+  };
+  return {
+    observe(chunk) {
+      if (completed !== undefined) return Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+      const bytes = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+      let remaining = Math.max(0, limit - observedBytes);
+      let offset = 0;
+      while (offset < bytes.length) {
+        const newline = bytes.indexOf(10, offset);
+        if (newline === -1) {
+          const trailing = bytes.subarray(offset);
+          appendPending(trailing);
+          if (trailing.length > remaining) lineWithinLimit = false;
+          observedBytes = Math.min(limit + 1, observedBytes + trailing.length);
+          break;
+        }
+        const lineBytes = bytes.subarray(offset, newline);
+        appendPending(lineBytes);
+        if (lineBytes.length > remaining) lineWithinLimit = false;
+        observedBytes = Math.min(limit + 1, observedBytes + lineBytes.length);
+        remaining = Math.max(0, limit - observedBytes);
+        if (remaining === 0) {
+          lineWithinLimit = false;
+        } else {
+          observedBytes = Math.min(limit + 1, observedBytes + 1);
+          remaining -= 1;
+        }
+        const line = pending.toString('utf8').replace(/\r$/u, '');
+        pending = Buffer.alloc(0);
+        // A checkpoint can follow an unterminated private line; it must not turn
+        // that prefix into a complete publisher refusal.
+        if (line.endsWith(checkpoint)) {
+          completed = 'not-observed';
+          lineOverflow = false;
+          lineWithinLimit = true;
+          return bytes.subarray(newline + 1);
+        }
+        if (!lineOverflow && lineWithinLimit && accepted === undefined) {
+          const match = /^\[cave\] client-v1 discovery publication refused: ([a-z-]+)$/u.exec(line);
+          if (match !== null && cavePublisherCodes.has(match[1])) {
+            accepted = match[1];
+          }
+        }
+        lineOverflow = false;
+        lineWithinLimit = true;
+        offset = newline + 1;
+      }
+      return Buffer.alloc(0);
+    },
+    finish(reason) {
+      if (completed === undefined) completed = reason;
+      pending = Buffer.alloc(0);
+      lineOverflow = false;
+      lineWithinLimit = true;
+    },
+    result,
+    closed() {
+      return completed !== undefined;
+    },
+  };
+}
+
 export class NativeRpcClient {
-  constructor(child, { shutdownTimeoutMs = rpcTimeoutMs } = {}) {
+  constructor(
+    child,
+    {
+      shutdownTimeoutMs = rpcTimeoutMs,
+      requestTimeoutMs = rpcTimeoutMs,
+      caveLaunchTimeoutMs = caveLaunchRpcTimeoutMs,
+    } = {},
+  ) {
     this.child = child;
     this.shutdownTimeoutMs = shutdownTimeoutMs;
+    this.requestTimeoutMs = requestTimeoutMs;
+    this.caveLaunchTimeoutMs = caveLaunchTimeoutMs;
+    this.closed = child.exitCode != null || child.signalCode != null;
     this.pending = new Map();
+    this.launchPublications = [];
+    this.launchPublicationFailure = undefined;
     this.commandCounts = new Map();
     this.secretFreeResponses = true;
     this.sequence = 0;
     this.buffer = '';
+    this.stderrCompletion = child.stderr
+      ? child.stderr.readableEnded
+        ? 'not-observed'
+        : child.stderr.destroyed
+          ? 'drain-unavailable'
+          : undefined
+      : 'drain-unavailable';
+    // Drain all stderr, retaining only bounded, complete publisher refusal categories.
+    child.stderr?.on('data', (chunk) => {
+      let remaining = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+      while (remaining.length > 0 && this.launchPublications.length > 0) {
+        const current = this.launchPublications[0];
+        remaining = current.publication.observe(remaining);
+        const pending = this.pending.get(current.id);
+        if (pending !== undefined) this.resolveResponse(current.id, pending);
+        if (!current.publication.closed()) break;
+        this.launchPublications.shift();
+        clearTimeout(current.checkpointTimer);
+      }
+    });
+    const finishStderr = (reason) => {
+      this.stderrCompletion = reason;
+      for (const current of this.launchPublications) {
+        clearTimeout(current.checkpointTimer);
+        current.publication.finish(reason);
+      }
+      this.launchPublications = [];
+      for (const [id, pending] of this.pending) {
+        pending.publication?.finish(reason);
+        this.resolveResponse(id, pending);
+      }
+    };
+    child.stderr?.once('end', () => finishStderr('not-observed'));
+    child.stderr?.once('close', () => {
+      if (this.stderrCompletion === undefined) finishStderr('drain-unavailable');
+    });
+    child.stdin?.on?.('error', () => this.failInput());
     child.stdout.setEncoding('utf8');
     child.stdout.on('data', (chunk) => {
       this.buffer += chunk;
@@ -2369,20 +4444,71 @@ export class NativeRpcClient {
           this.secretFreeResponses = false;
         }
         const pending = this.pending.get(response.id);
-        if (pending !== undefined) {
-          this.pending.delete(response.id);
-          clearTimeout(pending.timer);
-          pending.resolve(response);
+        if (pending !== undefined && pending.response === undefined) {
+          pending.response = response;
+          this.resolveResponse(response.id, pending);
         }
       }
     });
     child.once('close', () => {
-      for (const pending of this.pending.values()) {
+      this.closed = true;
+      for (const [id, pending] of this.pending) {
+        if (pending.response !== undefined) {
+          pending.publication?.finish(this.stderrCompletion ?? 'drain-unavailable');
+          this.resolveResponse(id, pending);
+          continue;
+        }
         clearTimeout(pending.timer);
-        pending.reject(new Error('native RPC closed before responding'));
+        pending.reject(nativeRpcFailure('native RPC closed before responding', 'transport-closed'));
       }
       this.pending.clear();
+      for (const current of this.launchPublications) {
+        clearTimeout(current.checkpointTimer);
+      }
+      this.launchPublications = [];
     });
+  }
+
+  failInput() {
+    if (this.closed) return;
+    this.closed = true;
+    this.poisonLaunchPublications('drain-unavailable');
+    for (const [id, pending] of [...this.pending]) {
+      if (!this.pending.has(id)) continue;
+      clearTimeout(pending.timer);
+      this.pending.delete(id);
+      pending.reject(nativeRpcFailure('native RPC input failed', 'input-failed'));
+    }
+  }
+
+  poisonLaunchPublications(reason) {
+    if (this.launchPublicationFailure !== undefined || this.stderrCompletion !== undefined) return;
+    this.launchPublicationFailure = reason;
+    const publications = this.launchPublications;
+    this.launchPublications = [];
+    for (const current of publications) {
+      clearTimeout(current.checkpointTimer);
+      current.publication.finish(reason);
+      const pending = this.pending.get(current.id);
+      if (pending !== undefined) this.resolveResponse(current.id, pending);
+    }
+  }
+
+  resolveResponse(id, pending) {
+    if (pending.response === undefined) return;
+    if (pending.publication !== undefined) {
+      if (
+        pending.response.ok === false &&
+        pending.response.error?.code === 'cave_launch_discovery_not_found'
+      ) {
+        const category = pending.publication.result();
+        if (category === undefined) return;
+        nativeLaunchPublicationResponses.set(pending.response, category);
+      }
+    }
+    this.pending.delete(id);
+    clearTimeout(pending.timer);
+    pending.resolve(pending.response);
   }
 
   operation() {
@@ -2394,17 +4520,49 @@ export class NativeRpcClient {
   }
 
   request(command, args) {
+    if (this.closed) {
+      return Promise.reject(nativeRpcFailure('native RPC transport closed', 'transport-closed'));
+    }
     this.commandCounts.set(command, (this.commandCounts.get(command) ?? 0) + 1);
     this.sequence += 1;
-    const id = `request-${this.sequence}`;
+    const id = `request-${this.sequence}${command === 'cave_launch' ? `-${randomBytes(16).toString('hex')}` : ''}`;
     const request = { id, command, ...(args === undefined ? {} : { args }) };
+    const timeoutMs = command === 'cave_launch' ? this.caveLaunchTimeoutMs : this.requestTimeoutMs;
     return new Promise((resolveRequest, rejectRequest) => {
+      const publication =
+        command === 'cave_launch' ? createCavePublicationObservation(id) : undefined;
+      const unavailableReason = this.launchPublicationFailure ?? this.stderrCompletion;
+      if (unavailableReason !== undefined) publication?.finish(unavailableReason);
+      if (publication !== undefined && unavailableReason === undefined) {
+        const entry = { id, publication, checkpointTimer: undefined };
+        entry.checkpointTimer = setTimeout(
+          () => this.poisonLaunchPublications('drain-timeout'),
+          timeoutMs,
+        );
+        this.launchPublications.push(entry);
+      }
       const timer = setTimeout(() => {
+        if (!this.pending.has(id)) return;
+        if (pending.response !== undefined) {
+          this.poisonLaunchPublications('drain-timeout');
+          this.resolveResponse(id, pending);
+          return;
+        }
+        if (publication !== undefined && !publication.closed()) {
+          this.poisonLaunchPublications('drain-timeout');
+        }
         this.pending.delete(id);
-        rejectRequest(new Error(`native RPC timed out for ${command}`));
-      }, rpcTimeoutMs);
-      this.pending.set(id, { resolve: resolveRequest, reject: rejectRequest, timer });
-      this.child.stdin.write(`${JSON.stringify(request)}\n`);
+        rejectRequest(nativeRpcFailure(`native RPC timed out for ${command}`, 'timeout'));
+      }, timeoutMs);
+      const pending = { resolve: resolveRequest, reject: rejectRequest, timer, publication };
+      this.pending.set(id, pending);
+      try {
+        this.child.stdin.write(`${JSON.stringify(request)}\n`, (error) => {
+          if (error !== undefined && error !== null) this.failInput();
+        });
+      } catch {
+        this.failInput();
+      }
     });
   }
 
@@ -2419,7 +4577,25 @@ export class NativeRpcClient {
   async ok(command, args) {
     const response = await this.request(command, args);
     if (response.ok !== true) {
-      throw new Error(`native RPC ${command} failed with ${response.error?.code ?? 'unknown'}`);
+      const responseCode = response.error?.code;
+      const diagnosticCode =
+        command === 'app_installation_id' && typeof responseCode !== 'string'
+          ? 'unknown'
+          : (responseCode ?? 'unknown');
+      const failure = new Error(`native RPC ${command} failed with ${diagnosticCode}`);
+      if (command === 'app_installation_id') {
+        nativeRpcFailureCategories.set(
+          failure,
+          nativeInstallationResponseCategories.get(response.error?.code) ?? 'response-rejected',
+        );
+      }
+      if (command === 'cave_launch' && response.error?.code === 'cave_launch_discovery_not_found') {
+        nativeLaunchPublicationFailures.set(
+          failure,
+          nativeLaunchPublicationResponses.get(response),
+        );
+      }
+      throw failure;
     }
     return response.result;
   }
@@ -2433,9 +4609,12 @@ export class NativeRpcClient {
   }
 
   async close() {
-    if (this.child.exitCode !== null || this.child.signalCode !== null) {
+    if (this.child.exitCode != null || this.child.signalCode != null) {
       assertSuccessfulChildExit(this.child.exitCode, this.child.signalCode);
       return;
+    }
+    if (this.closed) {
+      throw new Error('native RPC transport closed');
     }
     await triggerAndWaitForChildClose(
       this.child,
@@ -2454,11 +4633,36 @@ export async function withFixtureDaemon(fixtureDaemon, action) {
 }
 
 export async function withOwnedArtifactRoot(ownedRoot, action) {
+  let result;
+  let actionFailure;
+  let actionFailed = false;
   try {
-    return await action();
-  } finally {
-    await ownedRoot.cleanup();
+    result = await action();
+  } catch (error) {
+    actionFailure = error;
+    actionFailed = true;
   }
+  let cleanupFailure;
+  let cleanupFailed = false;
+  try {
+    await ownedRoot.cleanup();
+  } catch (error) {
+    cleanupFailure = error;
+    cleanupFailed = true;
+  }
+  if (actionFailed && cleanupFailed) {
+    throw new AggregateError(
+      [actionFailure, cleanupFailure],
+      schemaV2FailureDiagnostic(actionFailure, 'Owned artifact action and cleanup both failed.'),
+    );
+  }
+  if (actionFailed) {
+    throw actionFailure;
+  }
+  if (cleanupFailed) {
+    throw cleanupFailure;
+  }
+  return result;
 }
 
 async function startNativeRpc(artifactRoot, binaryPath, environment, cwd) {
@@ -2470,7 +4674,6 @@ async function startNativeRpc(artifactRoot, binaryPath, environment, cwd) {
   });
   await once(child, 'spawn');
   artifactRoot.trackChild(child, { processGroup: ownedProcessGroupsSupported });
-  child.stderr.resume();
   return new NativeRpcClient(child);
 }
 
@@ -2744,6 +4947,40 @@ function validateNativeCustodyProof(value, expectedBackend, label) {
   return value;
 }
 
+export async function runNativePreflight(rpc, expectedBackend, onStage) {
+  onStage('native-preflight-custody-rpc');
+  const proof = await rpc.ok('conformance_native_custody_state', { instanceIds: [] });
+  onStage('native-preflight-custody-proof');
+  const nativeStateBefore = validateNativeCustodyProof(
+    proof,
+    expectedBackend,
+    'Native custody preflight',
+  );
+  onStage('native-preflight-installation-rpc');
+  let installationId;
+  try {
+    installationId = await rpc.ok('app_installation_id');
+  } catch (error) {
+    const category =
+      nativeRpcFailureCategories.get(error) ??
+      (error instanceof TypeError
+        ? 'unexpected-type-error'
+        : error instanceof Error
+          ? 'unexpected-error'
+          : 'unexpected-value');
+    onStage(`native-preflight-installation-${category}`);
+    throw error;
+  }
+  onStage('native-preflight-installation-id');
+  if (
+    typeof installationId !== 'string' ||
+    !/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u.test(installationId)
+  ) {
+    throw new Error('native custody returned a non-canonical installation ID');
+  }
+  return { nativeStateBefore, installationId };
+}
+
 async function runNativeScenarios({
   artifactRoot,
   roots,
@@ -2753,17 +4990,24 @@ async function runNativeScenarios({
   platform,
   compatibilityPassed,
 }) {
-  const isolatedHome = resolve(artifactRoot.rootPath, 'native-authority-home');
-  const covenHome = resolve(isolatedHome, 'coven');
-  const caveHome = resolve(covenHome, 'cave');
-  const fixtureDaemon = await startFixtureDaemon([
-    {
-      id: 'archivist',
-      display_name: 'Archivist',
-      role: 'Keeper',
-      description: 'Synthetic roster entry.',
-    },
-  ]);
+  const { isolatedHome, covenHome, caveHome } = nativeScenarioHomes(
+    artifactRoot.rootPath,
+    environment,
+  );
+  let activeNativeStage = 'fixture-daemon';
+  let fixtureDaemon;
+  try {
+    fixtureDaemon = await startFixtureDaemon([
+      {
+        id: 'archivist',
+        display_name: 'Archivist',
+        role: 'Keeper',
+        description: 'Synthetic roster entry.',
+      },
+    ]);
+  } catch (error) {
+    throw new Error(schemaV2NativeFailureDiagnostic(activeNativeStage, error), { cause: error });
+  }
   let rpc;
   let handle;
   let credentialId;
@@ -2810,7 +5054,9 @@ async function runNativeScenarios({
     allRevokedReadsRefused: false,
     keychainUnavailable: false,
   };
+  let scenarioFailure;
   try {
+    activeNativeStage = 'fixture';
     writeNativeFixture(caveHome, covenHome, fixtureDaemon.url);
     const portServer = createServer();
     portServer.listen(0, '127.0.0.1');
@@ -2823,6 +5069,7 @@ async function runNativeScenarios({
     const adminToken = `phase1-${randomUUID()}`;
     const rpcEnvironment = {
       ...environment,
+      OPENCOVEN_PHASE1_CONFORMANCE_CLEANUP_HOME: isolatedHome,
       COVEN_HOME: covenHome,
       COVEN_CAVE_HOME: caveHome,
       COVEN_CAVE_PORT: String(port),
@@ -2839,34 +5086,45 @@ async function runNativeScenarios({
             OPENCOVEN_PHASE1_CONFORMANCE_KEYRING_SERVICE: `ai.opencoven.chat.phase1.${nativeServiceOpaqueId}`,
           }),
     };
+    activeNativeStage = 'rpc-start';
     rpc = await startNativeRpc(artifactRoot, nativeRpcPath, rpcEnvironment, roots.caveRoot);
     let installationId = 'phase1-installation-1';
     if (platformEnvironment !== undefined) {
-      nativeStateBefore = validateNativeCustodyProof(
-        await rpc.ok('conformance_native_custody_state', { instanceIds: [] }),
+      activeNativeStage = 'native-preflight';
+      ({ nativeStateBefore, installationId } = await runNativePreflight(
+        rpc,
         platformEnvironment.nativeCustody,
-        'Native custody preflight',
-      );
-      installationId = await rpc.ok('app_installation_id');
-      if (
-        typeof installationId !== 'string' ||
-        !/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u.test(
-          installationId,
-        )
-      ) {
-        throw new Error('native custody returned a non-canonical installation ID');
-      }
+        (stage) => {
+          activeNativeStage = stage;
+        },
+      ));
     }
 
+    activeNativeStage = 'launch';
+    let activeLaunchBoundary = 'initial-discovery';
     try {
-      await rpc.error(
-        'cave_read_discovery',
-        { operation: rpc.operation() },
-        'cave_discovery_not_found',
+      const initialDiscoveryOutcome = classifyInitialDiscoveryOutcome(
+        await rpc.request('cave_read_discovery', { operation: rpc.operation() }),
       );
+      const safetyCategory = await observeInitialDiscoverySafety(
+        rpc,
+        initialDiscoveryOutcome,
+        process.platform,
+      );
+      if (safetyCategory !== null) {
+        throw new Error(`native RPC initial unsafe follow-up probe ${safetyCategory}`);
+      }
+      if (initialDiscoveryOutcome !== null) {
+        throw new Error(
+          `native RPC cave_read_discovery initial outcome ${initialDiscoveryOutcome}`,
+        );
+      }
+      activeLaunchBoundary = 'launch-rpc';
       await rpc.ok('cave_launch');
+      activeLaunchBoundary = 'discovery';
       const discovery = await waitForDiscovery(rpc);
       handle = discovery.handle;
+      activeLaunchBoundary = 'health';
       const health = await rpc.ok('cave_health', {
         handle,
         operation: rpc.operation(),
@@ -2886,6 +5144,12 @@ async function runNativeScenarios({
         'phase1.assertion.passed',
       );
     } catch (error) {
+      scenarioFailure = retainSchemaV2NativeFailure(
+        scenarioFailure,
+        activeNativeStage,
+        error,
+        activeLaunchBoundary,
+      );
       process.stderr.write(
         `phase1-conformance: phase1.missing-cave.validated-launch failed: ${error instanceof Error ? error.message : 'unknown'}\n`,
       );
@@ -2897,6 +5161,7 @@ async function runNativeScenarios({
       );
     }
 
+    activeNativeStage = 'pairing';
     try {
       if (typeof handle !== 'string') {
         throw new Error('no native authority handle');
@@ -2917,6 +5182,7 @@ async function runNativeScenarios({
         'phase1.assertion.passed',
       );
     } catch (error) {
+      scenarioFailure = retainSchemaV2NativeFailure(scenarioFailure, activeNativeStage, error);
       process.stderr.write(
         `phase1-conformance: phase1.pairing.create-pending-approve-exchange failed: ${error instanceof Error ? error.message : 'unknown'}\n`,
       );
@@ -2926,6 +5192,7 @@ async function runNativeScenarios({
         'failed',
         'phase1.integration.native-pairing-exchange-failed',
       );
+      activeNativeStage = 'pairing-recovery';
       try {
         if (typeof handle === 'string') {
           await rpc.ok('cave_reset_pairing', { handle });
@@ -2942,6 +5209,7 @@ async function runNativeScenarios({
       }
     }
 
+    activeNativeStage = 'pairing-denial';
     try {
       const created = await rpc.ok('cave_pairing_create', {
         handle,
@@ -2968,6 +5236,7 @@ async function runNativeScenarios({
       observations.pairingDenied = true;
       addAssertion(results, 'phase1.pairing.denial', 'passed', 'phase1.assertion.passed');
     } catch (error) {
+      scenarioFailure = retainSchemaV2NativeFailure(scenarioFailure, activeNativeStage, error);
       process.stderr.write(
         `phase1-conformance: phase1.pairing.denial failed: ${error instanceof Error ? error.message : 'unknown'}\n`,
       );
@@ -2982,16 +5251,21 @@ async function runNativeScenarios({
         'phase1.integration.native-credential-unavailable',
       );
     } else {
+      activeNativeStage = 'restart';
       try {
         const pairingCreatesBeforeRestart = rpc.commandCount('cave_pairing_create');
+        activeNativeStage = 'restart-launch';
         await rpc.ok('conformance_reset_native_state');
         await rpc.ok('cave_launch');
+        activeNativeStage = 'restart-discovery';
         const discovery = await waitForDiscovery(rpc);
         handle = discovery.handle;
+        activeNativeStage = 'restart-health';
         const health = await rpc.ok('cave_health', { handle, operation: rpc.operation() });
         if (typeof health.data?.instanceId === 'string') {
           nativeInstanceIds.add(health.data.instanceId);
         }
+        activeNativeStage = 'restart-status';
         const status = await rpc.ok('cave_credential_status', {
           handle,
           operation: rpc.operation(),
@@ -3009,6 +5283,7 @@ async function runNativeScenarios({
           'phase1.assertion.passed',
         );
       } catch (error) {
+        scenarioFailure = retainSchemaV2NativeFailure(scenarioFailure, activeNativeStage, error);
         process.stderr.write(
           `phase1-conformance: phase1.credential.restart-reuse failed: ${error instanceof Error ? error.message : 'unknown'}\n`,
         );
@@ -3029,6 +5304,7 @@ async function runNativeScenarios({
         'phase1.integration.native-credential-unavailable',
       );
     } else {
+      activeNativeStage = 'reads';
       try {
         const familiars = collection(
           await rpc.ok('cave_list_familiars', {
@@ -3089,6 +5365,7 @@ async function runNativeScenarios({
           'phase1.assertion.passed',
         );
       } catch (error) {
+        scenarioFailure = retainSchemaV2NativeFailure(scenarioFailure, activeNativeStage, error);
         process.stderr.write(
           `phase1-conformance: phase1.reads.bounded-canonical failed: ${error instanceof Error ? error.message : 'unknown'}\n`,
         );
@@ -3109,6 +5386,7 @@ async function runNativeScenarios({
         'phase1.integration.native-credential-unavailable',
       );
     } else {
+      activeNativeStage = 'reconciliation';
       try {
         const firstPage = await rpc.ok('cave_list_conversation_messages', {
           handle,
@@ -3155,6 +5433,7 @@ async function runNativeScenarios({
           'phase1.assertion.passed',
         );
       } catch (error) {
+        scenarioFailure = retainSchemaV2NativeFailure(scenarioFailure, activeNativeStage, error);
         process.stderr.write(
           `phase1-conformance: phase1.reads.stale-generation-cursor-reconciliation failed: ${error instanceof Error ? error.message : 'unknown'}\n`,
         );
@@ -3175,10 +5454,13 @@ async function runNativeScenarios({
         'phase1.integration.native-credential-unavailable',
       );
     } else {
+      activeNativeStage = 'revocation';
       try {
+        activeNativeStage = 'revocation-delete';
         await adminMutation(origin, adminToken, 'DELETE', `/admin/credentials/${credentialId}`, {
           reason: 'phase1-conformance',
         });
+        activeNativeStage = 'revocation-initial-status';
         const initialStatus = await rpc.ok('cave_credential_status', {
           handle,
           operation: rpc.operation(),
@@ -3190,12 +5472,15 @@ async function runNativeScenarios({
           throw new Error('native credential did not request revocation reconciliation');
         }
         await new Promise((resolveWait) => setTimeout(resolveWait, revocationConfirmationDelayMs));
+        activeNativeStage = 'revocation-rediscovery';
         const rediscovery = await waitForDiscovery(rpc);
         handle = rediscovery.handle;
+        activeNativeStage = 'revocation-health';
         const health = await rpc.ok('cave_health', { handle, operation: rpc.operation() });
         if (typeof health.data?.instanceId === 'string') {
           nativeInstanceIds.add(health.data.instanceId);
         }
+        activeNativeStage = 'revocation-status';
         const status = await rpc.ok('cave_credential_status', {
           handle,
           operation: rpc.operation(),
@@ -3249,6 +5534,7 @@ async function runNativeScenarios({
         observations.allRevokedReadsRefused = Object.values(observations.revokedReads).every(
           Boolean,
         );
+        activeNativeStage = 'revocation-repair';
         const repaired = await pairNative(
           rpc,
           handle,
@@ -3266,6 +5552,7 @@ async function runNativeScenarios({
           'phase1.assertion.passed',
         );
       } catch (error) {
+        scenarioFailure = retainSchemaV2NativeFailure(scenarioFailure, activeNativeStage, error);
         process.stderr.write(
           `phase1-conformance: phase1.credential.revocation-repair failed: ${error instanceof Error ? error.message : 'unknown'}\n`,
         );
@@ -3278,6 +5565,7 @@ async function runNativeScenarios({
       }
     }
 
+    activeNativeStage = 'stale-discovery';
     const discoveryPath = resolve(caveHome, 'client-v1-discovery.json');
     const originalDiscovery = readFileSync(discoveryPath, 'utf8');
     const discovery = JSON.parse(originalDiscovery);
@@ -3300,43 +5588,74 @@ async function runNativeScenarios({
       nativeInstanceIds.add(restoredHealth.data.instanceId);
     }
     observations.bearerNeverCrossedBoundary = rpc.responsesContainNoSecrets();
-  } finally {
-    await withFixtureDaemon(fixtureDaemon, async () => {
-      if (rpc !== undefined) {
-        try {
-          if (platformEnvironment !== undefined) {
-            let grant;
-            try {
-              const cleanupInstanceIds = [...nativeInstanceIds].sort();
-              const issued = await rpc.ok('conformance_issue_native_custody_cleanup', {
-                instanceIds: cleanupInstanceIds,
-              });
-              if (
-                issued === null ||
-                typeof issued !== 'object' ||
-                typeof issued.grant !== 'string' ||
-                !/^[A-Za-z0-9_-]{43}$/u.test(issued.grant)
-              ) {
-                throw new Error('Native custody cleanup grant was not canonical.');
-              }
-              grant = issued.grant;
-              issued.grant = undefined;
-              nativeStateAfter = validateNativeCustodyProof(
-                await rpc.ok('conformance_cleanup_native_custody', { grant }),
-                platformEnvironment.nativeCustody,
-                'Native custody cleanup',
-              );
-            } finally {
-              grant = undefined;
-            }
-          }
-        } finally {
-          await rpc.close();
-        }
-      }
-    });
+  } catch (error) {
+    scenarioFailure = retainSchemaV2NativeFailure(scenarioFailure, activeNativeStage, error);
   }
-  await runNativeMissingKeychainTrustScenario(artifactRoot, nativeRpcPath, environment, results);
+  activeNativeStage = 'cleanup';
+  let cleanupFailure;
+  if (rpc !== undefined && platformEnvironment !== undefined) {
+    let grant;
+    try {
+      activeNativeStage = 'cleanup-grant';
+      const cleanupInstanceIds = [...nativeInstanceIds].sort();
+      const issued = await rpc.ok('conformance_issue_native_custody_cleanup', {
+        instanceIds: cleanupInstanceIds,
+      });
+      if (
+        issued === null ||
+        typeof issued !== 'object' ||
+        typeof issued.grant !== 'string' ||
+        !/^[A-Za-z0-9_-]{43}$/u.test(issued.grant)
+      ) {
+        throw new Error('Native custody cleanup grant was not canonical.');
+      }
+      grant = issued.grant;
+      issued.grant = undefined;
+    } catch (error) {
+      cleanupFailure = retainSchemaV2NativeFailure(cleanupFailure, activeNativeStage, error);
+    }
+    if (grant !== undefined) {
+      try {
+        activeNativeStage = 'cleanup-custody';
+        nativeStateAfter = validateNativeCustodyProof(
+          await rpc.ok('conformance_cleanup_native_custody', { grant }),
+          platformEnvironment.nativeCustody,
+          'Native custody cleanup',
+        );
+      } catch (error) {
+        cleanupFailure = retainSchemaV2NativeFailure(cleanupFailure, activeNativeStage, error);
+      } finally {
+        grant = undefined;
+      }
+    }
+  }
+  if (rpc !== undefined) {
+    try {
+      activeNativeStage = 'cleanup-rpc';
+      await rpc.close();
+    } catch (error) {
+      cleanupFailure = retainSchemaV2NativeFailure(cleanupFailure, activeNativeStage, error);
+    }
+  }
+  try {
+    activeNativeStage = 'cleanup-fixture-daemon';
+    await fixtureDaemon.close();
+  } catch (error) {
+    cleanupFailure = retainSchemaV2NativeFailure(cleanupFailure, activeNativeStage, error);
+  }
+  if (scenarioFailure !== undefined || cleanupFailure !== undefined) {
+    const failures = [scenarioFailure, cleanupFailure].filter((failure) => failure !== undefined);
+    if (failures.length === 1) {
+      throw failures[0];
+    }
+    throw new AggregateError(failures, scenarioFailure.message);
+  }
+  activeNativeStage = 'missing-keychain';
+  try {
+    await runNativeMissingKeychainTrustScenario(artifactRoot, nativeRpcPath, environment, results);
+  } catch (error) {
+    throw new Error(schemaV2NativeFailureDiagnostic(activeNativeStage, error), { cause: error });
+  }
   observations.keychainUnavailable = true;
   if (platformEnvironment === undefined) {
     return undefined;
@@ -3346,7 +5665,7 @@ async function runNativeScenarios({
     nativeStateAfter === undefined ||
     nativeStateBefore.stateSha256 !== nativeStateAfter.stateSha256
   ) {
-    throw new Error('Native custody state changed after isolated cleanup.');
+    throw new Error(schemaV2NativeFailureDiagnostic('isolation-proof'));
   }
   return {
     ...observations,
@@ -3385,6 +5704,7 @@ async function runCovenIdentityScenario(
       executableTrustFailure: false,
       trustProviderUnavailable: false,
     };
+    let identityStage = 'daemon-ready';
     try {
       let running = false;
       for (let attempt = 0; attempt < 80; attempt += 1) {
@@ -3415,6 +5735,7 @@ async function runCovenIdentityScenario(
       if (!running) {
         throw new Error('Coven daemon did not authenticate its same-user transport');
       }
+      identityStage = 'rpc-start';
       rpc = await startNativeRpc(
         artifactRoot,
         nativeRpcPath,
@@ -3425,6 +5746,7 @@ async function runCovenIdentityScenario(
         },
         covenHome,
       );
+      identityStage = 'unavailable-health';
       const health = await rpc.ok('coven_health', {
         operation: rpc.operation(),
       });
@@ -3436,17 +5758,22 @@ async function runCovenIdentityScenario(
       observations.connectedIdentity = true;
       observations.executableTrusted = true;
       observations.executableTrustFailure = true;
-      await triggerAndWaitForChildClose(child, () =>
-        runCommand(
-          artifactRoot,
-          'Coven daemon authenticated stop',
-          covenBinaryPath,
-          ['daemon', 'stop'],
-          {
-            env: { ...environment, COVEN_HOME: covenHome },
-            timeoutMs: 10_000,
-          },
-        ),
+      identityStage = 'result';
+      await triggerAndWaitForChildClose(
+        child,
+        () =>
+          runCommand(
+            artifactRoot,
+            'Coven daemon authenticated stop',
+            covenBinaryPath,
+            ['daemon', 'stop'],
+            {
+              env: { ...environment, COVEN_HOME: covenHome },
+              timeoutMs: 10_000,
+            },
+          ),
+        rpcTimeoutMs,
+        covenVerifiedStopExitCode,
       );
       addAssertion(results, 'phase1.coven.same-user-identity', 'passed', 'phase1.assertion.passed');
     } catch (error) {
@@ -3457,7 +5784,7 @@ async function runCovenIdentityScenario(
         results,
         'phase1.coven.same-user-identity',
         'failed',
-        'phase1.integration.coven-identity-failed',
+        covenIdentityScenarioDiagnostic(identityStage),
       );
     } finally {
       if (rpc !== undefined) {
@@ -3945,6 +6272,31 @@ export function wrapInfrastructureFailure(error, report) {
   return new CommandExecutionError('Phase 1 conformance infrastructure', { report }, error);
 }
 
+export function requirePassingPrimaryAssertions(report) {
+  for (const assertion of report.assertions) {
+    if (assertion.status === 'passed') {
+      continue;
+    }
+    // A scenario that classified its own failure has already recorded the more
+    // specific identifier, so prefer it over the identifier built from the
+    // assertion name. `runtimeScenarioFailureDiagnostic` in the non-schema-v2
+    // runner makes the same choice. Without this, protected run 35774072327
+    // reported the assertion and dropped the Coven handshake stage that #363
+    // had just recorded, because the report is not retained on Windows
+    // (OpenCoven/chat#219).
+    const recorded = assertion.diagnosticIds?.[0];
+    if (typeof recorded === 'string' && preferredAssertionDiagnostics.has(recorded)) {
+      throw new Error(recorded);
+    }
+    const key = primaryReportAssertionKeys.get(assertion.id);
+    throw new Error(
+      key === undefined || (assertion.status !== 'failed' && assertion.status !== 'blocked')
+        ? 'phase1.stage.evidence-authority.report.assertions.unknown'
+        : `phase1.stage.evidence-authority.report.assertions.${assertion.status}.${key}`,
+    );
+  }
+}
+
 function fillMissingAssertions(results, status, diagnosticId) {
   for (const id of REQUIRED_PHASE1_ASSERTION_IDS) {
     if (!results.has(id)) {
@@ -3954,47 +6306,73 @@ function fillMissingAssertions(results, status, diagnosticId) {
 }
 
 export async function runSchemaV2Conformance(options, lock, harnessAuthorityVerification) {
-  scrubEvidenceAuthorizationEnvironment();
-  requirePhase1HarnessAuthorityVerification(harnessAuthorityVerification, lock, projectRoot);
+  runSchemaV2PreflightStage('phase1.stage.schema-v2-production.authorization-scrub', () =>
+    scrubEvidenceAuthorizationEnvironment(),
+  );
+  runSchemaV2PreflightStage('phase1.stage.evidence-authority.failed', () =>
+    requirePhase1HarnessAuthorityVerification(harnessAuthorityVerification, lock, projectRoot),
+  );
   const schemaV2 = options.platform !== undefined;
-  if (schemaV2 && lock.version !== 3 && lock.version !== 5) {
-    throw new Error('Schema-v2 evidence requires Phase 1 lock version 3 or 5.');
-  }
-  if (schemaV2 && options.platform !== `${process.platform}-${process.arch}`) {
-    throw new Error(
-      `Requested platform ${options.platform} does not match ${process.platform}-${process.arch}.`,
-    );
-  }
-  const supervisorEnvironment = schemaV2 ? schemaV2SupervisorEnvironment(process.env) : {};
-  if (
-    schemaV2 &&
-    options.outputPath !== supervisorArtifactOutputPath(supervisorEnvironment, process.platform)
-  ) {
-    throw new Error('Schema-v2 evidence output changed after supervisor validation.');
-  }
+  runSchemaV2PreflightStage('phase1.stage.schema-v2-production.lock-version', () => {
+    if (schemaV2 && lock.version !== 3 && lock.version !== 5) {
+      throw new Error('Schema-v2 evidence requires Phase 1 lock version 3 or 5.');
+    }
+  });
+  runSchemaV2PreflightStage('phase1.stage.schema-v2-production.platform', () => {
+    if (schemaV2 && options.platform !== `${process.platform}-${process.arch}`) {
+      throw new Error(
+        `Requested platform ${options.platform} does not match ${process.platform}-${process.arch}.`,
+      );
+    }
+  });
+  const supervisorEnvironment = runSchemaV2PreflightStage('phase1.stage.environment.failed', () =>
+    schemaV2 ? schemaV2SupervisorEnvironment(process.env) : {},
+  );
   const windowsJobBinding = schemaV2 && process.platform === 'win32' ? supervisorEnvironment : {};
   const unixProducerBinding = schemaV2 && process.platform !== 'win32' ? supervisorEnvironment : {};
-  assertWindowsJobMembership(windowsJobBinding);
-  options = resolveDefaultSourceRoots(options, resolveRepositoryLayout());
-  const startedAt = new Date().toISOString();
-  const operatorHomes = schemaV2 ? resolveOperatorHomes() : undefined;
-  const operatorBefore =
-    operatorHomes === undefined ? undefined : captureOperatorFilesystemState(operatorHomes);
-  const linuxSessionEnvironment =
-    schemaV2 && process.platform === 'linux'
-      ? curateLinuxSecretServiceEnvironment(
-          process.env,
-          process.env.OPENCOVEN_PHASE1_SECRET_SERVICE_ROOT,
-        )
-      : {};
-  const executionRoot = createProcessOwnedArtifactRoot({ prefix: 'phase1-conformance-run' });
-  const reportRoot = createProcessOwnedArtifactRoot({ prefix: 'phase1-conformance-report' });
-  const environment = safeEnvironment(executionRoot.rootPath, {
-    ...(schemaV2 ? { OPENCOVEN_PHASE1_SCHEMA_V2_EVIDENCE: '1' } : {}),
-    ...linuxSessionEnvironment,
-    ...unixProducerBinding,
-    ...windowsJobBinding,
+  runSchemaV2PreflightStage('phase1.stage.environment.failed', () => {
+    if (
+      schemaV2 &&
+      options.outputPath !== supervisorArtifactOutputPath(supervisorEnvironment, process.platform)
+    ) {
+      throw new Error('Schema-v2 evidence output changed after supervisor validation.');
+    }
+    assertWindowsJobMembership(windowsJobBinding);
   });
+  options = runSchemaV2PreflightStage('phase1.stage.checkouts.failed', () =>
+    resolveDefaultSourceRoots(options, resolveRepositoryLayout()),
+  );
+  const startedAt = new Date().toISOString();
+  const operatorHomes = runSchemaV2PreflightStage('phase1.operator-fingerprint.failed', () =>
+    schemaV2 ? resolveOperatorHomes() : undefined,
+  );
+  const operatorBefore = runSchemaV2PreflightStage('phase1.operator-fingerprint.failed', () =>
+    operatorHomes === undefined ? undefined : captureOperatorFilesystemState(operatorHomes),
+  );
+  const linuxSessionEnvironment = runSchemaV2PreflightStage(
+    'phase1.stage.environment.failed',
+    () =>
+      schemaV2 && process.platform === 'linux'
+        ? curateLinuxSecretServiceEnvironment(
+            process.env,
+            process.env.OPENCOVEN_PHASE1_SECRET_SERVICE_ROOT,
+          )
+        : {},
+  );
+  const executionRoot = runSchemaV2PreflightStage('phase1.stage.execution-root.failed', () =>
+    createProcessOwnedArtifactRoot({ prefix: 'phase1-conformance-run' }),
+  );
+  const reportRoot = runSchemaV2PreflightStage('phase1.stage.execution-root.failed', () =>
+    createProcessOwnedArtifactRoot({ prefix: 'phase1-conformance-report' }),
+  );
+  const environment = runSchemaV2PreflightStage('phase1.stage.environment.failed', () =>
+    safeEnvironment(executionRoot.rootPath, {
+      ...(schemaV2 ? { OPENCOVEN_PHASE1_SCHEMA_V2_EVIDENCE: '1' } : {}),
+      ...linuxSessionEnvironment,
+      ...unixProducerBinding,
+      ...windowsJobBinding,
+    }),
+  );
   const results = new Map();
   let artifactDigests = {};
   let infrastructureFailure;
@@ -4016,44 +6394,67 @@ export async function runSchemaV2Conformance(options, lock, harnessAuthorityVeri
     roots = await createExactCheckouts(executionRoot, options, lock, environment);
     if (schemaV2) {
       activeStage = 'phase1.stage.evidence-authority.failed';
-      validateSchemaV2AuthorityCheckouts({
-        lock,
-        harnessRoot: projectRoot,
-        producerRoot: roots.producerRoot,
-        producerIdentity: roots.producerIdentity,
-      });
-      sdkContract = await loadSdkEvidenceContract({
-        validatorRoot: roots.validatorRoot,
-        validatorIdentity: {
-          repository: 'OpenCoven/sdk',
-          commit: options.validatorRevision,
-          tree: roots.validatorIdentity.tree,
-        },
-      });
-      sdkContract.contract.assertEvidenceProducerCompatibility(sdkContract.frozenLock);
-      assertSdkContractMatchesPhase1Lock(sdkContract, lock);
-      producer = await verifySchemaV2ProducerCheckout({
-        producerRoot: roots.producerRoot,
-        producerIdentity: roots.producerIdentity,
-        sdkContract,
-      });
-      evidenceArtifacts = collectFrozenEvidenceArtifacts({ roots, sdkContract });
-      verifiedIdentities = {
-        candidate: verifiedCheckoutIdentity(lock, 'sdk', roots.sdkRoot),
-        cave: verifiedCheckoutIdentity(lock, 'cave', roots.caveRoot),
-        coven: verifiedCheckoutIdentity(lock, 'coven', roots.covenRoot),
-        chat: verifiedCheckoutIdentity(lock, 'chat', roots.chatRoot),
-      };
+      runSchemaV2PreflightStage('phase1.stage.evidence-authority.producer', () =>
+        validateSchemaV2AuthorityCheckouts({
+          lock,
+          harnessRoot: projectRoot,
+          producerRoot: roots.producerRoot,
+          producerIdentity: roots.producerIdentity,
+        }),
+      );
+      sdkContract = await runSchemaV2StageAsync('phase1.stage.evidence-authority.validator', () =>
+        loadSdkEvidenceContract({
+          validatorRoot: roots.validatorRoot,
+          validatorIdentity: {
+            repository: 'OpenCoven/sdk',
+            commit: options.validatorRevision,
+            tree: roots.validatorIdentity.tree,
+          },
+        }),
+      );
+      runSchemaV2PreflightStage('phase1.stage.evidence-authority.compatibility', () =>
+        sdkContract.contract.assertEvidenceProducerCompatibility(sdkContract.frozenLock),
+      );
+      runSchemaV2PreflightStage('phase1.stage.evidence-authority.lock', () =>
+        assertSdkContractMatchesPhase1Lock(sdkContract, lock),
+      );
+      producer = await runSchemaV2StageAsync('phase1.stage.evidence-authority.checkout', () =>
+        verifySchemaV2ProducerCheckout({
+          producerRoot: roots.producerRoot,
+          producerIdentity: roots.producerIdentity,
+          sdkContract,
+        }),
+      );
+      evidenceArtifacts = runSchemaV2PreflightStage(
+        'phase1.stage.evidence-authority.artifacts',
+        () => collectFrozenEvidenceArtifacts({ roots, sdkContract }),
+      );
+      verifiedIdentities = runSchemaV2PreflightStage(
+        'phase1.stage.evidence-authority.identities',
+        () => ({
+          candidate: verifiedCheckoutIdentity(lock, 'sdk', roots.sdkRoot),
+          cave: verifiedCheckoutIdentity(lock, 'cave', roots.caveRoot),
+          coven: verifiedCheckoutIdentity(lock, 'coven', roots.covenRoot),
+          chat: verifiedCheckoutIdentity(lock, 'chat', roots.chatRoot),
+        }),
+      );
       activeStage = 'phase1.stage.toolchain.failed';
+      const toolchainRoot =
+        supervisorEnvironment.OPENCOVEN_WINDOWS_WORKSPACE ??
+        supervisorEnvironment.OPENCOVEN_UNIX_WORKSPACE;
       toolchain = await collectToolchainMetadata(
         executionRoot,
         environment,
         sdkContract.frozenLock.toolchain,
+        toolchainRoot,
       );
     }
     activeStage = 'phase1.stage.packaging.failed';
     const packaged = await packageLockedArtifacts(executionRoot, roots, environment, {
       schemaV2,
+      onStage(stage) {
+        activeStage = stage;
+      },
     });
     artifactDigests = packaged.artifactDigests;
     packageObservations = packaged.packedConsumerObservations;
@@ -4064,6 +6465,9 @@ export async function runSchemaV2Conformance(options, lock, harnessAuthorityVeri
         roots,
         environment,
         options.platform,
+        (stage) => {
+          activeStage = stage;
+        },
       );
     }
 
@@ -4077,10 +6481,9 @@ export async function runSchemaV2Conformance(options, lock, harnessAuthorityVeri
       caveRecord = caveAuthority.caveRecord;
       recordCaveBackedAssertions(results, caveAuthority.assertions);
     } catch (error) {
-      const failure =
-        schemaV2 && !publicFailureDiagnosticSet.has(error?.message)
-          ? new Error(activeStage, { cause: error })
-          : error;
+      const failure = schemaV2
+        ? new Error(schemaV2FailureDiagnostic(error, activeStage), { cause: error })
+        : error;
       infrastructureFailure ??= recordCaveMatrixFailure(results, failure);
     }
 
@@ -4094,6 +6497,7 @@ export async function runSchemaV2Conformance(options, lock, harnessAuthorityVeri
     if (schemaV2 && process.platform === 'darwin') {
       activeStage = 'phase1.stage.native-scenarios.failed';
       macosKeychainSession = prepareMacosKeychainSession({ home: environment.HOME });
+      bindMacosKeychainSessionEnvironment(environment, macosKeychainSession);
     }
     activeStage = 'phase1.stage.native-scenarios.failed';
     nativeProof = await runNativeScenarios({
@@ -4127,214 +6531,272 @@ export async function runSchemaV2Conformance(options, lock, harnessAuthorityVeri
       operatorIsolationValid ? 'phase1.assertion.passed' : 'phase1.assertion.failed',
     );
   } catch (error) {
-    infrastructureFailure ??=
-      schemaV2 && !publicFailureDiagnosticSet.has(error?.message)
-        ? new Error(activeStage, { cause: error })
-        : error;
-    fillMissingAssertions(results, 'failed', 'phase1.assertion.failed');
+    infrastructureFailure ??= schemaV2
+      ? new Error(schemaV2FailureDiagnostic(error, activeStage), { cause: error })
+      : error;
+    runSchemaV2FinalizationOperation(
+      'failure-assertions',
+      () => fillMissingAssertions(results, 'failed', 'phase1.assertion.failed'),
+      infrastructureFailure,
+    );
   }
 
   if (macosKeychainSession !== undefined) {
     try {
       macosKeychainSession.close();
     } catch (error) {
-      infrastructureFailure ??=
-        schemaV2 && !publicFailureDiagnosticSet.has(error?.message)
-          ? new Error('phase1.stage.native-scenarios.failed', { cause: error })
-          : error;
-      for (const [id, assertion] of results) {
-        if (assertion.status === 'passed') {
-          results.set(id, makeAssertion(id, 'failed', 'phase1.assertion.failed'));
-        }
-      }
+      infrastructureFailure ??= schemaV2
+        ? new Error(schemaV2FailureDiagnostic(error, 'phase1.stage.native-scenarios.failed'), {
+            cause: error,
+          })
+        : error;
+      runSchemaV2FinalizationOperation(
+        'native-cleanup-assertions',
+        () => {
+          for (const [id, assertion] of results) {
+            if (assertion.status === 'passed') {
+              results.set(id, makeAssertion(id, 'failed', 'phase1.assertion.failed'));
+            }
+          }
+        },
+        infrastructureFailure,
+      );
     }
   }
 
-  if (!results.has('phase1.native.missing-keychain-trust')) {
-    addAssertion(
-      results,
-      'phase1.native.missing-keychain-trust',
-      'blocked',
-      'phase1.producer.native-trust-fixture-unavailable',
-    );
-  }
-  if (!results.has('phase1.compat.api-major-min-client')) {
-    addAssertion(
-      results,
-      'phase1.compat.api-major-min-client',
-      'failed',
-      'phase1.assertion.failed',
-    );
-  }
-  fillMissingAssertions(results, 'blocked', 'phase1.assertion.blocked');
+  runSchemaV2FinalizationOperation(
+    'required-assertions',
+    () => {
+      if (!results.has('phase1.native.missing-keychain-trust')) {
+        addAssertion(
+          results,
+          'phase1.native.missing-keychain-trust',
+          'blocked',
+          'phase1.producer.native-trust-fixture-unavailable',
+        );
+      }
+      if (!results.has('phase1.compat.api-major-min-client')) {
+        addAssertion(
+          results,
+          'phase1.compat.api-major-min-client',
+          'failed',
+          'phase1.assertion.failed',
+        );
+      }
+      fillMissingAssertions(results, 'blocked', 'phase1.assertion.blocked');
+    },
+    infrastructureFailure,
+  );
 
   try {
     await executionRoot.cleanup();
   } catch (error) {
-    infrastructureFailure ??=
-      schemaV2 && !publicFailureDiagnosticSet.has(error?.message)
-        ? new Error('phase1.stage.execution-root-cleanup.failed', { cause: error })
-        : error;
-    for (const [id, assertion] of results) {
-      if (assertion.status === 'passed') {
-        results.set(id, makeAssertion(id, 'failed', 'phase1.assertion.failed'));
-      }
-    }
+    infrastructureFailure ??= schemaV2
+      ? new Error(schemaV2FailureDiagnostic(error, 'phase1.stage.execution-root-cleanup.failed'), {
+          cause: error,
+        })
+      : error;
+    runSchemaV2FinalizationOperation(
+      'execution-cleanup-assertions',
+      () => {
+        for (const [id, assertion] of results) {
+          if (assertion.status === 'passed') {
+            results.set(id, makeAssertion(id, 'failed', 'phase1.assertion.failed'));
+          }
+        }
+      },
+      infrastructureFailure,
+    );
   }
 
-  const report = await withOwnedArtifactRoot(reportRoot, async () => {
-    const completedReport = buildPhase1Report({
-      assertions: [...results.values()],
-      revisions: {
-        chat: lock.chat.revision,
-        sdk: lock.sdk.revision,
-        cave: lock.cave.revision,
-        coven: lock.coven.revision,
-      },
-      artifactDigests,
-      versions: {
-        harness: schemaV2 ? PHASE1_SCHEMA_V2_HARNESS_VERSION : '1.0.0',
-        node: process.versions.node,
-        ...(schemaV2 && toolchain !== undefined
-          ? {
-              rust: toolchain.rustVersion,
-              tauri: toolchain.tauriVersion,
-            }
-          : {}),
-      },
-    });
-    scanPhase1ArtifactText(`${JSON.stringify(completedReport)}\n`);
+  const report = await runSchemaV2StageAsync('phase1.stage.evidence-authority.failed', () =>
+    withOwnedArtifactRoot(reportRoot, async () => {
+      const completedReport = runSchemaV2PreflightStage(
+        'phase1.stage.evidence-authority.report.failed',
+        () =>
+          buildPhase1Report({
+            assertions: [...results.values()],
+            revisions: {
+              chat: lock.chat.revision,
+              sdk: lock.sdk.revision,
+              cave: lock.cave.revision,
+              coven: lock.coven.revision,
+            },
+            artifactDigests,
+            versions: {
+              harness: schemaV2 ? PHASE1_SCHEMA_V2_HARNESS_VERSION : '1.0.0',
+              node: process.versions.node,
+              ...(schemaV2 && toolchain !== undefined
+                ? {
+                    rust: toolchain.rustVersion,
+                    tauri: toolchain.tauriVersion,
+                  }
+                : {}),
+            },
+          }),
+      );
+      runSchemaV2PreflightStage('phase1.stage.evidence-authority.scan.failed', () =>
+        scanPhase1ArtifactText(`${JSON.stringify(completedReport)}\n`),
+      );
 
-    if (schemaV2) {
-      if (
-        infrastructureFailure !== undefined ||
-        sdkContract === undefined ||
-        producer === undefined ||
-        evidenceArtifacts === undefined ||
-        toolchain === undefined ||
-        observationTests === undefined ||
-        covenProof === undefined ||
-        packageObservations === undefined ||
-        caveRecord === undefined ||
-        nativeProof === undefined ||
-        roots === undefined ||
-        verifiedIdentities === undefined ||
-        operatorBefore === undefined ||
-        operatorHomes === undefined
-      ) {
-        throw wrapInfrastructureFailure(
-          infrastructureFailure ?? new Error('Schema-v2 evidence prerequisites were incomplete.'),
-          completedReport,
+      if (schemaV2) {
+        if (
+          infrastructureFailure !== undefined ||
+          sdkContract === undefined ||
+          producer === undefined ||
+          evidenceArtifacts === undefined ||
+          toolchain === undefined ||
+          observationTests === undefined ||
+          covenProof === undefined ||
+          packageObservations === undefined ||
+          caveRecord === undefined ||
+          nativeProof === undefined ||
+          roots === undefined ||
+          verifiedIdentities === undefined ||
+          operatorBefore === undefined ||
+          operatorHomes === undefined
+        ) {
+          throw wrapInfrastructureFailure(
+            infrastructureFailure ?? new Error('Schema-v2 evidence prerequisites were incomplete.'),
+            completedReport,
+          );
+        }
+        // Placed after the infrastructure guard above so a genuine
+        // infrastructure failure keeps its own attribution instead of surfacing
+        // as the assertions its cleanup flipped to failed.
+        requirePassingPrimaryAssertions(completedReport);
+        const operatorAfter = runSchemaV2PreflightStage(
+          'phase1.stage.evidence-authority.operator-state.failed',
+          () => captureOperatorFilesystemState(operatorHomes),
         );
-      }
-      const operatorAfter = captureOperatorFilesystemState(operatorHomes);
-      const isolation = buildIsolationEvidence({
-        operatorBefore,
-        operatorAfter,
-        nativeBeforeSha256: nativeProof.beforeSha256,
-        nativeAfterSha256: nativeProof.afterSha256,
-        opaqueIds: [
-          randomBytes(16).toString('hex'),
-          randomBytes(16).toString('hex'),
-          randomBytes(16).toString('hex'),
-          nativeProof.opaqueId,
-        ],
-      });
-      const observedAssertions = buildObservedSchemaV2Assertions({
-        registry: sdkContract.registry,
-        platform: options.platform,
-        packageObservations,
-        primaryReport: completedReport,
-        caveRecord,
-        native: nativeProof,
-        coven: covenProof,
-        tests: observationTests,
-        scansPassed: true,
-      });
-      const evidence = buildSchemaV2PlatformEvidence({
-        primaryReport: completedReport,
-        caveRecord,
-        platform: options.platform,
-        timing: {
-          startedAt,
-          completedAt: new Date().toISOString(),
-        },
-        sdkContract,
-        observedAssertions,
-        verified: {
-          validator: sdkContract.validator,
-          ...verifiedIdentities,
-          harness: {
-            ...producer.harness,
-            invocationId: randomUUID(),
-          },
-          artifacts: evidenceArtifacts,
-          environment: {
-            os: process.platform,
-            arch: process.arch,
-            ...toolchain,
-            nativeCustody: {
-              backend: nativeProof.backend,
-              available: true,
-            },
-            covenIdentity: {
-              backend: CANONICAL_PLATFORM_ENVIRONMENTS[options.platform].covenIdentity,
-              available: true,
-            },
-          },
-          isolation,
-        },
-      });
-      const canonical = serializeValidatedSchemaV2PlatformEvidence(evidence, {
-        contract: sdkContract.contract,
-        schema: sdkContract.schema,
-      });
-      scanPhase1ArtifactText(canonical, {
-        validateReport(_value, contents) {
-          sdkContract.contract.parsePlatformEvidence(
-            contents,
-            'Chat retained schema-v2 platform evidence',
-            sdkContract.schema,
-          );
-        },
-      });
-      const reportPath = resolve(reportRoot.rootPath, 'record.json');
-      writeFileSync(reportPath, canonical, { mode: 0o600 });
-      await reportRoot.retainSanitizedJsonReport({
-        reportPath,
-        destinationPath: options.outputPath,
-        validateReport(_value, bytes) {
-          sdkContract.contract.parsePlatformEvidence(
-            bytes.toString('utf8'),
-            'Chat retained schema-v2 platform evidence',
-            sdkContract.schema,
-          );
-        },
-        secretScan: ({ reportPath: scannedPath }) => {
-          const contents = readFileSync(scannedPath, 'utf8');
-          scanPhase1ArtifactText(contents, {
-            validateReport() {
+        const isolation = runSchemaV2PreflightStage(
+          'phase1.stage.evidence-authority.isolation.failed',
+          () =>
+            buildIsolationEvidence({
+              operatorBefore,
+              operatorAfter,
+              nativeBeforeSha256: nativeProof.beforeSha256,
+              nativeAfterSha256: nativeProof.afterSha256,
+              opaqueIds: [
+                randomBytes(16).toString('hex'),
+                randomBytes(16).toString('hex'),
+                randomBytes(16).toString('hex'),
+                nativeProof.opaqueId,
+              ],
+            }),
+        );
+        const observedAssertions = runSchemaV2PreflightStage(
+          'phase1.stage.evidence-authority.assertions.failed',
+          () =>
+            buildObservedSchemaV2Assertions({
+              registry: sdkContract.registry,
+              platform: options.platform,
+              packageObservations,
+              primaryReport: completedReport,
+              caveRecord,
+              native: nativeProof,
+              coven: covenProof,
+              tests: observationTests,
+              scansPassed: true,
+            }),
+        );
+        const evidence = runSchemaV2PreflightStage(
+          'phase1.stage.evidence-authority.build.failed',
+          () =>
+            buildSchemaV2PlatformEvidence({
+              primaryReport: completedReport,
+              caveRecord,
+              platform: options.platform,
+              timing: {
+                startedAt,
+                completedAt: new Date().toISOString(),
+              },
+              sdkContract,
+              observedAssertions,
+              verified: {
+                validator: sdkContract.validator,
+                ...verifiedIdentities,
+                harness: {
+                  ...producer.harness,
+                  invocationId: randomUUID(),
+                },
+                artifacts: evidenceArtifacts,
+                environment: {
+                  os: process.platform,
+                  arch: process.arch,
+                  ...toolchain,
+                  nativeCustody: {
+                    backend: nativeProof.backend,
+                    available: true,
+                  },
+                  covenIdentity: {
+                    backend: CANONICAL_PLATFORM_ENVIRONMENTS[options.platform].covenIdentity,
+                    available: true,
+                  },
+                },
+                isolation,
+              },
+            }),
+        );
+        const canonical = runSchemaV2PreflightStage(
+          'phase1.stage.evidence-authority.serialize.failed',
+          () =>
+            serializeValidatedSchemaV2PlatformEvidence(evidence, {
+              contract: sdkContract.contract,
+              schema: sdkContract.schema,
+            }),
+        );
+        runSchemaV2PreflightStage('phase1.stage.evidence-authority.scan.failed', () =>
+          scanPhase1ArtifactText(canonical, {
+            validateReport(_value, contents) {
               sdkContract.contract.parsePlatformEvidence(
                 contents,
                 'Chat retained schema-v2 platform evidence',
                 sdkContract.schema,
               );
             },
+          }),
+        );
+        const reportPath = resolve(reportRoot.rootPath, 'record.json');
+        await runSchemaV2StageAsync('phase1.stage.evidence-authority.retain.failed', async () => {
+          writeFileSync(reportPath, canonical, { mode: 0o600 });
+          await reportRoot.retainSanitizedJsonReport({
+            reportPath,
+            destinationPath: options.outputPath,
+            validateReport(_value, bytes) {
+              sdkContract.contract.parsePlatformEvidence(
+                bytes.toString('utf8'),
+                'Chat retained schema-v2 platform evidence',
+                sdkContract.schema,
+              );
+            },
+            secretScan: ({ reportPath: scannedPath }) => {
+              const contents = readFileSync(scannedPath, 'utf8');
+              scanPhase1ArtifactText(contents, {
+                validateReport() {
+                  sdkContract.contract.parsePlatformEvidence(
+                    contents,
+                    'Chat retained schema-v2 platform evidence',
+                    sdkContract.schema,
+                  );
+                },
+              });
+            },
           });
-        },
-      });
-      return evidence;
-    }
+        });
+        return evidence;
+      }
 
-    const reportPath = resolve(reportRoot.rootPath, 'report.json');
-    writeFileSync(reportPath, `${JSON.stringify(completedReport, null, 2)}\n`, { mode: 0o600 });
-    await reportRoot.retainSanitizedJsonReport({
-      reportPath,
-      destinationPath: options.retainSanitizedReport,
-      secretScan: ({ artifactRoot }) => scanPhase1Artifacts({ artifactRoot }),
-    });
-    return completedReport;
-  });
+      const reportPath = resolve(reportRoot.rootPath, 'report.json');
+      writeFileSync(reportPath, `${JSON.stringify(completedReport, null, 2)}\n`, { mode: 0o600 });
+      await reportRoot.retainSanitizedJsonReport({
+        reportPath,
+        destinationPath: options.retainSanitizedReport,
+        secretScan: ({ artifactRoot }) => scanPhase1Artifacts({ artifactRoot }),
+      });
+      return completedReport;
+    }),
+  );
 
   if (infrastructureFailure !== undefined) {
     throw wrapInfrastructureFailure(infrastructureFailure, report);

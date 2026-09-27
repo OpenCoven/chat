@@ -1,5 +1,256 @@
 # Phase 1 real-authority conformance
 
+## Cave build home isolation checkpoint
+
+Protected run `35138402347` failed on Windows with
+`phase1.stage.evidence-authority.isolation.operator.cave-home.changed`.
+Linux and macOS records independently passed identity, timing, schema, privacy,
+and all 197 ordered assertions. Windows had no accepted record; validation,
+attestation, and aggregation were skipped.
+
+The schema-v2 Cave build now receives explicit `COVEN_HOME` and `COVEN_CAVE_HOME`
+under the producer's owned execution `HOME`. Previously, these variables were
+absent. The pinned Cave resolver falls back to `os.homedir()`, which on Windows
+can resolve the retained staging `USERPROFILE` instead of execution `HOME`.
+A frozen-resolver reproduction demonstrates that routing gap. It does not yet
+prove which build operation changed the protected filesystem snapshot.
+
+The build override preserves `USERPROFILE`, the validated OS token-profile
+binding, resource limits, native cleanup authority, and the complete before/after
+operator fingerprint comparison. Missing or non-absolute execution homes fail
+with a bounded error. Native scenario homes remain separately token-profile-bound.
+Fresh protected validation is required before claiming the Windows failure fixed.
+
+Earlier diagnostic checkpoints below describe the preceding deliveries.
+
+## Execution-root cleanup diagnostic checkpoint
+
+Protected [run 35125287541](https://github.com/OpenCoven/chat/actions/runs/35125287541)
+used Chat #305 (`1f69306293f8caf873e0a2d6459a5c402e77600a`) and SDK #291
+(`404c2bf898330cff10e0402646e83e6e65d17869`). Linux and macOS records passed
+independent identity, timing, privacy and all 197 ordered assertions each. Windows
+failed at `phase1.stage.execution-root-cleanup.failed`, before isolation validation,
+and emitted no record. Downstream validation, aggregation and attestation were
+skipped. This result does not prove that the earlier isolation failure is repaired.
+
+Cleanup diagnostics classify actual operation failures using private identity maps:
+`child-terminate`, `supervisor-wait`, `child-kill`, `child-reap`,
+`tracked-set-changed`, `root-precondition`, `root-rename`, `root-postrename`,
+`entry-stat`, `leaf-remove`, `directory-enumerate`, `directory-remove`,
+`multiple`, and `unknown`. Public IDs use the prefix
+`phase1.stage.execution-root-cleanup.`. Native messages, paths and PIDs stay in
+private errors; messages, public category properties and arbitrary aggregate causes
+do not establish a category. Several cleanup failures report `multiple`.
+
+The diagnostic change preserves original private errors, reverse child cleanup,
+existing grace periods, supervisor tree ownership, primary infrastructure-failure
+precedence, root ownership checks before and after rename, and missing-entry and
+symlink behavior. It does not repair the underlying Windows failure. Reviewed
+source and binding delivery, matching SDK rebinding, both scope rotations, and a
+fresh protected run remain necessary to identify that failure and prove acceptance.
+
+## Prior owner-cleanup investigation
+
+Windows owner-cleanup follow-up: [CI 35095826197](https://github.com/OpenCoven/chat/actions/runs/35095826197)
+passed ten jobs and failed in the second lifecycle child launch at
+`operation=job-assignment`, `nativeCode=5` (access denied). The target job had
+zero active processes. The child belonged to another job, not the target;
+its Windows session matched both the supervisor and first assigned child.
+All seven owner-cleanup tests, installation/quarantine, outer cleanup and the
+first child's credential/profile assertions passed. The application fixture
+was not reached. Protected acceptance remains open.
+
+The fixture reused one containment job across three logons. Other native
+callers, including the profile-owner/RPC probes, use independent job lifetimes;
+`RunAsUserCore` terminates and drains its job before returning. Each profile
+probe now receives a fresh job and matching nonce/name environment binding,
+while retaining the same isolated identity and owned profile. The first two
+jobs are disposed before the next launch; the final job remains available for
+terminal quarantine and unload-failure ownership assertions. All three child
+results still require zero exit and empty output, persistent credentials, and
+both profile comparisons. Final profile, account and hive absence checks remain.
+
+A portable regression executes the actual fixture control flow against a job
+implementation that rejects reuse. It failed on the second launch before the
+repair. Fresh Windows validation is still required. The observed categories
+exclude a session mismatch but do not establish the precise nested-job or
+termination-state constraint behind the access denial. Production supervisor
+behavior, ACLs, privileges, deadlines and resource limits are unchanged.
+
+The cleanup-grant owner consumes the validated marker by handle and prunes only
+its empty private directories with parent pins and original identity checks.
+Sibling grants, unrelated contents and replacements are preserved. Committed
+consumption remains final if pruning fails. Chat landing, SDK rebinding and
+fresh protected validation remain pending.
+
+## Executable diagnostic harness binding
+
+[Protected run 34970370434](https://github.com/OpenCoven/chat/actions/runs/34970370434)
+completed with Linux and macOS platform jobs passing and Windows failing at
+`phase1.native-scenarios.native-preflight-installation-rpc`. Artifact validation,
+attestation and aggregation were skipped; this run does not establish aggregate
+acceptance or identify the underlying Windows RPC failure.
+
+Although its producer was Chat `e28b2ccb80ab74dd9cd8ba40aa1c5ada3539212b`,
+the bootstrap cloned the lock-selected harness `683e99918eb38978680e46aed7c496f6801c3306`.
+That harness imported its own older producer module, so the newer installation
+diagnostic classification was never executed. Workspace-module tests alone
+could not detect this stale executable binding.
+
+Chat #296 selected reviewed Chat `e28b2ccb80ab74dd9cd8ba40aa1c5ada3539212b`,
+tree `64b1e1812e9bfc729f2d7d148b224afe6f17f775`, as the executable harness.
+Its governed file and production-delta identities are refreshed together.
+The regression clones the selected Git revision, verifies its harness authority,
+and executes its native preflight diagnostic module in a child Node process.
+This checks the selected module, not the complete protected bootstrap.
+Frozen consumer, SDK candidate, Cave and Coven revisions remain unchanged.
+Chat #296 landed this binding as `047e8ad7f4a2ca5a9009217de3c3f5f32fd98ba6`.
+SDK #284 bound it at `e37b195c246d55a5929dc74f7e7d116b1fc6dfd0`; both validator
+scopes were rotated before protected run `34977202052`. Linux and macOS each
+passed all 197 ordered assertions and independent identity, timing and scan
+checks. Windows failed at
+`phase1.native-scenarios.native-preflight-installation-secure-store-unavailable`.
+Validation, attestation and aggregation were skipped. The diagnostic binding
+worked; the underlying Windows store failure remains unresolved.
+
+### Installation operation diagnostics
+
+Conformance builds classify unavailable installation operations as `lock`,
+`entry`, `read`, `write`, or `persistence`, each with an `-unavailable` suffix
+under `phase1.native-scenarios.native-preflight-installation-`. These fixed
+labels preserve retryability without exposing provider messages or credentials.
+Other error kinds and ordinary-build diagnostics are unchanged. Persistence
+still combines attribute read, policy rejection and Enterprise migration;
+it does not identify the underlying Windows API error.
+
+Fault-injection tests exercise creation and existing-ID reads; Windows tests
+also cover legacy UTF-16 rewrites. The Windows supervisor behavior suite runs
+empty custody, grant issuance, creation, stable reread and authorized cleanup
+inside a separate Job for its isolated user. Local syntax and mocked tests do
+not establish restricted Windows runtime success.
+
+Windows supervisor job `104433590803` failed with its child diagnostic hidden.
+Follow-up job `104446263997` preserved the primary category:
+`conformance_issue_native_custody_cleanup-failed`, with no secondary error.
+That failure precedes installation-ID creation. The fixture supplied the
+redirected profile, owned by the isolated user, where explicit cleanup homes
+require a trusted owner. It now uses the authoritative OS profile, matching
+protected production's `nativeScenarioHomes` selection. Follow-up Windows job
+`104456151454` failed during OS-profile cleanup after Windows accepted deletion.
+Its outer cleanup could hide a primary exception, so it does not establish
+whether the installation roundtrip passed.
+
+The fixture now runs installation last for this identity and uses production's
+`RunProducerAsUserAndQuarantine` path, which registers terminal quarantine for
+authorized profile-residual cleanup. It checks quarantine completion and emits
+a fixed success marker. The outer boundary preserves both primary and cleanup
+exceptions, including Job-disposal failures. Portable tests cover simultaneous failures; Windows runtime
+verification remains pending.
+
+Job `104468314603` preserved the primary failure:
+`app_installation_id-installation_write_unavailable`, with no native secondary
+error. Outer profile cleanup separately failed with child relative-open access
+denied (`ntstatus=c0000022`). No successful installation roundtrip is established.
+The fixture captures a read-only snapshot before native startup: whether the
+current user's registry hive is loaded and the maximum generic-credential
+persistence reported by `CredGetSessionTypes`. It emits only fixed categories
+when the roundtrip fails, alongside the unchanged primary category. These
+observations test the profile/session hypothesis; they do not change logon flags,
+load a profile, write credentials, or relax the original assertions.
+
+Job `104478918965` reported `hive=absent;persistence=session` alongside the
+same installation write failure. The native entry requires local-machine
+persistence. The current logon therefore lacks a prerequisite for that write;
+the separate profile-residual access denial remains unresolved.
+
+Hosted Windows job `104496796949` then observed `hive=present;persistence=session`
+and the same installation-write failure. Hive presence alone is insufficient;
+this result does not prove a repaired credential store or cleanup path. A
+read-only comparison now snapshots credential capability under the retained
+validated token through `RunQuotaRead` immediately before the existing child
+launch, then compares it with that child's fixed environment report on failure.
+Only allowlisted hive/persistence categories are published. Different capability
+between the two tokens would isolate a launch-session boundary; equal session-only
+capability leaves retained-logon/profile/policy behavior unresolved. No additional
+child, credential write, launch API, policy, or ACL change is introduced.
+
+Job `104506428191` compared the retained token and child directly: both saw the
+hive, but the retained token supported `enterprise` persistence while the child
+supported only `session`. The candidate now requests `LOGON_WITH_PROFILE` for
+each fresh child logon while retaining the supervisor's explicit profile reference
+through quarantine. This preserves fresh-logon account-disable rejection.
+Whether it restores native credential writes remains a hosted verification gate.
+
+Cleanup completion now requires both SID hives to be absent even when profile
+registration and paths have disappeared. A persistent hive reports fixed
+`hive=1` detail and fails within the existing ten-second observation budget;
+residual deletion never runs while a hive remains. Portable delayed/permanent
+hive tests cover both present and already-absent paths. The native lifecycle
+fixture launches three children against the owned profile, quarantines the last,
+and requires persistent credential capability and final hive/profile/account absence.
+No cleanup retry category or budget is expanded.
+
+The repair loads the verified profile explicitly during `WindowsIsolatedUser`
+creation and retains its hive handle with the validated token. Each child loads its own logon-session profile through `LOGON_WITH_PROFILE`. After terminal quarantine, disposal unloads the
+owned hive before closing the token or deleting profile/account state. Unload
+failure defers destructive cleanup and retains ownership for retry. Post-load
+initialization failures use that same cleanup path; if cleanup also fails, the
+trusted exception retains the cleanup owner alongside both errors. The native
+lifecycle fixture covers loaded-hive presence, persistent credential capability,
+unload failure/retry, post-load rollback, and final hive/profile/account absence.
+The residual-cleanup fixture also unloads the owned hive before directly
+retiring its token and seeding adversarial userenv residuals. This preserves
+the intended sharing-violation and denied-access controls under profile loading.
+If fixture unload fails, later teardown stages retain the owned identity and
+skip profile/account deletion while independently restoring injected blockers.
+Native Windows verification remains required; the immutable source binding is
+recorded below.
+
+The child and parent share the same allowlist, including existing fixed native
+cleanup-grant subtypes bound to the issuance command. Private response text,
+parser messages and extra output remain excluded. Cleanup/shutdown cannot
+replace a primary category. The portable regression exercises the actual home
+assignment, RPC decoder and primary/secondary exception pipeline. This fixture
+correction does not establish the protected installation failure's cause or
+relax the round-trip assertions.
+
+The lock now selects reviewed source `2f72ecedd225759a11889ec4b7dd112b71361d56`,
+tree `0a2e550bddbeaec405367d1dcb383c38fb10fb51`, including all 25 governed files
+and ten production deltas. The checkout regression exercises all five labels
+from that immutable revision. SDK rebinding, both scope rotations and fresh
+protected validation remain required; this binding alone is not acceptance.
+
+## Cave rc.7 adoption in progress
+
+The current Cave pin is `ecdcdcf8a75b62bb912ec48215ae20ab0809a181`,
+tree `1634a8eb0a391419bf28af4be0020cfd8c4df472`, the reviewed
+[Cave #5410](https://github.com/OpenCoven/coven-cave/pull/5410) merge.
+[Candidate run 34896723149](https://github.com/OpenCoven/coven-cave/actions/runs/34896723149)
+passed all 17 jobs, including Windows runtime and native behavior.
+The repair removes cmdlet discovery from the stripped Windows ACL-probe
+environment while retaining the ownership and DACL acceptance rules.
+
+The package manifest, assertion engine, contract fixture and HPKE vectors
+are byte-identical to the prior Cave pin. Version `0.4.2`, ordered assertions,
+SDK candidate, consumer and Coven identities remain unchanged.
+
+Protected Chat run `34916510997` used the preceding Cave `5ee8545`.
+Linux and macOS passed authenticated records; Windows reported
+`startup.discovery.missing.read.not-found.publication.root-owner-unverified`
+and a separate residual child-open access denial. It produced no Windows
+record. The upstream repair is not yet proof that this protected failure is
+resolved. A new source-bound harness, actual Chat landing, SDK validator
+binding, both scope readbacks and fresh protected acceptance remain required.
+
+The source snapshot is `a443b625e94bf059a50c3f47f16fa44171334ea1`,
+tree `6375117ef56a85e09c21941ecd257c88c92c2398`. The harness binding
+verifies all 25 governed files and ten production deltas against that snapshot.
+Only the governed CI workflow hash changes from the prior harness, incorporating
+Chat #281's required Unix matrix check for documentation changes.
+
+The preceding Cave5409 and combined-harness checkpoints below are historical
+evidence, not acceptance of this rc.7 adoption.
+
 The trusted non-Node platform launcher is the runner for the Phase 1 read-only
 desktop release gate. It packages the reviewed Chat production commit,
 consumes the four frozen SDK tarballs, builds the locked Cave and Coven
@@ -13,43 +264,516 @@ No public record is written unless every primary assertion is completed and
 passes, the primary secret scan succeeds, and the exact SDK validator accepts
 the final bytes.
 
+## SDK 0.0.1 candidate and diagnostic authority adoption
+
+The current target is the replacement private SDK candidate from
+`cd10a3fa1d9900e0dbcb04bbb2477140854fba1d` (tree
+`6977092046b4cd5c3a3ce4a720141b1a97cfed39`), packed twice from that exact merge
+with identical bytes. Its runtime SHA-256 is
+`05bc8cc66bf07f9d2eef2015fdcd4e297a0ecb719fc2c92bca010d21c9045167`, from a
+135-entry canonical publication-source manifest of 26,543 bytes with SHA-256
+`a9d34128aa5aee886aebd9ce90a846dedd0c27a79d5060b13fa4c3cf6b54318b`. The
+schema-1 release manifest is 1,032 bytes with SHA-256
+`72041bfe9a236d709ea3fe26d32b871f17c7c5183e2991cd0229063ade730cb4`.
+Both locks record the four exact candidate archive sizes and digests.
+
+SDK #40 blocked the previous candidate `96804bc` because it predates the
+High-severity Cave fixes SDK #277 and #285. This replacement is cut from SDK
+`main` with those fixes, SDK #294 and the Automations and Cave APIs merged
+since (SDK #321). The Cave archive is 89,873 bytes
+(`7389376ebc40ff59d942957339769d4dbdb566e25adef9a9deb372581b39a245`), the
+Coven archive 102,172 bytes
+(`4162dd685f78c8703497cba65f68a2f0c28fc640bb7da64b0dc9462c74f357dc`) and the
+SDK archive 16,783 bytes
+(`68b258d21eb61360588c41db528d4b37e4594ddd82dac04cdf6477728161e43a`); the core
+archive is byte-identical. The Cave client now depends on `canonicalize`
+5.1.0. Evidence for `96804bc` remains historical and does not qualify the
+changed runtime.
+
+The previous candidate `96804bc483a063e41e9a9738a4ace61970f6c0a4` included
+the reviewed public Automations API from OpenCoven/sdk#251 and initial-release metadata from OpenCoven/sdk#253.
+Its 106-entry canonical publication-source manifest is 20,300 bytes with
+SHA-256 `c9e1c8c1538f5f14a170c3fa14a5d1a022d24937918e11caba1c7219232a624f`.
+Only the Coven archive differs from candidate `77d825d`: it is 45,724 bytes
+with SHA-256 `bc24d3c1542ba7c970b8e5eb1e54d3d9e7acc3e07028466906947773a4b5ef65`.
+The other three archives are byte-identical. Earlier SDK77 evidence remains
+historical and does not qualify the changed runtime. The primary assertion
+inventories remain 197 Darwin / 197 Linux / 196 Windows.
+
+Cave authority is the reviewed OpenCoven/coven-cave#5409 merge
+`5ee8545f5c2fe4c6121dfdfe842395a354bb3d7d` (tree
+`23cd75ef310e1f293a40e3eee183ea8df6180544`), version `0.4.2`. It retains the
+0.0.1 minimum-client prerequisite, bounded discovery diagnostics, read-only
+`OWNER RIGHTS` compatibility, and the shared 24-second publication probe
+budget required by the protected Windows profile boundary. The 77-file upgrade
+from historical `d655b2c3` also includes the reviewed deferred device-policy
+and ReviewDesk fixes, native Windows SID handling, bundled YAML dependencies,
+bounded startup-exit diagnostics, and direct-.NET ACL path resolution.
+This is a source/version upgrade, not a metadata-only correction.
+The packed SDK fixture retains its authenticated compatibility-source
+provenance at `e806655a7100e9d589662a6f3817c3fd8cde48ad`; the adopted authority contains that
+ancestor and identical fixture bytes. The Chat fixture mirror uses the same
+JSON values with repository formatting. Coven authority is unchanged.
+
+Exact archive and source digests already pin this candidate's fixture bytes.
+The current canary and frozen-consumer verifier additionally require direct
+packed/current fixture byte equality after the existing provenance, ancestry,
+historical-byte, and current-checkout digest checks. The generic historical
+validator still supports authenticated older fixtures; neither current entrypoint
+uses that permissive comparison policy. Native harness happy-path fixtures now
+advertise minimum client 0.0.1, with a regression against the adopted contract
+fixture. Those test-only changes advance the `connection.rs` native delta
+identity without changing the frozen production consumer or native behavior.
+
+`chat.revision` and `chatAuthority.tree` identify a separate production
+consumer `dabcdd47e7509880f26e9895ffb63d42d9070ca8` (tree
+`48e9387d2f3727e944a82376652fdc0c1dd02732`), prepared directly on the previous
+consumer `ef8c747f1dbae0fd2bc9fcb24d3a0914f9f1cc49`, itself prepared from
+reviewed consumer `636f7da96fa178c2c14648f84137091b15a1cb8a`. All production
+native files remain unchanged; its consumer lock and SDK archives are rebound from
+their actual committed bytes. The production canary also receives the already
+reviewed non-publishing artifact entrypoint, so private candidate verification
+does not invoke the publication CLI. The executable harness retains all ten
+reviewed native production deltas, including the merged #267 lifecycle work,
+#268 retained-handle diagnostics, and #266 checkpointed stderr observation.
+The bounded quota-removal retry does not address earlier persistent-quota
+failures; this adoption makes no certified Windows repair claim.
+Its actual source commit is frozen separately in
+`harnessAuthority`, with matching Windows/Unix module tables.
+
+The production source ancestry and the subsequent source-bound harness commit
+must be preserved by a true merge, not squash or rebase. Historical evidence
+and the historical SDK fixture below are not rewritten as current acceptance.
+After reviewed Chat landing, SDK coordination must bind the actual merged
+producer and these actual consumer, candidate, and authority identities.
+No protected run, Windows diagnostic pair, SDK #38 acceptance, SHIP approval,
+scope rotation, or package publication is established by this prerequisite.
+
+### Cave5409 source-version binding
+
+At pinned Cave `5ee8545`, `package.json` declares `0.4.2`. The health route
+uses that version through `APP_VERSION`, and the conformance engine emits it
+from the same package manifest. The engine is 153,390 bytes with SHA-256
+`e2742e3041648082e1087313f005a6e9407e2b8d2180881c42e109257804ec7b`.
+The lower version comes from the qualified upstream source, not a change to
+the SDK candidate. Neither historical `0.4.4` nor `0.4.3` is accepted by the
+new binding. The generic fixture's `0.0.0` example does not define the running
+release. Strict lock normalization and record-version equality remain intact.
+Regression coverage retains the bounded
+`phase1.stage.evidence-authority.build.cave-record.identity.cave-version`
+rejection. This is not a claim that this failure occurred in a protected run.
+
+The registry is an assertion inventory, not npm metadata. Its schema-2
+`provenance` identifies the exact Cave commit, tree, engine bytes, and coverage
+options. `sources.cave.releaseVersion` identifies the source manifest version.
+Neither field establishes a compatible published package; Cave's manifest is
+private. The historical schema-1 registry stays unchanged.
+
+The complete SDK `88332efc` lock and registry fixtures retain their original
+bytes and demonstrate rejection of this new Cave pin. Before protected
+execution, the subsequent SDK validator must bind the actual integrated Chat
+producer, its separate harness authority, Cave `5ee8545`, the new engine and
+registry provenance, and release version `0.4.2`. The ordered 109 required Cave
+assertions (110 with coverage), 197 Darwin / 197 Linux / 196 Windows primary
+totals, and exclusions remain unchanged.
+
+The private SDK968 candidate, its archives, and production consumer
+`ef8c747f1dbae0fd2bc9fcb24d3a0914f9f1cc49` remain frozen. The harness source
+branches from `9c4aa1f2` before Chat #277, so the newer UI's native changes do
+not enter the frozen production deltas. A true merge preserves both histories.
+This source preparation is not SDK #38 acceptance, a validator-scope rotation,
+a protected-run approval, SHIP authorization, or package publication.
+
+### Bounded pre-readiness exit observations
+
+[Protected run 34833377609](https://github.com/OpenCoven/chat/actions/runs/34833377609)
+used Chat `92c4c453` and Cave `d655b2c3`. Its Windows job reported
+`phase1.cave-authority.startup.exit`, with no Windows platform record. At that
+Cave revision, `startCave()` discards stdout, observes stderr only for discovery
+publication refusal, and reduces the server exit to a boolean. Neither the
+child's exit status nor another startup error survives into the retained
+diagnostic. The later Cave `0.4.4` metadata correction does not recover that
+missing observation.
+
+Chat accepts the exact finite counterpart message
+`Cave exited before readiness. [exit=<category>; stderr=<category>]`.
+Exit categories are `zero`, `nonzero`, `signal`, `windows-crash`, and `unknown`.
+Stderr categories are `not-observed`, `output-limit`, `address-in-use`,
+`access-denied`, `out-of-memory`, `module-not-found`, and `other`. The public
+diagnostic is `phase1.cave-authority.startup.exit.status.<exit>.stderr.<stderr>`.
+Unknown or malformed details retain the original generic exit diagnostic;
+command resource failures and the first startup failure keep precedence.
+Paths, error text, environment values, and arbitrary exit values are not
+accepted as diagnostic fields.
+
+The existing ordinary Windows job runs the finite parser and actual Node-pipe
+transport cases without a protected approval. That is transport coverage, not
+a reproduction of the protected Cave server failure: the native supervisor
+suite does not build and launch that server. Historical Cave `d655b2c3` emits
+the generic exit message; adopted Cave `5ee8545` includes the bounded categories
+from #5401 and the direct-.NET ACL path-resolution repair from #5409.
+The qualified source's ordinary CI passed, but no new protected run establishes
+the original startup failure's cause or its resolution. The separate Chat
+residual-profile cleanup work is not part of this adoption.
+
+## Windows OWNER RIGHTS discovery repair
+
+[Protected run 34782181876](https://github.com/OpenCoven/chat/actions/runs/34782181876)
+used Chat `5be5775e43cfdb3424e1a8361e11d5d59cbaaabb` and SDK validator
+`72a2c2467dbef2564ca4ddff2817914672f6580c`. Linux and Darwin passed, while
+Windows failed at `phase1.native-scenarios.launch.discovery-not-found`.
+
+The protected supervisor intentionally creates the real Windows profile's
+`.coven` directory with a protected DACL containing an `OWNER RIGHTS`
+(`S-1-3-4`) `READ_CONTROL` ACE. Cave previously treated that SID as a foreign
+principal and attempted to replace the DACL. The `OWNER RIGHTS` entry suppresses
+the owner's implicit `WRITE_DAC`, so that repair was denied and Cave withheld
+`client-v1-discovery.json`.
+
+OpenCoven/coven-cave#5388 repairs the mismatch at the publisher boundary. Cave
+now includes each ACE's access mask in its bounded ACL report and admits
+`OWNER RIGHTS` only when the ACE is `Allow` and contains none of the existing
+writable-rights mask. Writable owner-rights entries, foreign writers, deny
+entries, inherited DACLs, malformed reports, and unreadable DACLs remain
+refused. The supervisor ACL, quotas, process isolation, waiver policy, discovery
+read validation, and readiness deadlines are unchanged.
+
+## Windows cleanup-grant profile binding
+
+[Protected run 34789638633](https://github.com/OpenCoven/chat/actions/runs/34789638633)
+used merged Chat `68c49d8a1a1ebedc06bdc8793a64c972945a265c` and SDK validator
+`dee5563020d02559d53d61c2651f35c3e4fdfcc5`. Linux and Darwin passed. Windows
+passed Cave launch and discovery, then failed at
+`phase1.native-scenarios.cleanup-grant.marker-identity-unavailable`.
+
+The Windows fixture repair moved Cave authority into the restricted token's
+validated operating-system profile but left cleanup-grant storage rooted at
+the artifact-local `native-authority-home`. Unlike Unix, no Windows fixture
+creation populated that path, and the artifact hierarchy also permits the
+supervisor to write for quota collection. It is therefore not a valid private
+cleanup-marker authority.
+
+Windows cleanup grants now use the same validated token profile as Cave. The
+profile root is accepted only under the existing trusted-owner and
+trusted-writer validation used by Windows discovery. The existing `.coven`
+directory and every newly created `chat/phase1-cleanup-grants-v1` descendant
+must still be current-user-owned, non-reparse, and writable only by the current
+user, SYSTEM, or Administrators. Handle pinning, path revalidation, storage
+identity, link-count checks, write-through publication, collision handling,
+single-use consumption, and fail-closed cleanup behavior are unchanged.
+
+## Native launch and profile survival observations (diagnostic only)
+
+[Protected run 34796638173](https://github.com/OpenCoven/chat/actions/runs/34796638173)
+used Chat `7ec15b20b5526ef809c8f237a4dab1f640cb8a4d`, SDK validator
+`ff96d08e19e534e982b3e9ea24fb9cc7e9e22a67`, and Cave `8a06421a`. Unix
+platform jobs succeeded, but Windows failed at
+`phase1.native-scenarios.launch.discovery-not-found`, followed by
+`profile-delete:invalid-operation,profile-survived:invalid-operation`.
+There is no Windows record or aggregate acceptance from that run.
+
+The launch failure means native readiness ended without discovery; it does
+not identify why publication was absent. The native conformance launcher
+inherits Cave stderr, but the RPC client previously drained it without
+observing Cave's existing bounded publication-refusal line. The client now
+observes at most 8 KiB per launch, retains at most 256 bytes from an incomplete
+line, accepts only complete anchored publisher lines with the ten existing
+finite codes, and retains the first accepted code. Fragmented LF/CRLF lines are
+supported. All stderr continues to drain; no raw output is forwarded or
+retained. Only the matching native
+discovery-not-found failure receives a `.publication.<category>` suffix.
+`not-observed` and `output-limit` are local observations, not publisher claims.
+Other failures and the first retained scenario failure keep precedence.
+
+Stdout response delivery does not prove that earlier stderr bytes have been
+dispatched to Node. Each launch therefore uses a fresh opaque request identity.
+Before writing every launch response, the native RPC response writer writes and
+flushes a stderr checkpoint containing only the identity's SHA-256. The client
+keeps each launch observation in FIFO order until that checkpoint or a complete
+stderr EOF. Non-discovery responses can settle before their checkpoint, but
+their bounded observation remains as a tombstone so delayed stderr cannot move
+to a later request. Discovery-not-found responses remain pending until a
+terminal boundary; a refusal or byte cap alone is only a candidate result.
+Separate response and checkpoint timers preserve the original RPC deadline. A
+missing checkpoint poisons attribution for the RPC stream, clears the bounded
+queue, and fixes current and future discovery classifications at
+`drain-timeout`; incomplete pipe closure similarly yields `drain-unavailable`.
+Requests created after stderr completion or attribution poisoning are not
+enqueued. Wrong checkpoints, duplicate responses, and stale post-timeout bytes
+cannot settle or classify a different request. A synchronous or asynchronous
+stdin write failure clears pending requests and poisons launch attribution as
+`drain-unavailable`, so an unsent request cannot remain at the FIFO head. No new
+RPC command, readiness deadline, or shutdown operation is introduced.
+Checkpoint I/O failure still delivers the original response where possible and
+is propagated to the native RPC loop. This changes the conformance RPC native
+delta, not the frozen production consumer.
+
+The profile failure already distinguishes native API errors from survival
+after deletion was accepted or the API reported a missing profile. It did not
+identify which postcondition remained. That final failure now reports
+`profile-remained[delete=<outcome>;registry=<0|1>;expected=<0|1>;actual=<0|1>]`
+from the last bounded observation. The three outcomes are `not-needed`,
+`accepted`, and `not-found`; flags indicate only existence, never paths or
+contents. Native error codes, both ten-second cleanup bounds, quarantine,
+handle release, account cleanup, and all failure gates remain unchanged.
+
+These changes repair diagnostic loss, not Windows startup or profile deletion.
+The actual publication cause and residual profile component remain unknown
+until observed on a subsequently reviewed and rebound protected producer.
+No ACL relaxation, additional cleanup deletion, or deadline increase is
+justified by the current evidence.
+
+## Bounded discovery decoder prerequisite (historical)
+
+The decoder accepts the finite read/publication diagnostics emitted by
+[OpenCoven/coven-cave#5377](https://github.com/OpenCoven/coven-cave/pull/5377):
+
+```text
+client-v1-conformance: Client v1 discovery record is not published. [read=<read>; publication=<publication>]
+```
+
+The seven read categories and twelve publication categories are enumerated in
+`CAVE_DISCOVERY_FAILURE_DIAGNOSTICS`. Only exact combinations pass both public
+diagnostic gates. Unknown categories or malformed details retain the generic
+`phase1.cave-authority.startup.discovery.missing` identifier; raw details are
+never copied. Command failures and assertion results retain precedence over
+these pre-assertion diagnostics, and the first attributed startup message wins.
+
+The combined decoder and native launch behavior are frozen at the actual
+committed `harnessAuthority.revision` and `.tree` in
+`phase1-conformance.lock.json`. Both trusted Windows and Unix module tables
+bind those exact source bytes. The guide's workflow digest describes the
+producer workflow; the lock's workflow entry describes the workflow committed
+at the frozen source revision. The combined source preserves the bounded
+native launch diagnostics, aborted-worker recovery, live-worker exclusion,
+and corresponding native production deltas from OpenCoven/chat#259, together
+with the child-stderr discovery regression coverage added in `6755a3d`.
+This PR requires an actual merge commit to preserve the pinned source ancestry.
+
+The decoder-only binding did not adopt the Cave counterpart or change Cave
+fixture provenance, ACLs, identity checks, quotas, or readiness deadlines.
+It retained Cave `cb3d22d1f403dd3b94b02668a599a2bf94999e8b`; the current
+candidate adoption above advances that authority separately. A real Windows
+diagnostic pair and protected acceptance remain unproven by decoder delivery
+alone.
+
+## Cave-only adoption on main (historical)
+
+OpenCoven/chat#262 froze the Cave counterpart at merge
+`1bb0a21773fcc2966308ed1900ec6b746fcfdbc8`, tree
+`b05c2baa4b586e2523e1803db8d9fd1182ecd148`, which descends from the prior
+`cb3d22d1f403dd3b94b02668a599a2bf94999e8b` authority and includes reviewed
+head `90fbebf45316984890dd4695503a62e89e24e3ae`. The adoption advances the
+whole exact Cave source, release `0.4.3`, assertion engine, and contract fixture;
+it does not reinterpret the change as a root-cause repair.
+
+[Protected run 34763766701](https://github.com/OpenCoven/chat/actions/runs/34763766701)
+is pre-adoption evidence from merged Chat
+`311dda625b20aaa91c7bf2b19718387ec56acab0` with SDK validator
+`56fcf68e819c7f73201989e3c0f77fc2d17c0112`. Linux and Darwin passed. Windows
+failed only at `phase1.native-scenarios.launch.discovery-not-found`; artifact
+validation, attestations, and aggregation were skipped, so no aggregate exists.
+That Cave-only adoption called for a diagnostic run with Cave
+`1bb0a21773fcc2966308ed1900ec6b746fcfdbc8` to identify bounded read/publication
+categories; it did not establish protected acceptance.
+
+That rebind preserved ACL isolation, waiver-disabled execution, quotas,
+immutable authority and exact Git-object verification, privacy-bounded output,
+deadlines, readiness acceptance rules, cleanup, attestations, and fail-closed
+behavior. The Chat decoder was unchanged. That step froze harness authority at `323c05749dc5d0f970989e85c3859dc178f44944`,
+tree `02950571efd37ef1d1fd7fcc56cf446e9447a0fd`, to bind the exact `0.4.3`
+lock parser and matching workflow integrity tables. Main retained that source
+through true merge `cd4be039fd9f49268791dd439b5c024476189ed0`. The current SDK
+candidate integration preserves both ancestries and binds the combined source
+separately; it does not reuse the older SDK candidate or harness pin.
+
+## Frozen GLib source adoption (historical)
+
+The production binding and prior diagnostic harness below retain the reviewed
+GLib iterator backport. The current executable harness commit and tree are
+recorded in `phase1-conformance.lock.json` under `harnessAuthority`; the isolated
+quota-reader repair advances that binding through the two-commit process below.
+
+| Source | Revision | Tree |
+| --- | --- | --- |
+| Production Chat | `0da8c4749f57e63601b29d66032f80c9bbac1cb5` | `7be1737c4aae02493660d39a2d6f6fdf4dd9e696` |
+| Prior diagnostic harness | `e8fe64b4d2b9bd38a03d8c23a28432518b41c187` | `b8934b32dc6a1352df55bab36af6e261d0aa9e86` |
+
+The production snapshot changes only two Cargo files and 123 reviewed
+vendor/provenance files from its prior frozen revision. The executable harness
+retains those adoption bytes and additionally updates the Windows supervisor
+and its byte-for-byte workflow copy for owner-only status staging files and
+bounded quota diagnostics that preserve the first failure. The schema-v2
+producer retains the validated staging path and supervisor SID through its
+restricted child environment. Staging validators reject missing identity, and
+the ACL probe checks exact inherited ACEs on direct temporary files. The
+existing whole-checkout checks cover vendor files; no authority file list or
+cleanliness check is relaxed. Only the two Cargo-file bindings change within
+the production authority and native delta tables; 22 of the 25 pinned harness
+files retain their bytes from staging harness
+`14775ce396f73112ff95205e4e97303740748e13`.
+
+[Native validation run 34498480972](https://github.com/OpenCoven/chat/actions/runs/34498480972)
+validated the exact production tree and the earlier GLib-adoption harness at
+`e0fca804e46d1a30eedcdae505c33e70d06035fb`: production passed 128 native
+tests and that harness passed 158. Both passed the optimized desktop build, 11
+patched iterator tests, Linux dependency-graph checks and final source
+consistency. That run predates the status staging and quota diagnostic changes and does not
+validate the current executable harness. The source commits have verified
+signatures and are retained as parents of the adoption branch. This adoption
+must land with an actual merge commit to preserve their ancestry.
+
+Native candidate validation does not establish protected acceptance. Full
+packaged CI, an updated SDK validator binding, both protected scopes and fresh
+platform/aggregate validation remain required. Issue #188 remains open until
+those gates and advisory reconciliation are complete.
+
+## Fresh protected status-staging result
+
+[Run 34603676876](https://github.com/OpenCoven/chat/actions/runs/34603676876)
+used merged Chat `3d5af5b3441991e0314c4f2dfa91bfe9b450e9a7` and SDK validator
+`2e14473b1c0ee888411f769484616332e68514ea`. Linux and Darwin passed, and
+both retained records passed the matching SDK parser/scanner, exact source
+identities, Cave timing and ordered assertion sets: 110 Cave, 46 SDK and 41 Chat.
+Windows failed with `resource quota monitor failed closed: access-denied`, then
+a separate ephemeral identity-cleanup failure. Artifact validation, attestation
+and aggregation were skipped. The earlier status-writer assertion was not
+reported; that does not prove the protected status-staging repair complete.
+
+Issue #217 narrows the remaining quota diagnostic to fixed root and filesystem
+operation identifiers. Issue #215's merged cleanup diagnostics identify the
+separate cleanup subphase. Neither changes limits, authority checks, dependency
+settings or first-failure precedence. The new combined diagnostic requires a
+reviewed frozen harness, matching SDK binding and fresh protected execution
+before any ACL repair or aggregate acceptance can be established.
+
+## Protected validation before status staging
+
+[Run 34594407090](https://github.com/OpenCoven/chat/actions/runs/34594407090)
+used producer `4a5002011322de824f4d15676eab7769ce7975ba` and validator
+`c43b21cbeb5dfe218430345fc71eff2822810f33`. Linux and Darwin passed; each
+retained record contains 110 Cave, 46 SDK and 41 Chat passing assertions with
+unique identities, consistent Cave timing and both scans passed. Windows
+failed at
+`phase1.runtime-observations.coven-rust-tests.status-replacement.assertion.writer-error.apply-owner-only-security.access-denied`.
+The prior quota-monitor and identity-cleanup errors were not reported in this
+execution; their absence does not establish that they cannot recur.
+
+That run predates this combined staging harness and the merged Coven status
+writer. Artifact validation, attestation and aggregate acceptance were skipped.
+The result identifies the status-writer security operation as the next repair
+boundary; it does not validate this integration or justify changing quotas.
+
+## Earlier protected diagnostic result
+
+[Run 34435223248](https://github.com/OpenCoven/chat/actions/runs/34435223248),
+attempt 1, used Chat #199 at `724690e64c4be820bdf4e0e1f8c568db516ba490` and SDK
+#196 validator `a5c7e38ecc905a6fdb9c9a3e704c6395ec2df02a`. Linux artifact
+`10136315804` and Darwin artifact `10136396539` passed identity, digest, timing,
+scan, and all 197 assertion checks. Windows failed at
+`phase1.runtime-observations.coven-rust-tests.status-replacement.assertion.writer-error.access-denied`.
+This establishes OS code 5 from the writer, but does not identify the failing
+operation. Final validation, attestation, and aggregation were skipped. No
+aggregate is accepted.
+
+[Coven #984](https://github.com/OpenCoven/coven/issues/984) tracks fixed operation
+labels; [#985](https://github.com/OpenCoven/coven/pull/985) is the diagnostic
+implementation. The Chat classifier recognizes nine fixed operation labels and
+six fixed OS codes only within an attributed, structurally valid writer panic.
+Old operation strings retain their previous categories; unknown labels, codes,
+or malformed records retain the generic category. Raw messages are never emitted.
+Source adoption, harness authority, workflow digests, a matching SDK binding,
+and fresh protected validation remain required. This diagnostic work does not
+change writer security, retry limits, or observation selection.
+
+Coven #985 head `367e670a01379799d89b6802e1a00bea7a0e20ef` passed native
+Windows CI, including the new failure-path tests. Its Linux retry passed in
+[run 34437695364, attempt 2](https://github.com/OpenCoven/coven/actions/runs/34437695364/attempts/2).
+The initial Linux failure was SQLite exit-persistence contention, tracked in
+[Coven #986](https://github.com/OpenCoven/coven/issues/986); a passing retry does
+not establish a persistence fix. Val merged #985 as
+`c0c979cdee96327bf24218bc7c7ecb90d719cb27`; its tree matches the reviewed head.
+These CI results do not replace protected conformance validation.
+
+The proposed Coven update also includes merged
+[#983](https://github.com/OpenCoven/coven/pull/983), which changes CLI authority
+refusal receipts and store initialization. Source adoption therefore includes
+production CLI changes as well as diagnostic metadata. The frozen Chat native
+client remains separately pinned; do not describe the complete adoption as a
+diagnostic-only change.
+
 ## Exact inputs
 
 `phase1-conformance.lock.json` pins:
 
-- Chat production `edd4728792321771496df58bfc0e6122908a96ec`, tree
-  `c373902b48b06520450f520e669a34f72b64a35d`, the frozen SDK source
-  authority;
-- SDK package candidate `acc38488f00860d246c3c553375634d64806eabb`;
-- Cave authority `6325fc4c1154c7d7398074a9760a2e2dc323b424`, tree
-  `9144939792d3dbdd91c208d7e2abc5ecc0eac089`, release `0.3.12`;
-- Coven producer/client `721437b84026c042e431b0882dcd14fdb29ac07d`;
-- Chat conformance driver support at the exact `harness.revision` and
-  `harnessAuthority.tree` generated from the preceding code/integration
-  commit;
-- SDK evidence contract and registry
+- Chat production `dabcdd47e7509880f26e9895ffb63d42d9070ca8`, tree
+  `48e9387d2f3727e944a82376652fdc0c1dd02732`, the replacement SDK 0.0.1
+  consumer retaining the prior reviewed native production source;
+- SDK package candidate `cd10a3fa1d9900e0dbcb04bbb2477140854fba1d`;
+- Cave authority `5ee8545f5c2fe4c6121dfdfe842395a354bb3d7d`, tree
+  `23cd75ef310e1f293a40e3eee183ea8df6180544`, release `0.4.2`;
+- Coven daemon and observation-test source `8c3735f374d6bc95e5b6fd107f7e7308fa26a2f8`;
+- Chat native client remains at `721437b84026c042e431b0882dcd14fdb29ac07d`
+  in its frozen Cargo manifest and lock;
+- Chat conformance driver `3fb86bdac464b1b6e20a929db327808d49a2ab95`, tree
+  `6fc0690bf253fd817fc2938830eef2da7c223777`, retained in the producer ancestry;
+- Historical schema-1 SDK evidence contract and registry
   `4736bf2e0d5b16272d79ecf7784c75f376b39b94`;
 - manifest digest
-  `b248f2d945f77e22d0dee1644e9131aa7d2a20db2f30d06206a974d7a4262dec`;
+  `72041bfe9a236d709ea3fe26d32b871f17c7c5183e2991cd0229063ade730cb4`;
 - canonical package order, release/vendor paths, sizes, and SHA-256 digests.
 
-Chat's Phase 1 source lock now agrees with the frozen Cave and Chat source
-contract committed in SDK validator
-`933a9523ccbee071417eca01b8a7a37e54d6cbc0`. This is source-authority
-compatibility only. SDK 933 still names Chat producer
-`4dc8f64bb71634a01ee647542dcdafdd0888b4f9`, while SDK #100 currently binds
-Chat `95de47f7aa2bf8233f71a601ad16011a82905e41`; neither is the final producer
-identity for this fix. Full producer compatibility and provenance remain
-blocked until this Chat change merges, a reachable authority commit pins the
-final behavior commit, and the SDK validator is rebound to that final
-post-merge Chat authority commit.
+SDK PR #189 froze the preceding candidate and Chat source contract.
+The protected validator used by historical run 34647484742 is SDK #206 merge
+`c774ba4ba473dae99ea8fe712989ae33ef5d5184`, which binds Chat producer
+`e7dfc135bb7341d4cfc5b7f0fcf4004843868809` and the preceding Coven source.
+The current SDK/Cave adoption requires a new SDK source/producer binding after
+reviewed Chat landing and before another protected dispatch. The frozen
+Chat source preserves all ten native file differences required by
+`harnessAuthority.productionDeltas`. Pinning the
+producer-derived `8a63ff1` source would remove those differences and fail the
+existing authority check.
+
+Chat #191 merged the source-fetch repair at
+`3f2302da7dc2b39adb8042853b64aa58c406de08`. SDK #191 binds that producer at
+`0d480eb72e00d5e0f915dbe0cb289ef12cbb9ebd`. Both validator variable scopes were
+verified at that SDK revision before protected run `34406621503`, attempt 1.
+Linux and macOS passed all 110 Cave, 46 SDK, and 41 Chat assertions. Windows
+completed the SDK, Chat, and Chat Rust observations, then failed at
+`phase1.runtime-observations.coven-rust-tests.failed`. The label does not
+identify which Coven test failed or distinguish compilation from execution.
+Final validation, attestation, and aggregation were skipped. Publishing remains
+disabled and no three-platform aggregate is accepted.
+
+Protected run `34395004109` used the previous `6526b56b30c9a9c1c072caf2f0022d3427ae18db` SDK candidate: Linux
+and Darwin passed, while Windows failed at
+`phase1.runtime-observations.sdk-tests.failed`. The failing assertion is not
+identified by that stage label. The replacement candidate requires a fresh
+protected attempt with the complete observation suite and existing resource
+ceilings.
+
+Protected run `34401360323` validates merged Chat `4f5cbf8` against SDK
+validator `9dd5890`, with both validator variable scopes rotated to that revision.
+Windows passed the image bootstrap but failed at
+`phase1.stage.checkouts.chat.failed`, before SDK observations. Fetching only the
+producer and harness revisions omits frozen Chat `841a88f`, which is outside
+their ancestry. A cold fetch reproduced the missing commit; an explicit fetch
+of the locked Chat SHA restored it. The Windows bootstrap therefore validates
+and fetches that exact source and retains a tag for nested local clones.
+The later #191 binding and run `34406621503` exercised this repair and reached
+Coven Rust observations. Local Git regression tests alone do not establish
+Windows platform conformance.
+Linux and macOS completed this run successfully with all 46 SDK and 41 Chat
+assertions. Windows failed before those observations, so final validation,
+attestation, and aggregation were skipped. No three-platform aggregate is accepted.
 
 The evidence record names the SDK evidence-authority commit because the SDK
 aggregator binds its committed registry to that commit. The package candidate
 remains independently pinned by revision, manifest digest, and tarball bytes.
-The runner verifies that the evidence-authority commit descends from the
-candidate and that all four candidate source package identities match the
-frozen manifest. It never rebuilds replacement per-platform SDK tarballs.
+The runner verifies both exact revisions and clean checkouts independently,
+checks the locked evidence registry, schema, and contract digests, and requires
+all four candidate source package identities to match the frozen manifest.
+The evidence authority and package candidate do not require shared ancestry. It never rebuilds replacement per-platform SDK tarballs.
 
 After reading the lock and configuring the frozen Windows supervisor, the
 verified entrypoint authenticates its own Chat revision, tree, and every
@@ -121,6 +845,13 @@ substituted, hidden-index, filtered, replacement-ref, submodule, oversized, or
 timed-out release checkouts. Each repository's complete verification command
 sequence shares a finite 30-second deadline, which accommodates the frozen
 Cave tree without permitting an unbounded Git child.
+The protected Cave authority checkout retains its full commit history because
+the packed fixture provenance names an older reviewed ancestor. The canary
+must prove that ancestry and read the historical fixture bytes rather than
+trusting the package's provenance claim alone.
+Every clone, fetch, and checkout subprocess receives the checkout-specific
+environment directly. Git attribute sources and other ambient Git overrides
+removed by that projection cannot be reintroduced by the caller environment.
 
 ## Native Coven identity
 
@@ -131,9 +862,11 @@ the same trust boundary used by the desktop application.
 Before building the conformance driver, the runner requires the production
 adapter, RPC entrypoint, Cargo manifest, and Cargo lock bytes to match the
 locked Chat production commit. The conformance-only Rust support is built from
-the separate immutable descendant harness revision in the lock. The production
-tree plus selected adapter/custody Git blobs and SHA-256 values are checked
-before packaging.
+the separate immutable harness revision in the lock. Before packaging, the
+runner verifies the exact production revision and tree, clean source, selected
+adapter/custody Git blobs and SHA-256 values, and the harness authority with its
+allowlisted native changes. The production adapter bytes must agree; ancestry
+between the independently frozen revisions is not required.
 
 The runner never calls `coven daemon status`, duplicates Unix peer or Windows
 pipe identity logic, or adds a pathname/shell fallback. Missing authority and
@@ -210,18 +943,28 @@ the process-owned isolated home. The marker binds the grant identity, isolated
 service, canonical account set, storage identity, and issuing process under a
 native-only per-process MAC key without storing the raw grant.
 
-The producer immediately redeems and drops the grant. Redemption first
-acquires the credential mutation lock, verifies that the in-process grant is
-still issued, opens and validates the exact marker without removing it, and
-holds its file identity for the transaction. It then deletes only the
-marker-bound entries, confirms every scoped entry is absent, atomically moves
-the same held marker out of the redeemable name, and finally removes the
-in-process grant. Replay, concurrent use, marker tampering, service/account
-substitution, links, and path swaps therefore fail closed. A lock, backend, or
-partial-delete failure leaves the marker and issued grant available for an
-authenticated retry with the same immutable service/account scope;
-already-absent entries make that retry idempotent. The run requires the same
-empty-state digest afterward and preserves unrelated entries. A missing,
+The producer immediately redeems and drops the grant. The Unix supervisor
+projects its dedicated absolute, producer-owned mode-`0700` credential lock
+root through the schema-v2 environment allowlist. Redemption first acquires
+that lock, verifies that the in-process grant is still issued, opens and
+validates the exact marker without removing it, and holds its file identity
+for the transaction. Linux initializes the native store. macOS opens the exact
+`HOME/Library/Keychains/phase1.keychain-db` file created for the
+isolated producer identity only when the isolation marker is present, every
+parent is private, owned, and not a symlink, and the file identity remains
+stable and single-linked while opening it. One retained native keychain handle
+serves every exact service/account deletion in the transaction without reading
+secrets. Both paths invoke exact idempotent deletion for every authenticated
+scoped account, so an already-absent item succeeds without a separate metadata
+presence query. They confirm every scoped entry is absent, atomically move the
+same held marker out of the redeemable name, and finally remove the in-process
+grant.
+Replay, concurrent use, marker tampering,
+service/account substitution, links, and path swaps therefore fail closed. A
+lock, backend, or partial-delete failure leaves the marker and issued grant
+available for an authenticated retry with the same immutable service/account
+scope; already-absent entries make that retry idempotent. The run requires the
+same empty-state digest afterward and preserves unrelated entries. A missing,
 malformed, or production keyring service is rejected before native custody
 access or grant issuance; missing or locked native services also fail the run.
 The separate reservation/adoption protocol for production-keyring credential
@@ -302,14 +1045,31 @@ The trusted root supervisor creates a random local account and primary group
 whose numeric UID and GID differ from the original GitHub runner. The account
 has no administrator membership or usable password. Its `HOME`, artifact
 workspace, temporary directory, XDG roots, writable `node_modules`,
-Corepack/pnpm caches, Cargo home, rustup home, and package store are fresh
-mode-`0700` directories below one ephemeral root. The copied checkout and its
-tracked harness/validator launch sources are root-owned and recursively
-non-writable; Git receives only the exact source path as `safe.directory`.
-The trusted command is a root-owned, non-writable sibling of that producer
-root. It receives an allowlisted environment with no GitHub token, OIDC
-request value, credential helper, operator home, ambient package cache, or
-proxy setting.
+pnpm caches, Cargo home, rustup home, and package store are fresh mode-`0700`
+directories below one ephemeral root. The supervisor resolves the exact Node,
+pnpm, and rustup executables while still running as the broker and validates
+their ownership and mode. The pnpm launcher identifies its exact
+content-addressed `pnpm.cjs` package root; the supervisor validates that
+complete regular-file tree, copies it into a root-owned, non-writable trusted
+directory, and installs a fixed wrapper that invokes it through the trusted
+Node copy. This preserves the self-updated pnpm runtime without depending on
+its private installation path after the UID transition. The broker-owned source
+runtime may contain action-setup hardlinks, but it must contain no symlink,
+special file, unsafe owner, or writable component. The root-owned copy is then
+validated again after ownership and mode sealing; every copied regular file
+must have link count one before restricted execution begins. The copied checkout
+and its tracked harness/validator launch sources are root-owned and recursively
+non-writable; local Git clones resolve the source's exact Git metadata directory
+for `safe.directory`, use `--local --no-hardlinks`, and retain no shared-object
+alternate. This supports both ordinary checkouts and Git worktrees without
+trusting the broader source path. The trusted command is a root-owned,
+non-writable sibling of that producer root. It receives an allowlisted
+environment with no GitHub token, OIDC request value, credential helper,
+operator home, ambient package cache, or proxy setting.
+
+The restricted harness and its transitive packed-consumer canary invoke the
+reviewed copied `pnpm` executable directly. `corepack` is not exposed after the
+identity transition.
 
 Dependency installation, the isolated Rust toolchain installation, all
 candidate/validator/Chat/Cave/Coven checkouts and builds, native RPC work,
@@ -327,10 +1087,15 @@ the workflow checkout before restricted execution. The root supervisor copies
 that complete checkout into its immutable source tree, and the restricted
 command passes those exact `.phase1-counterparts` roots explicitly. On Windows,
 the trusted child reads only lowercase commit IDs and repository allowlist
-entries from the verified lock, fetches the historical harness commit plus all
-five counterpart checkouts with pinned Git inside the Job, and then passes
-those roots to the relocated runner. Producer identity is always recomputed
-from the supplied workflow Chat checkout rather than the runner module path.
+entries from the verified lock, fetches the historical harness commit, retains
+it under `refs/tags/opencoven-phase1-harness`, and explicitly selects that tag
+when creating the verified-runner shallow clone. The selected authority ref
+must resolve to the locked revision and cannot have a same-named branch, so it
+crosses both isolated local-clone generations without an ambiguous short ref.
+The child then fetches all five counterpart checkouts with pinned Git inside
+the Job and passes those roots to the relocated runner. Producer identity is
+always recomputed from the supplied workflow Chat checkout rather than the
+runner module path.
 
 On Linux, the trusted supervisor requires a writable unified cgroup v2 mount.
 It creates a dedicated child cgroup, starts only a trusted UID-dropping wrapper
@@ -344,13 +1109,23 @@ handoff.
 
 On macOS, the supervisor creates the local user and groups with the
 preinstalled Directory Services tools and launches the entire command tree as
-that exact UID. The account is disabled from creation. After the restricted
-root exits, the supervisor reapplies the disabled authentication authority and
-non-login shell, repeatedly enumerates `ps` by exact numeric UID, sends
-`SIGKILL` only to those PIDs, and requires three consecutive zero-process
-observations. It then deletes the user and primary group and proves both that
-the UID has no processes and that Directory Services no longer maps it. Any
-lock, kill, zero-process, account, group, or UID cleanup failure fails closed.
+that exact UID. Before `sudo` changes identity, its exec-preserving launch
+subshell changes to `/`, so the target shell never tries to resolve an
+inaccessible inherited runner workspace; the restricted shell then changes
+only to the copied isolated workspace. The account is disabled from creation.
+After the restricted root exits, the supervisor reapplies the disabled
+authentication authority and non-login shell, repeatedly enumerates `ps` by
+exact numeric UID, sends `SIGKILL` only to those PIDs, and requires three
+consecutive zero-process observations. It then deletes the user and primary
+group and proves both that the UID has no processes and that Directory
+Services no longer maps it. Any lock, kill, zero-process, account, group, or
+UID cleanup failure fails closed.
+
+The restricted Unix dependency install keeps the source copy read-only and
+passes `--config.store-dir="$PNPM_STORE_DIR"` directly to pnpm alongside
+`--frozen-lockfile --ignore-scripts`. Store discovery and package imports
+therefore use the producer-owned isolated store rather than probing the
+read-only source root.
 
 Only after the Linux cgroup or macOS UID is proved empty does the trusted
 supervisor begin handoff. A root-only preparation pass opens the producer
@@ -389,33 +1164,51 @@ tries to replace the record after its root exits. Ubuntu proves cgroup-v2
 drain and macOS proves exact-UID process/account cleanup; both verify that the
 escaped PID is dead and the original bytes were handed off. Native cases also
 reject a record symlink, second hardlink, replaced artifact parent, and a
-synchronized in-place rewrite. Local runs without passwordless `sudo` still
-compile and run the descriptor handoff/rewrite cases but explicitly skip, and
-must not claim, the privileged UID/cgroup runtime results.
+synchronized in-place rewrite. The macOS success case invokes the root
+supervisor from a broker-owned mode-`0700` directory that the ephemeral UID
+cannot traverse, then requires the restricted fixture to start in the copied
+workspace and read its tracked source file. Local runs without passwordless
+`sudo` still compile and run the descriptor handoff/rewrite cases but
+explicitly skip, and must not claim, the privileged UID/cgroup runtime results.
 
 ### Windows pre-bootstrap trust boundary
 
 The `win32-x64` matrix expansion does not begin with checkout or a setup
 action. Its first step is inline `pwsh` reviewed as part of the workflow
 itself. Before network access or repository mutation, that step requires the
-GitHub `windows-2025-vs2026` x64 image at exact image version
-`20260824.214.3`,
-Windows build `26100.33296`, `kernel32.dll` file version
-`10.0.26100.33296`, PowerShell `7.6.5` at
-`C:\Program Files\PowerShell\7\pwsh.exe` with its bundled .NET runtime
-`10.0.11`, Visual Studio Enterprise 2026 `18.9.12112.369` at
-`C:\Program Files\Microsoft Visual Studio\18\Enterprise`, and its legacy v143
-`Microsoft.VisualStudio.Component.VC.14.44.17.14.x86.x64` component version
-`18.9.12009.81`. The v143 compiler toolset directory version remains
-`14.44.35207` at
+GitHub `windows-2025-vs2026` x64 image with one of two reviewed image
+profiles:
+
+| Image version | Visual Studio | Windows build | PowerShell | .NET runtime |
+| --- | --- | --- | --- | --- |
+| `20260907.229.1` | `18.9.12120.119` | `26100.33296` | `7.6.5` | `10.0.11` |
+| `20260922.246.2` | `18.10.12210.168` | `26100.33438` | `7.6.6` | `10.0.12` |
+
+The image selects its whole profile. Unknown images and any crossed value are
+rejected. GitHub deploys a new image gradually, so for a while runners serve
+both, and consecutive images differ in more than Visual Studio: the
+`20260922.246.2` rollout changed the OS build, PowerShell and .NET too. Until
+that rollout only Visual Studio varied per image, so every run on the new image
+failed the single OS, PowerShell and .NET pin before any conformance work.
+
+Both profiles require `kernel32.dll` file version `10.0.26100.33296`,
+PowerShell at `C:\Program Files\PowerShell\7\pwsh.exe` with its bundled .NET
+runtime, and Visual Studio Enterprise 2026 at
+`C:\Program Files\Microsoft Visual Studio\18\Enterprise`. The legacy v143
+`Microsoft.VisualStudio.Component.VC.14.44.17.14.x86.x64` component version is
+`18.9.12009.81` on `20260907.229.1` and `18.10.12020.329` on `20260922.246.2`,
+as reported by `vswhere` on the hosted runner; it is recorded, not enforced.
+The v143 compiler toolset directory version remains `14.44.35207` at
 `C:\Program Files\Microsoft Visual Studio\18\Enterprise\VC\Tools\MSVC\14.44.35207`.
 The compiler and linker are pinned respectively to that toolset's
 `bin\Hostx64\x64\cl.exe` and `bin\Hostx64\x64\link.exe`. Windows SDK
 `10.0.26100.0` provides `rc.exe` at
 `C:\Program Files (x86)\Windows Kits\10\bin\10.0.26100.0\x64\rc.exe`.
 These values come from the authoritative `actions/runner-images` inventory for
-release tag `win25-vs2026/20260824.214` at commit
-`8c3c8c0bf0068534d87e970a58b590522f1dc1a5`.
+release tags `win25-vs2026/20260824.214` at commit
+`8c3c8c0bf0068534d87e970a58b590522f1dc1a5` and
+`win25-vs2026/20260907.229` at commit
+`c240f76fa0dd523af7376dbe8480964a3cb0af47`.
 The workflow also requires valid Microsoft Authenticode signatures for the
 trusted PowerShell, kernel, command processor, Visual Studio executable,
 compiler, linker, and resource compiler, plus non-reparse runner temporary and
@@ -471,10 +1264,12 @@ non-inherited ACE granting the ephemeral SID only
 `JOB_OBJECT_QUERY | SYNCHRONIZE`; the Job owner remains the trusted runner
 identity, which retains the original full-access handle. Set/assign/terminate
 reopens and silent-breakaway mutation are denied. The supervisor launches the
-bootstrap with `CreateProcessWithLogonW(LOGON_WITH_PROFILE)` and
+bootstrap with `CreateProcessWithLogonW` using `LOGON_WITH_PROFILE` and
 `CREATE_SUSPENDED`, assigns it with `AssignProcessToJobObject`, confirms
-membership with `IsProcessInJob`, and only then calls `ResumeThread`. Breakaway
-flags are not enabled. The outer process retains non-delete-sharing handles for
+membership with `IsProcessInJob`, and only then calls `ResumeThread`. Breakaway remains disabled. The isolated-user object owns a separate profile
+reference until terminal quarantine and explicit unloading; bounded cleanup
+also requires the child-session hives to disappear. The outer process retains
+non-delete-sharing handles for
 the bootstrap, checkout, and artifact workspaces, captures stdout and stderr
 independently with 16 MiB bounds, applies a 55-minute timeout, terminates and
 reaps the complete Job on every exit path, and requires zero active Job
@@ -533,27 +1328,59 @@ Job if any limit is exceeded. The bounds are 128 MiB for direct archives,
 384 MiB for extracted PortableGit, 192 MiB for Node, 96 MiB for pnpm, 1 GiB
 for rustup toolchains, 2 GiB/1 GiB for each Cargo registry/git cache, 3 GiB
 for each pnpm store, 256 MiB for the bootstrap npm cache, 512 MiB for the
-protected checkout's Git objects, 768 MiB for each SDK/Chat/Cave/Coven/
-validator/producer checkout, 4 GiB for harness build roots, 2 GiB for the
+protected checkout's Git objects, 768 MiB for each SDK/Chat/Coven/
+validator/producer checkout, 4 GiB for the Cave working tree including its
+dependencies and Next output, 4 GiB for harness build roots, 2 GiB for the
 workspace, 10 GiB for the harness execution root, and 12 GiB for the complete
 bootstrap root. Quotas are rechecked after the root process exits and again
 after exact-SID quarantine so a last-moment or out-of-Job excess cannot escape
-the watchdog. Each scan materializes only a bounded number of entries through
+the watchdog. After preserving the built Chat RPC executable, schema-v2 removes
+the no-longer-needed Chat Cargo target before building Coven so peak disk usage
+stays within those unchanged bounds. Each scan materializes only a bounded
+number of entries through
 bounded enumeration and ignores only file/directory disappearance races caused
 by concurrent producer cleanup; permission failures, malformed paths, bound
 exhaustion, overflow, and other monitor errors still terminate the Job fail
-closed. Failures report either the fixed reviewed quota label or a path-free
-quota-monitor error.
+closed. After preserving the built Coven executable, schema-v2 also removes the
+Coven Cargo target before starting the observation suite, so neither packaging
+target remains at the next peak. Observation failures expose only the fixed SDK
+install, Chat install, SDK tests, Chat tests, Chat Rust tests, or Coven Rust
+tests substage, plus a distinct temporary-root cleanup substage on Unix;
+command output and private paths remain suppressed. Failures report either the
+fixed reviewed quota label or a path-free quota-monitor error.
+
+The Cave allowance accounts for a measured frozen `d20d83c` build with
+3,405,969,113 bytes in `node_modules` and `.next` alone; the former source-sized
+768 MiB allowance could not fit that working tree. The execution and bootstrap
+aggregate limits remain unchanged. Windows schema-v2 native builds use
+`CARGO_PROFILE_DEV_DEBUG=0` and `CARGO_INCREMENTAL=0` for Chat and Coven packaging
+and the shared native observation-test target.
+They retain the existing dev profile's runtime checks, optimization level, and
+features, but omit debugger and incremental-rebuild data for these one-shot
+builds. Unix and schema-v1 native build settings are unchanged. A local native
+RPC comparison reduced the build tree from 1,980,684,162 to 1,004,039,629 bytes;
+that measurement is not a substitute for the protected Windows quota result.
+
+Before throwing for a supervised production failure, the parent writes its
+existing bounded quota or exit-code diagnostic to stderr. A subsequent trusted
+cleanup exception therefore cannot erase that first diagnostic. Cleanup errors
+still fail the job and prevent evidence acceptance.
 
 The child receives a constructed environment rather than the runner
 environment. It contains no GitHub token, OIDC request value, Git credential,
 Cargo credential, or proxy setting. Git disables system/global configuration,
 credential helpers, prompts, replacement objects, and non-HTTPS fetch
-protocols, and enables fetched-object verification. Downloads use a proxy-free
-.NET `HttpClient`, allow only HTTPS, permit at most the reviewed per-asset
+protocols, uses the native `NUL` device spelling for disabled configuration and
+prompt helpers, and enables fetched-object verification. Downloads use a
+proxy-free .NET `HttpClient`, allow only HTTPS, permit at most the reviewed per-asset
 redirect chain (`github.com` to `release-assets.githubusercontent.com` for
 PortableGit; no redirects for Node, pnpm, or rustup), cap time, require an
-exact byte count, and verify SHA-256 before execution or extraction.
+exact byte count, and verify SHA-256 before execution or extraction. Every
+child launched through `Invoke-Checked` receives the current absolute
+FileSystem provider path as `ProcessStartInfo.WorkingDirectory` only after the
+existing isolated-directory ownership and reparse checks pass. Consequently,
+the Chat Git sequence inside `Push-Location $workspace` initializes and
+mutates that exact workspace rather than inheriting the bootstrap root.
 
 The directly downloaded Windows assets are:
 
@@ -569,6 +1396,23 @@ profile from `https://static.rust-lang.org`; rustup verifies the exact
 toolchain component hashes from that release manifest. The workflow then
 requires the exact Git, Node, pnpm, rustup, Rust, and Tauri versions before
 conformance.
+
+When the ordinary Windows test suite reports a non-system null WTS SID, its
+failure reporter makes one bounded observation without changing the failure.
+The test-only `scripts/windows-process-sid-diagnostics.cs` opens one
+query/synchronize handle, performs at most two zero-time waits and one token
+query, and closes the handle. Fixed labels and numeric OS codes distinguish
+open-not-found, open failure, exited, live readable/unreadable token, invalid
+token, and wait failure without emitting a SID. The observation describes the
+newly opened handle; it cannot establish continuity or reuse relative to the
+original WTS row. Chat #206 remains open until native evidence explains the
+ambiguity. Standalone `scripts/windows-process-sid-diagnostics.test.ps1` tests
+exercise states and call/cleanup bounds and also run in the native suite.
+The native suite additionally checks one real self-process observation through a
+nested failure report; terminal-attempt wrapping preserves the inner exception
+chain so a real WTS failure reaches the same reporter. The reporter traverses
+aggregate children within a twelve-exception total bound and shares one probe
+budget across all branches, including producer-plus-quarantine failures.
 
 `scripts/windows-job-supervisor.test.ps1` is also run by the ordinary elevated
 `windows-2025` supervisor behavior CI job. It creates a real ephemeral standard
@@ -592,6 +1436,33 @@ same process/ACL/membership preflight directly from the exact inline production
 source before its first download. macOS development can parse and compile the
 source but cannot claim those native Windows runtime results; native Windows
 runtime evidence is CI-only. The native suite
+also provisions a same-volume `status-staging` directory with an exact
+protected DACL. The isolated user retains modify-only access to the directory
+itself, while an object-inherit-only ACE grants created files the ACL-management
+rights needed to secure an empty Coven status temporary before moving it into
+the stricter `COVEN_HOME`; the protected child validates the directory and
+receives it through
+`COVEN_WINDOWS_STATUS_STAGING_DIR`. A 1 MiB directory quota bounds this staging
+surface independently. Quota accounting consumes metadata returned by bounded
+directory enumeration instead of reopening owner-only staging children, and
+bootstrap cleanup first deletes files through the supervisor-controlled parent
+before attempting a read-only-attribute fallback. The native timeout case
+leaves an owner-only staging file in place while quota monitoring runs and
+proves terminal cleanup still removes the complete bootstrap root.
+
+The protected Windows bootstrap also provisions a dedicated 64 MiB Cave
+conformance temp root. The general temp and workspace roots retain their
+`OWNER RIGHTS` read-only ACE, which prevents the isolated producer from
+rewriting their DACLs. The dedicated root keeps the isolated identity at modify-only access and
+grants full control only to descendant files and directories through an
+inherit-only ACE. It retains the same protected owner, SYSTEM, Administrators,
+and supervisor ACL shape. Only the Cave real-authority child
+receives that root as `TEMP`/`TMP`/`TMPDIR`; its newly created fixture
+descendants can therefore remove inherited supervisor access and enforce
+Cave's stricter discovery-directory ACL without weakening the rest of the
+producer sandbox.
+
+The native suite
 also has a background supervised process replace an already validated record
 with a file symlink to a supervisor-only canary before exiting, and proves the
 handoff fails without reading or publishing the canary. Separate cases reject
@@ -684,7 +1555,11 @@ harness revision and re-executes that detached runner. Before authority work,
 the verified runner checks its own realpath, HEAD, tree, and the locked
 blob/SHA-256 set for every executable harness module. Intentional native
 conformance deltas from the production Chat commit are separately allowlisted
-by exact path, blob, and digest.
+by exact path, blob, and digest. The verified runner keeps executing from that
+detached harness, while its Tauri toolchain probe runs from the supervisor-bound
+source workspace where the frozen dependency installation already completed.
+This avoids consulting an uninstalled `node_modules` tree in the fresh harness
+clone without widening the allowed workspace boundary.
 
 The dedicated workflow is manually dispatchable and uses the protected
 environment `client-v1-conformance`, GitHub environment ID `20863036831`.
@@ -747,12 +1622,15 @@ inheritance. Unix carries only the validated UID/name, broker UID, native
 containment and cgroup membership, source workspace, private artifact
 directory, and source-record path, plus the isolated Secret Service values
 where applicable. Windows carries only the nonce-bound Job identity, trusted
-system PowerShell path, exact bootstrap/workspace/artifact paths, required
+system PowerShell path, exact bootstrap/workspace/artifact paths, the
+deterministic Node distribution path derived by the outer bootstrap, required
 system directories and command processor, isolated temporary directories,
 `PATH`/`PATHEXT`, and the reviewed `LIB`/`INCLUDE` toolchain paths. GitHub and
-OIDC bearer variables are never projected.
+OIDC bearer variables are never projected. The restricted bootstrap constructs
+each `PATH` directory as a distinct array entry so pnpm-generated command shims
+can resolve the pinned Node executable without consulting ambient runner paths.
 
-The Windows Job membership probe uses pinned PowerShell 7.6.5
+The Windows Job membership probe uses the pinned PowerShell
 `-CommandWithArgs`, so the nonce-bound Job name and decimal process ID arrive
 as exactly two literal arguments. It does not use `-Command` positional
 parsing, a shell command line, or caller-controlled interpolation.
@@ -967,6 +1845,141 @@ Diagnostics are stable IDs only.
   SID-wide zero-process proof, and handle-verified ACL sealing; macOS/Linux
   publish only after native zero-process proof and a no-follow descriptor read
   whose identity and timestamps remain stable.
+
+Packaging failures publish only the bounded failing substage: frozen consumer
+verification, Cave install/build, Chat install/web/native build, Coven build,
+or final output verification. Cave build failures are further classified to
+the bounded release-build phase, including resource exhaustion, compilation,
+page-data, static-page, server-bundle, and postbuild boundaries. A recognized
+bounded command-failure reason remains authoritative even when the captured
+output lacks a phase banner. Pnpm lifecycle banners are recognized with or
+without their workspace path, and a failure before the wrapped lifecycle starts
+is identified at the conformance-wrapper boundary. Verified-runner and
+owned-artifact cleanup retain an earlier execution failure instead of replacing
+it. Captured command output, filesystem paths, and the underlying error remain
+private in-memory causes and are not serialized into the public failure result.
+
+Checkout failures identify the Chat, SDK, Cave, Coven, integrity, validator, or
+producer boundary. Evidence finalization failures identify report construction,
+operator-state capture, isolation, assertions, evidence construction, serialization,
+scanning, or retention. These allowlisted diagnostics survive nested stage wrappers;
+underlying command output and private paths remain excluded from public errors.
+
+Frozen consumer failures are further bounded to authority verification,
+artifact loading, harness creation, offline installation, isolation checks,
+Cave fixture matching, packed build, packed verification, or cleanup. The
+cross-process diagnostic file contains only that allowlisted stage.
+
+Schema-v2 native failures publish only an allowlisted scenario substage, such
+as fixture setup, RPC startup, native custody preflight, launch, pairing,
+restart, reads, reconciliation, revocation, stale discovery, cleanup,
+missing-keychain trust, or final isolation proof. The first failed native
+assertion is retained while later scenarios and mandatory cleanup complete,
+and cleanup further identifies grant issuance, native-custody cleanup, RPC
+shutdown, or fixture-daemon shutdown. Nested wrappers preserve that bounded
+identifier. Private RPC responses, credential identifiers, native-store
+values, paths, and underlying errors remain in-memory only.
+
+Launch diagnostics also retain a fixed operation boundary for otherwise unknown
+errors: initial discovery, launch RPC, post-launch discovery, or health. Discovery
+RPC timeouts distinguish the initial read from the post-launch polling read.
+These identifiers contain no response data and preserve the first failure.
+Protected run `34738396429` passed Linux and macOS (197 assertions each), but
+Windows failed with `phase1.native-scenarios.launch.unknown` before pairing.
+The operation boundary and root cause remain unproven until fresh protected
+validation uses this diagnostic source and its reviewed validator binding.
+
+Protected run `34741820511` then passed all 197 assertions on each Unix platform,
+with independently verified identities and timing. Windows narrowed the failure
+to `phase1.native-scenarios.launch.launch-rpc-unknown`. Launch diagnostics now
+retain the declared native return codes for connection state, an existing launch,
+a stale attempt, child exit, service availability, invalid native response, and
+reconciliation. `service_unavailable` has several native causes and is not proof
+of a readiness timeout. Arbitrary native error text remains outside the public
+allowlist. Fresh protected validation is required to identify the return code.
+
+Protected run `34746733029`, using Chat `717fe222` and SDK validator
+`369a6c1`, passed Linux and macOS but failed earlier in the Windows bootstrap
+while the Cave checkout was being installed. The bounded result was
+`io; root=cave-checkout; scope=none;
+operation=directory-enumeration-depth-3-plus; repeat=persistent`. The generic
+I/O category cannot distinguish a missing or renamed directory represented as
+a base `IOException` from a sharing violation, lock violation, overlong name,
+invalid directory, or delete-pending state.
+
+The next diagnostic classifies only reviewed Win32 HRESULT values as
+`io-file-not-found`, `io-path-not-found`, `io-sharing-violation`,
+`io-lock-violation`, `io-name-too-long`, `io-invalid-directory`, or
+`io-delete-pending`; all other I/O failures remain `io`. It does not publish
+paths or exception messages and does not change traversal, retries, ACLs,
+limits, accounting, termination, or fail-closed behavior.
+The real overlong-path fixture preserves that boundary across runtimes:
+Windows currently reports its unreviewed HRESULT as `io`, while Unix hosts
+report the reviewed filename-too-long HRESULT as `io-name-too-long`.
+
+Protected run `34756443652`, using Chat `421beab1` and SDK validator
+`8b46f9cf`, passed Linux and macOS and progressed beyond the Windows Cave
+checkout quota monitor. Windows then returned
+`phase1.native-scenarios.launch.service-unavailable` from the native
+`cave_launch` RPC. That code can represent launch-worker scheduling or
+completion, the absolute spawn/readiness deadline, discovery availability or
+validation, health readiness, or post-health discovery revalidation.
+
+The next diagnostic retains only fixed conformance-build categories for those
+boundaries: `spawn-timeout`, `worker-unavailable`, `worker-closed`,
+`discovery-not-found`, `discovery-unavailable`, `discovery-rejected`,
+`health-unavailable`, or `revalidation-unavailable`. Production builds continue
+to return `service_unavailable`; no paths, process output, exception text, or
+discovery contents cross the public boundary. The diagnostic does not change
+the 30-second deadline, polling, retries, launch containment, health checks,
+discovery validation, or cleanup behavior.
+
+The initial pairing stage further distinguishes create, poll, and exchange RPC
+failures using a fixed native-code allowlist, operation timeouts, RPC closure,
+missing authority, response assertions, and admin HTTP status classes. Unknown
+errors map to `phase1.native-scenarios.pairing.unknown`; no response bodies,
+request IDs, credentials, or arbitrary error text enter the public diagnostic.
+
+Protected run `34734409422`, using Chat `c487e294` and SDK validator `a24d82cb`,
+passed Linux and macOS production but failed Windows at the original generic
+pairing stage. Artifact validation, aggregation, and attestation were skipped.
+That result does not establish the pairing failure subtype or protected
+acceptance. These diagnostics require a new frozen source, reviewed SDK binding,
+and fresh protected run before they can identify that subtype.
+PR #254 requests `ci:full` to run packaged Phase 1 conformance before landing.
+The bounded RPC allowlist includes `pairing_pending`, as declared by the native
+transport; create, poll, and exchange each retain that fixed subtype.
+
+Windows Cave startup keeps the existing 30-second native readiness deadline.
+The standalone publisher gives all Windows ACL probes in one publication a
+single 24-second monotonic budget, caps each PowerShell attempt at 12 seconds,
+and retries only one recognized timeout. Chat drains the native RPC stderr
+stream but retains only an exact static publication-refusal category within
+fixed byte and line bounds. Only `cave_launch_discovery_not_found` may gain that
+allowlisted suffix; raw stderr, paths, account names, tokens, handles, and
+exception text remain private.
+
+The restricted Windows producer still runs as the generated local user with the
+same explicit environment and suspended Job assignment, but
+`CreateProcessWithLogonW` now requests profile loading for each fresh child
+logon session.
+The isolated-user object explicitly loads the created, token-verified profile
+and retains the returned handle until quarantine completes. It unloads the hive
+before token retirement and profile deletion, preserving ownership on unload
+failure. Profile loading occurs during identity creation under the existing
+outer lifecycle/job budget; the production execution deadline is unchanged.
+The separate owned reference protects the profile during supervision. Cleanup
+still waits within its existing budget for any child-session unload to finish.
+Native credential and cleanup acceptance remain required.
+
+An isolated quota pass that observes only the exact
+`access-denied` followed by `repeat=missing` deletion race receives one complete
+remeasurement through the same isolated user object. A second unstable pass,
+every other failure category, aggregate-root absence, entry overflow, byte
+overflow, reparse point, or arithmetic overflow remains terminal. No quota,
+polling, traversal, identity, cleanup, or diagnostic bound is widened.
+
+
 - Windows account-disable ambiguity, scheduler or BITS enumeration/access
   failure, WTS enumeration or SID-query failure, matching-process access or
   termination failure, unstable drain, ACL-seal failure, or post-seal
@@ -992,39 +2005,143 @@ the `validate-conformance-artifacts` and `attest-conformance-artifacts` job
 names, the three static download names and record paths, the pinned download
 and attestation action SHAs, and the environment variable prerequisite.
 
+Cave record validation reports fixed diagnostic suffixes beneath
+`phase1.stage.evidence-authority.build.cave-record`: `identity.platform`,
+`identity.commit`, `identity.cave-version`, `identity.node-version`,
+`timing.invalid`, `timing.before-run`, `timing.after-run`, and `assertions.shape`, `count`,
+`unexpected`, `duplicate`, `result`, or `detail`. Both producer wrappers
+preserve only the exact allowlisted IDs. Record values, assertion IDs,
+private details, and exception causes are never included in these diagnostics.
+Identity, inclusive timing bounds, and assertion requirements still control
+acceptance. Cave timestamps must be canonical UTC millisecond strings before
+range comparisons; malformed values are rejected without coercion.
+
 ### SDK verification metadata for this producer
 
-The later SDK validator repin must use these exact committed file bytes:
+The ordinary contract canary imports the SDK's `createConformanceArtifacts` API
+instead of invoking its publication CLI. It builds the already-checked, exact SDK
+checkout with the locked version and `requireConformanceEvidence: false`: these
+private artifacts are inputs to conformance, so they cannot require an accepted
+conformance aggregate first. Checkout, manifest, package-content, and isolated
+consumer checks remain mandatory. This does not enable publication or qualify a
+release.
+
+Both harness schemas prepend the resolved Rust toolchain directory after applying
+the supervisor's PATH. The supervisor PATH must not replace that directory with
+Rustup shims: isolated builds intentionally do not inherit `RUSTUP_HOME` or a
+global default toolchain, and Coven does not have a local toolchain override.
+Cargo credentials remain isolated; no global Rust default is configured.
+
+The later SDK validator repin must use these exact final producer-checkout
+bytes. The workflow row describes the producer workflow, including its updated
+executable integrity tables. The workflow entry in `harnessAuthority.files`
+separately identifies the workflow at the frozen harness revision; those two
+revision authorities can therefore have different workflow hashes:
 
 | File | Bytes | SHA-256 |
 | --- | ---: | --- |
-| `.github/workflows/client-v1-conformance.yml` | 459,800 | `047ae05690461530e609370b3d2d5c90817d5a2ff06484f13ffef9f4d5c775f2` |
-| `scripts/contract-canary.mjs` | 38,191 | `4eb4d9b693187f110343a4c1efd92e59a9705e25790845bf04b05cb5bac6cbb5` |
+| `.github/workflows/client-v1-conformance.yml` | 181,684 | `93858b9056614e5bcfd0ffc02fdf38b4b4408364f7b1916491133c92050d5ab5` |
+| `scripts/contract-canary.mjs` | 40,618 | `a4c2fe0a5eb6a5ff4653de5374c34c0fb46907c6806a5d23b86d8b37206ef958` |
 | `scripts/executable-resolution.mjs` | 9,154 | `31e3c412ff8c835f14522f36a59e91f4a4ba82913210ae8e3b4455217503f430` |
-| `scripts/owned-temp-directory.mjs` | 6,965 | `a9c55c85cf2b7d70310d278bafd2c8e7695d66f4ae38b9c3f1f12fce0b442095` |
-| `scripts/phase1-artifact-secret-scan.mjs` | 21,183 | `be0ec302b9c4372f232d6bd1efcba873fd3380cc5de7f756cd0b9eeeec07222a` |
-| `scripts/phase1-conformance-lock.mjs` | 47,460 | `e24f8bdca96ff32968875021090cb8d569c92d842562e01988a769e9728d3789` |
-| `scripts/phase1-conformance.mjs` | 187,131 | `cc374d616d9de0a0cd94ce2ced5847fd877e124323acce3fca31f3df35d67d1b` |
+| `scripts/owned-temp-directory.mjs` | 9,205 | `1ba30d2d5f0312143e2837956899a4f3f116f3619937d5d9756ff197ecb2a325` |
+| `scripts/phase1-artifact-secret-scan.mjs` | 21,638 | `8b3c85cb8461fd520892a53a6169201e1db1bf50fe1457ed6315ba9fcd2fd658` |
+| `scripts/phase1-conformance-lock.mjs` | 48,960 | `92f981c43f75bc65c81e9e9ee16084aae658617b929d451a9db0d7c9e6bedbe2` |
+| `scripts/phase1-conformance.mjs` | 220,183 | `8f045e44cbe31377d7bb0697a398c27606c6505d2b3ff2ca23f8932809cb205c` |
 | `scripts/phase1-evidence-contract.mjs` | 15,088 | `24180ae03835fa6aac45559682adb3c1e626bab76466eddc55b9e2300f0a2b7f` |
-| `scripts/phase1-evidence-runtime.mjs` | 6,078 | `3d227c354e6d908c5912d2b8244336e3b79c3bbd4dec79b0ad219ed65b8cb159` |
+| `scripts/phase1-evidence-runtime.mjs` | 6,572 | `b09a0d20abc7ebbc6289c57c985fd42b8a4b5d196895bc035b8fca40281d9315` |
 | `scripts/phase1-linux-secret-service.mjs` | 4,270 | `ddf834c6f57853c5116b4b1f345952a218ff0687c5d741737c68e20bc2ecda92` |
 | `scripts/phase1-macos-keychain.mjs` | 5,091 | `ab0c2dd08cf606d9502f5da206175707d471d99f484e8c8c79b5b08a5772b9a4` |
 | `scripts/phase1-process-supervisor.mjs` | 3,820 | `16b51fb1a33b4bfef98daca549aacf5dc2d2c098cfbd664753b69c940d1e6f6c` |
-| `scripts/phase1-schema-v2-evidence.mjs` | 51,642 | `a7cab994aa0ee97baceb4b2c475ec1ff253ae5681f39e2c3d15fb1035b2d2387` |
-| `scripts/phase1-schema-v2-producer.mjs` | 141,680 | `40db3738d948149c48e75c0ead409722c0d9ebaf90e5c6ec625d25fde5f5d337` |
-| `scripts/process-owned-artifact-root.mjs` | 11,205 | `9ee158453044cd57b91c77c50262092a91993c6b1533b6584c61e1cbadfd794a` |
+| `scripts/phase1-schema-v2-evidence.mjs` | 52,505 | `0aede2ab3abd76fabf5ac61d64d2dbaaffa497c8647b82236403de16a47751c8` |
+| `scripts/phase1-schema-v2-producer.mjs` | 240,370 | `24c0750ebdc917d653e76ec929372f5abfe5dbfc52e11e685fb64f4766b82ba7` |
+| `scripts/process-owned-artifact-root.mjs` | 13,061 | `103cc789f12a6bbde16b2414aecf05813d9d28a2c40c7d6eaa2073b86e8e5d77` |
 | `scripts/supervised-exec.mjs` | 2,875 | `a5edfd985b934d3b46247a0da3141682c411d30bb582edf87ae7b29791dad65b` |
 | `scripts/supervisor-status.mjs` | 854 | `ac332ca7b6b040ecc846088bb3a6ad5e7112a0454eb3ea71d2a819d55e64254e` |
 | `scripts/phase1-linux-secret-service.sh` | 5,650 | `83ce19c0dd6da5002f6853fa37addb4fc2d39f3d17beee1b1c39e1fce232b476` |
 | `scripts/unix-artifact-handoff.c` | 18,704 | `2a003f9aa1d1886b9a593371a73cb65fe3a4a8b703f1c59fec8a27694367b7fc` |
-| `scripts/unix-producer-command.sh` | 3,213 | `d4ee80fae32f48647cda18501c38e03baee62832caf9ed4393ab6e7edfea2135` |
-| `scripts/unix-producer-supervisor.sh` | 25,167 | `7bb1d791b6b46aabaca2864e4b82b9f02da116b632774dfedb9aec3dc9ba0d52` |
-| `scripts/unix-producer-supervisor-attack.c` | 5,481 | `83f0f4a8a54e11d6e818ea93e0e864817aa15baba34c0431bb4cacc7945326dd` |
-| `scripts/unix-producer-supervisor.test.sh` | 8,083 | `c7d2d023d4c1f1ba3cdb3da1e95b30af1763602932a91592388bb117de6bd397` |
+| `scripts/unix-producer-command.sh` | 3,223 | `ce9ec2ff00947f3ec0db53f144c99d34bc27de6085062d00dccff7c934c2e3c8` |
+| `scripts/unix-producer-supervisor.sh` | 29,424 | `b73036415744c80ed27d5667f255ceea149096ca517b47c93a154299802206ff` |
+| `scripts/unix-producer-supervisor-attack.c` | 6,211 | `e485ebebb6570b06f179c03a3849224d59d96400b7cadd5547067cce35239642` |
+| `scripts/unix-producer-supervisor.test.sh` | 13,348 | `a8c6f48915b0c86a704a7ddc28eaa7f808ae0a3ddfcdb38c0c23ac0d83738f6d` |
 | `scripts/phase1-windows-supervisor-build.sh` | 4,646 | `713a9e0282887ade3e243b5ba175794d74cdb02c28c38dcd41491c9505812770` |
 | `scripts/phase1-windows-supervisor-install.ps1` | 1,743 | `2baab275f0bb6789884cded5f6185d00bfa5348b9e7c3ad1e5575353639101d5` |
-| `scripts/windows-job-supervisor.cs` | 291,329 | `08c18fa81b16f922b3fac32abec3a2f6369e5f2b9f4caa19a0b48df6302bb110` |
-| `scripts/windows-job-supervisor.test.ps1` | 171,179 | `55e9cf065e2dc7cc656c6aa8cc9ea53542259d3d7eee55c368c6cf0fc6356ab9` |
+| `scripts/windows-job-supervisor.cs` | 397,084 | `ec56ad9daf9cfd2e92de4420cfc5ce328e09a76b627a8253ef35f2e9ef151669` |
+| `scripts/windows-job-supervisor.test.ps1` | 201,048 | `0b9828c2cd801799bc0055fe4047e1e914ee7fcc921345dee6b0caa3a389386a` |
+| `scripts/windows-quota-diagnostics.test.ps1` | 45,628 | `2a2f59c95e14d7687cc258d52ed233062a793ba516a2b0d18d9a473a3ed79d96` |
+| `scripts/windows-owner-directory-quota.test.ps1` | 14,789 | `a6fccce4e1e41b06c655bc1a70bf870ba115f0848ee647777d2606294483cd1f` |
+| `scripts/windows-quota-isolated-reader.test.ps1` | 24,200 | `22f3baa7272f0bf7f03e44b3dec98398a96e64a8b507ce5b11925bd777d58a31` |
+| `scripts/windows-quota-lifetime.test.ps1` | 2,513 | `dd10741c19cd97cc1b9ee29ebe18b8381503d589680acd0eddaabda08b5e7aec` |
+| `scripts/windows-identity-cleanup-diagnostics.test.ps1` | 7,317 | `d141b33fb24d8a819211c4d303cf55357f2ef249c639e51c87e738bb5725f410` |
+| `scripts/windows-cleanup-delete-diagnostics.test.ps1` | 7,433 | `e9d30285a1fe0ad035637621c6a3840eb8a6194b2f23e1a4aa188c5884cd0c64` |
+| `scripts/windows-profile-cleanup-characterization.test.ps1` | 11,549 | `00052aab05d01785d225999536002fe17585fd80ff71b537b6ebed088b4549d7` |
+| `scripts/windows-profile-residual-policy.test.ps1` | 14,847 | `2a8517338ffc84d38967d11d3ade3f58d4d7004f5437da890da30a1cb0dda417` |
+| `scripts/windows-profile-residual-native.test.ps1` | 47,303 | `66477e50c2d6c15bdb876102b388c686bce03db554c66ce76bd9b9538fb7a380` |
+| `scripts/windows-process-sid-diagnostics.cs` | 4,054 | `cd4b1c16a759ce4e63b87c82c4be0dbee9c0b48e9bfd3851eb966c303918e1a2` |
+| `scripts/windows-process-sid-diagnostics.test.ps1` | 7,316 | `c83e2d63355fb95c8220045115a3b8106b7507b7132d235ad74eb0283f6c481f` |
+| `scripts/windows-staging-binding.test.ps1` | 885 | `56514e709e34b68e0692bd5c3bd91c8bea0a01fd281ded33920f83c2ab653182` |
+| `scripts/windows-status-acl-probe.test.ps1` | 3,980 | `8ef6032dd38921238d2d860bfa76ba79a53ff549c1e6b1cb8901698e0ca08e3c` |
+| `scripts/windows-status-acl-probe.cs` | 10,118 | `93fe7fd44286f8cb9b3944a7e66257181d0153ed81eec94cd56b79662e620638` |
+
+The table above is the SDK-facing subset; `phase1-conformance.lock.json`'s
+`harnessAuthority.files` also tracks `.github/workflows/ci.yml`, which does
+not appear here. Editing ordinary CI config still dirties that entry and
+requires the same file-hash repin as touching the harness itself — this is
+not discoverable until a test fails on it.
+
+### Authority is pinned to merge commits on `main`
+
+`harnessAuthority.revision` names a merge commit that is already part of
+`main`. It is never a commit on the branch that introduces the change, and a
+content pull request never advances it.
+
+That ordering is forced rather than chosen. A merge commit's SHA does not
+exist until the merge happens, so the lock inside the merged tree cannot name
+it. Pinning a branch commit instead is what made every pair of conformance
+branches collide: each wrote a different `harnessAuthority.revision` into the
+same file, so whichever merged second had to be rebuilt, and whichever merged
+last left a pin describing a tree that no longer matched what shipped.
+
+Landing a change to a governed file therefore takes two pull requests:
+
+1. **The content PR** changes governed files and leaves
+   `phase1-conformance.lock.json` alone. It lands as a merge commit so the
+   follow-up can name that commit.
+   The lock test stays green: it verifies digests against the previous
+   immutable authority. The main-only freshness guard fails until the repin
+   lands.
+2. **The repin PR** follows, and is the only PR that touches the lock. It
+   points `harness.revision` and `harnessAuthority.revision`/`.tree` at the
+   content PR's merge commit on `main`, refreshes every digest to that
+   commit's tree in `harnessAuthority.files` and
+   `harnessAuthority.productionDeltas`, including the workflow entries,
+   and updates the test's literal copy and the prose records. Workflow source
+   pin tables belong in the content PR; editing a governed workflow during
+   the repin would create fresh drift. Digests and the revision move together,
+   against a commit that already exists, so there is no ordering to get wrong.
+
+Because only the repin PR writes the lock, and it runs serially on `main`,
+two content branches can no longer conflict over it.
+
+### The repin is not optional
+
+Between the two merges the authority legitimately lags, and nothing in the
+lock notices. The lock test compares digests against the authority's own
+checkout, which stays self-consistent no matter how far `main` moves on.
+#322 changed `src-tauri/Cargo.toml`, `Cargo.lock` and `keyring.rs` without a
+repin and stayed green through three further merges; the drift only surfaced
+when a later change advanced the authority and had to reconcile all three at
+once.
+
+`scripts/phase1-authority-freshness.mjs` closes that gap. It asserts the pin
+is on the first-parent history of the ref under test, that it is a merge
+commit rather than a branch tip, and that no governed file or production
+delta has moved since it was pinned. CI extracts and executes the guard and its imports from the
+pinned authority, so changing the working-tree guard cannot bypass the check. The guard also
+compares its own blob, even though it is outside the frozen harness file list.
+The first content merge has no pinned guard yet and fails closed until its
+repin lands. CI runs it on `main` pushes only, since a pull request is allowed
+to lag by construction. A forgotten repin now turns `main` red instead of
+staying silent.
 
 Before parsing or executing SDK authority, the harness queries the verified
 checkout with `git rev-parse --show-object-format`, accepts only `sha1` or
@@ -1050,7 +2167,7 @@ after this commit is created; no SDK validator SHA is committed into Chat.
 
 The governed loader behavior is committed first. A separate Chat authority
 commit then pins that prior behavior commit, its tree, and every changed
-governed blob and SHA-256. After the Chat fix merges, SDK #100 must freeze the
+governed blob and SHA-256. After a Chat fix merges, a later SDK validator must freeze the
 final reachable Chat authority commit/tree, package manifest, harness,
 workflow, environment ID, and source/signer digests in a later validator
 commit. Operators dispatch the already-committed Chat workflow with that full
@@ -1067,8 +2184,8 @@ to the historical harness checkout, is rejected rather than accepted as an
 alternate SHA.
 
 The pre-rebind SDK validator remains authoritative for its old producer and is
-not evidence that this PR head is producer-compatible. Chat's always-on frozen
-fixture proves only that the local Phase 1 lock matches SDK 933's committed
+not evidence that a changed producer is compatible. Chat's always-on frozen
+fixture proves only that the local Phase 1 lock matches the committed SDK
 source contract, while the optional real-checkout integration continues to
 exercise the exact SDK loader. The later SDK change must replace the producer
 workflow size/SHA-256 and producer commit/tree metadata and retain the
@@ -1082,3 +2199,824 @@ are recomputed from the exact clean checkout and embedded in the platform
 record. The SDK aggregator still requires those values to equal the validator
 checkout performing aggregation. No SDK validator revision is committed back
 into Chat, so the two repositories do not form a commit-hash cycle.
+
+The Unix supervisor reports a nonzero restricted producer exit status on stderr
+before containment drain, retaining it even when cleanup subsequently fails.
+This numeric status complements the bounded producer stage diagnostic; it does
+not identify the failed authority check or establish successful containment.
+
+Cave plugin-evaluation failures may report a fixed `.syntax`, `.type`,
+`.reference`, or `.range` suffix when one recognized exception class follows
+the Node evaluation marker. Unknown or conflicting classes retain the generic
+plugin category. These IDs expose neither the exception message nor a source
+path, and identify the exception class rather than the underlying plugin cause.
+
+Windows harness directory quotas use the same isolated temp directory as the
+producer (`TEMP` and `TMP`), below the bootstrap root. Checkout, Cargo, pnpm,
+build, and execution quotas therefore cover the actual `phase1-conformance-run-*`
+directories. This path correction preserves every reviewed byte limit. It does
+not by itself identify the subtree responsible for an aggregate quota failure.
+
+Windows Coven Rust observation failures report only a fixed test category and
+failure category. The five test categories are `legacy-case`, `pipe-shapes`,
+`profile-pipe`, `inspection-wait`, and `status-replacement`. Cargo compilation,
+linking, resource, and process failures retain their existing bounded categories.
+`tracking` identifies a child-ownership registration failure. Launch failures
+report `spawn.enoent`, `spawn.eacces`, `spawn.eperm`, `spawn.einval`,
+`spawn.e2big`, or `spawn.enomem` only when Node supplies that exact error code;
+other launch errors retain `spawn` without disclosing their text.
+`test-failed` requires a failed result for the exact selected test;
+`not-observed` means a successful command did not report that test as passed.
+Unknown command labels retain the generic stage. Raw stdout, stderr, assertion
+messages, and private paths are never included. The selected tests, command
+arguments, deadlines, and production limits are unchanged. These diagnostics
+need a subsequent producer binding and protected run before the Windows cause
+can be identified.
+
+Child ownership accepts a recycled PID only after its former child has exited
+or been signaled. A live PID collision remains an error. Termination removes
+only the child instance it reaped, so an overlapping registration cannot lose
+ownership. Cleanup retains the root and fails if children registered during
+cleanup remain; an explicit cleanup retry handles those children.
+
+Protected run `34413820955` passed Linux and Darwin, including all 110 Cave,
+46 SDK, and 41 Chat assertions per platform. Windows stopped at
+`phase1.runtime-observations.coven-rust-tests.legacy-case.spawn`; that producer
+used the same category for launch and tracking failures. Local tests reproduce
+stale PID registration and cover its repair, but do not prove it caused this
+Windows failure. Fresh bound protected evidence is still required.
+
+Protected run `34422000259`, attempt 1, used producer `6cf479d` and validator
+`7ed9b19`. Linux and Darwin records passed provenance, scan, and exact assertion
+checks: 110 Cave, 46 SDK, and 41 Chat assertions per platform. Windows passed the
+first four selected Coven Rust tests, then reported `status-replacement.test-failed`.
+Validation, attestation, and aggregation were skipped; no aggregate was accepted.
+
+The status replacement diagnostic now recognizes fixed panic messages from the
+selected test and reports only an `assertion` category: setup, reader open, early
+result, result timeout or disconnection, writer error or join, readback, content,
+or cleanup. The matcher requires the selected test failure and its panic header
+in `discovery.rs`; unknown or unattributed output remains `test-failed`. An
+`early-result` category means the test received a result before its 20 ms wait
+expired. It does not distinguish writer success from writer failure. These
+categories require a refreshed producer binding and new protected evidence;
+they do not establish the cause of run `34422000259` retroactively.
+
+## Windows quota monitor diagnostics
+
+Native run `34627213499` isolated the reader failure above the isolated root:
+ancestor index 3 denied attributes, while direct target reads returned one
+1,024-byte file. The isolated root was at index 6. This distinguishes ancestor
+metadata access from owner-directory enumeration and actual byte overflow.
+
+Production accounting validates each fixed prefix through the isolated root as
+the supervisor, preserving directory and reparse checks. It then expands and
+measures only patterns constrained to that root under the validated isolated
+user token. Outside-root and ambiguous path components fail closed; denied
+subtree reads are never retried as the supervisor. Token duplicates remain
+noninheritable and valid across account disablement, and admitted reads retain
+their handle through disposal. These attribute checks preserve the existing
+check/use behavior; they do not establish immunity to ancestor replacement.
+Native run `34632027669` subsequently confirmed that only the implicitly
+created `profile\AppData` directory denied enumeration; its parent and both
+explicitly initialized children were readable. That intermediate directory is
+now included in the existing security initialization and validation loop, using
+the same trustees and access contract as its parent and children. Native reader
+success and refreshed protected acceptance remain required.
+
+Protected run `34580621067` passed Linux and Darwin, while Windows reported a
+quota-monitor error followed by identity-cleanup failure. That does not prove
+a byte quota was exceeded. The supervisor now retains only fixed categories:
+`entry-bound`, `access-denied`, `arithmetic-overflow`, the bounded Win32 I/O
+subcategories documented above, `io`, or `unexpected`.
+The first monitor failure retains its category, normalized quota-root identifier
+and filesystem operation through background monitoring and terminal rechecks.
+Operation codes distinguish pattern attributes/enumeration, directory
+attributes/enumeration, entry attributes and file length. Quota roots come from
+an exact label allowlist; unknown labels and operations become `unknown`.
+Original exception messages and paths are not retained in this context.
+The workflow prints these bounded fields before cleanup can mask the primary
+failure. Limits, failure exit status and cleanup requirements remain unchanged.
+Fresh SDK workflow binding and protected validation are required before this
+diagnostic change is adopted.
+
+The initial category-only diagnostic was introduced at `220e9aa1e2a83ccd9ed32279fda26fe09ac98894`, tree
+`ec79cb1416b2e443d0a413a309383099e18ce889`. It changes only the supervisor source
+from the adopted GLib harness and is retained in the diagnostic branch ancestry.
+
+## Windows identity cleanup diagnostics
+
+Retained-handle termination failures include a bounded suffix
+`[termination-error=<original native error>;wait=signaled|timeout|failed;exit=failed|active|nonactive]`.
+The error is captured immediately after `TerminateProcess` fails. A zero-time
+wait and exit query use only the same SID-verified retained handle, without
+reopening the PID. Each observation is made at most once; a confirmation wait
+or reap exit query already performed is reused. Unexpected wait results map
+to `failed`, and exit codes are reduced to active/nonactive rather than emitted.
+These observations do not establish the process state at the earlier failure.
+
+This is prospective failure diagnostics for Chat #246, not a restoration of
+its original diagnostic-only acceptance proposal. Chat #256 intentionally
+accepts error 5 followed by signaled confirmation and successful reap; that
+behavior remains unchanged. All other failure kinds and native errors remain
+failures, including later reap failures after confirmation. SID validation,
+handle cleanup, final zero-process verification, and existing waits and limits
+are unchanged. The original #246 historical cause remains unproven, and this
+change does not close or silently supersede its unconditional failure criterion.
+
+The same run `34580621067` reported `Trusted Windows identity cleanup failed`
+wrapping `Ephemeral Windows identity cleanup failed.` with no visible cause.
+`WindowsIsolatedUser.Dispose` collects independent failures from up to eight
+steps into one `AggregateException`, and PowerShell surfaces only the outer
+message. The supervisor now names each failed step with a fixed category in
+the message: `quarantine-check`, `quarantine`, `profile-delete`, `root-delete`,
+`user-delete`, `user-survived`, `profile-survived`, or `root-survived`, each
+paired with `win32-<status>`, `access-denied`, `not-found`, `io`,
+`invalid-operation`, `timeout`, or `unexpected`. Categories are recorded in
+step order and pair one-to-one with the retained inner exceptions. No exception
+text, account name or path is recorded. The local user survival query now runs
+even when deletion failed, so a refused deletion and a surviving account are
+reported separately. Fail-closed behaviour, cleanup order and the disposed
+state are unchanged. Whether cleanup failure is downstream of the preceding
+quota termination cannot be established until both categories are disclosed in
+one protected run.
+
+`scripts/windows-identity-cleanup-diagnostics.test.ps1` checks the classifier,
+drives the real `Dispose` path on an identity that was never provisioned with
+compiled quarantine callbacks, and verifies category order, pairing, bounded
+grammar, idempotent disposal and absence of leaked text.
+
+The cleanup diagnostic was introduced at `85bc89b1b6d8ef5c099566b827146e0e75608beb`, tree
+`b4d0e7445cafbdc33ff329d2d03c321ce2a9c2d9`. It changes only the supervisor source from the
+status staging harness and is retained in the diagnostic branch ancestry.
+
+
+The combined quota-context harness was introduced at `e8fe64b4d2b9bd38a03d8c23a28432518b41c187`, tree
+`b8934b32dc6a1352df55bab36af6e261d0aa9e86`. It retains the merged staging and cleanup diagnostics.
+Only the supervisor and its embedded workflow authority bytes change from
+the cleanup harness; all production inputs, native deltas and limits remain
+unchanged. Native Windows validation and a fresh SDK/protected binding remain
+required.
+
+Local validation of the combined quota-context diagnostic passed eight
+PowerShell regression groups, including real denied enumeration, wildcard
+enumeration, long-path failure, unknown-value sanitization and first-failure
+propagation. The workflow regression confirms the primary diagnostic survives
+a later cleanup failure. Final lock tests passed 92 cases with one platform
+skip; workflow/specification tests passed 128 cases with 19 platform skips.
+Independent specification, quality and final binding reviews passed. These
+local results do not replace native Windows CI or protected execution.
+
+
+## Isolated-user quota accounting
+
+The scoped reader retains the validated standard-user token and duplicates a
+noninheritable handle for each synchronous quota scan. It covers background,
+final process and post-quarantine terminal accounting without extending the
+account lifetime or changing directory ACLs. Active reads own their handles
+across identity disposal; surviving monitors retain their state until the task
+finishes. See [the native regression contract](windows-quota-reproduction.md).
+
+The earlier owner-directory reproduction landed in #220 with full native CI.
+This accounting implementation requires its own native Windows run, reviewed
+SDK rebinding and fresh protected validation. The denied protected descendant
+and separate cleanup `win32-3` remain open under #219.
+
+## Windows cleanup delete diagnostics
+
+Protected run `34611963297` disclosed the first cleanup categories:
+`root-delete:win32-3,root-survived:invalid-operation`. Win32 status 3 is
+`ERROR_PATH_NOT_FOUND` and, inside `DeleteDirectoryTree`, only the raw
+`DeleteFileW`/`RemoveDirectoryW` calls raise it as a `Win32Exception`; the
+managed enumerator had just returned the entry. The native calls now receive
+the extended-length (`\\?\`) form of the managed full path so both layers
+resolve the same entry regardless of `MAX_PATH` or trailing dot/space
+normalization. A not-found status (2 or 3) is accepted only when the managed
+layer confirms the entry is gone; every other disagreement still fails closed.
+The retained `Win32Exception` carries fixed, path-free context appended to the
+category as `win32-<status>[op=<operation>;kind=<entry>;depth=<bucket>;len=<bucket>;entry=present|gone;parent=present|gone]`.
+Operations are `delete-file`, `delete-read-only-file`, `remove-reparse-file`
+or `remove-reparse-directory`; depth buckets are `le4`, `le16`, `le64`, `gt64`;
+length buckets are `lt260`, `lt1024`, `ge1024`. No names, paths or exception
+text are recorded. Cleanup order, reparse rejection, read-only handling and the
+`root-survived` invariant are unchanged.
+
+`scripts/windows-cleanup-delete-diagnostics.test.ps1` checks the extended-path
+forms, the bounded context grammar, the classifier suffix, the fail-closed
+boundary for present and missing entries, and, on Windows, removes a real
+tree containing a path longer than 260 characters, a trailing-dot component,
+a read-only file and a directory junction whose target must survive.
+
+The cleanup delete harness is pinned at `2a594dc5e6643a318fd9f1f660845646899a413d`, tree
+`e21006a194ad73dda94c7f248dca32e91733f392`. It retains the quota-context harness ancestry;
+only the supervisor, its embedded workflow authority bytes and the new regression change.
+Native Windows CI removed the long-path/trailing-dot/junction tree through the
+production walker; a fresh SDK/protected binding remains required.
+
+## Bounded schema-v2 Cave authority failures
+
+Protected retry `34667436672` used Chat #228 producer `f77b249` and SDK #211
+validator `5730979`. Linux and macOS passed, with independently verified
+identities, Cave timing and all 197 ordered assertions per platform. Windows
+completed the observation suites and reported `phase1.cave-authority.startup`.
+Validation, attestation and aggregation were skipped. The preceding exact-
+authority run `34666399779` encountered an isolated fail-closed Windows quota
+monitor read before the Cave harness; its retry did not reproduce that monitor
+failure.
+
+The schema-v2 diagnostic boundary now distinguishes command timeout, output
+limit, spawn/tracking, supervisor termination, signaled exit, and nonzero exit.
+Failed assertion markers yield only fixed Cave category names; unknown names
+remain `assertion.unknown`, and duplicate markers yield `output.invalid`.
+Record read failures and invalid JSON have separate fixed identifiers. Raw
+child output, private paths and assertion text are not copied into public
+diagnostics. Signal values are not disclosed. Unknown errors retain the generic
+stage.
+
+Marker-free nonzero exits now classify only allowlisted pre-assertion evidence:
+Cave startup/readiness, filesystem cleanup syscalls, pairing
+setup, bounded paging, request transport, or the last emitted phase marker
+(setup, unconfigured, or configured). The classifier never publishes the
+captured error message, endpoint, path, status body, token, or child output.
+
+The startup category is now split into fixed timeout, early-exit, health,
+missing-discovery, endpoint-mismatch and pid-mismatch identifiers. These values
+correspond only to already fixed Cave harness messages and reveal no endpoint,
+path, process identifier, response body or child output.
+
+Protected run `34675842331` used Chat #231 (`395a5c9`) and SDK validator
+`d5fcd88`. Linux and macOS passed; Windows reached a healthy Cave listener but
+reported `phase1.cave-authority.startup.discovery.missing`. Cave #5374 fixes
+the failing boundary at authority `82bf6831b4afbe82709a5fe78949d1b16c4d61e1`:
+an already-owned Windows discovery directory can now have its inherited DACL
+restricted without an unnecessary `WRITE_OWNER` operation. A genuinely foreign
+owner still requires the existing takeover path, and the repaired owner and
+DACL are still re-read and refused unless they are exclusive.
+
+Protected run `34687009654` used Chat #233 (`d495070`) and SDK #216
+(`fcab133`). Linux and macOS passed. Windows passed Cave startup and discovery
+publication, then failed at `phase1.cave-authority.assertion.takeover`. The
+focused takeover proof uniquely allocated its scratch fixture beneath the
+restricted Cave checkout instead of the injected dedicated temp root. Cave
+#5378 fixes that boundary at authority
+`cb3d22d1f403dd3b94b02668a599a2bf94999e8b` by reusing the canonical
+OS-temp fixture helper. The proof, cleanup behavior, general workspace ACLs and
+quota policy remain unchanged. Validation, attestation and aggregation were
+skipped; a newly bound SDK validator and fresh protected matrix are required.
+
+Protected run `34691885853` used Chat #235 (`6e9af83`) and SDK #217
+(`9921f89`). Linux and macOS passed. Windows passed the frozen supervisor build
+and the repaired Cave authority proof, then failed later at the coarse
+`phase1.native-scenarios.launch` boundary. Validation, attestation and
+aggregation were skipped. The launch classifier now maps only fixed, public
+RPC outcomes into bounded not-installed, configuration, process, timeout,
+closed-RPC, initial-discovery, discovery-timeout, health, health-envelope and
+unknown categories. It never publishes the underlying response, path, process
+identifier, private error or child output. A newly bound SDK validator and
+fresh protected matrix are required before choosing a behavioral repair.
+
+These diagnostics preserve existing commands, deadlines, resource limits,
+record validation and assertion acceptance. They require a frozen harness and
+SDK binding followed by fresh protected execution before applying a behavioral
+Windows fix.
+
+## Bounded Windows quota traversal depth
+
+Protected run `34666399779` used Chat #228 (`f77b249`) and SDK #211
+(`5730979`). Linux and macOS passed independently verified identities,
+Cave timing and all 197 ordered assertions. Windows failed earlier, at
+`access-denied; root=harness-execution-aggregate; operation=directory-enumeration`.
+The run did not reach the new Cave diagnostic path. It does not establish a
+Cave identity, timing or assertion mismatch, or a recurrence of the earlier
+quota-reader token defect. Validation, attestation and aggregation were skipped.
+
+Quota traversal now distinguishes `directory-enumeration-root`,
+`directory-enumeration-depth-1`, `directory-enumeration-depth-2` and
+`directory-enumeration-depth-3-plus`. Depth starts at each matched quota root,
+including wildcard matches, and saturates at three. Pattern discovery retains
+`pattern-enumeration`. Only these fixed operation labels cross the failure
+boundary; directory names and original exception text remain discarded.
+The first failure, isolated-user reader, accounting, reparse handling, limits
+and fail-closed behavior are unchanged.
+
+The native diagnostic regression denies enumeration at depths 0, 1, 2, 3 and 5
+under direct and wildcard roots, exercises terminal and background monitoring,
+and checks that later failures cannot replace the first depth classification.
+
+Protected run `34670074847` used the merged quota-depth producer
+`5f4572c45e19bc17fa8963fb8147b47bc8d0c31c` and SDK validator
+`33240b9ff5212b1aec0f7f34173cdf899174769e`. Linux and macOS again passed
+independently verified identities, Cave timing and all 197 assertions. Windows
+failed closed at `access-denied; root=bootstrap-aggregate;
+operation=directory-enumeration-depth-3-plus`. Validation, attestation and
+aggregation were skipped. The failure is inside the isolated bootstrap root,
+but the aggregate quota still masks which fixed subtree was being measured.
+
+The next bounded diagnostic adds `scope` and `repeat` fields without changing
+the failure decision. For the bootstrap aggregate only, `scope` is selected
+from fixed names for the root, profile, temp, status staging, workspace,
+downloads, reviewed tool extractions, rustup, Cargo stores, pnpm/npm stores,
+counterpart checkouts, or `other`. Exact path components outside that closed
+set are never retained or emitted. The scope is attached to directory
+attributes, enumeration, entry attributes and file-length failures for the
+current bounded traversal node.
+
+After an initial metadata failure, the same validated isolated-user token
+performs one immediate bounded repeat. `readable` means the callback returned;
+`missing` means it reported a missing file or directory; `persistent` means
+it threw another exception, which need not match the first error. Older bound
+producers reported both readable and missing outcomes as `transient`. Enumeration
+creates a fresh enumerator, entry attributes use a fresh static metadata read,
+and file length uses a fresh metadata object, so each repeat reaches the
+filesystem again. The original failure still terminates production in either
+case. Synthetic or unattributed failures use `none`. Initial enumeration metadata and byte accounting are unchanged; fresh metadata
+is requested only by the diagnostic repeat. Supervisor prefix validation and
+non-isolated reads remain single-pass. The repeat never uses the
+supervisor identity, changes an ACL, accepts a partial measurement, or retries
+production. Existing quotas, traversal bounds, reparse handling, first-failure
+state, cleanup and acceptance remain unchanged. Supervisor-identity validation
+performs only the original read and reports `repeat=none`. Native regression
+coverage verifies the closed scope vocabulary, repeat propagation, unknown
+fallback and absence of private nonce or exception text.
+
+Protected run `34696065397` used the merged launch-diagnostic producer
+`59ea9ca3f557eb2179a1388e705cc5488d7fac9d` and SDK validator
+`42e62ac9e8d7ae5a14f3530d0ce22652ffdc6cd3`. Linux and macOS passed.
+Windows completed toolchain setup, exact checkouts, source verification and
+pnpm installation, then failed closed at `access-denied;
+root=harness-execution-aggregate; scope=none;
+operation=directory-enumeration-depth-3-plus; repeat=transient`. Validation,
+attestation and aggregation were skipped. The transient repeat shows only that
+the immediate same-token diagnostic read succeeded or the target disappeared;
+it does not permit partial quota accounting or production retry.
+
+The harness execution aggregate now classifies the current traversal node into
+the fixed scopes `root`, `home`, `temp`, `cache`, `data`, `pnpm-store`,
+`cargo-home`, `checkouts`, `build`, `packages`, `bin`, `native`,
+`compatibility`, or `other`. Native and compatibility workspaces are recognized
+only by their fixed prefixes; no nonce, descendant component, path or exception
+text crosses the diagnostic boundary. Failures before a matched aggregate root
+is available use the fixed `root` scope rather than `none`. This changes only
+bounded failure classification. The isolated-user reader, immediate repeat,
+limits, byte accounting, traversal, reparse handling, first-failure state and
+fail-closed decision are unchanged.
+
+Protected run `34699412717` used Chat #237
+(`4774a4d4760f13b1153ac47d84a25470d01ade5b`) and SDK #220
+(`9816b335676ddc7c63cb2cbf6454e0de5758a2c3`). Linux and macOS passed.
+Windows no longer encountered the transient quota-monitor failure and reached
+the native launch boundary, where the initial discovery read returned a result
+other than the required `cave_discovery_not_found`. Validation, attestation and
+aggregation were skipped.
+
+The initial discovery diagnostic now distinguishes a present record,
+unavailable discovery, unsafe metadata, invalid record, body limit, service
+failure, and unknown outcome. Classification is derived from a closed set of
+public RPC codes; arbitrary error codes, response bodies, paths, handles,
+process identifiers and exception text remain redacted. The expected
+not-found result still proceeds to launch, and all other outcomes still fail
+closed before launch.
+
+### Windows initial discovery safety observations
+
+After Windows returns `unsafe_discovery_record` before launch, the conformance
+producer requests a read-only directory safety observation from the same native
+RPC process. The probe obtains the profile root from the current process token,
+then checks the profile, `.coven`, and `cave` directory handles in order. It stops
+at the first non-safe directory and publishes only a fixed scope and category:
+type, reparse, owner, combined owner/ACL, owner with unavailable ACL metadata,
+ACL, missing, or unavailable. It publishes no paths, SIDs,
+ACL contents, handles, or discovery bytes. Caller-selected roots are rejected.
+
+The `initial-unsafe-probe-*` failure remains a failure. It describes a subsequent
+observation, not a captured snapshot of the original rejected read. In particular,
+`directories-safe` does not establish discovery file safety or successful launch.
+Malformed responses and probe errors produce `unknown`. Existing ownership,
+trusted-writer ACL, reparse, and identity acceptance checks remain unchanged.
+Native Windows execution and fresh protected evidence are required to establish
+the actual failing condition; local metadata tests are not that evidence.
+
+For a foreign owner, an ACL-query error retains the ordinary reader's unsafe
+rejection; it is reported only by the follow-up probe as `owner-acl-unavailable`.
+For the current user, an ACL-query error remains unavailable. Unknown ACL
+metadata is never treated as a safe ACL.
+
+Protected run `34709663093` used Chat #240
+(`8d17c173aa00310755fe912c66d4d3ba088296c4`) and SDK #222
+(`010032083d27ae7bf6807d4451c6c1fb33d68b71`). Linux and macOS records
+passed independent identity, timing and ordered-assertion checks. Windows
+reported `phase1.native-scenarios.launch.initial-unsafe-probe-profile-owner`
+at `2026-09-12T18:27:35.7586103Z`. The follow-up observation identified a
+non-reparse profile directory with a foreign owner and an acceptable writer
+DACL. It does not snapshot the original read or disclose the owner's SID class.
+The native Windows regression separately requires an actual LocalSystem or
+builtin Administrators owner before exercising the newly accepted branch.
+
+The Windows reader therefore accepts the operating-system profile root only
+when its owner is the current user, LocalSystem or builtin Administrators and
+its DACL permits writes only to those same trusted principals. The
+application-owned `.coven` and `cave` directories and discovery file still
+require current-user ownership, remain non-reparse objects and retain their
+existing DACL, identity and file-replacement checks. The Windows supervisor
+regression suite now performs an actual `cave_read_discovery` request under a
+fresh restricted profile and requires the exact `cave_discovery_not_found`
+response before any discovery state exists.
+
+When a trusted profile owner's ACL metadata cannot be queried, the follow-up
+probe reports `unavailable`; the ordinary reader continues to reject the path.
+Unknown ACL metadata is never reported as an observed unsafe ACL or accepted.
+
+The token-profile owner probe and native discovery request use independent Job
+Objects. Each is disposed after its bounded process completes; neither relies
+on assigning another process to a drained Job.
+
+Protected run `34712135363` used Chat #239
+(`43e821689cc22e58b424c59b90981379fb16a6a8`) and SDK #223
+(`75ab128767f7fc2f008a3d2c597e0e27339b9114`). Linux and macOS passed.
+The third Windows attempt reported `phase1.native-scenarios.launch.timeout`.
+The producer stopped waiting for `cave_launch` after 10 seconds even though the
+native command has a 30-second absolute readiness deadline. This result does
+not prove native readiness or agreement between publisher and reader roots.
+
+Both the packaged harness and schema-v2 producer now give only `cave_launch` a
+40-second RPC response budget: Rust's existing 30-second readiness deadline
+plus the existing 10-second transport allowance. Other native RPCs and shutdown
+retain their existing limits. Rust still owns launch readiness, child liveness,
+discovery pinning, health validation, and cleanup. Only an observed outer RPC
+timeout maps to `phase1.native-scenarios.launch.timeout`. A native
+`service_unavailable` response maps to
+`phase1.native-scenarios.launch.service-unavailable`
+because that code also represents worker completion loss and generation
+overflow. No paths, process IDs, discovery bytes, or child output are exposed.
+
+Before this change, Windows fixture publication used artifact-local
+`COVEN_CAVE_HOME`, while the native reader selected the actual token profile's
+`.coven/cave`. A response-budget correction alone could not align those roots.
+
+Protected run `34718514551` reached Rust's 30-second readiness deadline with the
+Cave child still alive. The Windows reader/publisher path comparison then
+confirmed the unresolved mismatch: the Rust reader intentionally derives the
+profile from the process token, while the producer directed Cave to an
+artifact-local home. The supervisor now overwrites
+`OPENCOVEN_WINDOWS_PROFILE_ROOT` after copying the requested child environment,
+using the operating-system profile registered for the restricted process token.
+The protected producer validates that dedicated canonical path independently
+from the bootstrap-local `USERPROFILE` redirect and places only the Windows
+native fixture beneath the token profile's `.coven/cave`. A caller-provided or
+inherited profile-root value therefore cannot redirect fixture publication.
+The fixture is removed only after the native RPC and its nested Cave Job close.
+If graceful shutdown fails, deletion is deferred to the supervisor's existing
+process-termination and profile-deletion boundary.
+
+The Windows readiness deadline remains 30 seconds, with a 40-second
+`cave_launch` response budget in both clients. The earlier 75/85-second
+increase was not supported by the observed profile-root mismatch and is
+reverted. Other RPCs retain their existing limits.
+
+The supervisor now creates the actual owned profile before launching the
+restricted child and verifies token/profile agreement. Its retained profile
+and application directory handles request directory-list access without delete
+sharing so replacement is rejected by Windows sharing checks. The owned
+application subtree is charged to the existing bootstrap and harness aggregate
+budgets. Quarantine must complete before those handles are released and owned
+profile/account cleanup proceeds.
+
+Protected run `34726708513` used merged Chat #249 (`4682a4a`) and SDK #228
+(`c863b58`). Linux and Darwin passed. Windows failed at
+`access-denied; root=cave-checkout; scope=none;
+operation=directory-attributes; repeat=missing`. Validation, attestation and
+aggregation were skipped. The Unix records independently passed source and
+Cave record identity, timing, and all 197 ordered assertions.
+
+The missing retry proves pathname absence on that read. It does not distinguish
+completed deletion from rename/replacement, prove zero retained bytes, or erase
+an already observed entry-bound violation. Chat #253 landed a conversion of
+these failures into skippable absence. Its merge ancestry is integrated here,
+while strict first-failure handling and its regression coverage are retained.
+The bounded repeat remains diagnostic only. Fresh protected evidence is still
+required after the actual Chat merge and SDK rebinding.
+
+The isolated-SID drain retains the SID-verified process handle through termination
+and reaping. If termination reports access denied, only a signaled zero-time wait
+on that same handle permits the existing wait and exit-code checks to continue.
+Live-process denial, failed waits, and unverified exit codes remain failures. The
+Windows runtime suite exercises exited handles and restricted live handles.
+
+Chat #257 publishes `phase1.native-scenarios.launch.service-unavailable`; this
+integration preserves that identifier alongside the six other allowlisted native
+launch codes and the retained-handle termination correction. Service unavailability
+is an observed native result and does not by itself establish a timeout.
+
+Protected run `34773356378` used Chat `3a1f4e3` and SDK validator
+`372fa9d`. Linux and Darwin passed. Windows failed during active Cave packaging
+with `access-denied; root=cave-checkout; scope=none;
+operation=directory-enumeration-depth-3-plus; repeat=readable`. No Windows
+record was produced, so validation, attestation, and aggregation were skipped.
+
+The fresh same-token enumeration had completed under the existing entry bound,
+but the monitor discarded it and terminated the producer because every repeat
+was diagnostic-only. Directory snapshots now recover only this narrow case:
+an initial `UnauthorizedAccessException` followed immediately by a successful
+fresh invocation of the same bounded snapshot core. The failed attempt's
+partial entries are never used. Missing and persistent repeats, all
+non-access-denied failures, and metadata reads remain fail-closed. Quota byte
+limits, entry limits, reparse rejection, isolated identity, polling cadence,
+process quarantine, cleanup, and private diagnostics remain unchanged.
+
+Portable coverage demonstrates the prior failure before the repair and verifies
+the returned fresh snapshot. Native Windows coverage keeps a real owner-only
+denial across both reads to prove persistent denial remains terminal, then
+restores only the test fixture between reads and verifies complete snapshot
+accounting plus a real byte-limit breach.
+
+## Native cleanup absence verification
+
+Native cleanup checks every account in the authenticated cleanup scope after
+all delete calls finish and before consuming the grant or returning the empty
+custody digest. The mutation lock remains held across deletion and readback.
+macOS readback searches the same isolated keychain used for deletion; Windows
+and Linux use the same native service/account entries. A retained entry or a
+readback error rejects cleanup and preserves the grant for retry.
+
+This closes the gap where a successful delete call alone could produce an
+`empty: true` response. It does not establish the cause of the Windows native
+E2E failure in Chat #274, or prove that another process cannot create an entry
+after verification. Fresh native CI, reviewed source binding, and protected
+validation remain required before accepting this producer.
+
+The cleanup readback source is pinned at
+`62f56a17a9722f29b8f74f6bcbff59c560673c48`, tree
+`3974a8a05eafb2d5c38c87047d4e7396f44a3c91`. Preserve that commit in producer
+ancestry when landing; the following lock update binds its harness and native
+production deltas without changing the SDK candidate or counterpart revisions.
+
+Local validation passed all 173 Rust library tests, Clippy with warnings denied,
+and formatting. Independent review found no issues. Chat #275 carries `ci:full`
+to run the native PR lanes; those results and fresh protected validation are
+separate requirements and are not implied by the local checks.
+
+## Combined cleanup and diagnostics source
+
+Historical source `d8d18fa991c03a28417fdd5b98e70c702d332a0f`, tree `f9064ad8892e8a0b90eeac296110b63358f19d93`, combines reviewed Windows residual cleanup, bounded Cave startup-exit diagnostics, and native credential absence readback. The Cave5409 harness source `1cf8693e86a8c323708a3d9050d5cff86a158ae6` retains that source and its original PR commits in ancestry, with identical native production deltas.
+
+All 46 bounded Cave diagnostic tests passed locally. The integration also passed 129 portable tests; 13 timed out. Bounded controls reproduced local PowerShell Add-Type timeouts for trivial C# and the baseline supervisor, so full native CI remains required. No timeouts, resource limits, or dependency settings were relaxed. Fresh SDK rebinding and protected cross-platform validation remain outstanding.
+
+## Residual deletion without directory-read access
+
+Residual source `1d5dc89b0f4fb1aedefe6203459184befbed8a20`
+(tree `03d85a77d79f9f7c44cdcb9c19bb846941954102`) is retained in ancestry.
+The combined binding integrates the qualified Cave authority from #280 while
+preserving the residual cleanup correction and protected approval gates.
+
+Residual cleanup opens entries for deletion and metadata inspection without
+requesting `FILE_LIST_DIRECTORY` (also `FILE_READ_DATA` for files).
+[Windows profile compatibility junctions](https://learn.microsoft.com/en-us/windows/win32/vss/junction-points)
+deliberately deny read access. Deleting the junction itself must not require
+enumerating its target.
+
+For ordinary directories, cleanup retains the original deletion handle and
+opens the same single-component name relative to its retained parent to obtain
+a separate enumeration handle for the same object.
+It checks the reopened identity and rejects reparse points before enumeration.
+The enumeration handle shares deletion only to coexist with the original
+handle, which still denies delete sharing and remains open throughout traversal.
+Child lookup stays relative to that original retained handle.
+
+The first native run of this correction, `34902663819`, rejected the earlier
+`ReOpenFile` enumeration attempt with access denied in the initial ordinary
+directory case. The relative NT open keeps both the parent and deletion handles
+retained and checks the reopened identity before reading directory records.
+
+Run the existing native regression on Windows:
+
+```powershell
+pwsh -NoProfile -File scripts/windows-profile-residual-native.test.ps1
+```
+
+The regression includes read-denied files and junctions, denied enumeration of
+ordinary directories, and the existing denied-delete and external-sentinel
+controls. Cleanup does not enable privileges, modify ACLs or file attributes,
+follow junction targets, retry access denial, or extend deadlines.
+
+This source correction addresses the unnecessary access request. The bounded
+`relative-open` access denial in protected run `34879698263` does not identify
+the failed entry or establish that it was a compatibility junction. Native
+execution, reviewed producer rebinding, and fresh protected conformance remain
+required before you treat the release blocker as resolved.
+
+The combined residual-open diagnostic reports only the fixed role `ancestor`,
+`profile-root`, or `child`, plus the existing bounded depth and NT status.
+It accepts no caller-supplied path or arbitrary role text. These labels identify
+the failing open call; they do not establish the cause of Cave startup failure.
+
+## Unclassified schema-v2 production failures
+
+Protected run `34922030401` failed on Windows with
+`phase1.stage.schema-v2-production.failed`; it produced no Windows record.
+Linux and macOS records passed identity, Cave timing, and all 197 ordered
+assertions, but validation, attestation, and aggregation were skipped.
+The separate profile cleanup child-open access denial remains unresolved.
+
+The producer distinguishes authorization-environment scrubbing, lock-version
+validation, and platform validation with bounded preflight diagnostics. An
+unexpected error escaping schema-v2 production is reported as
+`phase1.stage.schema-v2-production.unclassified.<kind>`, where `kind` is one of
+`type-error`, `reference-error`, `range-error`, `syntax-error`, `aggregate-error`,
+`error`, or `non-error`. Existing approved diagnostics retain priority.
+These categories identify an error kind, not the failing operation or its root cause. No error message,
+stack, name, code, environment value, or subprocess output is published by this
+fallback. Private causes remain in memory only.
+
+Protected run `34928011200` subsequently reported
+`phase1.stage.schema-v2-production.unclassified.error` on Windows. Linux and
+macOS records again passed all 197 assertions, identities, timing, and privacy
+checks. Windows produced no record; downstream acceptance jobs were skipped.
+
+The diagnostic audit found three producer-native stages missing from the outer
+launcher's allowlist: `phase1.native-scenarios.native-preflight`,
+`phase1.native-scenarios.pairing-recovery`, and
+`phase1.native-scenarios.revocation-repair`. The launcher now preserves those
+fixed identifiers through infrastructure wrapping. Regression tests reproduced
+all three being replaced by `unclassified.error` before this correction. This
+proves a diagnostic-loss bug, not which stage failed in the protected run.
+
+Fresh reviewed source binding, SDK rebinding, and protected validation are
+required before attributing the Windows failure or claiming a repaired run.
+
+
+### Dispatching a protected run against a specific merged revision
+
+`workflow_dispatch` previously validated whatever `main` pointed at when the
+run started. The cross-repository contract requires the evidence producer to be
+a merge whose tree equals its reviewed second parent's tree, so a binding names
+one exact merge; any later commit to `main` — conformance-related or not —
+leaves that binding unable to describe the tip. Protected runs were therefore
+only usable inside the window between a binding landing and the next merge.
+
+The optional `producer_revision` input names the commit to validate. The
+`resolve-producer-revision` job requires an exact lowercase 40-hex commit that
+exists in this repository and is an **ancestor of the dispatch ref**, then
+publishes it for the supervisor build, the Windows bootstrap and the Unix
+workspace checkout. Omitting it keeps the previous behaviour of validating the
+dispatch ref tip.
+
+The ancestry requirement is what keeps this from widening the trust boundary:
+an unmerged branch, an unrelated commit, or a revision from a fork is refused,
+so a protected run still only ever validates reviewed history that reached
+`main`. What changes is that it no longer has to be the newest such history.
+
+### Unexpected installation RPC failures
+
+Protected run `34964120550` used Chat `d84195c61b86598e691ccd47163e46a15b154417`
+and SDK `3490a801e1c1b079fd39351b12793b44aab8f9c8`. Linux and macOS each passed
+197 ordered assertions and independent identity, timing, and scan checks.
+Windows failed at `phase1.native-scenarios.native-preflight-installation-rpc`
+without a narrower response or transport category. It produced no record;
+validation, attestation, and aggregation were skipped.
+
+Installation exceptions without a private RPC category now receive one of
+three fixed suffixes: `unexpected-type-error`, `unexpected-error`, or
+`unexpected-value`. These classify the thrown value without publishing its
+message, code, stack, or cause. Existing privately assigned response and
+transport categories take precedence, and the original thrown value is retained.
+
+A malformed non-string installation response code is also rejected without
+string coercion. A regression reproduced coercion throwing before private
+classification. The frozen Rust consumer emits string codes, so this regression
+does not establish the protected Windows failure's cause. Neither correction
+changes request counts, timeouts, resource limits, or native-provider behavior.
+A verified source/SDK binding and fresh protected run remain required.
+### Finalization operation diagnostics
+
+Protected run [34928011200](https://github.com/OpenCoven/chat/actions/runs/34928011200)
+used Chat `6e051296`, SDK validator `129d4fd`, and Cave `ecdcdcf8a`.
+Windows emitted `phase1.stage.schema-v2-production.unclassified.error`.
+Linux and macOS jobs passed; validation, attestation, and aggregation were skipped.
+The error kind does not identify the original production operation.
+
+The producer and outer runner had separate native-stage allowlists. The producer
+recognized `native-preflight`, `pairing-recovery`, and `revocation-repair`, but the
+outer runner recognized none of them. Injecting each native-stage failure through
+`schemaV2NativeFailureDiagnostic`, `wrapInfrastructureFailure`, and the outer
+runner reproduces the exact `unclassified.error` fallback. Both layers now use
+the same immutable registry of fixed native-stage diagnostics. Regression coverage
+requires every registry entry to survive runner extraction and rejects arbitrary
+suffixes. The protected log cannot establish which of these operations failed.
+
+Failure injection into the actual producer orchestration reproduces one escape:
+`createExactCheckouts` fails, its exception receives `phase1.stage.checkouts.failed`,
+and `fillMissingAssertions` then throws while the catch block is unwinding.
+That second exception previously replaced the classified failure and reached the
+outer fallback as `unclassified.error`. This establishes a reachable diagnostic
+gap, not the origin of the protected run's exception.
+
+The finalization boundary now preserves the first infrastructure failure and
+attaches a second, bounded diagnostic under
+`phase1.stage.schema-v2-production.operation.<operation>`. The four operations are
+`failure-assertions`, `native-cleanup-assertions`, `required-assertions`, and
+`execution-cleanup-assertions`. Without an earlier failure, the operation diagnostic
+is public. With an earlier classified failure, that diagnostic keeps priority;
+both failures remain available in memory. Arbitrary operation names are rejected.
+Messages, stacks, paths, credentials, and raw subprocess output are not added to
+public diagnostics or evidence records.
+
+Run the portable injection coverage with:
+
+```sh
+corepack pnpm exec vitest run src/phase1-producer-operation-diagnostics.test.ts
+```
+
+### Independent residual cleanup investigation
+
+Run `34928011200` also reported accepted profile deletion followed by a surviving
+profile and `relative-open;kind=entry;depth=le4;ntstatus=c0000022;role=child`.
+The source has two child-open paths with that same label:
+
+| Path | Requested access | What remains unknown |
+| --- | --- | --- |
+| Initial child deletion handle | `DELETE`, `FILE_READ_ATTRIBUTES`, `READ_CONTROL`, `SYNCHRONIZE` | Entry type and which requested right was denied |
+| Ordinary-directory enumeration reopen | `FILE_LIST_DIRECTORY`, `FILE_READ_ATTRIBUTES`, `READ_CONTROL`, `SYNCHRONIZE` | Whether this reopen was reached |
+
+The second path runs only after the retained deletion handle identifies an ordinary
+directory. It retains the first handle, allows delete sharing on the enumeration
+handle, and verifies matching file identities before enumeration. Both paths disable
+cleanup-token privileges and fail on access denial. The log cannot distinguish
+these paths or identify a compatibility junction, ACL owner, or denied right.
+It does not establish a causal link to the earlier producer exception.
+
+The existing `windows-profile-residual-native.test.ps1` covers bounded role
+classification, denied deletion, read-denied files and junctions, denied ordinary
+directory enumeration, and external sentinels. The next native diagnostic should
+distinguish the fixed deletion/enumeration open purpose and verify both failure
+paths against those controls. This investigation changes no native cleanup code,
+ACLs, privileges, access masks, limits, or protected settings. Native Windows proof
+and a reviewed source/SDK binding remain required before another protected run can
+establish acceptance.
+
+## Quota enumeration and residual open purposes
+
+Protected run [34945048615](https://github.com/OpenCoven/chat/actions/runs/34945048615)
+failed Windows quota monitoring with `access-denied`, root `harness-execution-aggregate`,
+scope `checkouts`, operation `directory-enumeration-depth-3-plus`, and repeat `persistent`.
+No producer-stage diagnostic or Windows record was emitted. Linux and macOS passed;
+validation, attestation, and aggregation were skipped.
+
+`MeasureDirectoryBytes` traverses ordinary directories and skips observed reparse points.
+`ReadBoundedDirectorySnapshot` materializes a bounded snapshot. On access denial,
+`ReadDirectorySnapshotOperation` performs one fresh, complete snapshot read under the
+existing quota-reader identity. A successful repeat supplies the measurement; a missing
+directory is classified separately. Any other repeat exception produces `persistent`,
+while the initial access-denied category is preserved. An injected access denial followed
+by an I/O exception now exercises that distinction through the production snapshot seam.
+Thus the log does not prove two identical ACL failures, a particular checkout, a denied
+right, or a causal connection to profile cleanup. Quota limits and fail-closed behavior
+remain unchanged.
+
+Cleanup separately reported `relative-open;kind=entry;depth=le4;ntstatus=c0000022;role=child`.
+Both the initial deletion open and ordinary-directory enumeration reopen previously used
+that label. Residual-open diagnostics now append a fixed purpose derived from the same
+boolean that selects native access rights:
+
+- `purpose=deletion`: requests DELETE plus metadata, security-read, and synchronization
+  rights; denies delete sharing.
+- `purpose=enumeration`: requests LIST_DIRECTORY plus the same metadata rights. The child
+  enumeration reopen retains the deletion handle, permits delete sharing, and verifies
+  directory identity before enumeration.
+
+Portable injection covers both purposes for every bounded role and rejects private role
+text. Native denial controls require deletion purpose for denied deletion and enumeration
+purpose for an ordinary directory whose list access is denied. These diagnostics disclose
+no names or paths and do not change ACLs, privileges, access masks, sharing, or retries.
+Native Windows verification remains required; portable tests cannot establish those ACL
+results. No unchanged protected rerun is warranted. A future dispatch requires reviewed
+delivery, a reachable authority freeze, and the matching SDK binding first.
+
+### Original residual-purpose source binding
+
+PR #302 originally selected signed source `4dc702d2538a3815a84e39cddec598ce058518f6`, tree
+`f9ac551a29150e232c8e3ff8e8ddc0fa5cf8eefa`. The binding records the actual Git blobs and SHA-256
+digests of all 25 governed files and 10 production deltas. That source retained the merged
+finalization diagnostics and added only the residual-open purposes described above.
+The current integration also retains the access and scope diagnostics and the
+independent profile-probe job lifetimes described at the top of this document.
+Candidate, consumer, Cave, Coven, and supervisor executable authorities are unchanged.
+Native Windows checks and an SDK binding to the eventual delivery remain required
+before protected conformance can establish acceptance.
+
+
+### Cancelling superseded pull-request Windows CI
+
+The ordinary `Windows supervisor behavior` job uses `!cancelled()` together
+with its existing Rust-success, docs-only, main-push and `ci:full` gates. This
+lets a superseded pull-request run stop instead of retaining a Windows runner
+through `always()`. Main concurrency still completes each merge, and independent
+conformance scan, keychain cleanup and artifact-retention steps keep their
+existing conditions. The job name, 20-minute limit, and supervisor containment
+are unchanged.
+
+A cancelled run is not cleanup or conformance acceptance evidence. Its replacement
+must pass all required checks. Issue #306 tracks this change and the remaining
+hosted supersession/replacement validation. The motivating old-head run
+`35117564510` was cancelled while its Windows job continued to completion; the
+replacement run `35118809575` subsequently passed all eleven jobs. That history
+does not validate the new cancellation guard.

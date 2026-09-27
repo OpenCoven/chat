@@ -18,15 +18,25 @@ import { devNull } from 'node:os';
 import { delimiter, dirname, isAbsolute, resolve, win32 as windowsPath } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { isDeepStrictEqual, stripVTControlCharacters } from 'node:util';
+import { FROZEN_PACKED_CONSUMER_STAGES } from './contract-canary.mjs';
 import { resolveExecutableInvocation } from './executable-resolution.mjs';
-import { scanPhase1Artifacts } from './phase1-artifact-secret-scan.mjs';
 import {
+  REQUIRED_PHASE1_ASSERTION_IDS,
+  scanPhase1Artifacts,
+} from './phase1-artifact-secret-scan.mjs';
+import {
+  assertCleanPhase1Checkout,
   assertCleanPhase1Checkouts,
   assertExecutingPhase1HarnessAuthority,
   assertPhase1CheckoutHeads,
   assertPhase1ProducerAuthority,
+  createGitCheckoutEnvironment,
   createGitEnvironment,
+  gitNullDevice,
+  readPhase1CheckoutIdentity,
   readPhase1ConformanceLock,
+  resolveLocalGitDirectory,
+  toGitSafeDirectoryPath,
 } from './phase1-conformance-lock.mjs';
 import {
   buildPlatformEvidence,
@@ -41,15 +51,29 @@ import {
   createObservedAssertionRecorder,
 } from './phase1-schema-v2-evidence.mjs';
 import {
+  CAVE_DISCOVERY_FAILURE_DIAGNOSTICS,
+  CAVE_STARTUP_EXIT_DIAGNOSTICS,
+  caveFontFetchFailurePattern,
+  caveLaunchRpcTimeoutForPlatform,
+  classifyCavePluginEvaluationFailure,
+  NATIVE_LAUNCH_PUBLICATION_DIAGNOSTICS,
+  pnpmInvocation,
   runSchemaV2Conformance,
+  SCHEMA_V2_FINALIZATION_OPERATIONS,
+  SCHEMA_V2_NATIVE_FAILURE_DIAGNOSTICS,
   schemaV2SupervisorEnvironment,
   supervisorArtifactOutputPath,
 } from './phase1-schema-v2-producer.mjs';
-import { createProcessOwnedArtifactRoot } from './process-owned-artifact-root.mjs';
+import {
+  createProcessOwnedArtifactRoot,
+  PROCESS_CLEANUP_FAILURE_CATEGORIES,
+  processCleanupFailureCategory,
+} from './process-owned-artifact-root.mjs';
 import { configureSupervisedExecution, runSupervisedSync } from './supervised-exec.mjs';
 import { parseSupervisorStatusFrame } from './supervisor-status.mjs';
 
 export {
+  caveLaunchRpcTimeoutForPlatform,
   runPowerShellCommandWithArgs,
   schemaV2SupervisorEnvironment,
   supervisorArtifactOutputPath,
@@ -73,8 +97,9 @@ const revocationConfirmationDelayMs = 550;
 const commandTimeoutMs = 20 * 60_000;
 export const cargoBuildTimeoutMs = 45 * 60_000;
 const caveBuildNodeOptions = '--max-old-space-size=6144';
-const caveBuildReportedCpuTotal = '3';
+const caveBuildReportedCpuTotal = '2';
 const rpcTimeoutMs = 10_000;
+const caveLaunchRpcTimeoutMs = caveLaunchRpcTimeoutForPlatform();
 const caveConformanceTimeoutMs = 15 * 60_000;
 const approvedCommandFailureReasons = new Set([
   'spawn',
@@ -86,6 +111,7 @@ const approvedCommandFailureReasons = new Set([
 ]);
 const verifiedRunnerEnvironment = 'OPENCOVEN_PHASE1_VERIFIED_RUNNER';
 const verifiedRunnerRootEnvironment = 'OPENCOVEN_PHASE1_VERIFIED_RUNNER_ROOT';
+const protectedHarnessTagRef = 'refs/tags/opencoven-phase1-harness';
 const evidenceAuthorizationVariables = new Set([
   'ACTIONS_ID_TOKEN_REQUEST_TOKEN',
   'ACTIONS_ID_TOKEN_REQUEST_URL',
@@ -252,7 +278,24 @@ const covenIdentityDiagnosticIds = new Set(
   [...covenIdentityFailureStages, 'unknown'].map((stage) => `phase1.coven-identity.${stage}`),
 );
 
+const schemaV2UnexpectedErrorKinds = [
+  [TypeError, 'type-error'],
+  [ReferenceError, 'reference-error'],
+  [RangeError, 'range-error'],
+  [SyntaxError, 'syntax-error'],
+  [AggregateError, 'aggregate-error'],
+  [Error, 'error'],
+];
+
 const publicPhase1DiagnosticIds = new Set([
+  ...SCHEMA_V2_NATIVE_FAILURE_DIAGNOSTICS,
+  ...SCHEMA_V2_FINALIZATION_OPERATIONS.map(
+    (operation) => `phase1.stage.schema-v2-production.operation.${operation}`,
+  ),
+  'phase1.stage.schema-v2-production.operation.invalid',
+  ...[...schemaV2UnexpectedErrorKinds.map(([, kind]) => kind), 'non-error'].map(
+    (kind) => `phase1.stage.schema-v2-production.unclassified.${kind}`,
+  ),
   'phase1.operator-fingerprint.failed',
   'phase1.operator-fingerprint.unsafe-root',
   'phase1.operator-fingerprint.entry-limit',
@@ -262,6 +305,12 @@ const publicPhase1DiagnosticIds = new Set([
   'phase1.stage.runner-bootstrap.failed',
   'phase1.stage.runner-lock.failed',
   'phase1.stage.runner-checkout.failed',
+  'phase1.stage.runner-checkout.unsafe-source-owner',
+  'phase1.stage.runner-checkout.source-reference',
+  'phase1.stage.runner-checkout.source-revision',
+  'phase1.stage.runner-checkout.source-tag',
+  'phase1.stage.runner-checkout.clone',
+  'phase1.stage.runner-checkout.checkout',
   'phase1.stage.runner-checkout-verification.failed',
   'phase1.stage.verified-runner.failed',
   'phase1.stage.verified-runner.timeout',
@@ -269,8 +318,26 @@ const publicPhase1DiagnosticIds = new Set([
   'phase1.stage.verified-runner.spawn',
   'phase1.stage.verified-runner.supervisor',
   'phase1.stage.verified-runner.exit-nonzero',
+  'phase1.stage.runtime-integrity.failed',
+  'phase1.stage.invocation.failed',
+  'phase1.stage.invocation.windows-job-required',
+  'phase1.stage.invocation.windows-job-identity',
+  'phase1.stage.invocation.windows-powershell',
+  'phase1.stage.invocation.windows-toolchain-path',
+  'phase1.stage.invocation.windows-path',
+  'phase1.stage.invocation.windows-artifact-binding',
+  'phase1.stage.invocation.windows-os-environment',
+  'phase1.stage.invocation.windows-executable-path',
+  'phase1.stage.invocation.windows-path-extensions',
+  'phase1.stage.invocation.windows-output-binding',
+  'phase1.stage.invocation.unix-output-binding',
+  'phase1.stage.invocation.platform-mismatch',
   'phase1.stage.lock.failed',
   'phase1.stage.harness-authority.failed',
+  'phase1.stage.schema-v2-production.failed',
+  'phase1.stage.schema-v2-production.authorization-scrub',
+  'phase1.stage.schema-v2-production.lock-version',
+  'phase1.stage.schema-v2-production.platform',
   'phase1.stage.native-provider.failed',
   'phase1.stage.execution-root.failed',
   'phase1.stage.environment.failed',
@@ -282,17 +349,254 @@ const publicPhase1DiagnosticIds = new Set([
   'phase1.environment.rustup-home.invalid',
   'phase1.environment.directories.failed',
   'phase1.stage.toolchain.failed',
+  'phase1.stage.toolchain.pnpm',
+  'phase1.stage.toolchain.rust',
+  'phase1.stage.toolchain.tauri',
+  'phase1.stage.toolchain.metadata',
   'phase1.stage.checkouts.failed',
+  'phase1.stage.checkouts.chat.failed',
+  'phase1.stage.checkouts.sdk.failed',
+  'phase1.stage.checkouts.cave.failed',
+  'phase1.stage.checkouts.coven.failed',
+  'phase1.stage.checkouts.integrity.failed',
+  'phase1.stage.checkouts.validator.failed',
+  'phase1.stage.checkouts.producer.failed',
   'phase1.stage.evidence-authority.failed',
+  'phase1.stage.evidence-authority.producer',
+  'phase1.stage.evidence-authority.validator',
+  'phase1.stage.evidence-authority.compatibility',
+  'phase1.stage.evidence-authority.lock',
+  'phase1.stage.evidence-authority.checkout',
+  'phase1.stage.evidence-authority.artifacts',
+  'phase1.stage.evidence-authority.identities',
+  'phase1.stage.evidence-authority.report.failed',
+  'phase1.stage.evidence-authority.operator-state.failed',
+  'phase1.stage.evidence-authority.isolation.failed',
+  'phase1.stage.evidence-authority.isolation.opaque-ids.invalid',
+  'phase1.stage.evidence-authority.isolation.opaque-ids.duplicate',
+  'phase1.stage.evidence-authority.isolation.native-credential-store.invalid',
+  'phase1.stage.evidence-authority.isolation.native-credential-store.changed',
+  'phase1.stage.evidence-authority.isolation.operator.cave-home.invalid',
+  'phase1.stage.evidence-authority.isolation.operator.cave-home.path',
+  'phase1.stage.evidence-authority.isolation.operator.cave-home.changed',
+  'phase1.stage.evidence-authority.isolation.operator.coven-home.invalid',
+  'phase1.stage.evidence-authority.isolation.operator.coven-home.path',
+  'phase1.stage.evidence-authority.isolation.operator.coven-home.changed',
+  'phase1.stage.evidence-authority.isolation.operator.projects.invalid',
+  'phase1.stage.evidence-authority.isolation.operator.projects.path',
+  'phase1.stage.evidence-authority.isolation.operator.projects.changed',
+  'phase1.stage.evidence-authority.assertions.failed',
+  // Mirrors the producer's bounded report-assertion categories so the outer
+  // runner recognises one when a supervised child prints it (#219).
+  ...['failed', 'blocked'].flatMap((status) =>
+    REQUIRED_PHASE1_ASSERTION_IDS.map(
+      (id) =>
+        `phase1.stage.evidence-authority.report.assertions.${status}.${id.slice('phase1.'.length)}`,
+    ),
+  ),
+  'phase1.stage.evidence-authority.report.assertions.unknown',
+  'phase1.stage.evidence-authority.build.failed',
+  'phase1.stage.evidence-authority.build.environment',
+  'phase1.stage.evidence-authority.build.cave-record',
+  'phase1.stage.evidence-authority.build.cave-record.identity.platform',
+  'phase1.stage.evidence-authority.build.cave-record.identity.commit',
+  'phase1.stage.evidence-authority.build.cave-record.identity.cave-version',
+  'phase1.stage.evidence-authority.build.cave-record.identity.node-version',
+  'phase1.stage.evidence-authority.build.cave-record.timing.invalid',
+  'phase1.stage.evidence-authority.build.cave-record.timing.before-run',
+  'phase1.stage.evidence-authority.build.cave-record.timing.after-run',
+  'phase1.stage.evidence-authority.build.cave-record.assertions.shape',
+  'phase1.stage.evidence-authority.build.cave-record.assertions.count',
+  'phase1.stage.evidence-authority.build.cave-record.assertions.unexpected',
+  'phase1.stage.evidence-authority.build.cave-record.assertions.duplicate',
+  'phase1.stage.evidence-authority.build.cave-record.assertions.result',
+  'phase1.stage.evidence-authority.build.cave-record.assertions.detail',
+  'phase1.stage.evidence-authority.build.isolation',
+  'phase1.stage.evidence-authority.build.assertions',
+  'phase1.stage.evidence-authority.serialize.failed',
+  'phase1.stage.evidence-authority.scan.failed',
+  'phase1.stage.evidence-authority.retain.failed',
   'phase1.stage.packaging.failed',
+  'phase1.packaging.frozen-consumer.failed',
+  ...FROZEN_PACKED_CONSUMER_STAGES.map(
+    (stage) => `phase1.packaging.frozen-consumer.${stage}.failed`,
+  ),
+  'phase1.packaging.cave-install.failed',
+  'phase1.packaging.cave-build.failed',
+  'phase1.packaging.chat-install.failed',
+  'phase1.packaging.chat-web-build.failed',
+  'phase1.packaging.chat-native-build.failed',
+  'phase1.packaging.chat-native-build.timeout',
+  'phase1.packaging.chat-native-build.output-limit',
+  'phase1.packaging.chat-native-build.spawn',
+  'phase1.packaging.chat-native-build.supervisor',
+  'phase1.packaging.chat-native-build.native-dependency',
+  'phase1.packaging.chat-native-build.dependency-fetch',
+  'phase1.packaging.chat-native-build.resource.memory',
+  'phase1.packaging.chat-native-build.resource.disk',
+  'phase1.packaging.chat-native-build.resource.killed',
+  'phase1.packaging.chat-native-build.process.crash',
+  'phase1.packaging.chat-native-build.no-output',
+  'phase1.packaging.chat-native-build.linker',
+  'phase1.packaging.chat-native-build.build-script',
+  'phase1.packaging.chat-native-build.compile',
+  'phase1.packaging.chat-native-build.unknown',
+  'phase1.packaging.coven-build.failed',
+  'phase1.packaging.coven-build.timeout',
+  'phase1.packaging.coven-build.output-limit',
+  'phase1.packaging.coven-build.spawn',
+  'phase1.packaging.coven-build.supervisor',
+  'phase1.packaging.coven-build.native-dependency',
+  'phase1.packaging.coven-build.dependency-fetch',
+  'phase1.packaging.coven-build.resource.memory',
+  'phase1.packaging.coven-build.resource.disk',
+  'phase1.packaging.coven-build.resource.killed',
+  'phase1.packaging.coven-build.process.crash',
+  'phase1.packaging.coven-build.no-output',
+  'phase1.packaging.coven-build.linker',
+  'phase1.packaging.coven-build.build-script',
+  'phase1.packaging.coven-build.compile',
+  'phase1.packaging.coven-build.unknown',
+  'phase1.packaging.outputs.failed',
   'phase1.stage.packaging-proof.failed',
   'phase1.stage.cave-authority.failed',
   'phase1.stage.native-scenarios.failed',
-  'phase1.native-scenarios.fixture-daemon',
-  'phase1.native-scenarios.fixture',
-  'phase1.native-scenarios.rpc-start',
-  'phase1.native-scenarios.launch',
-  'phase1.native-scenarios.pairing',
+  'phase1.native-scenarios.launch.not-installed',
+  'phase1.native-scenarios.launch.configuration-invalid',
+  'phase1.native-scenarios.launch.process',
+  'phase1.native-scenarios.launch.service-unavailable',
+  'phase1.native-scenarios.launch.spawn-timeout',
+  'phase1.native-scenarios.launch.worker-unavailable',
+  'phase1.native-scenarios.launch.worker-closed',
+  'phase1.native-scenarios.launch.discovery-not-found',
+  ...NATIVE_LAUNCH_PUBLICATION_DIAGNOSTICS,
+  'phase1.native-scenarios.launch.discovery-unavailable',
+  'phase1.native-scenarios.launch.discovery-rejected',
+  'phase1.native-scenarios.launch.health-unavailable',
+  'phase1.native-scenarios.launch.revalidation-unavailable',
+  'phase1.native-scenarios.launch.timeout',
+  'phase1.native-scenarios.launch.rpc-closed',
+  'phase1.native-scenarios.launch.initial-discovery',
+  'phase1.native-scenarios.launch.initial-present',
+  'phase1.native-scenarios.launch.initial-unavailable',
+  'phase1.native-scenarios.launch.initial-unsafe',
+  'phase1.native-scenarios.launch.initial-unsafe-probe-profile-type',
+  'phase1.native-scenarios.launch.initial-unsafe-probe-profile-reparse',
+  'phase1.native-scenarios.launch.initial-unsafe-probe-profile-owner',
+  'phase1.native-scenarios.launch.initial-unsafe-probe-profile-owner-acl',
+  'phase1.native-scenarios.launch.initial-unsafe-probe-profile-owner-acl-unavailable',
+  'phase1.native-scenarios.launch.initial-unsafe-probe-profile-acl',
+  'phase1.native-scenarios.launch.initial-unsafe-probe-profile-missing',
+  'phase1.native-scenarios.launch.initial-unsafe-probe-profile-unavailable',
+  'phase1.native-scenarios.launch.initial-unsafe-probe-coven-type',
+  'phase1.native-scenarios.launch.initial-unsafe-probe-coven-reparse',
+  'phase1.native-scenarios.launch.initial-unsafe-probe-coven-owner',
+  'phase1.native-scenarios.launch.initial-unsafe-probe-coven-owner-acl',
+  'phase1.native-scenarios.launch.initial-unsafe-probe-coven-owner-acl-unavailable',
+  'phase1.native-scenarios.launch.initial-unsafe-probe-coven-acl',
+  'phase1.native-scenarios.launch.initial-unsafe-probe-coven-missing',
+  'phase1.native-scenarios.launch.initial-unsafe-probe-coven-unavailable',
+  'phase1.native-scenarios.launch.initial-unsafe-probe-cave-type',
+  'phase1.native-scenarios.launch.initial-unsafe-probe-cave-reparse',
+  'phase1.native-scenarios.launch.initial-unsafe-probe-cave-owner',
+  'phase1.native-scenarios.launch.initial-unsafe-probe-cave-owner-acl',
+  'phase1.native-scenarios.launch.initial-unsafe-probe-cave-owner-acl-unavailable',
+  'phase1.native-scenarios.launch.initial-unsafe-probe-cave-acl',
+  'phase1.native-scenarios.launch.initial-unsafe-probe-cave-missing',
+  'phase1.native-scenarios.launch.initial-unsafe-probe-cave-unavailable',
+  'phase1.native-scenarios.launch.initial-unsafe-probe-directories-safe',
+  'phase1.native-scenarios.launch.initial-unsafe-probe-unknown',
+
+  'phase1.native-scenarios.launch.initial-invalid',
+  'phase1.native-scenarios.launch.initial-body-limit',
+  'phase1.native-scenarios.launch.initial-service',
+  'phase1.native-scenarios.launch.initial-unknown',
+  'phase1.native-scenarios.launch.discovery-timeout',
+  'phase1.native-scenarios.launch.health',
+  'phase1.native-scenarios.launch.health-envelope',
+  'phase1.native-scenarios.launch.unknown',
+  'phase1.native-scenarios.launch.initial-discovery-unknown',
+  'phase1.native-scenarios.launch.launch-rpc-unknown',
+  'phase1.native-scenarios.launch.rpc-connection-state-unavailable',
+  'phase1.native-scenarios.launch.rpc-cave-launch-in-progress',
+  'phase1.native-scenarios.launch.rpc-stale-connection-attempt',
+  'phase1.native-scenarios.launch.rpc-cave-exited',
+  'phase1.native-scenarios.launch.rpc-invalid-native-response',
+  'phase1.native-scenarios.launch.rpc-reconcile-required',
+  'phase1.native-scenarios.launch.discovery-unknown',
+  'phase1.native-scenarios.launch.health-unknown',
+  'phase1.native-scenarios.launch.initial-discovery-timeout',
+  'phase1.native-scenarios.launch.discovery-rpc-timeout',
+  'phase1.native-scenarios.pairing.rpc-closed',
+  'phase1.native-scenarios.pairing.authority-handle',
+  'phase1.native-scenarios.pairing.creation-response',
+  'phase1.native-scenarios.pairing.pending-status',
+  'phase1.native-scenarios.pairing.approved-status',
+  'phase1.native-scenarios.pairing.exchange-response',
+  'phase1.native-scenarios.pairing.admin-http-3xx',
+  'phase1.native-scenarios.pairing.admin-http-4xx',
+  'phase1.native-scenarios.pairing.admin-http-5xx',
+  'phase1.native-scenarios.pairing.unknown',
+  'phase1.native-scenarios.pairing.create.invalid-request',
+  'phase1.native-scenarios.pairing.create.unauthorized',
+  'phase1.native-scenarios.pairing.create.scope-denied',
+  'phase1.native-scenarios.pairing.create.not-found',
+  'phase1.native-scenarios.pairing.create.conflict',
+  'phase1.native-scenarios.pairing.create.rate-limited',
+  'phase1.native-scenarios.pairing.create.pairing-pending',
+  'phase1.native-scenarios.pairing.create.pairing-denied',
+  'phase1.native-scenarios.pairing.create.pairing-expired',
+  'phase1.native-scenarios.pairing.create.incompatible-version',
+  'phase1.native-scenarios.pairing.create.service-unavailable',
+  'phase1.native-scenarios.pairing.create.reconcile-required',
+  'phase1.native-scenarios.pairing.create.internal-error',
+  'phase1.native-scenarios.pairing.create.invalid-response',
+  'phase1.native-scenarios.pairing.create.timeout',
+  'phase1.native-scenarios.pairing.create.stale-discovery-handle',
+  'phase1.native-scenarios.pairing.create.invalid-native-response',
+  'phase1.native-scenarios.pairing.create.invalid-native-input',
+  'phase1.native-scenarios.pairing.create.secure-store-unavailable',
+  'phase1.native-scenarios.pairing.create.keychain-failure',
+  'phase1.native-scenarios.pairing.poll.invalid-request',
+  'phase1.native-scenarios.pairing.poll.unauthorized',
+  'phase1.native-scenarios.pairing.poll.scope-denied',
+  'phase1.native-scenarios.pairing.poll.not-found',
+  'phase1.native-scenarios.pairing.poll.conflict',
+  'phase1.native-scenarios.pairing.poll.rate-limited',
+  'phase1.native-scenarios.pairing.poll.pairing-pending',
+  'phase1.native-scenarios.pairing.poll.pairing-denied',
+  'phase1.native-scenarios.pairing.poll.pairing-expired',
+  'phase1.native-scenarios.pairing.poll.incompatible-version',
+  'phase1.native-scenarios.pairing.poll.service-unavailable',
+  'phase1.native-scenarios.pairing.poll.reconcile-required',
+  'phase1.native-scenarios.pairing.poll.internal-error',
+  'phase1.native-scenarios.pairing.poll.invalid-response',
+  'phase1.native-scenarios.pairing.poll.timeout',
+  'phase1.native-scenarios.pairing.poll.stale-discovery-handle',
+  'phase1.native-scenarios.pairing.poll.invalid-native-response',
+  'phase1.native-scenarios.pairing.poll.invalid-native-input',
+  'phase1.native-scenarios.pairing.poll.secure-store-unavailable',
+  'phase1.native-scenarios.pairing.poll.keychain-failure',
+  'phase1.native-scenarios.pairing.exchange.invalid-request',
+  'phase1.native-scenarios.pairing.exchange.unauthorized',
+  'phase1.native-scenarios.pairing.exchange.scope-denied',
+  'phase1.native-scenarios.pairing.exchange.not-found',
+  'phase1.native-scenarios.pairing.exchange.conflict',
+  'phase1.native-scenarios.pairing.exchange.rate-limited',
+  'phase1.native-scenarios.pairing.exchange.pairing-pending',
+  'phase1.native-scenarios.pairing.exchange.pairing-denied',
+  'phase1.native-scenarios.pairing.exchange.pairing-expired',
+  'phase1.native-scenarios.pairing.exchange.incompatible-version',
+  'phase1.native-scenarios.pairing.exchange.service-unavailable',
+  'phase1.native-scenarios.pairing.exchange.reconcile-required',
+  'phase1.native-scenarios.pairing.exchange.internal-error',
+  'phase1.native-scenarios.pairing.exchange.invalid-response',
+  'phase1.native-scenarios.pairing.exchange.timeout',
+  'phase1.native-scenarios.pairing.exchange.stale-discovery-handle',
+  'phase1.native-scenarios.pairing.exchange.invalid-native-response',
+  'phase1.native-scenarios.pairing.exchange.invalid-native-input',
+  'phase1.native-scenarios.pairing.exchange.secure-store-unavailable',
+  'phase1.native-scenarios.pairing.exchange.keychain-failure',
   'phase1.native-scenarios.pairing-reservation',
   'phase1.native-scenarios.pairing-reservation-request',
   'phase1.native-scenarios.pairing-reservation-keychain',
@@ -309,27 +613,13 @@ const publicPhase1DiagnosticIds = new Set([
   'phase1.native-scenarios.pairing-approve',
   'phase1.native-scenarios.pairing-approved',
   'phase1.native-scenarios.pairing-exchange',
-  'phase1.native-scenarios.pairing-denial',
-  'phase1.native-scenarios.restart',
   'phase1.native-scenarios.restart-rpc-start',
-  'phase1.native-scenarios.restart-discovery',
-  'phase1.native-scenarios.restart-health',
   'phase1.native-scenarios.restart-cleanup-adoption',
-  'phase1.native-scenarios.restart-status',
   'phase1.native-scenarios.restart-handoff-close',
-  'phase1.native-scenarios.restart-launch',
   'phase1.native-scenarios.restart-rediscovery',
   'phase1.native-scenarios.restart-restarted-health',
   'phase1.native-scenarios.restart-restarted-status',
   'phase1.native-scenarios.restart-result',
-  'phase1.native-scenarios.reads',
-  'phase1.native-scenarios.reconciliation',
-  'phase1.native-scenarios.revocation',
-  'phase1.native-scenarios.revocation-delete',
-  'phase1.native-scenarios.revocation-initial-status',
-  'phase1.native-scenarios.revocation-rediscovery',
-  'phase1.native-scenarios.revocation-health',
-  'phase1.native-scenarios.revocation-status',
   'phase1.native-scenarios.revocation-repair-create',
   'phase1.native-scenarios.revocation-repair-pending',
   'phase1.native-scenarios.revocation-repair-approve',
@@ -343,9 +633,43 @@ const publicPhase1DiagnosticIds = new Set([
   'phase1.native-scenarios.credential-cleanup-forget',
   'phase1.native-scenarios.credential-cleanup-status',
   'phase1.native-scenarios.credential-cleanup-result',
-  'phase1.native-scenarios.stale-discovery',
-  'phase1.native-scenarios.cleanup',
-  'phase1.native-scenarios.missing-keychain',
+  'phase1.native-scenarios.cleanup-grant.service-unavailable',
+  'phase1.native-scenarios.cleanup-grant.process-secret-unavailable',
+  'phase1.native-scenarios.cleanup-grant.random-unavailable',
+  'phase1.native-scenarios.cleanup-grant.marker-home-unavailable',
+  'phase1.native-scenarios.cleanup-grant.marker-directory-unavailable',
+  'phase1.native-scenarios.cleanup-grant.marker-directory-create-unavailable',
+  'phase1.native-scenarios.cleanup-grant.marker-directory-open-unavailable',
+  'phase1.native-scenarios.cleanup-grant.marker-directory-metadata-unavailable',
+  'phase1.native-scenarios.cleanup-grant.marker-directory-trust-unavailable',
+  'phase1.native-scenarios.cleanup-grant.marker-sync-unavailable',
+  'phase1.native-scenarios.cleanup-grant.marker-identity-unavailable',
+  'phase1.native-scenarios.cleanup-grant.marker-publish-unavailable',
+  'phase1.native-scenarios.cleanup-grant.collision-exhausted',
+  'phase1.native-scenarios.cleanup-grant.secure-store-unavailable',
+  'phase1.native-scenarios.cleanup-grant.keychain-failure',
+  'phase1.native-scenarios.cleanup-grant.cleanup-grant-rejected',
+  'phase1.native-scenarios.cleanup-grant.invalid-native-input',
+  'phase1.native-scenarios.cleanup-grant.timeout',
+  'phase1.native-scenarios.cleanup-grant.process',
+  'phase1.native-scenarios.cleanup-grant.response',
+  'phase1.native-scenarios.cleanup-grant.unknown',
+  'phase1.native-scenarios.cleanup-custody.secure-store-unavailable',
+  'phase1.native-scenarios.cleanup-custody.keychain-failure',
+  'phase1.native-scenarios.cleanup-custody.cleanup-grant-rejected',
+  'phase1.native-scenarios.cleanup-custody.backend-unavailable',
+  'phase1.native-scenarios.cleanup-custody.lock-unavailable',
+  'phase1.native-scenarios.cleanup-custody.lock-process-unavailable',
+  'phase1.native-scenarios.cleanup-custody.lock-path-unavailable',
+  'phase1.native-scenarios.cleanup-custody.lock-file-unavailable',
+  'phase1.native-scenarios.cleanup-custody.lock-contended',
+  'phase1.native-scenarios.cleanup-custody.installation-delete-unavailable',
+  'phase1.native-scenarios.cleanup-custody.credential-delete-unavailable',
+  'phase1.native-scenarios.cleanup-custody.invalid-native-input',
+  'phase1.native-scenarios.cleanup-custody.timeout',
+  'phase1.native-scenarios.cleanup-custody.process',
+  'phase1.native-scenarios.cleanup-custody.proof',
+  'phase1.native-scenarios.cleanup-custody.unknown',
   'phase1.native-scenarios.missing-keychain-timeout',
   'phase1.native-scenarios.missing-keychain-output-limit',
   'phase1.native-scenarios.missing-keychain-process',
@@ -355,10 +679,142 @@ const publicPhase1DiagnosticIds = new Set([
   'phase1.native-scenarios.missing-keychain-canary',
   'phase1.native-scenarios.missing-keychain-home',
   'phase1.native-scenarios.missing-keychain-response',
-  'phase1.native-scenarios.isolation-proof',
   'phase1.stage.coven-identity.failed',
   ...covenIdentityDiagnosticIds,
   'phase1.stage.runtime-assertions.failed',
+  'phase1.runtime-observations.sdk-install.failed',
+  'phase1.runtime-observations.chat-install.failed',
+  'phase1.runtime-observations.sdk-tests.failed',
+  'phase1.runtime-observations.sdk-tests.command.spawn',
+  'phase1.runtime-observations.sdk-tests.command.tracking',
+  'phase1.runtime-observations.sdk-tests.command.timeout',
+  'phase1.runtime-observations.sdk-tests.command.output-limit',
+  'phase1.runtime-observations.sdk-tests.command.signal',
+  'phase1.runtime-observations.sdk-tests.unknown',
+  'phase1.runtime-observations.sdk-tests.command.spawn.enoent',
+  'phase1.runtime-observations.sdk-tests.command.spawn.eacces',
+  'phase1.runtime-observations.sdk-tests.command.spawn.eperm',
+  'phase1.runtime-observations.sdk-tests.command.spawn.einval',
+  'phase1.runtime-observations.sdk-tests.command.spawn.e2big',
+  'phase1.runtime-observations.sdk-tests.command.spawn.enomem',
+  'phase1.runtime-observations.sdk-tests.report.missing',
+  'phase1.runtime-observations.sdk-tests.report.unreadable',
+  'phase1.runtime-observations.sdk-tests.report.unsafe-file',
+  'phase1.runtime-observations.sdk-tests.report.oversize',
+  'phase1.runtime-observations.sdk-tests.report.invalid-json',
+  'phase1.runtime-observations.sdk-tests.report.malformed',
+  'phase1.runtime-observations.sdk-tests.report.empty',
+  'phase1.runtime-observations.sdk-tests.report.not-successful',
+  'phase1.runtime-observations.sdk-tests.report.claims-success',
+  'phase1.runtime-observations.sdk-tests.report.failed.cave-discovery-pairing',
+  'phase1.runtime-observations.sdk-tests.report.failed.cave-canonical-reads',
+  'phase1.runtime-observations.sdk-tests.report.failed.cave-hpke-bound-v1',
+  'phase1.runtime-observations.sdk-tests.report.failed.cave-managed-native',
+  'phase1.runtime-observations.sdk-tests.report.failed.cave-managed-native-staged',
+  'phase1.runtime-observations.sdk-tests.report.failed.coven-discovery',
+  'phase1.runtime-observations.sdk-tests.report.failed.health-validation',
+  'phase1.runtime-observations.sdk-tests.report.failed.client-contract',
+  'phase1.runtime-observations.sdk-tests.report.failed.native-secret-store',
+  'phase1.runtime-observations.sdk-tests.command.nonzero.report.missing',
+  'phase1.runtime-observations.sdk-tests.command.nonzero.report.unreadable',
+  'phase1.runtime-observations.sdk-tests.command.nonzero.report.unsafe-file',
+  'phase1.runtime-observations.sdk-tests.command.nonzero.report.oversize',
+  'phase1.runtime-observations.sdk-tests.command.nonzero.report.invalid-json',
+  'phase1.runtime-observations.sdk-tests.command.nonzero.report.malformed',
+  'phase1.runtime-observations.sdk-tests.command.nonzero.report.empty',
+  'phase1.runtime-observations.sdk-tests.command.nonzero.report.not-successful',
+  'phase1.runtime-observations.sdk-tests.command.nonzero.report.claims-success',
+  'phase1.runtime-observations.sdk-tests.command.nonzero.report.failed.cave-discovery-pairing',
+  'phase1.runtime-observations.sdk-tests.command.nonzero.report.failed.cave-canonical-reads',
+  'phase1.runtime-observations.sdk-tests.command.nonzero.report.failed.cave-hpke-bound-v1',
+  'phase1.runtime-observations.sdk-tests.command.nonzero.report.failed.cave-managed-native',
+  'phase1.runtime-observations.sdk-tests.command.nonzero.report.failed.cave-managed-native-staged',
+  'phase1.runtime-observations.sdk-tests.command.nonzero.report.failed.coven-discovery',
+  'phase1.runtime-observations.sdk-tests.command.nonzero.report.failed.health-validation',
+  'phase1.runtime-observations.sdk-tests.command.nonzero.report.failed.client-contract',
+  'phase1.runtime-observations.sdk-tests.command.nonzero.report.failed.native-secret-store',
+
+  'phase1.runtime-observations.chat-tests.failed',
+  'phase1.runtime-observations.chat-rust-tests.failed',
+  'phase1.runtime-observations.coven-rust-tests.failed',
+  ...[
+    'legacy-case',
+    'pipe-shapes',
+    'profile-pipe',
+    'inspection-wait',
+    'status-replacement',
+  ].flatMap((test) =>
+    [
+      ...[
+        'timeout',
+        'output-limit',
+        'spawn',
+        'supervisor',
+        'native-dependency',
+        'dependency-fetch',
+        'resource.memory',
+        'resource.disk',
+        'resource.killed',
+        'process.crash',
+        'no-output',
+        'linker',
+        'build-script',
+        'compile',
+        'unknown',
+      ],
+      'test-failed',
+      'not-observed',
+      'tracking',
+      'spawn.enoent',
+      'spawn.eacces',
+      'spawn.eperm',
+      'spawn.einval',
+      'spawn.e2big',
+      'spawn.enomem',
+    ].map((category) => `phase1.runtime-observations.coven-rust-tests.${test}.${category}`),
+  ),
+  ...[
+    'setup',
+    'reader-open',
+    'early-result',
+    'result-timeout',
+    'result-disconnected',
+    'writer-error',
+    'writer-error.access-denied',
+    'writer-error.sharing-violation',
+    'writer-error.privilege-not-held',
+    'writer-error.invalid-owner',
+    'writer-error.file-not-found',
+    'writer-error.path-not-found',
+    ...[
+      'create-temporary-file',
+      'write-contents',
+      'write-newline',
+      'sync-temporary-file',
+      'convert-security-descriptor',
+      'open-process-token',
+      'read-process-token',
+      'apply-owner-only-security',
+      'replace-status-file',
+    ].flatMap((operation) =>
+      [
+        'file-not-found',
+        'path-not-found',
+        'access-denied',
+        'sharing-violation',
+        'invalid-owner',
+        'privilege-not-held',
+      ].map((category) => `writer-error.${operation}.${category}`),
+    ),
+    'writer-join',
+    'readback',
+    'content',
+    'cleanup',
+  ].map(
+    (category) =>
+      `phase1.runtime-observations.coven-rust-tests.status-replacement.assertion.${category}`,
+  ),
+  'phase1.runtime-observations.cleanup.failed',
   ...runtimeScenarioDiagnosticIds.values(),
   'phase1.stage.isolation.failed',
   'phase1.stage.isolation-proof.failed',
@@ -376,11 +832,31 @@ const publicPhase1DiagnosticIds = new Set([
   'phase1.stage.evidence-validation.unknown',
   'phase1.stage.evidence-retention.failed',
   'phase1.stage.execution-root-cleanup.failed',
+  ...PROCESS_CLEANUP_FAILURE_CATEGORIES.map(
+    (category) => `phase1.stage.execution-root-cleanup.${category}`,
+  ),
   'phase1.cave-authority.timeout',
   'phase1.cave-authority.output-limit',
   'phase1.cave-authority.spawn',
   'phase1.cave-authority.supervisor',
+  'phase1.cave-authority.signal',
   'phase1.cave-authority.exit-nonzero',
+  'phase1.cave-authority.cleanup',
+  'phase1.cave-authority.startup',
+  'phase1.cave-authority.startup.timeout',
+  'phase1.cave-authority.startup.exit',
+  ...CAVE_STARTUP_EXIT_DIAGNOSTICS,
+  'phase1.cave-authority.startup.health',
+  'phase1.cave-authority.startup.discovery.missing',
+  ...CAVE_DISCOVERY_FAILURE_DIAGNOSTICS,
+  'phase1.cave-authority.startup.discovery.endpoint',
+  'phase1.cave-authority.startup.discovery.pid',
+  'phase1.cave-authority.pairing',
+  'phase1.cave-authority.reads',
+  'phase1.cave-authority.request',
+  'phase1.cave-authority.phase.setup',
+  'phase1.cave-authority.phase.unconfigured',
+  'phase1.cave-authority.phase.configured',
   'phase1.cave-authority.assertion.admin',
   'phase1.cave-authority.assertion.discovery',
   'phase1.cave-authority.assertion.health',
@@ -393,13 +869,17 @@ const publicPhase1DiagnosticIds = new Set([
   'phase1.cave-authority.assertion.hpke',
   'phase1.cave-authority.assertion.multiple',
   'phase1.cave-authority.assertion.unknown',
+  'phase1.cave-authority.record.read',
+  'phase1.cave-authority.output.invalid',
   'phase1.cave-authority.record.invalid',
   'phase1.cave-authority.record.incomplete',
   'phase1.packaging.authority.failed',
+  'phase1.packaging.production-adapter.failed',
   'phase1.packaging.chat-install.failed',
   'phase1.packaging.chat-web-build.failed',
   'phase1.packaging.chat-native-build.failed',
   'phase1.packaging.chat-native-tests.failed',
+  'phase1.packaging.native-test-home.invalid',
   'phase1.packaging.artifact-verification.failed',
   'phase1.packaging.cave-install.failed',
   'phase1.packaging.cave-build.failed',
@@ -409,6 +889,7 @@ const publicPhase1DiagnosticIds = new Set([
   'phase1.packaging.cave-build.spawn',
   'phase1.packaging.cave-build.supervisor',
   'phase1.packaging.cave-build.phase.prebuild',
+  'phase1.packaging.cave-build.phase.conformance-wrapper',
   'phase1.packaging.cave-build.phase.next-build',
   'phase1.packaging.cave-build.phase.next-build.resource',
   'phase1.packaging.cave-build.phase.next-build.resource.spawn',
@@ -417,6 +898,15 @@ const publicPhase1DiagnosticIds = new Set([
   'phase1.packaging.cave-build.phase.next-build.resource.memory.allocation',
   'phase1.packaging.cave-build.phase.next-build.resource.killed',
   'phase1.packaging.cave-build.phase.next-build.compile',
+  'phase1.packaging.cave-build.phase.next-build.compile.permission',
+  'phase1.packaging.cave-build.phase.next-build.compile.font-fetch',
+  'phase1.packaging.cave-build.phase.next-build.compile.module-resolution',
+  'phase1.packaging.cave-build.phase.next-build.compile.native-module',
+  'phase1.packaging.cave-build.phase.next-build.compile.plugin',
+  'phase1.packaging.cave-build.phase.next-build.compile.plugin.syntax',
+  'phase1.packaging.cave-build.phase.next-build.compile.plugin.type',
+  'phase1.packaging.cave-build.phase.next-build.compile.plugin.reference',
+  'phase1.packaging.cave-build.phase.next-build.compile.plugin.range',
   'phase1.packaging.cave-build.phase.next-build.typescript',
   'phase1.packaging.cave-build.phase.next-build.page-data',
   'phase1.packaging.cave-build.phase.next-build.static-pages',
@@ -536,6 +1026,9 @@ export function publicPhase1FailureDiagnostic(error) {
     if ('errors' in current && Array.isArray(current.errors)) {
       pending.push(...current.errors.slice(0, 16));
     }
+    if ('cause' in current) {
+      pending.push(current.cause);
+    }
     if (
       'result' in current &&
       current.result !== null &&
@@ -552,6 +1045,49 @@ export function publicPhase1FailureDiagnostic(error) {
   return undefined;
 }
 
+export function throwCombinedPhase1Failures(primaryFailure, cleanupFailure, message) {
+  const failures = [primaryFailure, cleanupFailure].filter((failure) => failure !== undefined);
+  if (failures.length === 1) {
+    throw failures[0];
+  }
+  if (failures.length > 1) {
+    throw new AggregateError(failures, message);
+  }
+}
+
+export function runnerCheckoutFailureDiagnostic(error) {
+  if (
+    error instanceof CommandExecutionError &&
+    typeof error.result?.stderr === 'string' &&
+    stripVTControlCharacters(error.result.stderr).includes(
+      'detected dubious ownership in repository',
+    )
+  ) {
+    return 'phase1.stage.runner-checkout.unsafe-source-owner';
+  }
+  if (error instanceof CommandExecutionError) {
+    const suffixDiagnostics = [
+      [' source reference', 'phase1.stage.runner-checkout.source-reference'],
+      [' source revision', 'phase1.stage.runner-checkout.source-revision'],
+      [' clone', 'phase1.stage.runner-checkout.clone'],
+      [' checkout', 'phase1.stage.runner-checkout.checkout'],
+    ];
+    for (const [suffix, diagnostic] of suffixDiagnostics) {
+      if (error.label.endsWith(suffix)) {
+        return diagnostic;
+      }
+    }
+  }
+  if (
+    error instanceof Error &&
+    (error.message.endsWith(' source tag is unavailable or ambiguous.') ||
+      error.message.endsWith(' source tag does not match the immutable revision.'))
+  ) {
+    return 'phase1.stage.runner-checkout.source-tag';
+  }
+  return 'phase1.stage.runner-checkout.failed';
+}
+
 function runPublicPhase1Stage(id, action) {
   try {
     return action();
@@ -563,12 +1099,19 @@ function runPublicPhase1Stage(id, action) {
   }
 }
 
-async function runPublicPhase1StageAsync(id, action) {
+export async function runPublicPhase1StageAsync(id, action) {
   try {
     return await action();
   } catch (cause) {
     if (publicPhase1FailureDiagnostic(cause) !== undefined) {
       throw cause;
+    }
+    if (id === 'phase1.stage.schema-v2-production.failed') {
+      // Report only a fixed built-in error kind. Messages, stacks, names and codes
+      // can contain private paths or subprocess output and must stay in memory.
+      const kind =
+        schemaV2UnexpectedErrorKinds.find(([type]) => cause instanceof type)?.[1] ?? 'non-error';
+      throw new Error(`phase1.stage.schema-v2-production.unclassified.${kind}`, { cause });
     }
     throw new Error(id, { cause });
   }
@@ -597,9 +1140,9 @@ export function classifyPackagingCommandFailure(baseId, error) {
         `${error.result.stdout ?? ''}\n${error.result.stderr ?? ''}`,
       ).replaceAll('\r\n', '\n');
       let phase = 'unknown';
-      if (/^> coven-cave@\d+\.\d+\.\d+ postbuild$/mu.test(output)) {
+      if (/^> coven-cave@\d+\.\d+\.\d+ postbuild(?:\s+.+)?$/mu.test(output)) {
         phase = 'postbuild';
-      } else if (/^> coven-cave@\d+\.\d+\.\d+ build:server$/mu.test(output)) {
+      } else if (/^> coven-cave@\d+\.\d+\.\d+ build:server(?:\s+.+)?$/mu.test(output)) {
         phase = 'server-bundle';
       } else if (output.includes('Creating an optimized production build')) {
         phase = /\bEAGAIN\b/u.test(output)
@@ -618,9 +1161,32 @@ export function classifyPackagingCommandFailure(baseId, error) {
                       ? 'next-build.page-data'
                       : output.includes('Compiled successfully')
                         ? 'next-build.typescript'
-                        : 'next-build.compile';
-      } else if (/^> coven-cave@\d+\.\d+\.\d+ prebuild$/mu.test(output)) {
+                        : /\b(?:EACCES|EPERM)\b|permission denied|operation not permitted/iu.test(
+                              output,
+                            )
+                          ? 'next-build.compile.permission'
+                          : caveFontFetchFailurePattern.test(output)
+                            ? 'next-build.compile.font-fetch'
+                            : /module not found|can't resolve|cannot find module/iu.test(output)
+                              ? 'next-build.compile.module-resolution'
+                              : /failed to load external module|\bdlopen\(|mach-o.*(?:incompatible|not found)|image not found/iu.test(
+                                    output,
+                                  )
+                                ? 'next-build.compile.native-module'
+                                : /error evaluating node\.js code|turbopack.*plugin.*(?:failed|error)/iu.test(
+                                      output,
+                                    )
+                                  ? [
+                                      'next-build.compile.plugin',
+                                      classifyCavePluginEvaluationFailure(output),
+                                    ]
+                                      .filter((part) => part !== undefined)
+                                      .join('.')
+                                  : 'next-build.compile';
+      } else if (/^> coven-cave@\d+\.\d+\.\d+ prebuild(?:\s+.+)?$/mu.test(output)) {
         phase = 'prebuild';
+      } else if (/^> coven-cave@\d+\.\d+\.\d+ build:conformance(?:\s+.+)?$/mu.test(output)) {
+        phase = 'conformance-wrapper';
       }
       return `${baseId}.phase.${phase}`;
     }
@@ -837,7 +1403,7 @@ export function parseArgs(argv, runtime = {}) {
       );
     }
     if (options.platform !== `${runtimePlatform}-${runtimeArchitecture}`) {
-      throw new Error('schema-v2 --platform must match the supervised native host.');
+      throw new Error('phase1.stage.invocation.platform-mismatch');
     }
     const supervisorEnvironment = schemaV2SupervisorEnvironment(
       runtimeEnvironment,
@@ -848,7 +1414,11 @@ export function parseArgs(argv, runtime = {}) {
     );
     const expectedOutput = supervisorArtifactOutputPath(supervisorEnvironment, runtimePlatform);
     if (options.outputPath !== expectedOutput) {
-      throw new Error('schema-v2 --output must match the supervisor artifact path.');
+      throw new Error(
+        runtimePlatform === 'win32'
+          ? 'phase1.stage.invocation.windows-output-binding'
+          : 'phase1.stage.invocation.unix-output-binding',
+      );
     }
   } else if (options.validatorRevision !== undefined) {
     throw new Error('--validator-revision is only valid with schema-v2 --platform/--output.');
@@ -858,10 +1428,12 @@ export function parseArgs(argv, runtime = {}) {
 }
 
 export function observeReleaseToolVersions() {
-  const toolchain = resolveRustToolchain();
+  const toolchain = runPublicPhase1Stage('phase1.environment.rust-toolchain.failed', () =>
+    resolveRustToolchain(),
+  );
   return validateObservedToolVersions({
     nodeVersion: process.version,
-    pnpmVersion: runSupervisedSync('corepack', ['pnpm@10.34.0', '--version'], {
+    pnpmVersion: runSupervisedSync('pnpm', ['--version'], {
       encoding: 'utf8',
     }).trim(),
     rustcVersion: runSupervisedSync(toolchain.rustcPath, ['--version'], {
@@ -958,14 +1530,14 @@ function resolveRustToolchain() {
     throw new Error('phase1.environment.rust-toolchain-mismatch');
   }
   const bin = resolve(rustupHome, 'toolchains', `1.95.0-${triple}`, 'bin');
-  const cargoPath = realpathSync(
-    resolve(bin, process.platform === 'win32' ? 'cargo.exe' : 'cargo'),
+  const cargoPath = runPublicPhase1Stage('phase1.environment.rustup-cargo.failed', () =>
+    realpathSync(resolve(bin, process.platform === 'win32' ? 'cargo.exe' : 'cargo')),
   );
-  const rustcPath = realpathSync(
-    resolve(bin, process.platform === 'win32' ? 'rustc.exe' : 'rustc'),
+  const rustcPath = runPublicPhase1Stage('phase1.environment.rustup-rustc.failed', () =>
+    realpathSync(resolve(bin, process.platform === 'win32' ? 'rustc.exe' : 'rustc')),
   );
-  const rustdocPath = realpathSync(
-    resolve(bin, process.platform === 'win32' ? 'rustdoc.exe' : 'rustdoc'),
+  const rustdocPath = runPublicPhase1Stage('phase1.environment.rustup-rustdoc.failed', () =>
+    realpathSync(resolve(bin, process.platform === 'win32' ? 'rustdoc.exe' : 'rustdoc')),
   );
   for (const path of [cargoPath, rustcPath, rustdocPath]) {
     if (!statSync(path).isFile() || dirname(path) !== bin) {
@@ -995,8 +1567,8 @@ export function safeEnvironment(rootPath, extra = {}) {
     }
   });
 
+  const inheritedPath = extra.PATH ?? process.env.PATH ?? '';
   const environment = {
-    PATH: `${rustToolchainBin}${delimiter}${process.env.PATH ?? ''}`,
     LANG: process.env.LANG ?? 'C.UTF-8',
     LC_ALL: process.env.LC_ALL ?? '',
     HOME: home,
@@ -1017,7 +1589,7 @@ export function safeEnvironment(rootPath, extra = {}) {
     CI: '1',
     NO_COLOR: '1',
     GIT_TERMINAL_PROMPT: '0',
-    GIT_CONFIG_GLOBAL: devNull,
+    GIT_CONFIG_GLOBAL: gitNullDevice,
     GIT_CONFIG_NOSYSTEM: '1',
     GIT_NO_REPLACE_OBJECTS: '1',
     GIT_NO_LAZY_FETCH: '1',
@@ -1028,6 +1600,8 @@ export function safeEnvironment(rootPath, extra = {}) {
     https_proxy: '',
     all_proxy: '',
     ...extra,
+    // Supervisor PATH overrides must not restore Rustup shims ahead of the resolved toolchain.
+    PATH: inheritedPath ? `${rustToolchainBin}${delimiter}${inheritedPath}` : rustToolchainBin,
   };
   for (const name of [
     'SYSTEMROOT',
@@ -1225,22 +1799,28 @@ async function bootstrapVerifiedRunner(options) {
     return locked;
   });
   const bootstrapRoot = createProcessOwnedArtifactRoot({ prefix: 'p1boot', shortPath: true });
+  let primaryFailure;
   try {
     const harnessRoot = resolve(bootstrapRoot.rootPath, 'harness');
     const environment = {
       ...process.env,
       ...createGitEnvironment(process.env),
     };
-    await runPublicPhase1StageAsync('phase1.stage.runner-checkout.failed', () =>
-      cloneExactCheckout({
-        artifactRoot: bootstrapRoot,
-        sourceRoot: options.chatSourceRoot,
-        destinationRoot: harnessRoot,
-        revision: lock.harness.revision,
-        environment,
-        label: 'Verified Chat conformance harness',
-      }),
-    );
+    await runPublicPhase1StageAsync('phase1.stage.runner-checkout.failed', async () => {
+      try {
+        await cloneExactCheckout({
+          artifactRoot: bootstrapRoot,
+          sourceRoot: options.chatSourceRoot,
+          destinationRoot: harnessRoot,
+          revision: lock.harness.revision,
+          sourceRef: process.platform === 'win32' ? protectedHarnessTagRef : undefined,
+          environment,
+          label: 'Verified Chat conformance harness',
+        });
+      } catch (cause) {
+        throw new Error(runnerCheckoutFailureDiagnostic(cause), { cause });
+      }
+    });
     runPublicPhase1Stage('phase1.stage.runner-checkout-verification.failed', () => {
       if (
         runSupervisedSync('git', ['status', '--porcelain=v1', '--untracked-files=all'], {
@@ -1326,9 +1906,20 @@ async function bootstrapVerifiedRunner(options) {
       },
     );
     process.stdout.write(result.stdout);
-  } finally {
-    await bootstrapRoot.cleanup();
+  } catch (error) {
+    primaryFailure = error;
   }
+  let cleanupFailure;
+  try {
+    await bootstrapRoot.cleanup();
+  } catch (error) {
+    cleanupFailure = new Error('phase1.stage.runner-bootstrap.failed', { cause: error });
+  }
+  throwCombinedPhase1Failures(
+    primaryFailure,
+    cleanupFailure,
+    'Verified runner execution and cleanup both failed.',
+  );
 }
 
 function runCommand(
@@ -1571,11 +2162,30 @@ export async function cloneExactCheckout({
   sourceRoot,
   destinationRoot,
   revision,
+  sourceRef,
   environment,
   label,
 }) {
   if (!statSync(sourceRoot).isDirectory()) {
     throw new Error(`${label} source root is unavailable.`);
+  }
+  const sourceSafeDirectory = realpathSync(sourceRoot);
+  const sourceGitDirectory = resolveLocalGitDirectory(sourceRoot);
+  const checkoutEnvironment = createGitCheckoutEnvironment(environment);
+  let cloneSourceArguments = [];
+  let protectedSourceReference;
+  if (sourceRef !== undefined) {
+    if (sourceRef !== protectedHarnessTagRef) {
+      throw new Error(`${label} source reference is not approved.`);
+    }
+    const tagName = sourceRef.slice('refs/tags/'.length);
+    protectedSourceReference = {
+      tagName,
+      tagRef: sourceRef,
+      localHeadRef: `refs/heads/${tagName}`,
+      remoteHeadRef: `refs/remotes/origin/${tagName}`,
+    };
+    cloneSourceArguments = ['--branch', tagName];
   }
   await runCommand(
     artifactRoot,
@@ -1587,29 +2197,78 @@ export async function cloneExactCheckout({
       '-c',
       `core.hooksPath=${devNull}`,
       '-c',
-      'protocol.file.allow=always',
+      `safe.directory=${toGitSafeDirectoryPath(sourceSafeDirectory)}`,
+      '-c',
+      `safe.directory=${toGitSafeDirectoryPath(sourceGitDirectory)}`,
       'clone',
-      '--shared',
+      '--local',
+      '--no-hardlinks',
       '--no-checkout',
       '--quiet',
+      ...cloneSourceArguments,
       sourceRoot,
       destinationRoot,
     ],
     {
       cwd: projectRoot,
       env: {
-        ...environment,
-        ...createGitEnvironment(environment),
+        ...checkoutEnvironment,
         GIT_ALLOW_PROTOCOL: 'file',
       },
     },
   );
+  if (protectedSourceReference !== undefined) {
+    const sourceRefs = (
+      await runCommand(
+        artifactRoot,
+        `${label} source reference`,
+        'git',
+        [
+          '-c',
+          `core.hooksPath=${devNull}`,
+          'for-each-ref',
+          '--format=%(refname)',
+          protectedSourceReference.tagRef,
+          protectedSourceReference.localHeadRef,
+          protectedSourceReference.remoteHeadRef,
+        ],
+        { cwd: destinationRoot, env: checkoutEnvironment },
+      )
+    ).stdout
+      .split(/\r?\n/u)
+      .filter(Boolean);
+    if (
+      !sourceRefs.includes(protectedSourceReference.tagRef) ||
+      sourceRefs.includes(protectedSourceReference.localHeadRef) ||
+      sourceRefs.includes(protectedSourceReference.remoteHeadRef)
+    ) {
+      throw new Error(`${label} source tag is unavailable or ambiguous.`);
+    }
+    const sourceCommit = (
+      await runCommand(
+        artifactRoot,
+        `${label} source revision`,
+        'git',
+        [
+          '-c',
+          `core.hooksPath=${devNull}`,
+          'rev-parse',
+          '--verify',
+          `${protectedSourceReference.tagRef}^{commit}`,
+        ],
+        { cwd: destinationRoot, env: checkoutEnvironment },
+      )
+    ).stdout.trim();
+    if (sourceCommit !== revision) {
+      throw new Error(`${label} source tag does not match the immutable revision.`);
+    }
+  }
   await runCommand(
     artifactRoot,
     `${label} checkout`,
     'git',
     ['-c', `core.hooksPath=${devNull}`, 'checkout', '--detach', '--force', revision],
-    { cwd: destinationRoot, env: { ...environment, ...createGitEnvironment(environment) } },
+    { cwd: destinationRoot, env: checkoutEnvironment },
   );
 }
 
@@ -1678,17 +2337,22 @@ async function createExactCheckouts(artifactRoot, options, lock, environment) {
 }
 
 async function installPnpm(artifactRoot, rootPath, environment, label) {
-  await runCommand(
-    artifactRoot,
-    `${label} dependency install`,
-    'corepack',
+  const pnpmCommand = pnpmInvocation(
     [
-      'pnpm@10.34.0',
       '--ignore-workspace',
       'install',
       '--frozen-lockfile',
       `--config.store-dir=${environment.PNPM_STORE_DIR}`,
     ],
+    {
+      pnpmCli: environment.OPENCOVEN_WINDOWS_PNPM_CLI,
+    },
+  );
+  await runCommand(
+    artifactRoot,
+    `${label} dependency install`,
+    pnpmCommand.command,
+    pnpmCommand.args,
     { cwd: rootPath, env: environment },
   );
 }
@@ -1729,14 +2393,11 @@ export function assertProductionAdapterAtRevision(harnessRoot, lock) {
   }
 }
 
-function assertProductionChatAuthority(roots, lock) {
-  const tree = runSupervisedSync('git', ['rev-parse', 'HEAD^{tree}'], {
-    cwd: roots.chatRoot,
-    encoding: 'utf8',
-    env: createGitEnvironment(),
-  }).trim();
-  if (tree !== lock.chatAuthority.tree) {
-    throw new Error('Production Chat tree does not match the immutable authority lock.');
+export function assertProductionChatAuthority(roots, lock) {
+  assertCleanPhase1Checkout(roots.chatRoot, 'Production Chat');
+  const identity = readPhase1CheckoutIdentity(roots.chatRoot, 'Production Chat');
+  if (identity.revision !== lock.chat.revision || identity.tree !== lock.chatAuthority.tree) {
+    throw new Error('Production Chat identity does not match the immutable authority lock.');
   }
   for (const file of lock.chatAuthority.files) {
     const path = resolve(roots.chatRoot, file.path);
@@ -1755,19 +2416,7 @@ function assertProductionChatAuthority(roots, lock) {
       throw new Error('Production Chat authority file does not match its locked blob.');
     }
   }
-  try {
-    runSupervisedSync(
-      'git',
-      ['merge-base', '--is-ancestor', lock.chat.revision, lock.harness.revision],
-      {
-        cwd: roots.chatHarnessRoot,
-        env: createGitEnvironment(),
-        stdio: 'ignore',
-      },
-    );
-  } catch {
-    throw new Error('Chat conformance harness must descend from the production revision.');
-  }
+  assertProductionAdapterAtRevision(roots.chatHarnessRoot, lock);
 }
 
 function assertWindowsSupervisorSource(roots, lock) {
@@ -1801,22 +2450,22 @@ function assertWindowsSupervisorSource(roots, lock) {
   }
 }
 
-function assertSdkCandidateProvenance(roots, lock) {
-  try {
-    runSupervisedSync(
-      'git',
-      [
-        '-C',
-        roots.sdkEvidenceRoot,
-        'merge-base',
-        '--is-ancestor',
-        lock.sdk.revision,
-        lock.evidence.revision,
-      ],
-      { env: createGitEnvironment(), stdio: 'ignore' },
-    );
-  } catch {
-    throw new Error('SDK evidence authority does not descend from the package candidate.');
+export function assertSdkCandidateProvenance(roots, lock) {
+  for (const [root, revision, label] of [
+    [roots.sdkRoot, lock.sdk.revision, 'SDK candidate'],
+    [roots.sdkEvidenceRoot, lock.evidence.revision, 'SDK evidence authority'],
+  ]) {
+    assertCleanPhase1Checkout(root, label);
+    if (readPhase1CheckoutIdentity(root, label).revision !== revision) {
+      throw new Error(`${label} identity does not match the immutable authority lock.`);
+    }
+  }
+  for (const [key, label] of [
+    ['assertionRegistry', 'SDK assertion registry'],
+    ['schema', 'SDK evidence schema'],
+    ['contract', 'SDK evidence contract'],
+  ]) {
+    readLockedDigestFile(roots.sdkEvidenceRoot, lock.evidence[key], label);
   }
   const sourcePackages = [
     ['packages/core/package.json', '@opencoven/sdk-core'],
@@ -1848,20 +2497,16 @@ async function packageLockedArtifacts(artifactRoot, roots, environment, lock) {
     installPnpm(artifactRoot, roots.chatRoot, environment, 'Chat'),
   );
   await runPublicPhase1StageAsync('phase1.packaging.chat-web-build.failed', () =>
-    runCommand(
-      artifactRoot,
-      'Chat web package',
-      'corepack',
-      ['pnpm@10.34.0', '--ignore-workspace', 'build'],
-      {
-        cwd: roots.chatRoot,
-        env: environment,
-      },
-    ),
+    runCommand(artifactRoot, 'Chat web package', 'pnpm', ['--ignore-workspace', 'build'], {
+      cwd: roots.chatRoot,
+      env: environment,
+    }),
   );
   const chatTarget = resolve(artifactRoot.rootPath, 'build', 'chat-target');
   mkdirSync(chatTarget, { recursive: true, mode: 0o700 });
-  assertProductionAdapterAtRevision(roots.chatHarnessRoot, lock);
+  runPublicPhase1Stage('phase1.packaging.production-adapter.failed', () =>
+    assertProductionAdapterAtRevision(roots.chatHarnessRoot, lock),
+  );
   await runPublicPhase1StageAsync('phase1.packaging.chat-native-build.failed', () =>
     runCommand(
       artifactRoot,
@@ -1938,8 +2583,8 @@ async function packageLockedArtifacts(artifactRoot, roots, environment, lock) {
     runCommand(
       artifactRoot,
       'Cave authority server package',
-      'corepack',
-      ['pnpm@10.34.0', '--ignore-workspace', 'build'],
+      'pnpm',
+      ['--ignore-workspace', 'build'],
       {
         cwd: roots.caveRoot,
         env: caveBuildEnvironment(environment),
@@ -2399,9 +3044,19 @@ async function assertSuccessfulChildExit(child, code, signal, supervised = false
 }
 
 export class NativeRpcClient {
-  constructor(child, { shutdownTimeoutMs = rpcTimeoutMs, supervised = false } = {}) {
+  constructor(
+    child,
+    {
+      shutdownTimeoutMs = rpcTimeoutMs,
+      requestTimeoutMs = rpcTimeoutMs,
+      caveLaunchTimeoutMs = caveLaunchRpcTimeoutMs,
+      supervised = false,
+    } = {},
+  ) {
     this.child = child;
     this.shutdownTimeoutMs = shutdownTimeoutMs;
+    this.requestTimeoutMs = requestTimeoutMs;
+    this.caveLaunchTimeoutMs = caveLaunchTimeoutMs;
     this.supervised = supervised;
     this.pending = new Map();
     this.sequence = 0;
@@ -2460,11 +3115,12 @@ export class NativeRpcClient {
     this.sequence += 1;
     const id = `request-${this.sequence}`;
     const request = { id, command, ...(args === undefined ? {} : { args }) };
+    const timeoutMs = command === 'cave_launch' ? this.caveLaunchTimeoutMs : this.requestTimeoutMs;
     return new Promise((resolveRequest, rejectRequest) => {
       const timer = setTimeout(() => {
         this.pending.delete(id);
         rejectRequest(new Error(`native RPC timed out for ${command}`));
-      }, rpcTimeoutMs);
+      }, timeoutMs);
       this.pending.set(id, { resolve: resolveRequest, reject: rejectRequest, timer });
       const failWrite = () => {
         const pending = this.pending.get(id);
@@ -3188,6 +3844,7 @@ async function runNativeScenarios({ artifactRoot, roots, nativeRpcPath, environm
     const adminToken = `phase1-${randomUUID()}`;
     rpcEnvironment = {
       ...nativeAdapterTestEnvironment(environment),
+      OPENCOVEN_PHASE1_CONFORMANCE_CLEANUP_HOME: isolatedHome,
       COVEN_HOME: covenHome,
       COVEN_CAVE_HOME: caveHome,
       COVEN_CAVE_PORT: String(port),
@@ -4549,9 +5206,8 @@ async function runVitestObservationSuite({
   await runCommand(
     artifactRoot,
     label,
-    'corepack',
+    'pnpm',
     [
-      'pnpm@10.34.0',
       '--ignore-workspace',
       'exec',
       'vitest',
@@ -5150,8 +5806,12 @@ export function buildObservedSchemaV2Assertions({
   };
 }
 
-export async function runPhase1Conformance(options = parseArgs([])) {
-  assertNoNodeRuntimeInjection();
+export async function runPhase1Conformance(
+  options = runPublicPhase1Stage('phase1.stage.invocation.failed', () => parseArgs([])),
+) {
+  runPublicPhase1Stage('phase1.stage.runtime-integrity.failed', () =>
+    assertNoNodeRuntimeInjection(),
+  );
   const lock = runPublicPhase1Stage('phase1.stage.lock.failed', () =>
     bootstrapWindowsSupervisor(options),
   );
@@ -5160,7 +5820,9 @@ export async function runPhase1Conformance(options = parseArgs([])) {
     () => assertExecutingHarnessAuthority(lock),
   );
   if (options.platform !== undefined) {
-    return runSchemaV2Conformance(options, lock, harnessAuthorityVerification);
+    return runPublicPhase1StageAsync('phase1.stage.schema-v2-production.failed', () =>
+      runSchemaV2Conformance(options, lock, harnessAuthorityVerification),
+    );
   }
   runPublicPhase1Stage('phase1.stage.native-provider.failed', () =>
     assertNativeCredentialProviderIsolated(),
@@ -5381,7 +6043,10 @@ export async function runPhase1Conformance(options = parseArgs([])) {
     try {
       await executionRoot.cleanup();
     } catch (error) {
-      cleanupFailure = new Error('phase1.stage.execution-root-cleanup.failed', { cause: error });
+      cleanupFailure = new Error(
+        `phase1.stage.execution-root-cleanup.${processCleanupFailureCategory(error)}`,
+        { cause: error },
+      );
     }
   }
 
@@ -5505,8 +6170,10 @@ export async function runPhase1Conformance(options = parseArgs([])) {
 }
 
 async function main(argv = process.argv.slice(2)) {
-  assertNoNodeRuntimeInjection();
-  const options = parseArgs(argv);
+  runPublicPhase1Stage('phase1.stage.runtime-integrity.failed', () =>
+    assertNoNodeRuntimeInjection(),
+  );
+  const options = runPublicPhase1Stage('phase1.stage.invocation.failed', () => parseArgs(argv));
   if (process.env[verifiedRunnerEnvironment] !== '1') {
     await runPublicPhase1StageAsync('phase1.stage.runner-bootstrap.failed', () =>
       bootstrapVerifiedRunner(options),

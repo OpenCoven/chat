@@ -25,11 +25,13 @@ const {
   assertCleanPhase1Checkouts,
   assertPhase1CheckoutHeads,
   createGitEnvironment,
+  hasPrivateDirectoryMode,
   phase1ConformanceTestOnly,
   readPhase1ConformanceLock,
 } = phase1ConformanceLock;
 
 const projectRoot = resolve(import.meta.dirname, '..');
+const expectedGitNullDevice = process.platform === 'win32' ? 'NUL' : devNull;
 const scratchRoots: string[] = [];
 const gitIntegrationTestTimeout = 60_000;
 const gitTestCommandTimeout = 45_000;
@@ -78,33 +80,73 @@ const committedHarnessAuthority = JSON.parse(
   readFileSync(resolve(projectRoot, 'phase1-conformance.lock.json'), 'utf8'),
 ).harnessAuthority;
 const expectedBehaviorAuthority = {
-  revision: '55071f4200d312911ff5f6e5220873ae6f6197f2',
-  tree: 'd4d0d383d3f004d4d99ba5b69928dffb94228140',
+  revision: '2f72ecedd225759a11889ec4b7dd112b71361d56',
+  tree: '0a2e550bddbeaec405367d1dcb383c38fb10fb51',
   files: [
     {
+      path: 'scripts/owned-temp-directory.mjs',
+      blob: '5b6fcc651a3b3d859f79d4163a9ed91a446ca47d',
+      sha256: '1ba30d2d5f0312143e2837956899a4f3f116f3619937d5d9756ff197ecb2a325',
+    },
+    {
+      path: 'scripts/phase1-conformance.mjs',
+      blob: '47825da877b5285fc0936a4884b1e4918117fcd2',
+      sha256: '8f045e44cbe31377d7bb0697a398c27606c6505d2b3ff2ca23f8932809cb205c',
+    },
+    {
+      path: 'scripts/phase1-conformance-lock.mjs',
+      blob: 'c62a3c379eb09021c957206fd6ae78ffb6c657df',
+      sha256: '92f981c43f75bc65c81e9e9ee16084aae658617b929d451a9db0d7c9e6bedbe2',
+    },
+    {
       path: 'scripts/phase1-schema-v2-evidence.mjs',
-      blob: '0d0424731a06f169342258e76216583667e4deb0',
-      sha256: 'a7cab994aa0ee97baceb4b2c475ec1ff253ae5681f39e2c3d15fb1035b2d2387',
+      blob: '023c87e5055472b4be2e0914d97e14109b1d86ad',
+      sha256: '0aede2ab3abd76fabf5ac61d64d2dbaaffa497c8647b82236403de16a47751c8',
+    },
+    {
+      path: 'scripts/phase1-schema-v2-producer.mjs',
+      blob: '20b6f63c0fdb2b0a2f6d0558ecbe5624ac7fea1b',
+      sha256: '24c0750ebdc917d653e76ec929372f5abfe5dbfc52e11e685fb64f4766b82ba7',
+    },
+    {
+      path: 'scripts/phase1-artifact-secret-scan.mjs',
+      blob: '94365a87156a54d1202e8d6e7f8fac33d1278ad0',
+      sha256: '8b3c85cb8461fd520892a53a6169201e1db1bf50fe1457ed6315ba9fcd2fd658',
     },
     {
       path: 'scripts/unix-producer-supervisor.sh',
-      blob: 'b0e6f392af80b8562d155707a61ab51c199ed525',
-      sha256: '7bb1d791b6b46aabaca2864e4b82b9f02da116b632774dfedb9aec3dc9ba0d52',
+      blob: '0a27a5be4d2eb4981d35d7e3c178424c851697c5',
+      sha256: 'b73036415744c80ed27d5667f255ceea149096ca517b47c93a154299802206ff',
     },
     {
       path: 'scripts/windows-job-supervisor.cs',
-      blob: '547f2db1e7cacd539f49f5c879839fa80397ac1d',
-      sha256: '08c18fa81b16f922b3fac32abec3a2f6369e5f2b9f4caa19a0b48df6302bb110',
+      blob: 'c6ddcb12a3b439b04e1272b8b26d110a8372c973',
+      sha256: 'ec56ad9daf9cfd2e92de4420cfc5ce328e09a76b627a8253ef35f2e9ef151669',
     },
     {
       path: 'scripts/unix-producer-command.sh',
-      blob: '7e9e329c741de52ecaa6c4076b495e9f063217b2',
-      sha256: 'd4ee80fae32f48647cda18501c38e03baee62832caf9ed4393ab6e7edfea2135',
+      blob: '2c1a3e5f8ca96d801d900f5df3886fb3b0d3601b',
+      sha256: 'ce9ec2ff00947f3ec0db53f144c99d34bc27de6085062d00dccff7c934c2e3c8',
+    },
+    {
+      path: 'scripts/contract-canary.mjs',
+      blob: 'f4c72220cd200dba09aa9aeea05cd905b7cec435',
+      sha256: 'a4c2fe0a5eb6a5ff4653de5374c34c0fb46907c6806a5d23b86d8b37206ef958',
+    },
+    {
+      path: '.github/workflows/ci.yml',
+      blob: '1212c7eecfa5781713b2399a2f0d37ad765f6afa',
+      sha256: '4e2a4d77c6224bc098d9b356c6a47da256b86d6537a4477374dd87680f2b939a',
     },
     {
       path: '.github/workflows/client-v1-conformance.yml',
-      blob: '28bad32e2ad0fc849ac87e9a7b9cbd3229e9640a',
-      sha256: '047ae05690461530e609370b3d2d5c90817d5a2ff06484f13ffef9f4d5c775f2',
+      blob: '836a0702cee4736b7a529fecd43014f805258b85',
+      sha256: '93858b9056614e5bcfd0ffc02fdf38b4b4408364f7b1916491133c92050d5ab5',
+    },
+    {
+      path: 'scripts/process-owned-artifact-root.mjs',
+      blob: 'c3127190fdbfd082f79a1ce73b6778746f2c89b4',
+      sha256: '103cc789f12a6bbde16b2414aecf05813d9d28a2c40c7d6eaa2073b86e8e5d77',
     },
   ],
 } as const;
@@ -112,19 +154,19 @@ const expectedBehaviorAuthority = {
 const expectedEntries = {
   chat: {
     repository: 'OpenCoven/chat',
-    revision: 'edd4728792321771496df58bfc0e6122908a96ec',
+    revision: 'dabcdd47e7509880f26e9895ffb63d42d9070ca8',
   },
   sdk: {
     repository: 'OpenCoven/sdk',
-    revision: 'acc38488f00860d246c3c553375634d64806eabb',
+    revision: 'cd10a3fa1d9900e0dbcb04bbb2477140854fba1d',
   },
   cave: {
     repository: 'OpenCoven/coven-cave',
-    revision: '6325fc4c1154c7d7398074a9760a2e2dc323b424',
+    revision: 'ecdcdcf8a75b62bb912ec48215ae20ab0809a181',
   },
   coven: {
     repository: 'OpenCoven/coven',
-    revision: '721437b84026c042e431b0882dcd14fdb29ac07d',
+    revision: '8c3735f374d6bc95e5b6fd107f7e7308fa26a2f8',
   },
   harness: {
     repository: 'OpenCoven/chat',
@@ -132,17 +174,17 @@ const expectedEntries = {
   },
   harnessAuthority: committedHarnessAuthority,
   chatAuthority: {
-    tree: 'c373902b48b06520450f520e669a34f72b64a35d',
+    tree: '48e9387d2f3727e944a82376652fdc0c1dd02732',
     files: [
       {
         path: 'src-tauri/Cargo.toml',
-        blob: '75a54c604d5d8b88b661f5a2427c3f9494e3a374',
-        sha256: '92b6839acf7785fbeb77abeeb8c3576d904f71bdaed1f79f834c740b09ecfbaf',
+        blob: '50bb635ce23e25fd6b460e0cacc247b2eee947c7',
+        sha256: 'c1971ef226315e6ec57cfd6c11d91f4fdd1c77ae80a1c537b62960c837d825de',
       },
       {
         path: 'src-tauri/Cargo.lock',
-        blob: '4bcf036ae5f2c9be11bef0ac890159c6cf0fd06a',
-        sha256: '50ff6c361744a08b9cc2770f6e06659ebb7cd1d5cd1b43b39ea7127c9c80e7ca',
+        blob: '77f6ae3bd7c439228bea4e37a149dcd8536538ec',
+        sha256: 'af0805758f12cc36c92e21e195a5b33313062db9ca3fcc3b298332c25d22acc7',
       },
       {
         path: 'src-tauri/src/bin/phase1-native-rpc.rs',
@@ -202,56 +244,56 @@ const expectedEntries = {
   },
   release: {
     sdkManifest: {
-      version: '0.1.0',
-      sha256: 'b248f2d945f77e22d0dee1644e9131aa7d2a20db2f30d06206a974d7a4262dec',
+      version: '0.0.1',
+      sha256: '72041bfe9a236d709ea3fe26d32b871f17c7c5183e2991cd0229063ade730cb4',
     },
     sdkArtifacts: [
       {
         packageName: '@opencoven/sdk-core',
-        releaseFile: 'tarballs/core/opencoven-sdk-core-0.1.0.tgz',
-        vendorFile: 'sdk-core-0.1.0.tgz',
-        size: 33332,
-        sha256: 'dc86c6d4c88dc8273272b70d2014d2b62c80ae7368c9cf1e8eb78440f5fcc9c4',
+        releaseFile: 'tarballs/core/opencoven-sdk-core-0.0.1.tgz',
+        vendorFile: 'sdk-core-0.0.1.tgz',
+        size: 33308,
+        sha256: '5f41291d303cf25e5ff4a3c40d0169f025f7e218da8637fc905935524b5e4e2b',
       },
       {
         packageName: '@opencoven/cave-client',
-        releaseFile: 'tarballs/cave/opencoven-cave-client-0.1.0.tgz',
-        vendorFile: 'cave-client-0.1.0.tgz',
-        size: 85426,
-        sha256: 'de16ce13f2e3be0f6555cfc4413ca3c8f8f1a94f980261a6857c025615e7a14a',
+        releaseFile: 'tarballs/cave/opencoven-cave-client-0.0.1.tgz',
+        vendorFile: 'cave-client-0.0.1.tgz',
+        size: 89873,
+        sha256: '7389376ebc40ff59d942957339769d4dbdb566e25adef9a9deb372581b39a245',
       },
       {
         packageName: '@opencoven/coven-client',
-        releaseFile: 'tarballs/coven/opencoven-coven-client-0.1.0.tgz',
-        vendorFile: 'coven-client-0.1.0.tgz',
-        size: 33009,
-        sha256: 'cba09410aeae9670173a1f7bfe3174b5dd610873358944ed0955c86ac56a3aa1',
+        releaseFile: 'tarballs/coven/opencoven-coven-client-0.0.1.tgz',
+        vendorFile: 'coven-client-0.0.1.tgz',
+        size: 102172,
+        sha256: '4162dd685f78c8703497cba65f68a2f0c28fc640bb7da64b0dc9462c74f357dc',
       },
       {
         packageName: '@opencoven/sdk',
-        releaseFile: 'tarballs/sdk/opencoven-sdk-0.1.0.tgz',
-        vendorFile: 'sdk-0.1.0.tgz',
-        size: 15833,
-        sha256: 'eee7557feeaf4719d0cb990a66fdddf62270dbbeb05cfe7e35efbfe22827d04f',
+        releaseFile: 'tarballs/sdk/opencoven-sdk-0.0.1.tgz',
+        vendorFile: 'sdk-0.0.1.tgz',
+        size: 16783,
+        sha256: '68b258d21eb61360588c41db528d4b37e4594ddd82dac04cdf6477728161e43a',
       },
     ],
-    caveVersion: '0.3.12',
+    caveVersion: '0.4.2',
     covenVersion: '0.1.0',
     consumerLock: {
       path: 'pnpm-lock.yaml',
       size: 56222,
-      sha256: 'd2f0db8eca64112324e861bb7cbd2b645ed9ae4aad836200855b3477f3ea49ae',
+      sha256: '1721be3c4ac1c8d0e31690e0a6d4a8f77b59db1bb4b5ae31bf288eaadc652719',
     },
     caveArtifacts: {
       assertionEngine: {
         path: 'scripts/client-v1-conformance.mjs',
-        size: 146432,
-        sha256: 'b611d2b2935dad3cf913eda45e30ba109ba2ab53dadfef8670a26c7c03b115dd',
+        size: 153390,
+        sha256: 'e2742e3041648082e1087313f005a6e9407e2b8d2180881c42e109257804ec7b',
       },
       contractFixture: {
         path: 'src/lib/server/client-v1/contract-fixture.json',
-        size: 16695,
-        sha256: 'c0b1af2442409f8b26bbf0cf2a5fac467d23e5f56d2c966a9428c4b3e830a186',
+        size: 18280,
+        sha256: '0c03baea9c21f0985df41eef3c5ae5223497b9081c665b53ddecab36598f5ede',
       },
       hpkeVectors: {
         path: 'src/lib/server/client-v1/hpke-bound-v1-vectors.json',
@@ -493,6 +535,25 @@ function createCheckoutFixture() {
 }
 
 describe('Phase 1 conformance lock', () => {
+  test.each(['0.4.3', '0.4.4'])(
+    'requires the Cave5409 source release and rejects %s',
+    (oldVersion) => {
+      expect(expectedEntries.cave.revision).toBe('ecdcdcf8a75b62bb912ec48215ae20ab0809a181');
+      expect(() =>
+        readPhase1ConformanceLock(writeLock({ version: 5, ...expectedEntries })),
+      ).not.toThrow();
+      expect(() =>
+        readPhase1ConformanceLock(
+          writeLock({
+            version: 5,
+            ...expectedEntries,
+            release: { ...expectedEntries.release, caveVersion: oldVersion },
+          }),
+        ),
+      ).toThrow('release authority versions are invalid.');
+    },
+  );
+
   test('reads the immutable reviewed revisions into an exact normalized lock', () => {
     const lock = readPhase1ConformanceLock();
     expect(lock).toEqual({
@@ -514,6 +575,74 @@ describe('Phase 1 conformance lock', () => {
         ),
       ).toEqual(expected);
     }
+  });
+
+  gitTest('executes installation diagnostics from the lock-selected harness checkout', () => {
+    const lock = readPhase1ConformanceLock();
+    const checkout = resolve(createScratchRoot('locked-harness-diagnostics'), 'harness');
+    runGit(['clone', '--no-checkout', '--no-hardlinks', projectRoot, checkout], projectRoot);
+    runGit(['checkout', '--detach', lock.harness.revision], checkout);
+    phase1ConformanceLock.assertPhase1HarnessAuthorityCheckout(lock, checkout);
+
+    // A workspace import would miss a stale bootstrap pin even when local tests pass.
+    const output = execFileSync(
+      process.execPath,
+      [
+        '--input-type=module',
+        '--eval',
+        `
+      import assert from 'node:assert/strict';
+      import { EventEmitter } from 'node:events';
+      import { PassThrough } from 'node:stream';
+      import { NativeRpcClient, runNativePreflight, schemaV2NativeFailureDiagnostic }
+        from './scripts/phase1-schema-v2-producer.mjs';
+      const proof = { backend: 'windows-credential-manager', available: true,
+        empty: true, stateSha256: 'a'.repeat(64) };
+      const failure = new Error('private credential detail');
+      const commands = [];
+      let stage = '';
+      await assert.rejects(runNativePreflight({ ok: async (command) => {
+        commands.push(command);
+        if (command === 'conformance_native_custody_state') return proof;
+        throw failure;
+      } }, proof.backend, value => { stage = value; }), error => error === failure);
+      assert.deepEqual(commands, ['conformance_native_custody_state', 'app_installation_id']);
+      assert.equal(schemaV2NativeFailureDiagnostic(stage, failure),
+        'phase1.native-scenarios.native-preflight-installation-unexpected-error');
+      for (const boundary of ['lock', 'entry', 'read', 'write', 'persistence']) {
+        const child = new EventEmitter();
+        child.stdout = new PassThrough();
+        child.stderr = new PassThrough();
+        child.stdin = { write: line => {
+          const request = JSON.parse(line);
+          const response = request.command === 'conformance_native_custody_state'
+            ? { id: request.id, ok: true, result: proof }
+            : { id: request.id, ok: false, error: { code: 'installation_' + boundary + '_unavailable' } };
+          child.stdout.write(JSON.stringify(response) + String.fromCharCode(10));
+          return true;
+        } };
+        const rpc = new NativeRpcClient(child);
+        let caught;
+        try { await runNativePreflight(rpc, proof.backend, value => { stage = value; }); }
+        catch (error) { caught = error; }
+        assert.ok(caught instanceof Error);
+        assert.equal(schemaV2NativeFailureDiagnostic(stage, caught),
+          'phase1.native-scenarios.native-preflight-installation-' + boundary + '-unavailable');
+        assert.equal(rpc.commandCount('app_installation_id'), 1);
+      }
+      process.stdout.write('installation-boundaries-verified');
+    `,
+      ],
+      {
+        cwd: checkout,
+        encoding: 'utf8',
+        env: createTestGitEnvironment(),
+        timeout: gitTestCommandTimeout,
+        maxBuffer: gitTestMaxBuffer,
+        stdio: 'pipe',
+      },
+    );
+    expect(output).toBe('installation-boundaries-verified');
   });
 
   gitTest('binds the production Chat authority to the pinned Git objects', () => {
@@ -745,18 +874,24 @@ describe('Phase 1 checkout verification', () => {
     expect(environment).not.toHaveProperty('Git_Work_Tree');
     expect(environment).not.toHaveProperty('git_index_file');
     expect(environment.GIT_ALLOW_PROTOCOL).toBe('');
-    expect(environment.GIT_ASKPASS).toBe(devNull);
+    expect(environment.GIT_ASKPASS).toBe(expectedGitNullDevice);
     expect(environment.GIT_ATTR_NOSYSTEM).toBe('1');
     expect(environment.GIT_ATTR_SOURCE).toBe('HEAD');
-    expect(environment.GIT_CONFIG_GLOBAL).toBe(devNull);
+    expect(environment.GIT_CONFIG_GLOBAL).toBe(expectedGitNullDevice);
     expect(environment.GIT_CONFIG_NOSYSTEM).toBe('1');
     expect(environment.GIT_NO_LAZY_FETCH).toBe('1');
     expect(environment.GIT_NO_REPLACE_OBJECTS).toBe('1');
     expect(environment.GIT_OPTIONAL_LOCKS).toBe('0');
-    expect(environment.GIT_SSH).toBe(devNull);
-    expect(environment.GIT_SSH_COMMAND).toBe(devNull);
+    expect(environment.GIT_SSH).toBe(expectedGitNullDevice);
+    expect(environment.GIT_SSH_COMMAND).toBe(expectedGitNullDevice);
     expect(environment.GIT_TERMINAL_PROMPT).toBe('0');
-    expect(environment.SSH_ASKPASS).toBe(devNull);
+    expect(environment.SSH_ASKPASS).toBe(expectedGitNullDevice);
+  });
+
+  test('does not interpret Windows directory mode bits as POSIX permissions', () => {
+    expect(hasPrivateDirectoryMode(0o777, 'win32')).toBe(true);
+    expect(hasPrivateDirectoryMode(0o700, 'linux')).toBe(true);
+    expect(hasPrivateDirectoryMode(0o777, 'linux')).toBe(false);
   });
 
   gitTest('accepts four clean checkouts at their locked revisions', () => {

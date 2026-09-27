@@ -1,0 +1,1008 @@
+/* Text for assistive technology only. */
+.coven-sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
+.coven-chat {
+  --coven-rail-tab-w: 28px;
+  /* The rail tabs' own fills, so each scheme can set them. */
+  --coven-rail-tab-bg: rgba(27, 27, 30, 0.97);
+  --coven-rail-tab-hover: #303035;
+  --coven-rail-tab-active: #38383e;
+  --fr-sidebar-w: var(--coven-sidebar-w);
+  --fr-inspector-w: var(--coven-inspector-w);
+  min-width: 0;
+  height: 100%;
+  overflow: clip;
+  transition: none;
+}
+
+.coven-chat :is(.fr-thread, .fr-sidebar, .fr-inspector) {
+  overflow: clip;
+}
+
+/* Overlaid rails leave the grid flow, so the thread must always claim its own track. */
+.coven-chat .fr-thread {
+  grid-column: 2;
+  grid-row: 1;
+}
+
+.coven-chat .fr-sidebar {
+  grid-column: 1;
+  grid-row: 1;
+}
+
+.coven-chat .fr-inspector {
+  grid-column: 3;
+  grid-row: 1;
+}
+
+/* Tabs own grid tracks, never the transcript's or composer's scrollable edges. */
+.coven-chat .coven-rail-tab {
+  grid-row: 1;
+  z-index: 51;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  min-width: 0;
+  min-height: 0;
+  width: 100%;
+  height: 100%;
+  padding: 12px 0;
+  overflow: hidden;
+  border: 0;
+  border-radius: 0;
+  background:
+    linear-gradient(90deg, rgba(255, 255, 255, 0.045), transparent 55%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.035), transparent 45%), var(--coven-rail-tab-bg);
+  box-shadow:
+    inset 1px 0 rgba(255, 255, 255, 0.07),
+    inset -1px 0 rgba(0, 0, 0, 0.5);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition:
+    background-color 120ms var(--ease-standard),
+    color 120ms var(--ease-standard),
+    box-shadow 120ms var(--ease-standard);
+}
+
+.coven-chat .coven-rail-tab--left {
+  grid-column: 1;
+  border-right: 1px solid var(--border-strong);
+}
+
+.coven-chat .coven-rail-tab--right {
+  grid-column: 3;
+  border-left: 1px solid var(--border-strong);
+}
+
+.coven-chat .coven-rail-tab[hidden] {
+  display: none;
+}
+
+.coven-rail-tab-label {
+  min-height: 0;
+  overflow: hidden;
+  writing-mode: vertical-rl;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.08em;
+}
+
+/* How many familiars have a run that ended while the list was out of sight. */
+.coven-rail-tab-badge {
+  flex: none;
+  min-width: 18px;
+  padding: 1px 5px;
+  border-radius: 9px;
+  background: var(--accent-presence);
+  color: var(--bg-panel, #1b1b1e);
+  font-size: 10.5px;
+  font-weight: 600;
+  line-height: 16px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+
+.coven-rail-tab-cue {
+  flex: none;
+  color: var(--accent-presence);
+  font-size: 18px;
+  line-height: 1;
+}
+
+.coven-chat .coven-rail-tab:hover {
+  background-color: var(--coven-rail-tab-hover);
+  color: var(--text-primary);
+}
+
+.coven-chat .coven-rail-tab:active {
+  transform: none;
+  background-color: var(--coven-rail-tab-active);
+}
+
+.coven-chat .coven-rail-tab:focus-visible {
+  outline: 2px solid var(--ring-focus);
+  outline-offset: -3px;
+  color: var(--text-primary);
+}
+
+.coven-chat .fr-column,
+.coven-chat .fr-composer-inner {
+  max-width: 1200px;
+  width: 100%;
+  margin-inline: auto;
+  box-sizing: border-box;
+}
+
+.coven-chat .fr-column {
+  gap: 20px;
+  padding-block: 16px 28px;
+  padding-inline: 0;
+}
+
+.coven-chat .fr-transcript {
+  padding-inline: 12px;
+}
+
+.coven-chat .fr-transcript:focus-visible {
+  outline: 2px solid var(--ring-focus);
+  outline-offset: -2px;
+}
+
+.coven-chat .fr-familiar {
+  width: 100%;
+  max-width: none;
+  min-width: 0;
+}
+
+.coven-chat .fr-bubble {
+  line-height: 1.65;
+}
+
+.coven-connection {
+  color: var(--text-secondary);
+  font-size: 11px;
+}
+
+.coven-connection .coven-status-copy {
+  margin: 2px 0 4px;
+}
+
+.coven-connection summary {
+  cursor: pointer;
+  width: fit-content;
+  padding: 4px 0;
+}
+
+.coven-composer-context {
+  margin: 0 8px 6px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+
+.coven-run-status {
+  display: block;
+  margin: 4px 8px 8px;
+  color: var(--accent-presence);
+  font-size: 12px;
+}
+
+.coven-run-elapsed {
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.coven-jump-latest {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 auto 8px;
+  padding: 6px 12px;
+  border: 1px solid var(--border-hairline);
+  border-radius: 16px;
+  background: var(--bg-elevated);
+  color: var(--text-primary);
+  font-size: 12px;
+  cursor: pointer;
+  box-shadow: 0 6px 18px -10px rgba(0, 0, 0, 0.8);
+}
+
+.coven-jump-latest:hover {
+  background: var(--bg-hover);
+}
+
+.coven-jump-latest:focus-visible {
+  outline: 2px solid var(--ring-focus);
+  outline-offset: 1px;
+}
+
+.coven-jump-count {
+  padding: 1px 7px;
+  border-radius: 10px;
+  background: color-mix(in oklch, var(--accent-presence) 22%, transparent);
+  color: var(--accent-presence);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* The tool turn's header counts what the list below holds, folded or not. */
+.coven-tool-turn-count {
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+/* The live row: the familiar's avatar beside the run's current state. */
+.coven-chat .coven-live-row {
+  max-width: 72%;
+}
+
+/* A reply's copy control sits in its meta line, quiet until pointed at. */
+.coven-chat .fr-familiar-meta {
+  align-items: center;
+}
+
+/*
+ * Quiet by colour, not opacity: muted is the design's floor (3:1), and
+ * dimming it further put these labels near 2:1. Hovering the message lifts
+ * the control a step; :where keeps that below the control's own hover and
+ * Copied/Copy failed colours.
+ */
+.coven-message-copy {
+  margin-inline-start: auto;
+}
+
+.coven-message-copy--user {
+  margin: -2px 0 0;
+}
+
+:where(.fr-user:hover, .fr-familiar:hover) .coven-message-copy {
+  color: var(--text-secondary);
+}
+
+.coven-chat :is(.fr-sidebar, .fr-inspector)[aria-hidden="true"] {
+  visibility: hidden;
+}
+
+.coven-chat .fr-composer-wrap {
+  min-height: 0;
+  max-height: 50dvh;
+  overflow: auto;
+  overscroll-behavior: contain;
+}
+
+.coven-chat :is(.fr-transcript, .fr-conv-scroll, .fr-inspector-panel, .oc-textarea) {
+  overscroll-behavior: contain;
+}
+
+.coven-composer-fieldset {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  min-width: 0;
+}
+
+.coven-chat .fr-sidebar-inner {
+  width: 100%;
+}
+
+.coven-chat .fr-inspector-inner {
+  min-width: 0;
+}
+
+.coven-chat .oc-send-options {
+  display: none;
+}
+
+.coven-chat .coven-message {
+  min-width: 0;
+  font-size: 14px;
+  line-height: 1.7;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.coven-familiar-card-trigger {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 24px;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  cursor: pointer;
+  text-align: left;
+}
+
+.coven-familiar-card-trigger:hover {
+  background: var(--bg-hover);
+}
+
+.coven-avatar-image {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border-radius: inherit;
+  object-fit: cover;
+}
+
+/*
+ * Notices. The runtime line is a quiet mono caption, not a card: it is
+ * context, and the transcript should read as the first thing on the page.
+ * Alerts keep a hairline of colour on the leading edge so state is carried
+ * by a word and a mark rather than a filled box.
+ */
+.coven-status,
+.coven-error {
+  display: block;
+  margin: 4px 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.coven-status {
+  max-width: 100%;
+  padding: 2px 0;
+  color: var(--text-muted);
+  font-family: var(--font-jetbrains-mono);
+  font-size: 11px;
+  letter-spacing: 0.01em;
+  text-align: left;
+  text-wrap: balance;
+}
+
+.coven-error {
+  position: relative;
+  padding: 8px 12px 8px 16px;
+  border-radius: 6px;
+  background: color-mix(in oklch, var(--color-danger) 8%, transparent);
+  color: color-mix(in oklch, var(--color-danger) 70%, var(--text-primary));
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.coven-error::before {
+  content: "";
+  position: absolute;
+  top: 8px;
+  bottom: 8px;
+  left: 0;
+  width: 2px;
+  border-radius: 2px;
+  background: var(--color-danger);
+}
+
+.coven-error {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+}
+
+.coven-error-text {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.coven-chat .coven-error-copy {
+  flex: none;
+  margin: -3px 0;
+  color: inherit;
+  opacity: 0.8;
+}
+
+.coven-chat .coven-error-copy:hover,
+.coven-chat .coven-error-copy:focus-visible {
+  opacity: 1;
+}
+
+/* Declared project access in the inspector. */
+.coven-access {
+  display: grid;
+  gap: 8px;
+}
+
+.coven-chat .coven-access-rows {
+  padding: 0;
+}
+
+.coven-chat .coven-access-rows .fr-row:last-child {
+  border-bottom: 0;
+  padding-bottom: 0;
+}
+
+.coven-chat .coven-error-retry {
+  flex: none;
+  margin: -3px 0;
+}
+
+.coven-error-dismiss {
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  width: 22px;
+  height: 22px;
+  margin: -3px -4px -3px 0;
+  padding: 0;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: inherit;
+  opacity: 0.7;
+  cursor: pointer;
+}
+
+.coven-error-dismiss:hover {
+  background: color-mix(in oklch, var(--color-danger) 14%, transparent);
+  opacity: 1;
+}
+
+.coven-error-dismiss:focus-visible {
+  outline: 2px solid var(--ring-focus);
+  outline-offset: 1px;
+  opacity: 1;
+}
+
+.coven-details {
+  padding: 20px;
+  color: var(--text-secondary);
+  overflow-wrap: anywhere;
+}
+
+.coven-details h2 {
+  color: var(--text-primary);
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.coven-search {
+  margin: 0 16px 12px;
+  padding: 8px;
+  min-width: 0;
+  border: 1px solid var(--border-hairline);
+  border-radius: 8px;
+  background: var(--bg-sunken);
+  color: var(--text-primary);
+}
+
+.coven-chat .fr-conv {
+  display: flex;
+  flex-direction: column;
+  text-align: left;
+}
+
+.coven-agent-search {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 8px 12px;
+  padding: 8px 10px;
+  border: 1px solid var(--border-hairline);
+  border-radius: 8px;
+  background: var(--bg-sunken);
+  color: var(--text-muted);
+}
+
+.coven-agent-search input {
+  width: 100%;
+  min-width: 0;
+  border: 0;
+  background: transparent;
+  color: var(--text-primary);
+}
+
+.coven-chat .coven-agent-row {
+  display: grid;
+  grid-template-columns: 36px minmax(0, 1fr);
+  align-items: center;
+  gap: 10px;
+  min-height: 64px;
+  padding: 10px;
+}
+
+.coven-agent-row[aria-current="true"] {
+  background: var(--bg-elevated);
+  box-shadow: inset 2px 0 0 var(--accent-presence);
+}
+
+.coven-agent-copy {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.coven-agent-row .fr-conv-top {
+  align-items: baseline;
+}
+
+.coven-agent-row .fr-conv-time {
+  margin-inline-start: auto;
+}
+
+/* The row whose familiar owns the active run says so in place of its age. */
+.coven-agent-live {
+  color: var(--accent-presence);
+  font-variant-numeric: normal;
+}
+
+/* A run that ended while the reader was elsewhere; the row says how. */
+.coven-agent-done {
+  color: var(--accent-presence);
+  font-variant-numeric: normal;
+  font-weight: 500;
+}
+
+.coven-agent-done--error {
+  color: var(--color-danger);
+}
+
+/* A row with unsent text leads its preview with the word, in the accent. */
+.coven-agent-draft {
+  flex: none;
+  color: var(--accent-presence);
+  font-weight: 500;
+}
+
+/* The header's last-activity caption sits after the name and yields to it. */
+.coven-chat .coven-thread-updated {
+  flex: none;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--text-muted);
+}
+
+/* The familiar's purpose under the empty thread's heading. */
+.coven-thread-empty-purpose {
+  font-size: 13px;
+  color: var(--text-primary);
+  text-wrap: balance;
+}
+
+.coven-chat .fr-thread-header-lead {
+  flex: 1 1 140px;
+}
+
+.coven-chat .fr-thread-header-actions,
+.coven-chat .fr-thread-header-lead > .fr-avatar {
+  flex-shrink: 0;
+}
+
+.coven-chat .fr-thread-title {
+  display: block;
+  min-width: 0;
+  text-align: left;
+}
+
+.coven-chat .coven-agent-search:focus-within {
+  border-color: var(--ring-focus);
+  box-shadow: 0 0 0 2px color-mix(in oklch, var(--ring-focus) 15%, transparent);
+}
+
+.coven-chat .coven-agent-search input:focus-visible {
+  outline: none;
+}
+
+.coven-chat .coven-familiar-card-trigger {
+  transition:
+    background-color 120ms,
+    color 120ms;
+}
+
+.coven-chat .coven-familiar-card-trigger:active {
+  transform: scale(0.96);
+}
+
+.coven-chat .fr-msg {
+  animation: none;
+}
+
+.coven-agent-row .coven-avatar-image {
+  outline: 1px solid oklch(1 0 0 / 0.1);
+}
+
+/*
+ * Responsive tiers. The layout hook (viewport.ts) names the tier on the shell
+ * root; these rules only decide where each rail lives. `wide` keeps three
+ * columns. `medium` folds the inspector into a drawer. `compact` folds both
+ * rails into drawers; closed tabs always retain their own narrow tracks.
+ */
+.coven-chat {
+  min-width: 0;
+  height: 100%;
+  max-height: 100dvh;
+}
+
+.coven-chat[data-tier="medium"] {
+  --fr-sidebar-w: min(var(--coven-sidebar-w), 260px);
+}
+
+.coven-chat[data-tier="medium"] .fr-sidebar-inner {
+  width: 100%;
+}
+
+.coven-chat[data-tier="medium"] .fr-inspector,
+.coven-chat[data-tier="compact"] :is(.fr-sidebar, .fr-inspector) {
+  position: absolute;
+  grid-column: 1 / -1;
+  top: 0;
+  bottom: 0;
+  z-index: 50;
+  width: min(340px, calc(100% - 2 * var(--coven-rail-tab-w)));
+  border: 0;
+  border-radius: 0;
+  background: var(--bg-panel);
+  box-shadow:
+    0 24px 64px -24px rgba(0, 0, 0, 0.9),
+    0 0 0 1px var(--border-hairline);
+  transition: transform 120ms var(--ease-standard);
+}
+
+.coven-chat[data-tier="compact"] .fr-sidebar {
+  left: 0;
+  transform: translateX(-100%);
+  visibility: hidden;
+}
+
+.coven-chat[data-tier="compact"][data-sidebar="open"] .fr-sidebar {
+  transform: none;
+  visibility: visible;
+}
+
+.coven-chat[data-tier="medium"] .fr-inspector,
+.coven-chat[data-tier="compact"] .fr-inspector {
+  right: 0;
+  transform: translateX(100%);
+  visibility: hidden;
+}
+
+.coven-chat[data-tier="medium"][data-inspector="open"] .fr-inspector,
+.coven-chat[data-tier="compact"][data-inspector="open"] .fr-inspector {
+  transform: none;
+  visibility: visible;
+}
+
+.coven-chat[data-tier="compact"] .fr-sidebar-inner,
+.coven-chat[data-tier="compact"] .fr-inspector-inner,
+.coven-chat[data-tier="medium"] .fr-inspector-inner {
+  width: 100%;
+  min-width: 0;
+}
+
+.coven-scrim {
+  position: absolute;
+  inset: 0;
+  z-index: 40;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: rgba(6, 6, 8, 0.55);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  cursor: pointer;
+  animation: fr-fade 120ms var(--ease-standard);
+}
+
+.coven-scrim:focus-visible {
+  outline: var(--ring-width) solid var(--ring-focus);
+  outline-offset: -4px;
+}
+
+.coven-chat[data-tier="compact"] .fr-column {
+  padding-block: 14px 18px;
+}
+
+.coven-chat[data-tier="compact"] .fr-transcript {
+  padding-inline: 10px;
+}
+
+.coven-chat[data-tier="compact"] .fr-user-body {
+  max-width: 92%;
+}
+
+.coven-chat[data-tier="compact"] .fr-composer-wrap {
+  padding: 8px 10px calc(10px + env(safe-area-inset-bottom, 0px));
+}
+
+.coven-chat[data-tier="compact"] .fr-thread-header {
+  padding: 0 8px;
+}
+
+.coven-chat[data-tier="compact"] .fr-thread-familiar {
+  display: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .coven-chat :is(.fr-sidebar, .fr-inspector, .coven-scrim, .coven-rail-tab) {
+    transition: none;
+    animation: none;
+  }
+  .coven-chat .coven-familiar-card-trigger:active {
+    transform: none;
+  }
+}
+
+/* ---------------------------------------------------------- inspector rows */
+
+.coven-chat .fr-row {
+  grid-template-columns: auto minmax(0, 1fr);
+}
+
+.coven-chat .fr-row-value {
+  justify-content: flex-end;
+  min-width: 0;
+  text-align: right;
+}
+
+.coven-row-value--path {
+  display: block;
+  overflow: hidden;
+  font-family: var(--font-jetbrains-mono);
+  font-size: 11px;
+  direction: rtl;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  unicode-bidi: plaintext;
+}
+
+/* A path row keeps its copy control beside the truncated value. */
+.coven-row-path {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 2px;
+  min-width: 0;
+}
+
+.coven-row-path > .fr-row-value {
+  flex: 0 1 auto;
+}
+
+.coven-row-copy {
+  flex: none;
+}
+
+/*
+ * The thread's rows are explicit: header, optional panels (screen viewer and
+ * find bar share one), transcript, composer. Auto-placement let an open panel
+ * take the transcript's flexible track and push the composer off-screen.
+ */
+.coven-chat .fr-thread,
+.coven-chat .fr-thread:has(.coven-lifecycle) {
+  grid-template-rows: minmax(44px, auto) auto minmax(0, 1fr) auto;
+}
+
+.coven-chat .fr-thread > .fr-thread-header {
+  grid-row: 1;
+}
+
+.coven-chat .fr-thread > .coven-thread-panels {
+  grid-row: 2;
+  min-width: 0;
+}
+
+.coven-chat .fr-thread > .fr-transcript {
+  grid-row: 3;
+}
+
+.coven-chat .fr-thread > .fr-composer-wrap {
+  grid-row: 4;
+}
+
+/* Find in the conversation: a slim bar over the transcript, and the match it is on. */
+.coven-find {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin: 6px 12px 0;
+  padding: 4px 4px 4px 10px;
+  border: 1px solid var(--border-hairline);
+  border-radius: 8px;
+  background: var(--bg-sunken);
+}
+
+.coven-find input {
+  flex: 1 1 auto;
+  min-width: 0;
+  border: 0;
+  background: transparent;
+  color: var(--text-primary);
+}
+
+.coven-find input:focus-visible {
+  outline: none;
+}
+
+/* The bar has its own close control; the field's native clear would be a second ×. */
+.coven-find input::-webkit-search-cancel-button {
+  display: none;
+}
+
+.coven-find:focus-within {
+  border-color: var(--ring-focus);
+}
+
+.coven-find-count {
+  flex: none;
+  color: var(--text-muted);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+.coven-chat [data-find-hit] {
+  border-radius: 8px;
+  outline: 2px solid var(--accent-presence);
+  outline-offset: 4px;
+}
+
+/* Files dragged over the thread: a quiet overlay saying what a drop will do. */
+.coven-chat .fr-thread {
+  position: relative;
+}
+
+.coven-drop-zone {
+  position: absolute;
+  inset: 8px;
+  z-index: 30;
+  display: grid;
+  place-items: center;
+  border: 1.5px dashed var(--accent-presence);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--bg-panel, #1b1b1e) 82%, transparent);
+  color: var(--text-primary);
+  font-size: 13px;
+  pointer-events: none;
+}
+
+@media (prefers-color-scheme: light) {
+  .coven-chat {
+    --coven-rail-tab-bg: #ececf0;
+    --coven-rail-tab-hover: #e2e2e8;
+    --coven-rail-tab-active: #d9d9e0;
+  }
+}
+
+/*
+ * The composer is one line tall until the draft grows, but its placeholder
+ * names the familiar and can be long; wrapped, its second line was clipped
+ * under the composer's own controls. It stays on one line and is cut at the
+ * field's edge; the field's label still carries the whole text.
+ */
+.coven-chat .oc-composer-field::placeholder {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/*
+ * Destructive buttons (Stop run) set their label in the danger colour over a
+ * tint of itself, 4.3:1. The label takes the same lift toward the primary
+ * text that the error notice uses, which clears 4.5:1.
+ */
+.coven-chat [data-slot="button"][data-variant="destructive"] {
+  color: color-mix(in oklch, var(--color-danger) 70%, var(--text-primary));
+}
+
+/* A partial history says so, with the control that reads further back. */
+.coven-chat .coven-history-notice {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+
+/* A replayed-history notice: a quiet line between messages, addressed by no one. */
+.coven-chat .coven-notice {
+  margin: 0 auto;
+  max-width: 560px;
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1.5;
+  text-align: center;
+  text-wrap: balance;
+}
+
+/* Raw engine output: a quiet mono block, addressed by no one. */
+.coven-chat .coven-output {
+  padding: 8px 12px;
+  border-left: 2px solid var(--border-hairline);
+  color: var(--text-secondary);
+}
+
+.coven-chat .coven-output pre {
+  margin: 0;
+  font-family: var(--font-jetbrains-mono);
+  font-size: 11.5px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* The refresh control turns while the CLI is being read. */
+.coven-refreshing svg {
+  animation: coven-refresh-spin 1s linear infinite;
+}
+
+@keyframes coven-refresh-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .coven-refreshing svg {
+    animation: none;
+  }
+}
+
+/* The footer's shortcut reference, folded until asked for. */
+.coven-shortcuts summary {
+  cursor: pointer;
+  width: fit-content;
+}
+
+.coven-shortcuts dl {
+  display: grid;
+  gap: 6px;
+  margin: 8px 0 2px;
+  font-size: 11px;
+}
+
+.coven-shortcuts dl > div {
+  display: grid;
+  grid-template-columns: minmax(92px, auto) 1fr;
+  gap: 8px;
+  align-items: baseline;
+}
+
+.coven-shortcuts dt,
+.coven-shortcuts dd {
+  margin: 0;
+}
+
+.coven-shortcuts dd {
+  color: var(--text-secondary);
+}
+
+.coven-shortcuts kbd {
+  padding: 1px 5px;
+  border: 1px solid var(--border-hairline);
+  border-radius: 4px;
+  background: var(--bg-sunken);
+  color: var(--text-primary);
+  font-family: var(--font-jetbrains-mono);
+  font-size: 10.5px;
+  white-space: nowrap;
+}
+
+/* ------------------------------------------------------------- composer */
+
+.coven-composer-note {
+  margin: 0 4px 8px;
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.coven-run-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin: 0 0 8px;
+}
