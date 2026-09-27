@@ -1,5 +1,7 @@
 import { expect, test } from '@playwright/test';
 
+import { contrastFailures } from './contrast';
+
 test.beforeEach(async ({ page }) => {
   await page.addInitScript(() => {
     const session = {
@@ -120,3 +122,27 @@ test('confirms app-local delete and never lists tombstones', async ({ page }) =>
   await archived.check();
   await expect(page.getByText('No archived familiars.')).toBeVisible();
 });
+
+for (const colorScheme of ['dark', 'light'] as const) {
+  test(`keeps the chat actions menu, delete dialog and context picker at WCAG AA contrast (${colorScheme})`, async ({
+    page,
+  }) => {
+    await page.emulateMedia({ colorScheme });
+    await expect(page.getByRole('textbox', { name: 'Message Lifecycle familiar' })).toBeEnabled();
+    const found: string[] = [];
+    await page.getByRole('button', { name: 'Chat actions' }).click();
+    await expect(page.getByRole('menu')).toBeVisible();
+    await page.keyboard.press('ArrowDown');
+    for (const failure of await contrastFailures(page)) found.push(`menu: ${failure}`);
+    await page.getByRole('menuitem', { name: 'Delete chat' }).click();
+    const dialog = page.getByRole('dialog', { name: 'Delete chat from this app?' });
+    await expect(dialog).toBeVisible();
+    for (const failure of await contrastFailures(page, { minimum: 3 }))
+      found.push(`dialog: ${failure}`);
+    await dialog.getByRole('button', { name: 'Keep chat' }).click();
+    await page.getByRole('button', { name: 'Add context', exact: true }).click();
+    for (const failure of await contrastFailures(page)) found.push(`context picker: ${failure}`);
+    await page.keyboard.press('Escape');
+    expect(found).toEqual([]);
+  });
+}

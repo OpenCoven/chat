@@ -32,6 +32,13 @@
 .chat-context-panel::backdrop {
   background: rgb(0 0 0 / 15%);
 }
+/* The picker is not modal: the page behind stays readable and clickable, so
+   on a light page it is not dimmed below AA. The panel's shadow separates it. */
+@media (prefers-color-scheme: light) {
+  .chat-context-panel::backdrop {
+    background: transparent;
+  }
+}
 /* Older desktop webviews retain the bounded inline picker. */
 .chat-context-panel:not([popover]) {
   position: static;
