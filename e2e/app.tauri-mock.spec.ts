@@ -1453,3 +1453,94 @@ for (const colorScheme of ['dark', 'light'] as const) {
     expect(failures).toEqual([]);
   });
 }
+
+for (const size of [
+  { width: 1280, height: 720 },
+  { width: 480, height: 520 },
+]) {
+  test(`keeps every pointer target at least 24px or spaced apart at ${size.width}x${size.height} (WCAG 2.5.8)`, async ({
+    page,
+  }) => {
+    await page.setViewportSize(size);
+    await installRuntimeFixture(page);
+    await page.goto('/');
+    const composer = page.getByRole('textbox', { name: 'Message Local familiar' });
+    await expect(composer).toBeEnabled();
+    await composer.fill('hello');
+    await page.getByRole('button', { name: 'Send', exact: true }).click();
+    await expect(page.getByRole('button', { name: 'Copy reply' })).toBeVisible();
+    await expect(composer).toBeEnabled();
+    await page.getByRole('button', { name: 'Show screen' }).click();
+    await page.getByRole('log', { name: 'Messages' }).focus();
+    await page.keyboard.press('Control+f');
+    await expect(page.getByRole('searchbox', { name: 'Find in conversation' })).toBeVisible();
+    // Open the footer disclosures so the controls folded inside are measured.
+    await page.evaluate(() => {
+      for (const details of document.querySelectorAll('.coven-user-settings details'))
+        (details as HTMLDetailsElement).open = true;
+    });
+    // The narrow window folds the sidebar away.
+    if (size.width > 480) await expect(page.getByText('Show archived chats')).toBeVisible();
+    const failures = await page.evaluate(() => {
+      const selector =
+        'a[href], button, input:not([type="hidden"]), select, textarea, summary, [role="button"], [role="link"], [role="tab"], [role="menuitem"], [role="option"], [role="checkbox"], [role="switch"], [tabindex]:not([tabindex="-1"])';
+      const targets = [...document.querySelectorAll<HTMLElement>(selector)].filter((element) => {
+        if (element.closest('[inert], [aria-hidden="true"], .coven-sr-only')) return false;
+        if (element.matches(':disabled, [aria-disabled="true"]')) return false;
+        if (element.closest('details:not([open])') && !element.closest('summary')) return false;
+        const style = getComputedStyle(element);
+        if (style.visibility === 'hidden' || style.pointerEvents === 'none') return false;
+        const rect = element.getBoundingClientRect();
+        if (rect.width === 0 || rect.height === 0) return false;
+        // A link in a sentence is exempt (inline).
+        if (
+          style.display === 'inline' &&
+          element.parentElement?.textContent !== element.textContent
+        )
+          return false;
+        // A target inside another target is part of it.
+        return !element.parentElement?.closest(selector);
+      });
+      // A checkbox or radio inside its label is clicked through the label.
+      const boxes = targets.map((element) => ({
+        element,
+        rect: (element.matches('[type="checkbox"], [type="radio"]')
+          ? (element.closest('label') ?? element)
+          : element
+        ).getBoundingClientRect(),
+      }));
+      const small = (rect: DOMRect) => rect.width < 23.5 || rect.height < 23.5;
+      const centre = (rect: DOMRect): [number, number] => [
+        rect.left + rect.width / 2,
+        rect.top + rect.height / 2,
+      ];
+      const circleHitsRect = ([x, y]: [number, number], rect: DOMRect) => {
+        const dx = Math.max(rect.left - x, 0, x - rect.right);
+        const dy = Math.max(rect.top - y, 0, y - rect.bottom);
+        return dx * dx + dy * dy < 12 * 12;
+      };
+      const found: string[] = [];
+      for (const { element, rect } of boxes) {
+        if (!small(rect)) continue;
+        const c = centre(rect);
+        const crowded = boxes.some(({ element: other, rect: box }) => {
+          if (other === element) return false;
+          if (circleHitsRect(c, box)) return true;
+          if (!small(box)) return false;
+          const [ox, oy] = centre(box);
+          return Math.hypot(c[0] - ox, c[1] - oy) < 24;
+        });
+        if (crowded) {
+          const label =
+            element.getAttribute('aria-label') ||
+            (element as HTMLInputElement).labels?.[0]?.textContent?.trim() ||
+            element.textContent?.trim().slice(0, 30) ||
+            element.outerHTML.slice(0, 60);
+          found.push(`${label}: ${Math.round(rect.width)}x${Math.round(rect.height)}`);
+        }
+      }
+      return found;
+    });
+    expect(failures).toEqual([]);
+  });
+}
