@@ -1404,6 +1404,13 @@ for (const colorScheme of ['dark', 'light'] as const) {
     await expect(page.getByRole('button', { name: 'Copy reply' })).toBeVisible();
     await expect(composer).toBeEnabled();
     await composer.fill('');
+    // The screen viewer and find bar render only when open; open both so
+    // their fields are in the sweep.
+    await page.getByRole('button', { name: 'Show screen' }).click();
+    await expect(page.locator('.coven-screen-input').first()).toBeEnabled();
+    await page.getByRole('log', { name: 'Messages' }).focus();
+    await page.keyboard.press('Control+f');
+    await expect(page.getByRole('searchbox', { name: 'Find in conversation' })).toBeVisible();
     await page.mouse.move(2, 2);
     await page.addStyleTag({ content: '* { caret-color: transparent !important; }' });
     await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
@@ -1427,6 +1434,7 @@ for (const colorScheme of ['dark', 'light'] as const) {
         const rect = shown.getBoundingClientRect();
         const label =
           element.getAttribute('aria-label') ||
+          (element as HTMLInputElement).labels?.[0]?.textContent?.trim() ||
           element.textContent?.trim().slice(0, 30) ||
           element.tagName.toLowerCase();
         return {
@@ -1492,6 +1500,9 @@ for (const colorScheme of ['dark', 'light'] as const) {
         failures.push(`${target.label}: ${changed.strong}/${changed.ring}`);
     }
     expect(seen.size).toBeGreaterThan(8);
+    const labels = [...seen].map((key) => key.split('|')[0]);
+    expect(labels).toContain('Find in conversation');
+    expect(labels).toContain('Screen address');
     expect(failures).toEqual([]);
   });
 }
