@@ -1388,3 +1388,110 @@ for (const viewport of [
       .toEqual({ x: 0, y: 0 });
   });
 }
+
+for (const colorScheme of ['dark', 'light'] as const) {
+  test(`shows a visible focus indicator on every tab stop (${colorScheme})`, async ({ page }) => {
+    // WCAG 2.4.7 asks that keyboard focus be visible. Each tab stop is
+    // captured unfocused and focused; the pixels that change must include a
+    // ring's worth whose colour moved by at least 3:1 (the 2.4.13 measure).
+    await page.emulateMedia({ colorScheme, reducedMotion: 'reduce' });
+    await installRuntimeFixture(page);
+    await page.goto('/');
+    const composer = page.getByRole('textbox', { name: 'Message Local familiar' });
+    await expect(composer).toBeEnabled();
+    await composer.fill('hello');
+    await page.getByRole('button', { name: 'Send', exact: true }).click();
+    await expect(page.getByRole('button', { name: 'Copy reply' })).toBeVisible();
+    await expect(composer).toBeEnabled();
+    await composer.fill('');
+    await page.mouse.move(2, 2);
+    await page.addStyleTag({ content: '* { caret-color: transparent !important; }' });
+    await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+    const unfocused = (await page.screenshot()).toString('base64');
+
+    const failures: string[] = [];
+    const seen = new Set<string>();
+    for (let stop = 0; stop < 80; stop++) {
+      await page.keyboard.press('Tab');
+      const target = await page.evaluate(() => {
+        const element = document.activeElement as HTMLElement | null;
+        if (!element || element === document.body) return null;
+        // Fields whose container shows focus (:focus-within) carry no ring of
+        // their own; the container is what is measured.
+        const shown = (
+          element.matches('input, textarea')
+            ? (element.closest('[data-slot="composer"], .coven-agent-search, .coven-find') ??
+              element)
+            : element
+        ) as HTMLElement;
+        const rect = shown.getBoundingClientRect();
+        const label =
+          element.getAttribute('aria-label') ||
+          element.textContent?.trim().slice(0, 30) ||
+          element.tagName.toLowerCase();
+        return {
+          key: `${label}|${Math.round(rect.left)},${Math.round(rect.top)}`,
+          label,
+          box: { x: rect.left, y: rect.top, width: rect.width, height: rect.height },
+          visible: rect.width > 0 && rect.height > 0 && rect.bottom > 0 && rect.top < innerHeight,
+        };
+      });
+      // Tabbing past the last stop leaves the page once before wrapping.
+      if (!target) continue;
+      if (seen.has(target.key)) break;
+      seen.add(target.key);
+      if (!target.visible) continue;
+      await page.waitForFunction(() =>
+        document.getAnimations().every((animation) => animation.playState !== 'running'),
+      );
+      const focused = (await page.screenshot()).toString('base64');
+      const changed = await page.evaluate(
+        async ({ before, after, box }) => {
+          const read = async (source: string) => {
+            const picture = new Image();
+            picture.src = `data:image/png;base64,${source}`;
+            await picture.decode();
+            const canvas = document.createElement('canvas');
+            canvas.width = picture.width;
+            canvas.height = picture.height;
+            const context = canvas.getContext('2d', { willReadFrequently: true });
+            if (!context) throw new Error('No 2D context.');
+            context.drawImage(picture, 0, 0);
+            return context;
+          };
+          const [a, b] = await Promise.all([read(before), read(after)]);
+          const scale = a.canvas.width / innerWidth;
+          const pad = 6;
+          const x = Math.max(0, Math.floor((box.x - pad) * scale));
+          const y = Math.max(0, Math.floor((box.y - pad) * scale));
+          const w = Math.min(a.canvas.width - x, Math.ceil((box.width + pad * 2) * scale));
+          const h = Math.min(a.canvas.height - y, Math.ceil((box.height + pad * 2) * scale));
+          const one = a.getImageData(x, y, w, h).data;
+          const two = b.getImageData(x, y, w, h).data;
+          const channel = (value: number) => {
+            const c = value / 255;
+            return c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
+          };
+          const luminance = (d: Uint8ClampedArray, i: number) =>
+            0.2126 * channel(d[i] ?? 0) +
+            0.7152 * channel(d[i + 1] ?? 0) +
+            0.0722 * channel(d[i + 2] ?? 0);
+          let strong = 0;
+          for (let i = 0; i < one.length; i += 4) {
+            const l1 = luminance(one, i);
+            const l2 = luminance(two, i);
+            if ((Math.max(l1, l2) + 0.05) / (Math.min(l1, l2) + 0.05) >= 3) strong++;
+          }
+          // A 1 CSS px ring around the box, in device pixels.
+          const ring = 2 * (box.width + box.height) * scale;
+          return { strong, ring: Math.round(ring) };
+        },
+        { before: unfocused, after: focused, box: target.box },
+      );
+      if (changed.strong < changed.ring)
+        failures.push(`${target.label}: ${changed.strong}/${changed.ring}`);
+    }
+    expect(seen.size).toBeGreaterThan(8);
+    expect(failures).toEqual([]);
+  });
+}

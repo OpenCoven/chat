@@ -403,14 +403,12 @@
     box-shadow 240ms;
 }
 
+/* A full-strength 2px ring (border plus 1px spread) keeps focus visible at 3:1. */
 :where([data-slot="composer"]):focus-within {
-  border-color: color-mix(
-    in oklch,
-    var(--accent-presence, #a79bf5) 45%,
-    var(--border-strong, rgba(255, 255, 255, 0.16))
-  );
+  border-color: var(--ring-focus, #a79bf5);
   box-shadow:
-    0 0 0 3px color-mix(in oklch, var(--accent-presence, #a79bf5) 12%, transparent),
+    0 0 0 1px var(--ring-focus, #a79bf5),
+    0 0 0 4px color-mix(in srgb, var(--ring-focus, #a79bf5) 12%, transparent),
     0 16px 40px -16px rgba(0, 0, 0, 0.9),
     inset 0 1px 0 rgba(255, 255, 255, 0.05);
 }
