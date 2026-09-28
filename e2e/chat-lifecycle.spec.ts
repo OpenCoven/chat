@@ -124,7 +124,7 @@ test('confirms app-local delete and never lists tombstones', async ({ page }) =>
 });
 
 for (const colorScheme of ['dark', 'light'] as const) {
-  test(`keeps the chat actions menu, delete dialog and context picker at WCAG AA contrast (${colorScheme})`, async ({
+  test(`keeps the chat actions menu, delete dialog, context picker and mentions at WCAG AA contrast (${colorScheme})`, async ({
     page,
   }) => {
     await page.emulateMedia({ colorScheme });
@@ -133,6 +133,7 @@ for (const colorScheme of ['dark', 'light'] as const) {
     await page.getByRole('button', { name: 'Chat actions' }).click();
     await expect(page.getByRole('menu')).toBeVisible();
     await page.keyboard.press('ArrowDown');
+    await expect(page.getByRole('menuitem').first()).toBeVisible();
     for (const failure of await contrastFailures(page)) found.push(`menu: ${failure}`);
     await page.getByRole('menuitem', { name: 'Delete chat' }).click();
     const dialog = page.getByRole('dialog', { name: 'Delete chat from this app?' });
@@ -141,8 +142,15 @@ for (const colorScheme of ['dark', 'light'] as const) {
       found.push(`dialog: ${failure}`);
     await dialog.getByRole('button', { name: 'Keep chat' }).click();
     await page.getByRole('button', { name: 'Add context', exact: true }).click();
+    await expect(page.getByRole('listbox', { name: 'Known context' })).toBeVisible();
     for (const failure of await contrastFailures(page)) found.push(`context picker: ${failure}`);
     await page.keyboard.press('Escape');
+    const composer = page.getByRole('textbox', { name: 'Message Lifecycle familiar' });
+    await composer.fill('@');
+    await expect(page.getByRole('listbox', { name: 'Context suggestions' })).toBeVisible();
+    for (const failure of await contrastFailures(page))
+      found.push(`mention suggestions: ${failure}`);
+    await composer.fill('');
     expect(found).toEqual([]);
   });
 }

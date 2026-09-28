@@ -24,7 +24,9 @@ export async function contrastFailures(page: Page, { minimum = 20 } = {}): Promi
       const style = getComputedStyle(element);
       if (
         style.visibility === 'hidden' ||
-        element.closest('[aria-hidden="true"], [inert], .coven-sr-only') ||
+        // aria-hidden text is still seen, so it is measured; inert and
+        // screen-reader-only text is not.
+        element.closest('[inert], .coven-sr-only') ||
         (modal && !modal.contains(element)) ||
         // Inactive controls are exempt from contrast (WCAG 1.4.3).
         element.closest(':disabled, [aria-disabled="true"]') ||

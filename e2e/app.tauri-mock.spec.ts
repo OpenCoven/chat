@@ -342,18 +342,16 @@ for (const colorScheme of ['dark', 'light'] as const) {
 
     await page.getByRole('log', { name: 'Messages' }).focus();
     await page.keyboard.press('Control+f');
-    await page.getByRole('searchbox', { name: 'Find in conversation' }).fill('hello');
+    const find = page.getByRole('searchbox', { name: 'Find in conversation' });
+    await find.fill('hello');
+    await expect(find).toBeVisible();
     await measure('find bar');
     await page.keyboard.press('Escape');
 
     await page.getByRole('button', { name: 'Show screen' }).click();
+    await expect(page.locator('#coven-screen-viewer')).toBeVisible();
     await measure('screen viewer');
     await page.getByRole('button', { name: 'Hide screen' }).click();
-
-    await composer.fill('@');
-    await measure('mention suggestions');
-    await page.keyboard.press('Escape');
-    await composer.fill('');
 
     const transfer = await page.evaluateHandle(() => {
       const data = new DataTransfer();
@@ -361,6 +359,7 @@ for (const colorScheme of ['dark', 'light'] as const) {
       return data;
     });
     await page.locator('main.fr-thread').dispatchEvent('dragenter', { dataTransfer: transfer });
+    await expect(page.locator('.coven-drop-zone')).toBeVisible();
     await measure('drop overlay');
 
     expect(found).toEqual([]);
