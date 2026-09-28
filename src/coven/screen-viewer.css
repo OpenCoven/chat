@@ -58,7 +58,7 @@
 .coven-screen-input:focus-visible {
   outline: none;
   border-color: var(--ring-focus);
-  box-shadow: 0 0 0 2px color-mix(in oklch, var(--ring-focus) 15%, transparent);
+  box-shadow: 0 0 0 1px var(--ring-focus);
 }
 
 .coven-screen-input:disabled {

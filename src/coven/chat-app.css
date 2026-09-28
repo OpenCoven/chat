@@ -593,7 +593,7 @@
 
 .coven-chat .coven-agent-search:focus-within {
   border-color: var(--ring-focus);
-  box-shadow: 0 0 0 2px color-mix(in oklch, var(--ring-focus) 15%, transparent);
+  box-shadow: 0 0 0 1px var(--ring-focus);
 }
 
 .coven-chat .coven-agent-search input:focus-visible {
@@ -837,6 +837,7 @@
 
 .coven-find:focus-within {
   border-color: var(--ring-focus);
+  box-shadow: 0 0 0 1px var(--ring-focus);
 }
 
 .coven-find-count {
