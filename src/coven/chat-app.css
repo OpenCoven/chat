@@ -960,6 +960,20 @@
   width: fit-content;
 }
 
+/* Footer disclosures sit in a stack; a 24px line keeps each a full pointer
+   target (WCAG 2.5.8) instead of a 17px strip. */
+.coven-user-settings summary {
+  line-height: 24px;
+}
+
+.coven-user-settings label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 24px;
+  cursor: pointer;
+}
+
 .coven-shortcuts dl {
   display: grid;
   gap: 6px;
