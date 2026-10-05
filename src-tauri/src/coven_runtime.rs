@@ -2955,6 +2955,118 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "opt-in configured-model probe: creates and retains one real Coven ledger session"]
+    fn installed_native_chat_attachment_and_lifecycle() {
+        assert_eq!(
+            std::env::var("COVEN_CHAT_MODEL_SMOKE").as_deref(),
+            Ok("1"),
+            "Set COVEN_CHAT_MODEL_SMOKE=1 to authorize the configured-model probe."
+        );
+        let familiar = std::env::var("COVEN_CHAT_SMOKE_FAMILIAR")
+            .expect("Set COVEN_CHAT_SMOKE_FAMILIAR to an installed Coven familiar id.");
+        let data = home()
+            .unwrap()
+            .join("Library/Application Support/com.opencoven.chat")
+            .join("native-smoke")
+            .join(uuid::Uuid::new_v4().to_string());
+        println!("Retaining isolated app smoke storage: {}", data.display());
+        // The marker exists only inside the attachment, so a reply that
+        // repeats it proves the file's bytes reached the engine.
+        let marker = format!(
+            "COVEN_CHAT_ATTACHED_{}",
+            uuid::Uuid::new_v4().simple().to_string()[..12].to_ascii_uppercase()
+        );
+        let input = SendInput {
+            run_id: uuid::Uuid::new_v4().to_string(),
+            prompt: "The attached file marker.txt holds one line. Reply with exactly that line, nothing else. Do not use tools.".into(),
+            session_id: None,
+            familiar_id: Some(familiar.clone()),
+            harness: Some("coven-code".into()),
+            attachments: vec![attachments::Attachment {
+                name: "marker.txt".into(),
+                bytes: format!("{marker}\n").into_bytes(),
+            }],
+        };
+        let mut observed = Vec::new();
+        send_local(&data, input, &AtomicBool::new(false), &mut |event| {
+            observed.push(event);
+            Ok(())
+        })
+        .expect("Actual configured-model attachment send failed");
+        let init = observed
+            .iter()
+            .find(|event| event["type"] == "system" && event["subtype"] == "init")
+            .unwrap();
+        let id = string(init, "session_id").unwrap().to_owned();
+        println!("Retaining Coven smoke ledger ID: {id}");
+        let input_event = observed
+            .iter()
+            .find(|event| is_captured_input(event))
+            .expect("The send did not capture its input");
+        assert_eq!(
+            input_event["attachments"][0]["name"], "marker.txt",
+            "The captured input must keep the attachment's metadata"
+        );
+        let delta_text: String = observed
+            .iter()
+            .filter(|event| event["type"] == "text_delta")
+            .filter_map(|event| event["text"].as_str())
+            .collect();
+        let assistant_text: String = observed
+            .iter()
+            .filter(|event| event["type"] == "assistant")
+            .filter_map(|event| event.pointer("/message/content").and_then(Value::as_array))
+            .flatten()
+            .filter_map(|block| block["text"].as_str())
+            .collect();
+        assert!(
+            delta_text.contains(&marker) || assistant_text.contains(&marker),
+            "The actual assistant did not repeat the attachment's marker"
+        );
+        assert_eq!(
+            crate::chat_canonical::head(&data, &familiar)
+                .unwrap()
+                .as_deref(),
+            Some(id.as_str())
+        );
+
+        // Archive, restore and delete through the same path the window uses.
+        let runs = Runs::default();
+        let shutdown = AtomicBool::new(false);
+        let lifecycle = |next| change_chat_lifecycle(&data, &runs, &shutdown, &id, next);
+        lifecycle(crate::chat_lifecycle::Lifecycle::Archived).unwrap();
+        assert_eq!(
+            crate::chat_lifecycle::require_active(&data, &id).unwrap_err(),
+            "Restore this archived chat before sending a message."
+        );
+        lifecycle(crate::chat_lifecycle::Lifecycle::Active).unwrap();
+        crate::chat_lifecycle::require_active(&data, &id).unwrap();
+        let transcript = transcripts_dir(&data, false)
+            .unwrap()
+            .join(format!("{id}.jsonl"));
+        assert!(
+            transcript.exists(),
+            "The saved transcript is missing before delete"
+        );
+        lifecycle(crate::chat_lifecycle::Lifecycle::Deleted).unwrap();
+        assert!(
+            !transcript.exists(),
+            "Delete left the saved transcript behind"
+        );
+        assert_eq!(crate::chat_canonical::head(&data, &familiar).unwrap(), None);
+        assert!(crate::chat_lifecycle::require_visible(&data, &id).is_err());
+        // The tombstone is permanent: the deleted chat cannot come back.
+        assert!(lifecycle(crate::chat_lifecycle::Lifecycle::Active).is_err());
+        assert!(crate::chat_lifecycle::change(
+            &data,
+            &id,
+            crate::chat_lifecycle::Lifecycle::Active
+        )
+        .is_err());
+        println!("Verified attachment delivery and archive, restore and delete for {id}");
+    }
+
+    #[test]
     #[ignore = "read-only verification of retained real model-smoke records"]
     fn retained_model_smoke_reopens_both_turns() {
         let data = PathBuf::from(
