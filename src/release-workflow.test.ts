@@ -191,10 +191,8 @@ describe('release workflow specification', () => {
       'APPLE_ID',
       'APPLE_PASSWORD',
       'APPLE_TEAM_ID',
-      'WINDOWS_CERTIFICATE',
-      'WINDOWS_CERTIFICATE_PASSWORD',
     ]) {
-      expect(verify).toContain(secret);
+      expect(verify).toContain(`${secret}: \${{ secrets.${secret} }}`);
     }
 
     // The gate runs before the tree is fetched, so a missing secret is not paid
@@ -238,6 +236,24 @@ describe('release workflow specification', () => {
       publishStep.indexOf('gh release create'),
     );
     expect(releasingGuide).toContain('An `allow_unsigned` run never publishes');
+  });
+
+  test('defers Windows as a whole, never as an unsigned build', () => {
+    const verify = job('verify-tag', 'build');
+    const build = job('build', 'publish');
+
+    // No Windows build runs, so the gate does not wait on Windows secrets.
+    expect(build).not.toMatch(/^\s+- platform: windows-x86_64$/m);
+    expect(verify).not.toMatch(/WINDOWS_CERTIFICATE: \$\{\{ secrets\./);
+    for (const platform of ['macos-aarch64', 'macos-x86_64', 'linux-x86_64']) {
+      expect(build).toMatch(new RegExp(`^\\s+- platform: ${platform}$`, 'm'));
+    }
+
+    // The restore recipe travels with the matrix, and the Windows signing
+    // steps stay ready for it rather than being deleted.
+    expect(build).toContain('Windows is deferred until Windows code signing is set up');
+    expect(build).toContain('Import Windows signing certificate');
+    expect(build).toContain('Verify Windows Authenticode signatures');
   });
 
   test('documents conditional updates and the current storage boundary', () => {

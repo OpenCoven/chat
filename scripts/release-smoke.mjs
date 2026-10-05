@@ -16,14 +16,17 @@ const CHECKSUMS = 'SHA256SUMS';
 const UPDATER_MANIFEST = 'latest.json';
 const MAC_TARGETS = ['aarch64-apple-darwin', 'x86_64-apple-darwin'];
 
-/** Installer names exactly as the six release build targets emit them. */
+/**
+ * Installer names exactly as the release build targets emit them. Windows is
+ * deferred until Windows code signing is set up (#356), so its `.msi` and
+ * `.exe` are absent here and refused as unexpected assets if one appears.
+ * Restore them together with the Windows entry in release.yml's build matrix.
+ */
 export function expectedInstallers(version, product = PRODUCT_NAME) {
   const prefix = `${product}_${version}`;
   return [
     `${prefix}_aarch64.dmg`,
     `${prefix}_x64.dmg`,
-    `${prefix}_x64_en-US.msi`,
-    `${prefix}_x64-setup.exe`,
     `${prefix}_amd64.AppImage`,
     `${prefix}_amd64.deb`,
   ];

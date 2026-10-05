@@ -170,6 +170,10 @@ jobs:
       # update is opt-in and currently disabled (docs/releasing.md § 4), so its
       # absence is the expected state rather than an omission, and the build job
       # still reports it as a notice.
+      #
+      # WINDOWS_CERTIFICATE and its password are absent too, for as long as
+      # Windows is deferred: the build matrix has no Windows entry, so nothing
+      # here would use them. They return with that entry.
       - name: Require signing material
         shell: bash
         env:
@@ -182,8 +186,6 @@ jobs:
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-          WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}
-          WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
         run: |
           set -euo pipefail
 
@@ -192,8 +194,7 @@ jobs:
           missing=()
           for name in \
             APPLE_CERTIFICATE APPLE_CERTIFICATE_PASSWORD APPLE_SIGNING_IDENTITY \
-            APPLE_ID APPLE_PASSWORD APPLE_TEAM_ID \
-            WINDOWS_CERTIFICATE WINDOWS_CERTIFICATE_PASSWORD
+            APPLE_ID APPLE_PASSWORD APPLE_TEAM_ID
           do
             if [ -z "${!name:-}" ]; then
               missing+=("${name}")
@@ -388,10 +389,17 @@ jobs:
             runner: macos-15-intel
             target: x86_64-apple-darwin
             bundles: app,dmg
-          - platform: windows-x86_64
-            runner: windows-latest
-            target: x86_64-pc-windows-msvc
-            bundles: msi,nsis
+          # Windows is deferred until Windows code signing is set up (decided
+          # 2026-10-05 on #356): certificate authorities no longer issue the
+          # exportable .pfx that WINDOWS_CERTIFICATE expects. The Windows signing
+          # steps below stay in place. To restore Windows, re-add this entry
+          #   - platform: windows-x86_64
+          #     runner: windows-latest
+          #     target: x86_64-pc-windows-msvc
+          #     bundles: msi,nsis
+          # and, in the same change, require the two WINDOWS_* secrets in
+          # verify-tag and add the Windows installers back to
+          # scripts/release-smoke.mjs.
           - platform: linux-x86_64
             runner: ubuntu-22.04
             target: x86_64-unknown-linux-gnu
@@ -977,7 +985,7 @@ jobs:
           shasum -a 256 -c SHA256SUMS
 
       # Check the assembled set as a whole before anything is published: all
-      # six installers exactly once, SHA256SUMS covering every asset, version
+      # four installers exactly once, SHA256SUMS covering every asset, version
       # and identity agreeing with the tagged tree, and the updater and signing
       # state stated in the summary rather than implied.
       - name: Smoke-test the assembled release

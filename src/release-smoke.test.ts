@@ -37,7 +37,7 @@ function writeChecksums(dir: string, names: string[]) {
   writeFileSync(join(dir, 'SHA256SUMS'), `${lines.join('\n')}\n`);
 }
 
-/** A complete release directory: the six installers plus SHA256SUMS. */
+/** A complete release directory: the four installers plus SHA256SUMS. */
 function release(extra: Record<string, string> = {}) {
   const dir = tempDir('release-smoke-');
   const files: Record<string, string> = {};
@@ -81,15 +81,24 @@ describe('release smoke test', () => {
   });
 
   it('matches the installer names the rehearsal release actually produced', () => {
+    // Windows is deferred until Windows code signing is set up (#356).
     expect(expectedInstallers('0.0.1')).toEqual([
       'OpenCoven Chat_0.0.1_aarch64.dmg',
       'OpenCoven Chat_0.0.1_x64.dmg',
-      'OpenCoven Chat_0.0.1_x64_en-US.msi',
-      'OpenCoven Chat_0.0.1_x64-setup.exe',
       'OpenCoven Chat_0.0.1_amd64.AppImage',
       'OpenCoven Chat_0.0.1_amd64.deb',
     ]);
   });
+
+  it.each([`x64_en-US.msi`, `x64-setup.exe`])(
+    'refuses a Windows %s while Windows is deferred',
+    (suffix) => {
+      const name = `OpenCoven Chat_${VERSION}_${suffix}`;
+      expect(smoke(release({ [name]: 'installer' })).failures).toContain(
+        `Unexpected release asset: ${name}.`,
+      );
+    },
+  );
 
   it.each(expectedInstallers('X').map((_, index) => index))(
     'fails when installer %i is missing',
