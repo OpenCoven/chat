@@ -1357,10 +1357,21 @@ for (const colorScheme of ['dark', 'light'] as const) {
     await expect(page.locator('.coven-screen-input').first()).toBeEnabled();
     await page.getByRole('log', { name: 'Messages' }).focus();
     await page.keyboard.press('Control+f');
-    await expect(page.getByRole('searchbox', { name: 'Find in conversation' })).toBeVisible();
+    const find = page.getByRole('searchbox', { name: 'Find in conversation' });
+    await expect(find).toBeVisible();
+    // The bar focuses its field on the next animation frame. Blurring before
+    // that frame lets the late focus land in the unfocused capture, so the
+    // field's ring shows in both pictures and measures as no change.
+    await expect(find).toBeFocused();
     await page.mouse.move(2, 2);
     await page.addStyleTag({ content: '* { caret-color: transparent !important; }' });
     await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+    // Blurring starts the same brief transitions the focused captures wait out
+    // below. Until they finish, the find bar still wears its ring in this
+    // picture, and its focused capture then measures as no change at all.
+    await page.waitForFunction(() =>
+      document.getAnimations().every((animation) => animation.playState !== 'running'),
+    );
     const unfocused = (await page.screenshot()).toString('base64');
 
     const failures: string[] = [];
