@@ -193,6 +193,10 @@ continue past the gate when platform secrets are *missing*. With all eight
 present the switch is a no-op and the Apple and Authenticode paths run
 normally.
 
+An `allow_unsigned` run never publishes. `verify-tag` refuses one dispatched
+with `dry_run=false`, before anything is built, and the publish step refuses it
+again. To publish, dispatch without the switch or push the tag.
+
 The distinction matters when rehearsing before the certificates exist. On such
 a run, each platform whose secrets are absent builds unsigned — no
 notarization, no Authenticode — so a green result says nothing about whether
@@ -226,8 +230,10 @@ the version is spent.
 
 To build deliberately unsigned artifacts — rehearsing the pipeline before the
 certificates exist, for instance — dispatch the workflow manually with
-`allow_unsigned=true`. That switch is dispatch-only: the `inputs` context does
-not exist on a tag push, so the production path cannot reach it.
+`allow_unsigned=true` and `dry_run=true`. That switch is dispatch-only: the
+`inputs` context does not exist on a tag push, so the production path cannot
+reach it. It is also rehearsal-only: a run that sets it never publishes a
+release (see the dry-run rehearsal above).
 
 Two secrets are exempt, for different reasons. `TAURI_SIGNING_PRIVATE_KEY` is
 not required because auto-update is opt-in and currently disabled (§ 4), so its

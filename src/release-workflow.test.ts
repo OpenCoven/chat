@@ -215,6 +215,31 @@ describe('release workflow specification', () => {
     expect(verify).not.toMatch(/TAURI_SIGNING_PRIVATE_KEY: \$\{\{ secrets\./);
   });
 
+  test('never publishes an allow_unsigned build', () => {
+    const verify = job('verify-tag', 'build');
+    const publish = job('publish');
+    const publishStep = publish.slice(
+      publish.indexOf('- name: Publish GitHub release'),
+      publish.indexOf('- name: Summarize dry run'),
+    );
+
+    // Refused while the tag is resolved, so a mistaken dispatch costs seconds
+    // rather than four platform builds and a published unsigned release.
+    const guard = verify.indexOf('allow_unsigned=true is for rehearsals only');
+    expect(verify).toContain(`INPUT_ALLOW_UNSIGNED: \${{ inputs.allow_unsigned }}`);
+    expect(guard).toBeGreaterThan(verify.indexOf('dry_run=true'));
+    expect(guard).toBeLessThan(verify.indexOf('>> "$GITHUB_OUTPUT"'));
+    expect(guard).toBeLessThan(verify.indexOf('Require signing material'));
+
+    // And again where the release is created, ahead of `gh release create`.
+    expect(publishStep).toContain(`ALLOW_UNSIGNED: \${{ inputs.allow_unsigned }}`);
+    expect(publishStep.indexOf('Refusing to publish an allow_unsigned build')).toBeGreaterThan(-1);
+    expect(publishStep.indexOf('Refusing to publish an allow_unsigned build')).toBeLessThan(
+      publishStep.indexOf('gh release create'),
+    );
+    expect(releasingGuide).toContain('An `allow_unsigned` run never publishes');
+  });
+
   test('documents conditional updates and the current storage boundary', () => {
     expect(releasingGuide).toContain('conditionally generates the updater manifest');
     expect(releasingGuide).toContain('leave `dry_run` at its default value of `true`');
