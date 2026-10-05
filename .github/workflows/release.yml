@@ -16,7 +16,7 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: 'Existing signed tag to build (for example v0.0.1)'
+        description: 'Existing signed tag to build (for example v0.0.2)'
         required: true
         type: string
       dry_run:
@@ -235,7 +235,7 @@ jobs:
 
       # The package's declared contract (names, window bounds, strict CSP,
       # installer targets and icons, the capability allowlist, no shell or
-      # filesystem plugins) and the v0.0.1 decisions on issue #356 (no
+      # filesystem plugins) and the first release's decisions on issue #356 (no
       # updater, no deep-link protocol) are enforced before any build.
       - name: Verify the package contract
         run: node scripts/verify-package.mjs
@@ -492,7 +492,7 @@ jobs:
             echo "::warning::Windows signing material is absent or incomplete; producing an UNSIGNED Windows build. This is only reachable via allow_unsigned; do not publish these artifacts."
           fi
           if [ "${updater_signed}" = "false" ]; then
-            echo "::notice::TAURI_SIGNING_PRIVATE_KEY is not set; updater artifacts and latest.json are not produced. Auto-update is opt-in and disabled for v0.0.1 (no plugins.updater / createUpdaterArtifacts:false). See docs/releasing.md."
+            echo "::notice::TAURI_SIGNING_PRIVATE_KEY is not set; updater artifacts and latest.json are not produced. Auto-update is opt-in and currently disabled (no plugins.updater / createUpdaterArtifacts:false). See docs/releasing.md."
           fi
 
       # Import Windows signing material before bundling so Tauri signs the
@@ -551,7 +551,7 @@ jobs:
 
       # Apple signing variables are consumed directly by Tauri. Updater
       # artifacts appear only when the updater plugin and private key are both
-      # configured; their absence is expected for v0.0.1.
+      # configured; their absence is expected while auto-update is disabled.
       - name: Build installers
         shell: bash
         env:
@@ -872,7 +872,7 @@ jobs:
           ls -la release
 
       # Emit the Tauri updater manifest (latest.json) ONLY when signed updater
-      # artifacts actually exist. As of v0.0.1 the repo has no `plugins.updater`
+      # artifacts actually exist. As of v0.0.2 the repo has no `plugins.updater`
       # section and ships `bundle.createUpdaterArtifacts: false`, so `tauri
       # build` produces no `.sig` files and this step deliberately produces no
       # latest.json (auto-update is opt-in; see docs/releasing.md). It becomes
