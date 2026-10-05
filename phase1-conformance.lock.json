@@ -18,11 +18,11 @@
   },
   "harness": {
     "repository": "OpenCoven/chat",
-    "revision": "2f72ecedd225759a11889ec4b7dd112b71361d56"
+    "revision": "9b5d86fc65515d7723e959728cf4f736a714bd54"
   },
   "harnessAuthority": {
-    "revision": "2f72ecedd225759a11889ec4b7dd112b71361d56",
-    "tree": "0a2e550bddbeaec405367d1dcb383c38fb10fb51",
+    "revision": "9b5d86fc65515d7723e959728cf4f736a714bd54",
+    "tree": "c5fff07b7d1dd00f26923dbfe8c7a4f354949aba",
     "files": [
       {
         "path": "scripts/phase1-conformance.mjs",
@@ -141,8 +141,8 @@
       },
       {
         "path": ".github/workflows/ci.yml",
-        "blob": "1212c7eecfa5781713b2399a2f0d37ad765f6afa",
-        "sha256": "4e2a4d77c6224bc098d9b356c6a47da256b86d6537a4477374dd87680f2b939a"
+        "blob": "4d19cee72bbf2b1cf974a976c4e840c116655f86",
+        "sha256": "852e5b4522a66e53aeb407cc615b7eb11469806d8e19b70b70aa5e6d88340d3b"
       },
       {
         "path": ".github/workflows/client-v1-conformance.yml",
@@ -153,13 +153,13 @@
     "productionDeltas": [
       {
         "path": "src-tauri/Cargo.toml",
-        "blob": "6c0f118ad21595067c91d1965994be95fae9dbf1",
-        "sha256": "3f53d4710dd4bf17d3be30b3d219d61fb5d85c66ecb2472ecd7206f186666f68"
+        "blob": "6c2925a04569b3cc7e503b2f84be2f92973d92a5",
+        "sha256": "ff3fe805b01cb054728b3f25c5f97c43f472a75715d4c6d53fe56d63417fd1bf"
       },
       {
         "path": "src-tauri/Cargo.lock",
-        "blob": "5bb14effed69756d32fa1f3d7f75ab173733547c",
-        "sha256": "3f3d7ecd87fd6f96678dab9fe484081e49161fcc413cd20a2a7af045f588a71d"
+        "blob": "2ccadb78bd156120e2871afa4c26a49bbafd023e",
+        "sha256": "fb70a813c6c034cf07f69c1fee06248a00777f32ac0c68815e4158f75bfd43da"
       },
       {
         "path": "src-tauri/src/bin/phase1-native-rpc.rs",
