@@ -7,7 +7,12 @@ rest: it verifies the tag, builds signed installers for macOS, Windows, and
 Linux, checksums them, conditionally generates the updater manifest when
 auto-update is configured, and publishes a GitHub Release.
 
-The first public release is **v0.0.1**.
+The first public release is **v0.0.2**.
+
+There is no v0.0.1 release. A signed `v0.0.1` tag was pushed on 2026-09-16,
+but its release run stopped at the signing gate because the `release-signing`
+environment held no secrets, so nothing was published. The tag stays on the
+remote as history, and the version is not reused (§ 6.3).
 
 ---
 
@@ -31,7 +36,7 @@ Run through this in order. Every step is runnable as written.
    - `src-tauri/Cargo.toml` → `[package] version`
 
    ```bash
-   # confirm they match, e.g. for 0.0.1
+   # confirm they match, e.g. for 0.0.2
    node -p "require('./package.json').version"
    node -p "require('./src-tauri/tauri.conf.json').version"
    grep -m1 '^version' src-tauri/Cargo.toml
@@ -48,7 +53,7 @@ Run through this in order. Every step is runnable as written.
    the 1180×780 default and 480×520 minimum window, a strict CSP with no
    network origins in `connect-src`, the installer targets and icons, the
    main window's capability allowlist, and no shell, filesystem, HTTP or
-   opener plugin. It also holds the v0.0.1 decisions recorded on issue #356:
+   opener plugin. It also holds the first release's decisions recorded on issue #356:
    no updater (see § 4) and no deep-link protocol. A release that enables
    either changes that decision in `scripts/verify-package.mjs` in the same
    change that configures it.
@@ -78,14 +83,14 @@ Run through this in order. Every step is runnable as written.
 
    ```bash
    git checkout main && git pull --ff-only
-   git tag -s v0.0.1 -m "OpenCoven Chat v0.0.1"
-   git verify-tag v0.0.1
+   git tag -s v0.0.2 -m "OpenCoven Chat v0.0.2"
+   git verify-tag v0.0.2
    ```
 
 7. **Push the tag.** This is the point of no return — it starts the release.
 
    ```bash
-   git push origin v0.0.1
+   git push origin v0.0.2
    ```
 
 8. **Watch the `Release` workflow.** It will:
@@ -118,7 +123,7 @@ Run through this in order. Every step is runnable as written.
     to be applied deliberately:
 
     ```bash
-    gh release edit v0.0.1 --notes-file docs/release-notes/v0.0.1.md
+    gh release edit v0.0.2 --notes-file docs/release-notes/v0.0.2.md
     ```
 
     Do this even for a pre-release. The generated body does not say what
@@ -136,7 +141,7 @@ carries a **GPG or SSH signature**. The workflow rejects anything else.
 Create a signed tag:
 
 ```bash
-git tag -s v0.0.1 -m "OpenCoven Chat v0.0.1"
+git tag -s v0.0.2 -m "OpenCoven Chat v0.0.2"
 ```
 
 `-s` signs with your configured signing key. This machine signs with SSH:
@@ -149,7 +154,7 @@ git config --get user.signingkey   # your signing key
 Verify before pushing:
 
 ```bash
-git verify-tag v0.0.1
+git verify-tag v0.0.2
 ```
 
 For **SSH-signed** tags, `git verify-tag` needs an allowed-signers file:
@@ -168,7 +173,7 @@ the authority; the workflow never treats an unverifiable tag as releasable.
 Delete a bad *local* tag before it is pushed:
 
 ```bash
-git tag -d v0.0.1
+git tag -d v0.0.2
 ```
 
 ## Dry-run rehearsal
@@ -257,7 +262,7 @@ adds an independent local SSH check.
 
 ## 4. Auto-update status and how to enable it
 
-> **v0.0.1 ships WITHOUT auto-update.** This repository currently has **no
+> **v0.0.2 ships WITHOUT auto-update.** This repository currently has **no
 > `plugins.updater`** section and no updater public key, and
 > `src-tauri/tauri.conf.json` sets `bundle.createUpdaterArtifacts: false`.
 > Setting it to `true` without the plugin configured makes `tauri build` fail
@@ -271,7 +276,7 @@ adds an independent local SSH check.
 > Because of this, the release workflow produces **no `.sig` files and no
 > `latest.json`** today, and it does **not** fail on their absence — the
 > updater manifest step is opt-in and simply skips (`::notice::`) when no
-> updater artifacts exist. Users of v0.0.1 update by downloading a newer
+> updater artifacts exist. Users of v0.0.2 update by downloading a newer
 > release manually.
 
 ### Enabling auto-update (later release)
@@ -325,7 +330,7 @@ with a new key.
 ## 5. Artifacts produced
 
 The product name contains a space, so installer filenames look like
-`OpenCoven Chat_0.0.1_aarch64.dmg`. Always quote artifact paths in scripts.
+`OpenCoven Chat_0.0.2_aarch64.dmg`. Always quote artifact paths in scripts.
 
 Per release, the workflow publishes:
 
@@ -339,7 +344,7 @@ Per release, the workflow publishes:
 - **`SHA256SUMS`**: checksums for every asset. Verify with
   `shasum -a 256 -c SHA256SUMS`.
 - **`latest.json`**: the Tauri updater manifest — **only when auto-update is
-  enabled** (see §4). Absent for v0.0.1.
+  enabled** (see §4). Absent for v0.0.2.
 
 ---
 
@@ -354,7 +359,7 @@ this order.
 This is the most urgent step, because the updater is the only channel that
 pushes a bad build to users who did nothing.
 
-> **Not applicable to v0.0.1**, which ships without auto-update (no
+> **Not applicable to v0.0.2**, which ships without auto-update (no
 > `latest.json`; see §4). If auto-update is still disabled, skip to §6.2.
 
 1. **Delete the bad release's `latest.json` asset.** This stops new clients
@@ -368,23 +373,23 @@ pushes a bad build to users who did nothing.
 
 ```bash
 # Convert the release to a draft so it disappears from the Releases page:
-gh release edit v0.0.1 --draft
+gh release edit v0.0.2 --draft
 
 # or delete the release (keeps the tag unless you also delete it):
-gh release delete v0.0.1 --yes
+gh release delete v0.0.2 --yes
 ```
 
 If you delete the release but keep the tag, the tag can still be referenced;
 prefer marking it clearly:
 
 ```bash
-gh release edit v0.0.1 --prerelease --title "OpenCoven Chat v0.0.1 (WITHDRAWN — do not use)"
+gh release edit v0.0.2 --prerelease --title "OpenCoven Chat v0.0.2 (WITHDRAWN — do not use)"
 ```
 
 ### 6.3 Delete or supersede the tag
 
 **Preferred: supersede.** Do not reuse a version number. Fix the defect, bump
-to the next patch (e.g. `v0.0.2`), and cut a fresh signed release. Re-releasing
+to the next patch (e.g. `v0.0.3`), and cut a fresh signed release. Re-releasing
 under the same tag breaks anyone who already has the old artifacts and
 checksums.
 
@@ -393,9 +398,9 @@ were distributed):
 
 ```bash
 # delete the remote tag
-git push --delete origin v0.0.1
+git push --delete origin v0.0.2
 # delete it locally
-git tag -d v0.0.1
+git tag -d v0.0.2
 ```
 
 Deleting a tag that people may have already fetched is disruptive; only do it
