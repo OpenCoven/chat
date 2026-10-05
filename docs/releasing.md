@@ -3,9 +3,19 @@
 This document is the runbook for cutting a public release of **OpenCoven Chat**
 (`ai.opencoven.chat`). Releases are driven entirely by pushing a **signed,
 annotated `v*` tag**. The `.github/workflows/release.yml` pipeline does the
-rest: it verifies the tag, builds signed installers for macOS, Windows, and
-Linux, checksums them, conditionally generates the updater manifest when
-auto-update is configured, and publishes a GitHub Release.
+rest: it verifies the tag, builds signed installers for macOS and Linux,
+checksums them, conditionally generates the updater manifest when auto-update
+is configured, and publishes a GitHub Release.
+
+**Windows is deferred** until Windows code signing is set up (decided
+2026-10-05 on #356). Certificate authorities have issued code-signing keys
+only on hardware tokens or cloud HSMs since June 2023, so the exportable
+`.pfx` that `WINDOWS_CERTIFICATE` expects is no longer obtainable. Windows also
+cannot send in the current app. The Windows signing steps stay in
+`release.yml`. To restore Windows, re-add its build-matrix entry, require the two
+`WINDOWS_*` secrets in `verify-tag`, and add its installers back to
+`scripts/release-smoke.mjs`, all in the same change. The comment above the
+matrix spells this out.
 
 The first public release is **v0.0.2**.
 
@@ -100,7 +110,7 @@ Run through this in order. Every step is runnable as written.
    - build installers on each platform and smoke-test them,
    - generate `SHA256SUMS` and, only when signed updater artifacts exist,
      `latest.json`,
-   - smoke-test the assembled release with `scripts/release-smoke.mjs`: all six
+   - smoke-test the assembled release with `scripts/release-smoke.mjs`: all four
      installers present once and non-empty, `SHA256SUMS` covering every asset
      and matching its bytes, the tag, `package.json`, `tauri.conf.json` and
      `Cargo.toml` versions agreeing, the product name and identifier
@@ -183,7 +193,7 @@ The workflow can be run manually against an existing signed tag. In
 change, enter the tag, and leave `dry_run` at its default value of `true`.
 
 A dry run verifies the remote tag, checks out its exact commit, reruns the
-release-relevant tests, builds and smoke-tests all four native targets,
+release-relevant tests, builds and smoke-tests all three native targets,
 generates and verifies checksums, and then stops without creating or modifying
 a GitHub Release. Use this path to validate workflow changes and signing-secret
 wiring before the next real tag push.
@@ -194,9 +204,9 @@ rehearsed against a tag that predates it. Select `main` unless you are
 deliberately testing an older pipeline.
 
 `allow_unsigned=true` does not itself skip signing: it only lets the run
-continue past the gate when platform secrets are *missing*. With all eight
-present the switch is a no-op and the Apple and Authenticode paths run
-normally.
+continue past the gate when platform secrets are *missing*. With all six
+Apple secrets present the switch is a no-op and the Apple signing and
+notarization paths run normally.
 
 An `allow_unsigned` run never publishes. `verify-tag` refuses one dispatched
 with `dry_run=false`, before anything is built, and the publish step refuses it
@@ -224,9 +234,9 @@ All signing secrets live in the GitHub deployment **environment**
 release-signing**.
 
 **A missing platform signing secret fails the release.** The `verify-tag` job
-refuses to continue when any of the eight Apple and Windows secrets below is
-absent, before the tag is checked out and long before the platform builds
-start. This used to be a warning, and a warning is the wrong shape for it: the
+refuses to continue when any of the six Apple secrets below is absent, before
+the tag is checked out and long before the platform builds start. The two
+Windows secrets are not required while Windows is deferred. This used to be a warning, and a warning is the wrong shape for it: the
 default outcome of a missing secret was a *published* unsigned release and a
 yellow annotation nobody reads. An unsigned `.app` will not open past
 Gatekeeper, an unsigned `.msi` is flagged by SmartScreen, and the tag cannot be
@@ -254,8 +264,8 @@ adds an independent local SSH check.
 | `APPLE_ID` | Apple ID used for notarization | `release-signing` |
 | `APPLE_PASSWORD` | app-specific password for that Apple ID | `release-signing` |
 | `APPLE_TEAM_ID` | Apple Developer Team ID | `release-signing` |
-| `WINDOWS_CERTIFICATE` | base64 of the Authenticode code-signing `.pfx` | `release-signing` |
-| `WINDOWS_CERTIFICATE_PASSWORD` | password for the `.pfx` | `release-signing` |
+| `WINDOWS_CERTIFICATE` | base64 of the Authenticode code-signing `.pfx` (not required while Windows is deferred) | `release-signing` |
+| `WINDOWS_CERTIFICATE_PASSWORD` | password for the `.pfx` (not required while Windows is deferred) | `release-signing` |
 | `TAURI_SIGNING_PRIVATE_KEY` | Tauri updater private key (signs updater artifacts) | `release-signing` |
 | `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` | password for the updater private key | `release-signing` |
 | `TAG_ALLOWED_SIGNERS` | allowed-signers file contents for verifying SSH-signed tags | `release-signing` |
@@ -344,8 +354,8 @@ Per release, the workflow publishes:
   `x86_64`, signed and notarized when Apple secrets are present. The Intel
   target runs natively on GitHub's `macos-15-intel` runner rather than
   cross-compiling on Apple silicon.
-- **Windows**: `.msi` and NSIS `.exe` for `x86_64`, Authenticode-signed when
-  the Windows secret is present.
+- **Windows**: deferred; see the top of this document. When restored, it
+  publishes `.msi` and NSIS `.exe` for `x86_64`, Authenticode-signed.
 - **Linux**: `.AppImage` and `.deb` for `x86_64`.
 - **`SHA256SUMS`**: checksums for every asset. Verify with
   `shasum -a 256 -c SHA256SUMS`.
