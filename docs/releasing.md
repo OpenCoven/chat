@@ -212,6 +212,14 @@ An `allow_unsigned` run never publishes. `verify-tag` refuses one dispatched
 with `dry_run=false`, before anything is built, and the publish step refuses it
 again. To publish, dispatch without the switch or push the tag.
 
+The production path never builds unsigned either. `verify-tag`'s secrets gate
+runs once per workflow run, so a re-run of failed jobs re-reads the secrets in
+the build job instead. That job refuses to continue when the Apple material is
+incomplete and the run was not dispatched with `allow_unsigned`, and its
+artifact check runs `codesign` and `spctl` whatever the signing step reported.
+This closed a real gap: on 2026-10-07 an `APPLE_ID` saved as an empty value
+let a re-run of v0.0.2 build unsigned and publish (#356).
+
 The distinction matters when rehearsing before the certificates exist. On such
 a run, each platform whose secrets are absent builds unsigned — no
 notarization, no Authenticode — so a green result says nothing about whether

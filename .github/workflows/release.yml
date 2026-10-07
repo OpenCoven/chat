@@ -452,15 +452,19 @@ jobs:
       # are present. The result is surfaced so the artifacts and the job log say
       # plainly when a build is unsigned.
       #
-      # `verify-tag` has already refused to get this far with a signing secret
-      # missing, so the unsigned branches below are only reachable on a
-      # deliberate allow_unsigned dispatch. They are kept because that path
-      # still exists and an unsigned artifact should still say so in its own
-      # job log, not only in the gate that permitted it.
+      # `verify-tag` refuses a production run with a signing secret missing,
+      # but that gate runs once per workflow run. Re-running failed jobs skips
+      # it and re-reads the secrets here, so a secret emptied between the gate
+      # and the build reaches this step unchecked. On 2026-10-07 an empty
+      # APPLE_ID did exactly that on a re-run of v0.0.2: this step warned,
+      # built unsigned, and the release published (#356). The unsigned branch
+      # is therefore a refusal here too, unless the run was dispatched with
+      # allow_unsigned, which is empty on a tag push.
       - id: signing
         name: Determine signing availability
         shell: bash
         env:
+          ALLOW_UNSIGNED: ${{ inputs.allow_unsigned }}
           APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
           APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
           APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
@@ -494,9 +498,17 @@ jobs:
           echo "windows_signed=${windows_signed}" >> "$GITHUB_OUTPUT"
           echo "updater_signed=${updater_signed}" >> "$GITHUB_OUTPUT"
           if [ "${{ runner.os }}" = "macOS" ] && [ "${macos_signed}" = "false" ]; then
+            if [ "${ALLOW_UNSIGNED:-false}" != "true" ]; then
+              echo "::error::Apple signing material is absent or incomplete on the production path; refusing to build unsigned. Check every APPLE_* secret in release-signing for an empty value, then re-run."
+              exit 1
+            fi
             echo "::warning::Apple signing material is absent or incomplete; producing an UNSIGNED, un-notarized macOS build. This is only reachable via allow_unsigned; do not publish these artifacts."
           fi
           if [ "${{ runner.os }}" = "Windows" ] && [ "${windows_signed}" = "false" ]; then
+            if [ "${ALLOW_UNSIGNED:-false}" != "true" ]; then
+              echo "::error::Windows signing material is absent or incomplete on the production path; refusing to build unsigned."
+              exit 1
+            fi
             echo "::warning::Windows signing material is absent or incomplete; producing an UNSIGNED Windows build. This is only reachable via allow_unsigned; do not publish these artifacts."
           fi
           if [ "${updater_signed}" = "false" ]; then
@@ -681,6 +693,7 @@ jobs:
         shell: bash
         env:
           MACOS_SIGNED: ${{ steps.signing.outputs.macos_signed }}
+          ALLOW_UNSIGNED: ${{ inputs.allow_unsigned }}
           EXPECTED_VERSION: ${{ needs.verify-tag.outputs.version }}
           TARGET: ${{ matrix.target }}
         run: |
@@ -739,13 +752,17 @@ jobs:
                 fi
                 echo "  ok: .app ${bundle_id} ${bundle_version}, architecture ${expected_arch}"
 
-                if [ "${MACOS_SIGNED}" = "true" ]; then
+                # The skip below is for allow_unsigned rehearsals only. On the
+                # production path the signature is checked whatever the
+                # signing step reported, so an unsigned .app can never be
+                # staged for publication.
+                if [ "${MACOS_SIGNED}" = "true" ] || [ "${ALLOW_UNSIGNED:-false}" != "true" ]; then
                   echo "  verifying code signature..."
                   codesign --verify --deep --strict --verbose=2 "${app}"
                   spctl --assess --type execute --verbose=2 "${app}" || {
-                    echo "::error::spctl assessment failed for signed ${app}."; exit 1; }
+                    echo "::error::spctl assessment failed for ${app}."; exit 1; }
                 else
-                  echo "  (unsigned build: skipping codesign/spctl)"
+                  echo "  (unsigned rehearsal build: skipping codesign/spctl)"
                 fi
                 rm -rf "${work}"
               fi
