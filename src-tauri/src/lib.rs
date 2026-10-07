@@ -5,6 +5,7 @@ mod chat_origin;
 #[cfg(feature = "phase1-conformance")]
 mod cleanup_grant;
 mod commands;
+pub mod companion;
 #[cfg(feature = "phase1-conformance")]
 pub mod conformance;
 mod connection;
@@ -261,7 +262,13 @@ fn builder() -> tauri::Builder<tauri::Wry> {
         .manage(NativeConnectionState::default())
         .manage(coven_runtime::CovenRuntimeState::default())
         .manage(screen_relay::ScreenRelayState::default())
+        .manage(companion::CompanionState::default())
         .invoke_handler(tauri::generate_handler![
+            companion::companion_status,
+            companion::companion_enable,
+            companion::companion_disable,
+            companion::companion_forget,
+            companion::companion_active_run,
             coven_runtime::coven_runtime_status,
             coven_runtime::coven_runtime_familiars,
             coven_runtime::coven_runtime_sessions,
@@ -302,6 +309,8 @@ pub fn run() {
         .expect("error while building OpenCoven Chat")
         .run(|app, event| {
             if let tauri::RunEvent::ExitRequested { api, code, .. } = event {
+                use tauri::Manager;
+                app.state::<companion::CompanionState>().shutdown();
                 coven_runtime::handle_exit_requested(app, &api, code.unwrap_or(0));
             }
         });

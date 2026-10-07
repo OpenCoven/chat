@@ -1,0 +1,4 @@
+*.xcodeproj/
+build/
+*.xcresult/
+TestSupport/LocalPairing.json

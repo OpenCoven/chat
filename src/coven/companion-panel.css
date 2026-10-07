@@ -1,0 +1,70 @@
+.coven-companion-open {
+  color: inherit;
+  font: inherit;
+  background: none;
+  border: 0;
+  text-align: left;
+  padding: 6px 0;
+  cursor: pointer;
+}
+.coven-companion-dialog {
+  color: var(--text-primary);
+  background: var(--bg-panel, Canvas);
+  border: 1px solid var(--border-strong, GrayText);
+  border-radius: 16px;
+  padding: 24px;
+  width: min(440px, calc(100vw - 32px));
+  max-height: calc(100dvh - 48px);
+  overflow: auto;
+  box-sizing: border-box;
+}
+.coven-companion-dialog::backdrop {
+  background: #0008;
+}
+.coven-companion-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+.coven-companion-heading h2 {
+  font-size: 20px;
+  margin: 0;
+}
+.coven-companion-dialog p {
+  line-height: 1.5;
+}
+.coven-companion-pairing img {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  margin: 16px auto;
+  border-radius: 8px;
+}
+.coven-companion-pairing label {
+  display: grid;
+  gap: 8px;
+}
+.coven-companion-pairing input {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 8px;
+  font: inherit;
+  color: inherit;
+  background: transparent;
+  border: 1px solid var(--border-strong, GrayText);
+  border-radius: 6px;
+}
+.coven-companion-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 16px;
+}
+.coven-companion-note {
+  font-size: 12px;
+}
+.coven-companion-confirm {
+  margin-top: 16px;
+  border-top: 1px solid var(--border-strong, GrayText);
+}

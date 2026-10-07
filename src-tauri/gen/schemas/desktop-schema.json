@@ -291,6 +291,36 @@
           "markdownDescription": "Enables the cave_reset_pairing command without any pre-configured scope."
         },
         {
+          "description": "Enables the companion_active_run command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-companion-active-run",
+          "markdownDescription": "Enables the companion_active_run command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the companion_disable command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-companion-disable",
+          "markdownDescription": "Enables the companion_disable command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the companion_enable command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-companion-enable",
+          "markdownDescription": "Enables the companion_enable command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the companion_forget command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-companion-forget",
+          "markdownDescription": "Enables the companion_forget command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the companion_status command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-companion-status",
+          "markdownDescription": "Enables the companion_status command without any pre-configured scope."
+        },
+        {
           "description": "Enables the coven_health command without any pre-configured scope.",
           "type": "string",
           "const": "allow-coven-health",
@@ -469,6 +499,36 @@
           "type": "string",
           "const": "deny-cave-reset-pairing",
           "markdownDescription": "Denies the cave_reset_pairing command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the companion_active_run command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-companion-active-run",
+          "markdownDescription": "Denies the companion_active_run command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the companion_disable command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-companion-disable",
+          "markdownDescription": "Denies the companion_disable command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the companion_enable command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-companion-enable",
+          "markdownDescription": "Denies the companion_enable command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the companion_forget command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-companion-forget",
+          "markdownDescription": "Denies the companion_forget command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the companion_status command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-companion-status",
+          "markdownDescription": "Denies the companion_status command without any pre-configured scope."
         },
         {
           "description": "Denies the coven_health command without any pre-configured scope.",

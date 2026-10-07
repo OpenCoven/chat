@@ -29,6 +29,7 @@ import { Composer } from '../ui/composer';
 import { MenuPortalContainer } from '../ui/dropdown-menu';
 import { ATTACHMENT_ACCEPT, type ChatAttachment, formatAttachmentSize } from './attachments';
 import { ChatLifecycleControls } from './chat-lifecycle';
+import { CompanionPanel } from './companion-panel';
 import { ContextPicker } from './context-picker';
 import { CopyButton } from './copy-button';
 import type { ChatMessage } from './events';
@@ -308,19 +309,6 @@ export function activityCounts(messages: readonly ChatMessage[]) {
     .join(' · ');
   return { sent, replies, tools, failed, breakdown };
 }
-
-/** The shell's keys, listed in the sidebar footer. Every entry is wired above. */
-export const SHORTCUTS: readonly (readonly [keys: string, action: string])[] = [
-  ['Cmd/Ctrl+\\', 'Show or hide the familiar list'],
-  ['Cmd/Ctrl+Shift+\\', 'Show or hide the inspector'],
-  ['Cmd/Ctrl+K', 'Search familiars'],
-  ['Cmd/Ctrl+F', 'Find in the conversation; Enter and Shift+Enter step through matches'],
-  ['Cmd/Ctrl+[ and ]', 'Previous or next familiar in the list'],
-  ['↑ ↓ Home End', 'Move through the list; Enter opens, Escape clears the search'],
-  ['Enter', 'Send the message; Shift+Enter starts a new line'],
-  ['@ or #', 'Mention a familiar or project; Tab confirms, Escape dismisses'],
-  ['Any letter', 'Start typing anywhere to message the familiar'],
-];
 
 function activeControl(): HTMLElement | null {
   return document.activeElement instanceof HTMLElement ? document.activeElement : null;
@@ -1029,17 +1017,38 @@ export function ChatLayout(props: ChatLayoutProps) {
           inert={!sidebar}
         >
           <div className="fr-sidebar-inner">
-            <button
-              type="button"
-              className="fr-rail-toggle"
-              aria-label="Hide familiars"
-              aria-keyshortcuts={LEFT_RAIL_SHORTCUT}
-              title={LEFT_RAIL_HINT}
-              onClick={() => setSidebar(false)}
-            >
-              <span className="fr-rail-toggle-label">Familiars</span>
-              <Icon name="sidebar-simple" size={15} />
-            </button>
+            <div className="coven-sidebar-heading">
+              <button
+                type="button"
+                className="fr-rail-toggle"
+                aria-label="Hide familiars"
+                aria-keyshortcuts={LEFT_RAIL_SHORTCUT}
+                title={LEFT_RAIL_HINT}
+                onClick={() => setSidebar(false)}
+              >
+                <span className="fr-rail-toggle-label">Familiars</span>
+                <Icon name="sidebar-simple" size={15} />
+              </button>
+              <details className="coven-sidebar-options">
+                <summary aria-label="Sidebar options" title="Sidebar options">
+                  ⋯
+                </summary>
+                <div className="coven-sidebar-options-menu">
+                  {props.onArchivedFilter && (
+                    <label>
+                      <input
+                        type="checkbox"
+                        checked={Boolean(props.archivedFilter)}
+                        disabled={props.lifecycleBusy}
+                        onChange={(event) => props.onArchivedFilter?.(event.target.checked)}
+                      />
+                      Show archived chats
+                    </label>
+                  )}
+                  <CompanionPanel />
+                </div>
+              </details>
+            </div>
             <label className="coven-agent-search">
               <Icon name="magnifying-glass" size={14} />
               <input
@@ -1155,35 +1164,6 @@ export function ChatLayout(props: ChatLayoutProps) {
                   ) : null}
                 </div>
               ) : null}
-            </div>
-            <div className="fr-sidebar-foot coven-user-settings">
-              {props.onArchivedFilter ? (
-                <details>
-                  <summary>User settings</summary>
-                  <label>
-                    <input
-                      type="checkbox"
-                      checked={Boolean(props.archivedFilter)}
-                      disabled={props.lifecycleBusy}
-                      onChange={(event) => props.onArchivedFilter?.(event.target.checked)}
-                    />
-                    Show archived chats
-                  </label>
-                </details>
-              ) : null}
-              <details className="coven-shortcuts">
-                <summary>Keyboard shortcuts</summary>
-                <dl>
-                  {SHORTCUTS.map(([keys, action]) => (
-                    <div key={keys}>
-                      <dt>
-                        <kbd>{keys}</kbd>
-                      </dt>
-                      <dd>{action}</dd>
-                    </div>
-                  ))}
-                </dl>
-              </details>
             </div>
           </div>
         </aside>

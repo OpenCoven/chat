@@ -37,10 +37,9 @@ filter. **Cmd/Ctrl+F** opens a find bar over the conversation that counts
 the messages and tool calls containing your text; **Enter** and
 **Shift+Enter** step through them, scrolling each into view, and
 **Escape** closes it. These shortcuts work while composing
-without changing your text, stay quiet while a dialog or menu is open, and **Keyboard
-shortcuts** at the foot of the familiar list lists them all. Typing a letter while nothing editable has
+without changing your text, stay quiet while a dialog or menu is open, and rail buttons display shortcut hints. Typing a letter while nothing editable has
 focus starts a message: the keystroke moves to the composer and lands there,
-unless the composer cannot send or a dialog or menu is open. Rail buttons include shortcut hints; modal dialogs and input-method
+unless the composer cannot send or a dialog or menu is open. Modal dialogs and input-method
 composition do not trigger the shortcuts.
 
 Closed rails remain as 28px full-height tabs: **Familiars** on the left and the
@@ -193,8 +192,7 @@ thread header; focus returns there after the delete dialog closes).
 **Archive chat** keeps the saved history and hides the
 familiar from the active list; an archived chat shows **Restore chat** in the
 header itself, since restoring is what lets you send again.
-The familiar list shows active chats; **Show archived chats**, under **User
-settings** at the foot of the list, switches it to archived ones. Archived
+The familiar list shows active chats; **Show archived chats**, in **Sidebar options** (⋯) at the top of the list, switches it to archived ones. Archived
 history is preserved, and archive state survives refreshes and app restarts.
 
 **Delete chat** requires confirmation and is strictly app-local: it removes the
@@ -395,3 +393,11 @@ Releases are cut from signed `v*` tags through
 [`.github/workflows/release.yml`](.github/workflows/release.yml). The
 [release guide](docs/releasing.md) covers platform bundles, signing,
 checksums, rehearsals, and recovery.
+
+## iPhone companion
+
+Open **Sidebar options** (⋯) above the familiar list, then **iPhone companion**
+to enable local pairing. The native iPhone app reads your Chat conversations,
+sends text, streams replies and stops runs through the same Coven runtime on
+your Mac. Keep both devices on the same local network with the Mac awake.
+See [pairing, builds and verification](docs/iphone-companion.md).

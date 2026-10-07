@@ -845,3 +845,103 @@ describe('canonical familiar controller', () => {
     expect(api.listSessions).toHaveBeenCalledOnce();
   });
 });
+
+describe('phone run synchronization', () => {
+  it('coalesces phone events while an authoritative history read is slow', async () => {
+    localStorage.clear();
+    const api = runtime();
+    let receive: (value: import('../lib/companion-runs').CompanionRunEvent) => void = () => {};
+    await act(async () => {
+      render(
+        <ChatApp
+          runtime={api}
+          observePhoneRuns={async (callback) => {
+            receive = callback;
+            return () => {};
+          }}
+        />,
+      );
+    });
+    await waitFor(() => expect(screen.getByRole('textbox')).toBeEnabled());
+    let resolveRead!: (value: CovenSessionRead) => void;
+    vi.mocked(api.readSession)
+      .mockClear()
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            resolveRead = resolve;
+          }),
+      );
+    const event = {
+      runId: 'slow-phone',
+      familiarId: 'f',
+      status: 'running' as const,
+      event: { type: 'text_delta', text: 'saved' },
+    };
+    await act(async () => receive(event));
+    await waitFor(() => expect(api.readSession).toHaveBeenCalledTimes(1));
+    await act(async () => {
+      receive(event);
+      await new Promise((resolve) => setTimeout(resolve, 300));
+      receive(event);
+      await new Promise((resolve) => setTimeout(resolve, 300));
+    });
+    expect(api.readSession).toHaveBeenCalledTimes(1);
+    await act(async () =>
+      resolveRead({ session: first, events: [{ type: 'text_delta', text: 'Saved once' }] }),
+    );
+    expect(await screen.findByText('Saved once')).toBeInTheDocument();
+  });
+
+  it('allows Refresh to recover a phone observer that failed after a running event', async () => {
+    localStorage.clear();
+    const api = runtime();
+    const observe = vi
+      .fn()
+      .mockImplementationOnce(async (receive) => {
+        receive({ runId: 'lost', familiarId: 'f', status: 'running' });
+        throw new Error('hydration failed');
+      })
+      .mockResolvedValue(() => {});
+    await act(async () => {
+      render(<ChatApp runtime={api} observePhoneRuns={observe} />);
+    });
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Refresh' })).toBeEnabled());
+    fireEvent.click(screen.getByRole('button', { name: 'Refresh' }));
+    await waitFor(() => expect(observe).toHaveBeenCalledTimes(2));
+  });
+
+  it('shows phone output, stops the shared run, and reloads saved history on completion', async () => {
+    localStorage.clear();
+    const api = runtime();
+    let receive: (value: import('../lib/companion-runs').CompanionRunEvent) => void = () => {};
+    const observe = vi.fn(async (callback: typeof receive) => {
+      receive = callback;
+      return () => {};
+    });
+    await act(async () => {
+      render(<ChatApp runtime={api} observePhoneRuns={observe} />);
+    });
+    await waitFor(() => expect(screen.getByRole('textbox')).toBeEnabled());
+    vi.mocked(api.readSession).mockResolvedValue({
+      session: first,
+      events: [{ type: 'text_delta', text: 'From the phone' }],
+    });
+    await act(async () =>
+      receive({
+        runId: 'phone-one',
+        familiarId: 'f',
+        status: 'running',
+        event: { type: 'text_delta', text: 'From the phone' },
+      }),
+    );
+    expect(screen.getByRole('button', { name: 'Send' })).toBeDisabled();
+    await screen.findByText('From the phone');
+    fireEvent.click(screen.getByRole('button', { name: 'Stop' }));
+    await waitFor(() => expect(api.cancel).toHaveBeenCalledWith('phone-one'));
+    await act(async () => receive({ runId: 'phone-one', familiarId: 'f', status: 'completed' }));
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Send' })).toBeEnabled());
+    expect(api.listSessions).toHaveBeenCalled();
+    await waitFor(() => expect(screen.getAllByText('From the phone')).toHaveLength(1));
+  });
+});

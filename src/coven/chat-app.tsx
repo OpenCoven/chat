@@ -1,5 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
+  type CompanionRunEvent,
+  type ObserveCompanionRuns,
+  observeCompanionRuns,
+} from '../lib/companion-runs';
+import {
   type ChatLifecycle,
   type CovenFamiliar,
   type CovenRunEvent,
@@ -102,7 +107,9 @@ export function ChatApp({
   runtime = defaultRuntime,
   screen = defaultScreenRelay,
   onWindowTitle = setWindowTitle,
+  observePhoneRuns = observeCompanionRuns,
 }: {
+  observePhoneRuns?: ObserveCompanionRuns;
   runtime?: CovenRuntime;
   screen?: ScreenRelay;
   onWindowTitle?: SetWindowTitle;
@@ -119,6 +126,8 @@ export function ChatApp({
   // another one starts from the usual budget again.
   const [history, setHistory] = useState({ session: '', depth: 1 });
   const depth = history.session === navigation.sessionId ? history.depth : 1;
+  const depthRef = useRef(depth);
+  depthRef.current = depth;
   // A history read that failed can be asked for again without a full refresh.
   // The offer is tied to that failure's own text, so dismissing it or any
   // later, unrelated error withdraws the offer.
@@ -131,7 +140,10 @@ export function ChatApp({
   const [available, setAvailable] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(saved.error);
-  const [busy, setBusy] = useState(false);
+  const [localBusy, setBusy] = useState(false);
+  const [phoneRun, setPhoneRun] = useState<CompanionRunEvent | null>(null);
+  const phoneRunRef = useRef<CompanionRunEvent | null>(null);
+  const busy = localBusy || phoneRun !== null;
   // The familiar the active run addresses. Selection may move while a run is
   // live, and the layout must not credit the run to whichever familiar is shown.
   const [runFamiliarId, setRunFamiliarId] = useState('');
@@ -157,6 +169,7 @@ export function ChatApp({
   const [refresh, setRefresh] = useState(0);
   const lifetime = useRef(0);
   const readId = useRef(0);
+  const readingSession = useRef('');
   const activeRun = useRef<{ id: string; cancelRequested: boolean } | null>(null);
 
   function navigate(next: Navigation) {
@@ -237,21 +250,149 @@ export function ChatApp({
     };
   }, [runtime, refresh]);
 
+  // Phone runs use the same host guard, but belong to the phone: closing this
+  // webview must not cancel them. Completion reloads the shared saved history.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: navigate reads refs and stable setters.
+  useEffect(() => {
+    let alive = true;
+    phoneRunRef.current = null;
+    setPhoneRun(null);
+    let dispose: (() => void) | undefined;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    let syncing = false;
+    let pending: CompanionRunEvent | undefined;
+    async function syncHistory() {
+      if (!alive || syncing || !pending) return;
+      syncing = true;
+      const value = pending;
+      pending = undefined;
+      const life = lifetime.current;
+      let request = 0;
+      let selected = '';
+      try {
+        const next = await runtime.listSessions();
+        if (!alive || lifetime.current !== life) return;
+        setSessions(next);
+        const current = navigationRef.current;
+        const head = next.find((item) => item.familiarId === current.familiarId);
+        if (!head) {
+          if (current.sessionId) navigate({ ...current, sessionId: '' });
+          return;
+        }
+        selected = current.familiarId;
+        if (head.id !== current.sessionId) {
+          setRunOutputs((previous) => {
+            const next = { ...previous };
+            delete next[draftKey(current)];
+            return next;
+          });
+          navigate({ ...current, sessionId: head.id });
+          return;
+        }
+        request = ++readId.current;
+        const result = await runtime.readSession(head.id, depthRef.current);
+        if (
+          !alive ||
+          lifetime.current !== life ||
+          readId.current !== request ||
+          navigationRef.current.familiarId !== current.familiarId ||
+          activeRun.current
+        )
+          return;
+        setEvents(result.events);
+        setRunOutputs((previous) => {
+          const next = { ...previous };
+          delete next[draftKey(current)];
+          return next;
+        });
+        setPartial(Boolean(result.hasMore));
+        setReadError('');
+        setLoading(false);
+      } catch (failure) {
+        if (
+          alive &&
+          lifetime.current === life &&
+          (!request ||
+            (readId.current === request && navigationRef.current.familiarId === selected))
+        )
+          setError(errorText(failure));
+      } finally {
+        if (alive && value.status !== 'running' && phoneRunRef.current?.runId === value.runId) {
+          phoneRunRef.current = null;
+          setPhoneRun(null);
+          setCancelling(false);
+        }
+        syncing = false;
+        if (alive && pending)
+          timer = setTimeout(() => {
+            timer = undefined;
+            void syncHistory();
+          }, 250);
+      }
+    }
+    void observePhoneRuns((value) => {
+      if (!alive) return;
+      if (value.status !== 'running') {
+        if (value.status === 'failed') setError(value.error || 'The iPhone run failed.');
+        if (navigationRef.current.familiarId !== value.familiarId && value.status !== 'stopped')
+          setFinished((old) => ({
+            ...old,
+            [value.familiarId]: value.status === 'failed' ? 'error' : 'reply',
+          }));
+      }
+      if (value.status === 'running') {
+        if (!phoneRunRef.current) setRunStartedAt(Date.now());
+        phoneRunRef.current = value;
+        setPhoneRun(value);
+      }
+      // Phone events are already captured in shared history. Re-read that source
+      // instead of appending deltas, which duplicates turns on mount/completion.
+      pending = value;
+      if (!syncing && timer === undefined) {
+        timer = setTimeout(
+          () => {
+            timer = undefined;
+            void syncHistory();
+          },
+          value.status === 'running' ? 250 : 0,
+        );
+      }
+    })
+      .then((stop) => {
+        if (alive) dispose = stop;
+        else stop();
+      })
+      .catch(() => {
+        if (alive) {
+          phoneRunRef.current = null;
+          setPhoneRun(null);
+          setCancelling(false);
+          setError('Could not observe iPhone activity. Refresh Chat before sending.');
+        }
+      });
+    return () => {
+      alive = false;
+      if (timer !== undefined) clearTimeout(timer);
+      dispose?.();
+    };
+  }, [observePhoneRuns, runtime, refresh]);
+
   // biome-ignore lint/correctness/useExhaustiveDependencies: `reads` explicitly asks for the history again.
   useEffect(() => {
     const request = ++readId.current;
     // Reading further back keeps what is on screen until the longer history
     // arrives; a different chat starts empty.
-    if (depth === 1) {
+    if (depth === 1 && (!phoneRunRef.current || readingSession.current !== navigation.sessionId)) {
       setEvents([]);
       setPartial(false);
     }
+    readingSession.current = navigation.sessionId;
     setReadError('');
     if (!available || !navigation.sessionId) {
       if (available) setLoading(false);
       return;
     }
-    setLoading(true);
+    if (!phoneRunRef.current) setLoading(true);
     const reading =
       depth > 1
         ? runtime.readSession(navigation.sessionId, depth)
@@ -300,6 +441,7 @@ export function ChatApp({
     const selectedFiles = attachmentRef.current[key] ?? [];
     if (
       activeRun.current ||
+      phoneRunRef.current ||
       selecting.current ||
       !available ||
       loading ||
@@ -433,6 +575,16 @@ export function ChatApp({
   }
 
   async function cancel() {
+    if (phoneRunRef.current) {
+      setCancelling(true);
+      try {
+        await runtime.cancel(phoneRunRef.current.runId);
+      } catch (failure) {
+        setCancelling(false);
+        setError(errorText(failure));
+      }
+      return;
+    }
     const run = activeRun.current;
     if (!run || run.cancelRequested) return;
     run.cancelRequested = true;
@@ -613,7 +765,7 @@ export function ChatApp({
         !sessions.some((item) => item.id === navigation.sessionId && item.archived)
       }
       busy={busy}
-      runFamiliarId={runFamiliarId}
+      runFamiliarId={phoneRun?.familiarId ?? runFamiliarId}
       partialHistory={partial}
       {...(partial && depth < MAX_HISTORY_DEPTH && !busy && !loading
         ? {
