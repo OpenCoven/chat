@@ -238,6 +238,30 @@ describe('release workflow specification', () => {
     expect(releasingGuide).toContain('An `allow_unsigned` run never publishes');
   });
 
+  test('notarizes with an App Store Connect API key when one is configured', () => {
+    const verify = job('verify-tag', 'build');
+    const build = job('build', 'publish');
+    const buildStep = build.slice(
+      build.indexOf('- name: Build installers'),
+      build.indexOf('- name: Remove the notarization key'),
+    );
+
+    // Either credential set satisfies the gate; the API key is preferred.
+    for (const secret of ['APPLE_API_ISSUER', 'APPLE_API_KEY', 'APPLE_API_KEY_BASE64']) {
+      expect(verify).toContain(`${secret}: \${{ secrets.${secret} }}`);
+      expect(buildStep).toContain(`${secret}: \${{ secrets.${secret} }}`);
+    }
+    expect(verify).toContain('or APPLE_ID+APPLE_PASSWORD');
+    expect(build).toContain('notary=api-key');
+
+    // Tauri prefers the Apple ID when all three of its variables are set, so
+    // the build drops the pair when a key is in use, writes the key for this
+    // build only, and a later step removes it whatever happened.
+    expect(buildStep).toContain('export APPLE_API_KEY_PATH=');
+    expect(buildStep).toContain('unset APPLE_ID APPLE_PASSWORD');
+    expect(build).toMatch(/- name: Remove the notarization key\n\s+if: always\(\) && runner\.os == 'macOS'/);
+  });
+
   test('refuses to build or stage an unsigned artifact on the production path', () => {
     const build = job('build', 'publish');
     const signing = build.slice(
