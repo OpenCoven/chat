@@ -242,8 +242,16 @@ All signing secrets live in the GitHub deployment **environment**
 release-signing**.
 
 **A missing platform signing secret fails the release.** The `verify-tag` job
-refuses to continue when any of the six Apple secrets below is absent, before
-the tag is checked out and long before the platform builds start. The two
+refuses to continue when the Apple signing material is incomplete, before the
+tag is checked out and long before the platform builds start. Signing needs
+`APPLE_CERTIFICATE`, `APPLE_CERTIFICATE_PASSWORD`, `APPLE_SIGNING_IDENTITY` and
+`APPLE_TEAM_ID`; notarization needs one complete credential set, either the
+App Store Connect API key (`APPLE_API_ISSUER`, `APPLE_API_KEY`,
+`APPLE_API_KEY_BASE64`, preferred and used when present) or an Apple ID with an
+app-specific password (`APPLE_ID`, `APPLE_PASSWORD`). The API key is a team
+credential, which is why it is preferred: on 2026-10-06 four app-specific
+passwords in a row were rejected with `401 Invalid credentials` because the
+Apple ID was not on the team. The two
 Windows secrets are not required while Windows is deferred. This used to be a warning, and a warning is the wrong shape for it: the
 default outcome of a missing secret was a *published* unsigned release and a
 yellow annotation nobody reads. An unsigned `.app` will not open past
@@ -269,8 +277,11 @@ adds an independent local SSH check.
 | `APPLE_CERTIFICATE` | base64 of the Apple Developer ID `.p12` (macOS code signing) | `release-signing` |
 | `APPLE_CERTIFICATE_PASSWORD` | password for the `.p12` | `release-signing` |
 | `APPLE_SIGNING_IDENTITY` | e.g. `Developer ID Application: OpenCoven (TEAMID)` | `release-signing` |
-| `APPLE_ID` | Apple ID used for notarization | `release-signing` |
-| `APPLE_PASSWORD` | app-specific password for that Apple ID | `release-signing` |
+| `APPLE_API_ISSUER` | App Store Connect API issuer ID (notarization, preferred) | `release-signing` |
+| `APPLE_API_KEY` | App Store Connect API key ID, e.g. `BR9FQPGJ5N` | `release-signing` |
+| `APPLE_API_KEY_BASE64` | base64 of the `AuthKey_<id>.p8` private key | `release-signing` |
+| `APPLE_ID` | Apple ID used for notarization (alternative to the API key) | `release-signing` |
+| `APPLE_PASSWORD` | app-specific password for that Apple ID (alternative to the API key) | `release-signing` |
 | `APPLE_TEAM_ID` | Apple Developer Team ID | `release-signing` |
 | `WINDOWS_CERTIFICATE` | base64 of the Authenticode code-signing `.pfx` (not required while Windows is deferred) | `release-signing` |
 | `WINDOWS_CERTIFICATE_PASSWORD` | password for the `.pfx` (not required while Windows is deferred) | `release-signing` |
