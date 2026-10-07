@@ -259,7 +259,9 @@ describe('release workflow specification', () => {
     // build only, and a later step removes it whatever happened.
     expect(buildStep).toContain('export APPLE_API_KEY_PATH=');
     expect(buildStep).toContain('unset APPLE_ID APPLE_PASSWORD');
-    expect(build).toMatch(/- name: Remove the notarization key\n\s+if: always\(\) && runner\.os == 'macOS'/);
+    expect(build).toMatch(
+      /- name: Remove the notarization key\n\s+if: always\(\) && runner\.os == 'macOS'/,
+    );
   });
 
   test('refuses to build or stage an unsigned artifact on the production path', () => {
