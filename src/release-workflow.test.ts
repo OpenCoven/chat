@@ -238,6 +238,32 @@ describe('release workflow specification', () => {
     expect(releasingGuide).toContain('An `allow_unsigned` run never publishes');
   });
 
+  test('refuses to build or stage an unsigned artifact on the production path', () => {
+    const build = job('build', 'publish');
+    const signing = build.slice(
+      build.indexOf('name: Determine signing availability'),
+      build.indexOf('- name: Import Windows signing certificate'),
+    );
+    const smoke = build.slice(build.indexOf('- name: Smoke-test artifacts'));
+
+    // verify-tag's gate runs once per run; a re-run of failed jobs re-reads
+    // the secrets here. An empty APPLE_ID on 2026-10-07 built and published
+    // unsigned through the warning below, so missing material is a failure
+    // unless the run was dispatched with allow_unsigned.
+    expect(signing).toContain(`ALLOW_UNSIGNED: \${{ inputs.allow_unsigned }}`);
+    expect(signing).toContain('refusing to build unsigned');
+    expect(signing.indexOf('refusing to build unsigned')).toBeLessThan(
+      signing.indexOf('producing an UNSIGNED, un-notarized macOS build'),
+    );
+
+    // And the artifact check only skips codesign/spctl for that rehearsal.
+    expect(smoke).toContain(`ALLOW_UNSIGNED: \${{ inputs.allow_unsigned }}`);
+    expect(smoke).toMatch(
+      /\[ "\$\{MACOS_SIGNED\}" = "true" \] \|\| \[ "\$\{ALLOW_UNSIGNED:-false\}" != "true" \]/,
+    );
+    expect(smoke).not.toContain('(unsigned build: skipping codesign/spctl)');
+  });
+
   test('defers Windows as a whole, never as an unsigned build', () => {
     const verify = job('verify-tag', 'build');
     const build = job('build', 'publish');
