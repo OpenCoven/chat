@@ -314,8 +314,12 @@
 
 .coven-chat .coven-message {
   min-width: 0;
-  font-size: 14px;
+  /* The reading surface. Bumped 14 -> 16px so responses read comfortably at a
+     normal viewing distance; letter-spacing relaxed off the shell's tight
+     -0.004em since larger body text wants a touch more air. Reversible. */
+  font-size: 16px;
   line-height: 1.7;
+  letter-spacing: 0;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
