@@ -749,6 +749,26 @@ describe('canonical familiar controller', () => {
     expect(screen.queryByText('Stale response')).not.toBeInTheDocument();
   });
 
+  it('explains blocked attachment attempts during a reply without reading the file', async () => {
+    const api = runtime();
+    const pending = deferred<Awaited<ReturnType<CovenRuntime['send']>>>();
+    vi.mocked(api.send).mockReturnValue(pending.promise);
+    await ready(api);
+    draft('Hello');
+    click('Send');
+    await screen.findByRole('button', { name: 'Stop' });
+    const read = vi.fn();
+    const file = new File(['abc'], 'blocked.txt');
+    Object.defineProperty(file, 'arrayBuffer', { value: read });
+    fireEvent.change(screen.getByLabelText('Attach'), { target: { files: [file] } });
+    expect(screen.getByRole('alert')).toHaveTextContent(
+      'Finish or stop the current reply before attaching a file.',
+    );
+    expect(read).not.toHaveBeenCalled();
+    expect(screen.queryByRole('button', { name: 'blocked.txt' })).not.toBeInTheDocument();
+    await act(async () => pending.resolve({ runId: 'run', events: [] }));
+  });
+
   it('retains file bytes after a failed send and clears them only after success', async () => {
     const api = runtime();
     vi.mocked(api.send)

@@ -2240,15 +2240,29 @@ describe('dropping files onto the thread', () => {
     expect(screen.queryByText('Drop text or code files to attach them')).toBeNull();
   });
 
+  it('forwards a drop during a reply so the controller can explain why it is blocked', () => {
+    const p = base();
+    const { container } = render(<ChatLayout {...p} busy />);
+    const thread = container.querySelector('main.fr-thread') as HTMLElement;
+    const dataTransfer = transfer([file]);
+    fireEvent.dragOver(thread, { dataTransfer });
+    expect(dataTransfer.dropEffect).toBe('copy');
+    fireEvent.drop(thread, { dataTransfer });
+    expect(p.onAttach).toHaveBeenCalledWith([file]);
+  });
+
   it('refuses a drop while the composer cannot take files, and ignores drags without files', () => {
     const p = base();
-    const { container, rerender } = render(<ChatLayout {...p} busy />);
+    const { container, rerender } = render(<ChatLayout {...p} loading />);
     const thread = container.querySelector('main.fr-thread') as HTMLElement;
     fireEvent.dragEnter(thread, { dataTransfer: transfer([file]) });
     expect(
       screen.getByText('Files can be attached once the composer is ready'),
     ).toBeInTheDocument();
-    fireEvent.drop(thread, { dataTransfer: transfer([file]) });
+    const dataTransfer = transfer([file]);
+    fireEvent.dragOver(thread, { dataTransfer });
+    expect(dataTransfer.dropEffect).toBe('none');
+    fireEvent.drop(thread, { dataTransfer });
     expect(p.onAttach).not.toHaveBeenCalled();
     rerender(<ChatLayout {...p} />);
     fireEvent.dragEnter(thread, { dataTransfer: { files: [], types: ['text/plain'] } });
