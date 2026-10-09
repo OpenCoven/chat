@@ -419,6 +419,13 @@ const TranscriptBlock = memo(
       <section className="coven-output" aria-label="Engine output" data-block-id={blockId}>
         <pre>{block.message.text}</pre>
       </section>
+    ) : block.message.role === 'notice' && block.message.notice === 'diagnostic' ? (
+      // Chat's own record of a failed run: the engine's report, kept with
+      // the chat so it outlives the error notice, with its own Copy control.
+      <div className="coven-notice coven-notice--diagnostic" role="note" data-block-id={blockId}>
+        <p className="coven-notice-text">{block.message.text}</p>
+        <CopyButton className="coven-notice-copy" text={block.message.text} label="Copy report" />
+      </div>
     ) : block.message.role === 'notice' ? (
       // Chat's own disclosure (a replayed-history notice): a quiet
       // line between messages, not a reply from anyone.

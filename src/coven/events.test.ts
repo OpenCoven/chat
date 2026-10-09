@@ -24,8 +24,33 @@ describe('genuine Coven event projection', () => {
         { type: 'text_delta', session_id: 'run', text: 'Reply' },
       ]).messages,
     ).toEqual([
-      { id: '1', role: 'notice', text: 'Chat replayed the last 2 turns into this message.' },
+      {
+        id: '1',
+        role: 'notice',
+        notice: 'replay',
+        text: 'Chat replayed the last 2 turns into this message.',
+      },
       { id: '3', role: 'assistant', text: 'Reply' },
+    ]);
+  });
+  it("shows a failed run's kept report as a diagnostic notice", () => {
+    const text = "This run failed. Coven's error output:\nexit 1";
+    const message = { role: 'system', content: [{ type: 'text', text }] };
+    expect(
+      projectEvents([
+        { type: 'system', subtype: 'init', session_id: 'run' },
+        { type: 'text_delta', session_id: 'run', text: 'Partial' },
+        {
+          type: 'system',
+          subtype: 'notice',
+          source: 'chat-diagnostic',
+          session_id: 'run',
+          message,
+        },
+      ]).messages,
+    ).toEqual([
+      { id: '1', role: 'assistant', text: 'Partial' },
+      { id: '2', role: 'notice', notice: 'diagnostic', text },
     ]);
   });
   it('restores attachment-only history metadata without exposing bytes or trusting invalid entries', () => {
@@ -231,6 +256,16 @@ describe('genuine Coven event projection', () => {
     ]);
     expect(result.error).toBe('Credentials missing');
     expect(result.messages).toEqual([]);
+  });
+
+  it('names the kept report and the control when a failed result carries no error text', () => {
+    const { error } = projectEvents([
+      { type: 'result', is_error: true, error: null, session_id: 's' },
+    ]);
+    expect(error).toBe(
+      "The run failed. Coven's report, when it gave one, is the last line of the chat. Try again resends your message.",
+    );
+    expect(error).not.toContain('CLI');
   });
 
   it('shows older CLI output without pretending it is an assistant message', () => {

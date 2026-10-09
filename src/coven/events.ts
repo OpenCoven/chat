@@ -20,6 +20,8 @@ export type ChatMessage = {
   id: string;
   role: string;
   text: string;
+  /** Set on `role: 'notice'`: which of Chat's own disclosures this line is. */
+  notice?: 'replay' | 'diagnostic';
   attachments?: AttachmentMetadata[];
   tool?: ToolCall;
 };
@@ -154,15 +156,22 @@ export function projectEvents(events: readonly CovenRunEvent[]): {
       error =
         typeof event.error === 'string'
           ? event.error
-          : 'Coven reported a failed run. Inspect the session with the Coven CLI for details.';
+          : "The run failed. Coven's report, when it gave one, is the last line of the chat. Try again resends your message.";
     }
     const importedSystem = event.type === 'system' && event.source === 'cave-import';
-    // Chat's own disclosure that a turn carried replayed history (see
-    // `replay_notice` in the Rust backend); it renders as a plain notice line.
-    const replayNotice =
-      event.type === 'system' && event.subtype === 'notice' && event.source === 'chat-replay';
+    // Chat's own disclosures (see `replay_notice` and `record_run_failure` in
+    // the Rust backend): that a turn carried replayed history, or what is known
+    // about a run that failed. Each renders as a notice line, not a reply.
+    const chatNotice =
+      event.type === 'system' && event.subtype === 'notice'
+        ? event.source === 'chat-replay'
+          ? 'replay'
+          : event.source === 'chat-diagnostic'
+            ? 'diagnostic'
+            : undefined
+        : undefined;
     if (
-      (event.type !== 'user' && event.type !== 'assistant' && !importedSystem && !replayNotice) ||
+      (event.type !== 'user' && event.type !== 'assistant' && !importedSystem && !chatNotice) ||
       !record(event.message)
     )
       continue;
@@ -237,8 +246,9 @@ export function projectEvents(events: readonly CovenRunEvent[]): {
     if (text || attachments.length)
       messages.push({
         id: String(index),
-        role: replayNotice ? 'notice' : event.type,
+        role: chatNotice ? 'notice' : event.type,
         text,
+        ...(chatNotice ? { notice: chatNotice } : {}),
         ...(attachments.length ? { attachments } : {}),
       });
   }

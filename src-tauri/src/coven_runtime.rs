@@ -348,7 +348,7 @@ pub(crate) fn run_process(
     timeout: Duration,
     on_event: Option<&mut dyn FnMut(Value) -> Result<(), String>>,
 ) -> Result<Vec<u8>, String> {
-    run_process_input(args, cwd, cancel, timeout, on_event, None)
+    run_process_input(args, cwd, cancel, timeout, on_event, None, None)
 }
 
 fn run_process_input(
@@ -358,6 +358,7 @@ fn run_process_input(
     timeout: Duration,
     on_event: Option<&mut dyn FnMut(Value) -> Result<(), String>>,
     input_file: Option<File>,
+    diagnostics: Option<&mut String>,
 ) -> Result<Vec<u8>, String> {
     let mut command = Command::new(resolve_cli()?);
     command
@@ -389,7 +390,14 @@ fn run_process_input(
     } else {
         OUTPUT_LIMIT
     };
-    execute_command_bounded(command, cancel, timeout, on_event, output_limit)
+    execute_command_bounded(
+        command,
+        cancel,
+        timeout,
+        on_event,
+        output_limit,
+        diagnostics,
+    )
 }
 
 #[cfg(test)]
@@ -399,7 +407,7 @@ fn execute_command(
     timeout: Duration,
     on_event: Option<&mut dyn FnMut(Value) -> Result<(), String>>,
 ) -> Result<Vec<u8>, String> {
-    execute_command_bounded(command, cancel, timeout, on_event, OUTPUT_LIMIT)
+    execute_command_bounded(command, cancel, timeout, on_event, OUTPUT_LIMIT, None)
 }
 
 fn execute_command_bounded(
@@ -408,6 +416,7 @@ fn execute_command_bounded(
     timeout: Duration,
     mut on_event: Option<&mut dyn FnMut(Value) -> Result<(), String>>,
     output_limit: usize,
+    diagnostics: Option<&mut String>,
 ) -> Result<Vec<u8>, String> {
     if cancel.load(Ordering::SeqCst) {
         return Err(RUN_CANCELLED.into());
@@ -498,15 +507,26 @@ fn execute_command_bounded(
     if !pending.is_empty() {
         return Err("Coven returned an incomplete stream event.".into());
     }
+    let diagnostic = stderr_text(&errors);
+    if let Some(sink) = diagnostics {
+        *sink = diagnostic.clone();
+    }
     if !status.is_some_and(|status| status.success()) {
-        let diagnostic: String = String::from_utf8_lossy(&errors)
-            .chars()
-            .filter(|c| !c.is_control() || *c == '\n')
-            .take(2048)
-            .collect();
         return Err(format!("Coven command failed. {diagnostic}"));
     }
     Ok(output)
+}
+
+/// The process's stderr as a readable report: control characters other than
+/// newlines removed, capped so a notice stays a notice.
+fn stderr_text(errors: &[u8]) -> String {
+    String::from_utf8_lossy(errors)
+        .chars()
+        .filter(|c| !c.is_control() || *c == '\n')
+        .take(2048)
+        .collect::<String>()
+        .trim()
+        .to_owned()
 }
 
 /// Like `execute_command_bounded`, but for tools whose output is plain text
@@ -1789,34 +1809,124 @@ fn send_local(
         }
         Ok(())
     };
-    run_process_input(
+    let mut stderr_report = String::new();
+    let run = run_process_input(
         &args,
         Some(&workspace),
         cancel,
         RUN_TIMEOUT,
         Some(&mut observe),
         input_file,
-    )?;
-    if !events
-        .iter()
-        .any(|event| event.get("type").and_then(Value::as_str) == Some("result"))
-    {
-        return Err("Coven exited without a terminal result.".into());
+        Some(&mut stderr_report),
+    );
+    // Stopping a run is the user's own action; it leaves no report behind.
+    if matches!(&run, Err(error) if error == RUN_CANCELLED) {
+        return Err(RUN_CANCELLED.into());
     }
-    if let Some(event) = events.iter().find(|event| {
-        event.get("type").and_then(Value::as_str) == Some("result")
-            && event.get("is_error").and_then(Value::as_bool) == Some(true)
-    }) {
-        let detail: String = event
-            .get("error")
-            .and_then(Value::as_str)
-            .unwrap_or("The harness reported an unsuccessful result.")
-            .chars()
-            .take(2048)
-            .collect();
-        return Err(format!("Coven run failed. {detail}"));
+    let is_result = |event: &Value| event.get("type").and_then(Value::as_str) == Some("result");
+    let failed_result = events.iter().find(|event| {
+        is_result(event) && event.get("is_error").and_then(Value::as_bool) == Some(true)
+    });
+    let failure = match (&run, failed_result) {
+        (Ok(_), None) if events.iter().any(is_result) => {
+            return Ok(json!({"runId": input.run_id, "events": events}));
+        }
+        (Ok(_), None) => RunFailure {
+            engine_error: None,
+            run_error: Some(NO_TERMINAL_RESULT.into()),
+        },
+        (Ok(_), Some(result)) => RunFailure {
+            engine_error: result_error(result),
+            run_error: None,
+        },
+        (Err(error), result) => RunFailure {
+            engine_error: result.and_then(result_error),
+            run_error: Some(error.clone()),
+        },
+    };
+    // Before the CLI names a session there is no chat line to keep a report
+    // on, so the error itself carries what is known, as it always did.
+    let Some((file, id)) = transcript.as_mut().zip(input_session.as_deref()) else {
+        return Err(run.err().unwrap_or_else(|| NO_TERMINAL_RESULT.into()));
+    };
+    let (notice, message) = record_run_failure(file, id, &failure, &stderr_report)?;
+    events.push(notice.clone());
+    on_event(notice)?;
+    Err(message)
+}
+
+const NO_TERMINAL_RESULT: &str = "Coven exited without a terminal result.";
+
+/// Chat's own transcript line that keeps a failed run's report with the chat.
+pub(crate) const RUN_FAILURE_SOURCE: &str = "chat-diagnostic";
+
+/// What is known about a run that did not complete: the engine's `result`
+/// error, if it gave one, and the runner's own error, if the process failed.
+struct RunFailure {
+    engine_error: Option<String>,
+    run_error: Option<String>,
+}
+
+fn result_error(result: &Value) -> Option<String> {
+    result
+        .get("error")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|error| !error.is_empty())
+        .map(|error| error.chars().take(2048).collect())
+}
+
+/// The report kept for a failed run, in order of preference: what the engine
+/// said, then what it printed to stderr, then what the runner saw. A non-zero
+/// exit with nothing on stderr says only that it failed, which is no report.
+fn run_failure_report(failure: &RunFailure, stderr: &str) -> Option<String> {
+    if let Some(error) = &failure.engine_error {
+        return Some(format!("Coven reported: {error}"));
     }
-    Ok(json!({"runId": input.run_id, "events": events}))
+    if !stderr.is_empty() {
+        return Some(format!("Coven's error output:\n{stderr}"));
+    }
+    failure.run_error.as_deref().and_then(|error| {
+        let text = error
+            .strip_prefix("Coven command failed.")
+            .unwrap_or(error)
+            .trim();
+        (!text.is_empty()).then(|| text.to_owned())
+    })
+}
+
+fn run_failure_notice(report: Option<&str>) -> String {
+    match report {
+        Some(report) => format!("This run failed. {report}"),
+        None => "This run failed, and Coven gave no reason.".into(),
+    }
+}
+
+fn run_failure_message(report: Option<&str>) -> String {
+    match report {
+        Some(_) => "The run failed. Coven's report is the last line of the chat, and Try again resends your message.".into(),
+        None => "The run failed, and Coven gave no reason. Try again resends your message.".into(),
+    }
+}
+
+/// Keeps a failed run's report on the chat itself, as a notice line at the end
+/// of its transcript, and returns that event with the text for the error notice.
+fn record_run_failure(
+    file: &mut File,
+    session_id: &str,
+    failure: &RunFailure,
+    stderr: &str,
+) -> Result<(Value, String), String> {
+    let report = run_failure_report(failure, stderr);
+    let notice = json!({
+        "type": "system", "subtype": "notice", "source": RUN_FAILURE_SOURCE, "session_id": session_id,
+        "message": {"role": "system", "content": [{"type": "text", "text": run_failure_notice(report.as_deref())}]},
+    });
+    serde_json::to_writer(&mut *file, &notice).map_err(|_| "Cannot save Coven transcript.")?;
+    file.write_all(b"\n")
+        .map_err(|_| "Cannot save Coven transcript.")?;
+    file.flush().map_err(|_| "Cannot save Coven transcript.")?;
+    Ok((notice, run_failure_message(report.as_deref())))
 }
 
 #[tauri::command]
@@ -2540,6 +2650,152 @@ mod tests {
         .unwrap();
         assert_eq!(events.len(), 1);
         assert_eq!(events[0]["message"]["content"][0]["text"], "fixture");
+    }
+
+    #[test]
+    fn run_failure_report_prefers_engine_error_then_stderr_then_runner() {
+        let engine = RunFailure {
+            engine_error: Some("Credentials missing".into()),
+            run_error: Some("Coven command failed. ignored".into()),
+        };
+        assert_eq!(
+            run_failure_report(&engine, "noise").as_deref(),
+            Some("Coven reported: Credentials missing")
+        );
+        let exit = RunFailure {
+            engine_error: None,
+            run_error: Some("Coven command failed. boom".into()),
+        };
+        assert_eq!(
+            run_failure_report(&exit, "boom").as_deref(),
+            Some("Coven's error output:\nboom")
+        );
+        let runner = RunFailure {
+            engine_error: None,
+            run_error: Some("Coven returned invalid stream JSON.".into()),
+        };
+        assert_eq!(
+            run_failure_report(&runner, "").as_deref(),
+            Some("Coven returned invalid stream JSON.")
+        );
+        let silent = RunFailure {
+            engine_error: None,
+            run_error: Some("Coven command failed. ".into()),
+        };
+        assert_eq!(run_failure_report(&silent, ""), None);
+        assert_eq!(
+            result_error(&json!({"type":"result","is_error":true,"error":null})),
+            None
+        );
+        assert_eq!(
+            result_error(&json!({"type":"result","is_error":true,"error":"  "})),
+            None
+        );
+        assert_eq!(
+            result_error(&json!({"type":"result","is_error":true,"error":" x "})).as_deref(),
+            Some("x")
+        );
+    }
+
+    #[test]
+    fn record_run_failure_keeps_each_report_on_the_transcript() {
+        let data = std::env::temp_dir().join(uuid::Uuid::new_v4().to_string());
+        fs::create_dir_all(&data).unwrap();
+        let path = data.join("run.jsonl");
+        let mut file = File::create(&path).unwrap();
+        let cases = [
+            (
+                RunFailure {
+                    engine_error: Some("Credentials missing".into()),
+                    run_error: None,
+                },
+                "",
+                "This run failed. Coven reported: Credentials missing",
+                true,
+            ),
+            (
+                RunFailure {
+                    engine_error: None,
+                    run_error: Some("Coven command failed. exit 1".into()),
+                },
+                "exit 1",
+                "This run failed. Coven's error output:\nexit 1",
+                true,
+            ),
+            (
+                RunFailure {
+                    engine_error: None,
+                    run_error: Some("Coven command failed. ".into()),
+                },
+                "",
+                "This run failed, and Coven gave no reason.",
+                false,
+            ),
+        ];
+        for (failure, stderr, text, has_report) in &cases {
+            let (notice, message) = record_run_failure(&mut file, "run", failure, stderr).unwrap();
+            assert_eq!(notice["type"], "system");
+            assert_eq!(notice["subtype"], "notice");
+            assert_eq!(notice["source"], RUN_FAILURE_SOURCE);
+            assert_eq!(notice["session_id"], "run");
+            assert_eq!(notice["message"]["content"][0]["text"], *text);
+            assert!(message.starts_with("The run failed"), "{message}");
+            assert!(
+                message.contains("Try again resends your message."),
+                "{message}"
+            );
+            assert_eq!(
+                message.contains("last line of the chat"),
+                *has_report,
+                "{message}"
+            );
+            assert!(!message.contains("CLI"), "{message}");
+        }
+        let lines: Vec<Value> = fs::read_to_string(&path)
+            .unwrap()
+            .lines()
+            .map(|line| serde_json::from_str(line).unwrap())
+            .collect();
+        assert_eq!(lines.len(), 3);
+        assert_eq!(
+            lines[2]["message"]["content"][0]["text"],
+            "This run failed, and Coven gave no reason."
+        );
+        // Chat's own notices never travel back into the engine as history.
+        assert!(replay_turns(&lines).is_empty());
+        fs::remove_dir_all(&data).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn process_failure_hands_back_stderr_for_the_report() {
+        let mut command = Command::new("/bin/sh");
+        command.arg("-c").arg("echo oops >&2; exit 3");
+        let mut report = String::new();
+        let error = execute_command_bounded(
+            command,
+            &AtomicBool::new(false),
+            READ_TIMEOUT,
+            None,
+            OUTPUT_LIMIT,
+            Some(&mut report),
+        )
+        .unwrap_err();
+        assert_eq!(error, "Coven command failed. oops");
+        assert_eq!(report, "oops");
+        let mut command = Command::new("/usr/bin/printf");
+        command.arg("");
+        let mut report = String::from("stale");
+        execute_command_bounded(
+            command,
+            &AtomicBool::new(false),
+            READ_TIMEOUT,
+            None,
+            OUTPUT_LIMIT,
+            Some(&mut report),
+        )
+        .unwrap();
+        assert_eq!(report, "");
     }
 
     #[test]
