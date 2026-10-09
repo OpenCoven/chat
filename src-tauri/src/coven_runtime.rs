@@ -416,8 +416,11 @@ fn execute_command_bounded(
     timeout: Duration,
     mut on_event: Option<&mut dyn FnMut(Value) -> Result<(), String>>,
     output_limit: usize,
-    diagnostics: Option<&mut String>,
+    mut diagnostics: Option<&mut String>,
 ) -> Result<Vec<u8>, String> {
+    if let Some(sink) = diagnostics.as_deref_mut() {
+        sink.clear();
+    }
     if cancel.load(Ordering::SeqCst) {
         return Err(RUN_CANCELLED.into());
     }
@@ -473,6 +476,11 @@ fn execute_command_bounded(
                 if is_error {
                     let remaining = ERROR_LIMIT.saturating_sub(errors.len());
                     errors.extend_from_slice(&bytes[..bytes.len().min(remaining)]);
+                    // Keep collected diagnostics even when stream validation, a callback,
+                    // or the timeout ends the operation before the process exits.
+                    if let Some(sink) = diagnostics.as_deref_mut() {
+                        *sink = stderr_text(&errors);
+                    }
                     continue;
                 }
                 if output.len() + bytes.len() > output_limit {
@@ -508,9 +516,6 @@ fn execute_command_bounded(
         return Err("Coven returned an incomplete stream event.".into());
     }
     let diagnostic = stderr_text(&errors);
-    if let Some(sink) = diagnostics {
-        *sink = diagnostic.clone();
-    }
     if !status.is_some_and(|status| status.success()) {
         return Err(format!("Coven command failed. {diagnostic}"));
     }
@@ -2796,6 +2801,27 @@ mod tests {
         )
         .unwrap();
         assert_eq!(report, "");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn truncated_stream_hands_back_stderr_for_the_report() {
+        let mut command = Command::new("/bin/sh");
+        command
+            .arg("-c")
+            .arg("echo 'engine failure' >&2; printf '{'; exit 3");
+        let mut report = String::from("stale");
+        let error = execute_command_bounded(
+            command,
+            &AtomicBool::new(false),
+            READ_TIMEOUT,
+            Some(&mut |_| Ok(())),
+            OUTPUT_LIMIT,
+            Some(&mut report),
+        )
+        .unwrap_err();
+        assert_eq!(error, "Coven returned an incomplete stream event.");
+        assert_eq!(report, "engine failure");
     }
 
     #[test]
