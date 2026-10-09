@@ -10,8 +10,9 @@ is configured, and publishes a GitHub Release.
 **Windows is deferred** until Windows code signing is set up (decided
 2026-10-05 on #356). Certificate authorities have issued code-signing keys
 only on hardware tokens or cloud HSMs since June 2023, so the exportable
-`.pfx` that `WINDOWS_CERTIFICATE` expects is no longer obtainable. Windows also
-cannot send in the current app. The Windows signing steps stay in
+`.pfx` that `WINDOWS_CERTIFICATE` expects is no longer obtainable. The app
+itself can send on Windows: runs are contained in a kill-on-close Job Object, so
+Stop ends the whole process tree. The Windows signing steps stay in
 `release.yml`. To restore Windows, re-add its build-matrix entry, require the two
 `WINDOWS_*` secrets in `verify-tag`, and add its installers back to
 `scripts/release-smoke.mjs`, all in the same change. The comment above the

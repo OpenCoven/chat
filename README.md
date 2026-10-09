@@ -130,8 +130,9 @@ complete any provider setup required by your CLI before starting a run.
 
 Runs use Coven's bundled `coven-code` engine with explicit read-only
 permissions. Chat does not grant write access or simulate approval controls.
-The native runtime currently supports macOS and Linux. Windows displays an
-unavailable notice until equivalent process-tree containment is implemented.
+The native runtime supports macOS, Linux and Windows. Every run's process tree
+is contained, as a process group on macOS and Linux and as a kill-on-close job
+on Windows, so **Stop** ends the Coven CLI together with everything it started.
 
 The frozen SDK artifacts remain pinned. Their existing health and conformance
 contracts are not expanded into undocumented chat methods, and the standalone
