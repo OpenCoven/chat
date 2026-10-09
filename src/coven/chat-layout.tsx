@@ -720,7 +720,8 @@ export function ChatLayout(props: ChatLayoutProps) {
   // Files dragged onto the thread attach as if picked. The native host hands
   // drops to the webview (dragDropEnabled is off), so they arrive as File
   // objects and go through the same checks as the picker.
-  const canDrop = Boolean(props.onAttach) && !props.busy && !props.attaching && !composerDisabled;
+  const canRequestAttachment = Boolean(props.onAttach) && !props.attaching && !composerDisabled;
+  const canDrop = canRequestAttachment && !props.busy;
   const [dragDepth, setDragDepth] = useState(0);
   const dragging = dragDepth > 0;
   // A drop the thread does not take must never navigate the window to the file.
@@ -756,7 +757,8 @@ export function ChatLayout(props: ChatLayoutProps) {
       event.preventDefault();
       setDragDepth(0);
       const files = Array.from(event.dataTransfer.files);
-      if (canDrop && files.length) props.onAttach?.(files);
+      // Let the controller report an active-run rejection instead of swallowing the drop.
+      if (canRequestAttachment && files.length) props.onAttach?.(files);
     },
   };
   const composerRef = useRef<HTMLTextAreaElement>(null);

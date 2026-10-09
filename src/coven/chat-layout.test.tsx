@@ -2208,9 +2208,17 @@ describe('dropping files onto the thread', () => {
     expect(screen.queryByText('Drop text or code files to attach them')).toBeNull();
   });
 
+  it('forwards a drop during a reply so the controller can explain why it is blocked', () => {
+    const p = base();
+    const { container } = render(<ChatLayout {...p} busy />);
+    const thread = container.querySelector('main.fr-thread') as HTMLElement;
+    fireEvent.drop(thread, { dataTransfer: transfer([file]) });
+    expect(p.onAttach).toHaveBeenCalledWith([file]);
+  });
+
   it('refuses a drop while the composer cannot take files, and ignores drags without files', () => {
     const p = base();
-    const { container, rerender } = render(<ChatLayout {...p} busy />);
+    const { container, rerender } = render(<ChatLayout {...p} loading />);
     const thread = container.querySelector('main.fr-thread') as HTMLElement;
     fireEvent.dragEnter(thread, { dataTransfer: transfer([file]) });
     expect(

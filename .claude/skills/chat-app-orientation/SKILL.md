@@ -19,7 +19,7 @@ Rust bridge) that talks to the **live `coven-code` engine** (v0.8.0; not retired
 ## UI file map
 
 - `src/ui/composer.tsx` — composer/input. Accepts an `attachments` prop + an attach hook,
-  but **no dropzone/file-picker is wired to it yet** (as of this writing).
+  with the file picker and thread dropzone wired in `src/coven/chat-layout.tsx`.
 - `src/ui/attachment-chip.tsx` — chip UI for a selected attachment (render layer ready).
 - `src/coven/attachments.ts` — attachment read/model helper.
 - `src/coven/formatted-message.tsx` — assistant message rendering (markdown → DOM); the
