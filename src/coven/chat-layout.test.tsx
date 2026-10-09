@@ -2212,7 +2212,10 @@ describe('dropping files onto the thread', () => {
     const p = base();
     const { container } = render(<ChatLayout {...p} busy />);
     const thread = container.querySelector('main.fr-thread') as HTMLElement;
-    fireEvent.drop(thread, { dataTransfer: transfer([file]) });
+    const dataTransfer = transfer([file]);
+    fireEvent.dragOver(thread, { dataTransfer });
+    expect(dataTransfer.dropEffect).toBe('copy');
+    fireEvent.drop(thread, { dataTransfer });
     expect(p.onAttach).toHaveBeenCalledWith([file]);
   });
 
@@ -2224,7 +2227,10 @@ describe('dropping files onto the thread', () => {
     expect(
       screen.getByText('Files can be attached once the composer is ready'),
     ).toBeInTheDocument();
-    fireEvent.drop(thread, { dataTransfer: transfer([file]) });
+    const dataTransfer = transfer([file]);
+    fireEvent.dragOver(thread, { dataTransfer });
+    expect(dataTransfer.dropEffect).toBe('none');
+    fireEvent.drop(thread, { dataTransfer });
     expect(p.onAttach).not.toHaveBeenCalled();
     rerender(<ChatLayout {...p} />);
     fireEvent.dragEnter(thread, { dataTransfer: { files: [], types: ['text/plain'] } });

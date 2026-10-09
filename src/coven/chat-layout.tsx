@@ -746,7 +746,7 @@ export function ChatLayout(props: ChatLayoutProps) {
     onDragOver: (event: ReactDragEvent) => {
       if (!hasFiles(event)) return;
       event.preventDefault();
-      event.dataTransfer.dropEffect = canDrop ? 'copy' : 'none';
+      event.dataTransfer.dropEffect = canRequestAttachment ? 'copy' : 'none';
     },
     onDragLeave: (event: ReactDragEvent) => {
       if (!hasFiles(event)) return;
