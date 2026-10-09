@@ -71,3 +71,15 @@ Installers are code-signed where platform signing secrets are configured, and
 auto-updates are verified against the Tauri updater signing key. Treat any
 unsigned build, or any download whose checksum does not match `SHA256SUMS`, as
 untrusted.
+
+## iPhone companion boundary
+
+The optional companion listener is off at desktop launch and requires an
+explicit local enable action. It exposes a narrow authenticated HTTPS API on a
+private IPv4 interface. Browser Origin requests and redirects are refused. The
+phone pins the paired certificate before sending its random bearer, keeps
+pairing in device-only Keychain, and stores no transcript or draft on disk.
+Desktop credentials and durable idempotency receipts use private app storage.
+Revoking phones rotates the bearer and closes existing connections. Discovery
+records contain only a candidate endpoint and public fingerprint, never a token.
+The test-only `companion-fixture` Cargo feature is not enabled in releases.

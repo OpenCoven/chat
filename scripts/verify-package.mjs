@@ -25,8 +25,15 @@ export const ICONS = [
   'icons/icon.ico',
 ];
 // The main window may reach only these: the app's own commands and setting
-// its own title. Mirrors the specification guard on the capability.
+// its own title and receiving host run events. Mirrors the specification guard.
 export const ALLOWED_PERMISSIONS = [
+  'allow-companion-status',
+  'allow-companion-enable',
+  'allow-companion-disable',
+  'allow-companion-forget',
+  'allow-companion-active-run',
+  'core:event:allow-listen',
+  'core:event:allow-unlisten',
   'allow-coven-runtime-status',
   'allow-coven-runtime-familiars',
   'allow-coven-runtime-sessions',

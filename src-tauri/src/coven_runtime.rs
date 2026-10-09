@@ -24,6 +24,10 @@ mod attachments;
 #[path = "familiar_projects.rs"]
 mod familiar_projects;
 
+#[path = "companion/runtime.rs"]
+mod companion_adapter;
+pub(crate) use companion_adapter::{companion_history, companion_snapshot, companion_start};
+
 const OUTPUT_LIMIT: usize = 4 * 1024 * 1024;
 pub(crate) const TRANSCRIPT_LIMIT: usize = OUTPUT_LIMIT + 256 * 1024;
 const LEDGER_METADATA_LIMIT: usize = 16 * 1024 * 1024;
@@ -87,9 +91,45 @@ pub(crate) struct CovenRuntimeState {
     runs: Runs,
     shutting_down: Arc<AtomicBool>,
     exit_ready: Arc<AtomicBool>,
+    companion_views: Mutex<std::collections::VecDeque<Arc<crate::companion::backend::RunRecord>>>,
 }
 
 impl CovenRuntimeState {
+    pub(crate) fn companion_run(
+        &self,
+        id: &str,
+    ) -> Option<Arc<crate::companion::backend::RunRecord>> {
+        self.companion_views
+            .lock()
+            .ok()?
+            .iter()
+            .find(|r| r.id == id)
+            .cloned()
+    }
+    fn remember_companion(
+        &self,
+        record: Arc<crate::companion::backend::RunRecord>,
+    ) -> Result<(), String> {
+        let mut records = self
+            .companion_views
+            .lock()
+            .map_err(|_| "Run unavailable.")?;
+        if records.len() >= 16 {
+            records.pop_front();
+        }
+        records.push_back(record);
+        Ok(())
+    }
+    pub(crate) fn companion_active(&self) -> Option<Arc<crate::companion::backend::RunRecord>> {
+        let runs = self.runs.lock().ok()?;
+        self.companion_views
+            .lock()
+            .ok()?
+            .iter()
+            .find(|r| r.running() && runs.contains_key(&r.id))
+            .cloned()
+    }
+
     pub(crate) fn register_run(
         &self,
         id: &str,
@@ -979,14 +1019,18 @@ fn read_session(data: &Path, id: &str, budget: Budget) -> Result<Value, String> 
     crate::chat_lifecycle::require_visible(data, id)?;
     crate::chat_origin::require_chat_origin(data, id)?;
     let familiar = crate::chat_canonical::require_current(data, id)?;
-    let deadline = Instant::now() + Duration::from_secs(60);
     let selected = get_session(id)?;
     if selected.get("familiar_id").and_then(Value::as_str) != Some(familiar.as_str()) {
         return Err("This chat is no longer recorded as belonging to the familiar you selected. Refresh Coven and open the familiar again.".into());
     }
-    if let Some((events, has_more)) = read_captured_history(data, &selected, budget, get_session)? {
+    read_session_contents(data, &selected, budget)
+}
+
+fn read_session_contents(data: &Path, selected: &Value, budget: Budget) -> Result<Value, String> {
+    let deadline = Instant::now() + Duration::from_secs(60);
+    if let Some((events, has_more)) = read_captured_history(data, selected, budget, get_session)? {
         return Ok(
-            json!({"session": normalize_session(&selected)?, "events": events, "hasMore": has_more}),
+            json!({"session": normalize_session(selected)?, "events": events, "hasMore": has_more}),
         );
     }
     let siblings = if selected
@@ -996,7 +1040,7 @@ fn read_session(data: &Path, id: &str, budget: Budget) -> Result<Value, String> 
     {
         let listing = cli_json(&["sessions", "--all", "--json"])?;
         history_sessions(
-            &selected,
+            selected,
             listing
                 .get("sessions")
                 .and_then(Value::as_array)
@@ -1015,7 +1059,7 @@ fn read_session(data: &Path, id: &str, budget: Budget) -> Result<Value, String> 
         }
         read_single_session(data, id, budget).map(Some)
     })?;
-    Ok(json!({"session": normalize_session(&selected)?, "events": events, "hasMore": has_more}))
+    Ok(json!({"session": normalize_session(selected)?, "events": events, "hasMore": has_more}))
 }
 
 const HISTORY_DEADLINE: &str = "history deadline";
@@ -1580,18 +1624,36 @@ pub(crate) async fn coven_runtime_send(
     }
 
     validate_input(&input)?;
-    let (cancel, registration) = state.register_run(&input.run_id)?;
     let data = app
         .path()
         .app_local_data_dir()
         .map_err(|_| "Cannot locate local chat storage.")?;
+
+    let (cancel, registration) = state.register_run(&input.run_id)?;
+    let record = crate::companion::backend::RunRecord::new(
+        input.run_id.clone(),
+        input.familiar_id.clone().unwrap_or_default(),
+        cancel.clone(),
+    );
+    *record.base_session.lock().map_err(|_| "Run unavailable.")? = input
+        .session_id
+        .as_deref()
+        .map(crate::companion::backend::session_alias);
+    *record
+        .parent_session
+        .lock()
+        .map_err(|_| "Run unavailable.")? = input.session_id.clone();
+    state.remember_companion(record.clone())?;
     blocking(move || {
         let _registration = registration;
-        send_local(&data, input, &cancel, &mut |event| {
+        let result = send_local(&data, input, &cancel, &mut |event| {
+            let _ = record.observe(event.clone());
             on_event
                 .send(event)
                 .map_err(|_| "The chat event receiver disconnected.".into())
-        })
+        });
+        record.finish(&result);
+        result
     })
     .await
 }
@@ -1954,6 +2016,26 @@ pub(crate) fn coven_runtime_cancel(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn companion_can_poll_a_desktop_run_after_it_finishes() {
+        let state = CovenRuntimeState::default();
+        let (cancel, registration) = state.register_run("desktop-run").unwrap();
+        let record = crate::companion::backend::RunRecord::new(
+            "desktop-run".into(),
+            "familiar".into(),
+            cancel,
+        );
+        state.remember_companion(record.clone()).unwrap();
+        assert!(state.register_run("phone-run").is_err());
+        record.finish(&Ok(json!({})));
+        drop(registration);
+        assert!(state.companion_active().is_none());
+        assert_eq!(
+            state.companion_run("desktop-run").unwrap().value()["status"],
+            "completed"
+        );
+    }
 
     #[cfg(unix)]
     #[test]

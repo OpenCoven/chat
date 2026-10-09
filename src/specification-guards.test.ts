@@ -52,6 +52,13 @@ type ContractCanaryLock = {
 };
 
 const projectRoot = process.cwd();
+const companionCommands = [
+  'companion_status',
+  'companion_enable',
+  'companion_disable',
+  'companion_forget',
+  'companion_active_run',
+];
 const covenRuntimeCommands = [
   'coven_runtime_status',
   'coven_runtime_familiars',
@@ -235,12 +242,15 @@ describe('Phase 1 specification guards', () => {
     ) as CapabilityFile;
 
     expect(capability.windows).toEqual(['main']);
-    // The chat UI invokes only the coven_runtime_* commands. The Cave adapter
+    // The chat UI invokes the runtime, screen relay, and companion controls. The Cave adapter
     // and identity commands remain registered for their native and conformance
     // coverage, but the webview must not be able to reach them.
-    // Beyond the app's own commands, the window may set its own title and
-    // nothing else from Tauri core: no other window, webview or app control.
+    // The window may set its own title and receive native run events; it gets
+    // no event emit, other window, webview, or general network permission.
     expect(capability.permissions).toEqual([
+      ...companionCommands.map((command) => `allow-${command.replaceAll('_', '-')}`),
+      'core:event:allow-listen',
+      'core:event:allow-unlisten',
       ...[...covenRuntimeCommands, ...screenRelayCommands].map(
         (command) => `allow-${command.replaceAll('_', '-')}`,
       ),
@@ -277,7 +287,13 @@ describe('Phase 1 specification guards', () => {
 
     expect(manifest).toMatch(/\[features\]\s+phase1-conformance = \[\]/);
     const features = manifest.match(/\[features\]\r?\n([\s\S]*?)(?=\r?\n\[|$)/)?.[1];
-    expect(features?.trim()).toBe('phase1-conformance = []');
+    expect(features?.trim()).toBe('phase1-conformance = []\ncompanion-fixture = []');
+    expect(manifest).toMatch(
+      /name = "companion-fixture"\s+path = "src\/bin\/companion-fixture\.rs"\s+required-features = \["companion-fixture"\]/,
+    );
+    expect(readText('src-tauri/src/companion/mod.rs')).toContain(
+      '#[cfg(any(test, feature = "companion-fixture"))]\npub mod fixture;',
+    );
     expect(manifest).toMatch(/\[package\][\s\S]*?default-run = "opencoven-chat"/);
     expect(manifest).toMatch(
       /\[\[bin\]\]\s+name = "phase1-native-rpc"\s+path = "src\/bin\/phase1-native-rpc\.rs"\s+required-features = \["phase1-conformance"\]/,
@@ -710,6 +726,7 @@ describe('Phase 1 specification guards', () => {
   it('keeps the generated desktop schema aligned with the reviewed command table', () => {
     const schema = readText('src-tauri/gen/schemas/desktop-schema.json');
     const expectedCommands = [
+      ...companionCommands,
       ...covenRuntimeCommands,
       ...screenRelayCommands,
       'app_identity',
@@ -775,6 +792,7 @@ describe('Phase 1 specification guards', () => {
 
     expect(registeredCommandNames(commands)).toEqual(expected);
     expect(invokeHandlerCommandNames(lib)).toEqual([
+      ...companionCommands.map((command) => `companion::${command}`),
       ...covenRuntimeCommands.map((command) => `coven_runtime::${command}`),
       ...screenRelayCommands.map((command) => `screen_relay::${command}`),
       ...expected,

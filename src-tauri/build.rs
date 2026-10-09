@@ -1,6 +1,11 @@
 use std::{fs, path::Path};
 
 const NATIVE_COMMANDS: &[&str] = &[
+    "companion_status",
+    "companion_enable",
+    "companion_disable",
+    "companion_forget",
+    "companion_active_run",
     "coven_runtime_status",
     "coven_runtime_familiars",
     "coven_runtime_sessions",

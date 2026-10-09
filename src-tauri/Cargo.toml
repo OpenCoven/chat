@@ -12,11 +12,17 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 
 [features]
 phase1-conformance = []
+companion-fixture = []
 
 [[bin]]
 name = "phase1-native-rpc"
 path = "src/bin/phase1-native-rpc.rs"
 required-features = ["phase1-conformance"]
+
+[[bin]]
+name = "companion-fixture"
+path = "src/bin/companion-fixture.rs"
+required-features = ["companion-fixture"]
 
 [build-dependencies]
 serde_json = { version = "=1.0.145", features = ["preserve_order"] }
@@ -31,6 +37,11 @@ base64 = "=0.22.1"
 coven-client = { git = "https://github.com/OpenCoven/coven.git", rev = "721437b84026c042e431b0882dcd14fdb29ac07d" }
 fs2 = "=0.4.3"
 getrandom = "=0.4.3"
+httparse = "=1.10.1"
+rcgen = { version = "=0.14.10", default-features = false, features = ["crypto", "aws_lc_rs"] }
+rustls = "=0.23.45"
+subtle = "=2.6.1"
+tokio-rustls = "=0.26.5"
 hmac = "=0.12.1"
 hpke = { version = "=0.14.0", default-features = false, features = ["aes", "alloc", "x25519"] }
 image = { version = "=0.25.9", default-features = false, features = ["jpeg", "png"] }
@@ -45,7 +56,7 @@ serde_jcs = "=0.2.0"
 serde_json = "=1.0.145"
 sha2 = "=0.10.9"
 tauri = { version = "=2.11.2", features = [] }
-tokio = { version = "=1.53.1", features = ["macros", "sync", "time"] }
+tokio = { version = "=1.53.1", features = ["macros", "sync", "time", "net", "io-util", "rt-multi-thread", "signal"] }
 url = "=2.5.8"
 uuid = { version = "=1.24.1", features = ["v4"] }
 zeroize = "=1.9.0"

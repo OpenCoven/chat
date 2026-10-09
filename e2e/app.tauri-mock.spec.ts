@@ -1,6 +1,13 @@
 import { expect, type Page, test } from '@playwright/test';
 import { contrastFailures } from './contrast';
 
+const observationCommands = [
+  'plugin:window|set_title',
+  'plugin:event|listen',
+  'plugin:event|unlisten',
+  'companion_active_run',
+];
+
 declare global {
   interface Window {
     __covenFixture: { calls: string[]; inputs?: unknown[]; finish?: () => void };
@@ -17,9 +24,10 @@ async function installRuntimeFixture(
   // When set, these frames replace the single assistant reply so a test can
   // stream the structured tool shapes the runtime documents.
   stream?: Record<string, unknown>[],
+  observerFailure = false,
 ) {
   await page.addInitScript(
-    ({ ready, reply, population, stream }) => {
+    ({ ready, reply, population, stream, observerFailure }) => {
       const portrait = document.createElement('canvas');
       portrait.width = 2;
       portrait.height = 2;
@@ -51,6 +59,9 @@ async function installRuntimeFixture(
       } = saved ? JSON.parse(saved) : { heads: {}, calls: [], inputs: [] };
       const persist = () => localStorage.setItem('coven-browser-fixture', JSON.stringify(state));
       window.__covenFixture = { calls: state.calls, inputs: state.inputs };
+      Object.defineProperty(window, '__TAURI_EVENT_PLUGIN_INTERNALS__', {
+        value: { unregisterListener() {} },
+      });
       Object.defineProperty(window, '__TAURI_INTERNALS__', {
         value: {
           // What the host describes about the window; setTitle needs its label.
@@ -66,6 +77,12 @@ async function installRuntimeFixture(
             window.__covenFixture.calls.push(command);
             persist();
             switch (command) {
+              case 'plugin:event|listen':
+                if (observerFailure) throw new Error('Fixture observer unavailable');
+                return 1;
+              case 'plugin:event|unlisten':
+              case 'companion_active_run':
+                return null;
               case 'coven_runtime_status':
                 return ready
                   ? {
@@ -218,7 +235,7 @@ async function installRuntimeFixture(
         },
       });
     },
-    { ready: available, reply, population, stream },
+    { ready: available, reply, population, stream, observerFailure },
   );
 }
 
@@ -499,7 +516,7 @@ test('streams and reloads CLI chat without any Cave or pairing invocation', asyn
   expect(commands).toContain('coven_runtime_read');
   expect(
     commands.every(
-      (command) => command.startsWith('coven_runtime_') || command === 'plugin:window|set_title',
+      (command) => command.startsWith('coven_runtime_') || observationCommands.includes(command),
     ),
   ).toBe(true);
   expect(commands.some((command) => /cave|import|pair/.test(command))).toBe(false);
@@ -724,7 +741,7 @@ test('missing CLI shows actionable setup in the same interface', async ({ page }
   );
   expect(
     (await page.evaluate(() => window.__covenFixture.calls)).filter(
-      (command) => command !== 'plugin:window|set_title',
+      (command) => !observationCommands.includes(command),
     ),
   ).toEqual(['coven_runtime_status']);
 });
@@ -1233,7 +1250,7 @@ test('renders runtime-reported tool calls as rows with input, result and a runni
   const commands = await page.evaluate(() => window.__covenFixture.calls);
   expect(
     commands.every(
-      (invoked) => invoked.startsWith('coven_runtime_') || invoked === 'plugin:window|set_title',
+      (invoked) => invoked.startsWith('coven_runtime_') || observationCommands.includes(invoked),
     ),
   ).toBe(true);
 });
@@ -1485,9 +1502,9 @@ for (const size of [
     await page.getByRole('log', { name: 'Messages' }).focus();
     await page.keyboard.press('Control+f');
     await expect(page.getByRole('searchbox', { name: 'Find in conversation' })).toBeVisible();
-    // Open the footer disclosures so the controls folded inside are measured.
+    // Open the sidebar options so the controls folded inside are measured.
     await page.evaluate(() => {
-      for (const details of document.querySelectorAll('.coven-user-settings details'))
+      for (const details of document.querySelectorAll('details.coven-sidebar-options'))
         (details as HTMLDetailsElement).open = true;
     });
     // The narrow window folds the sidebar away.
@@ -1553,5 +1570,15 @@ for (const size of [
       return found;
     });
     expect(failures).toEqual([]);
+  });
+}
+
+for (const colorScheme of ['light', 'dark'] as const) {
+  test(`keeps companion observer errors readable (${colorScheme})`, async ({ page }) => {
+    await page.emulateMedia({ colorScheme });
+    await installRuntimeFixture(page, true, 'Reply', 1, undefined, true);
+    await page.goto('/');
+    await expect(page.getByRole('alert')).toContainText('Could not observe iPhone activity');
+    expect(await contrastFailures(page)).toEqual([]);
   });
 }

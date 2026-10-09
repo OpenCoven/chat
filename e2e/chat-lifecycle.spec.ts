@@ -13,11 +13,29 @@ test.beforeEach(async ({ page }) => {
       updatedAt: '2026-09-14',
       projectRoot: '/fixture',
     };
+    const callbacks = new Map<number, (data: unknown) => void>();
+    let callbackId = 0;
+    Object.defineProperty(window, '__TAURI_EVENT_PLUGIN_INTERNALS__', {
+      value: { unregisterListener() {} },
+    });
     Object.defineProperty(window, '__TAURI_INTERNALS__', {
       value: {
+        transformCallback(callback: (data: unknown) => void) {
+          callbacks.set(++callbackId, callback);
+          return callbackId;
+        },
+        unregisterCallback(id: number) {
+          callbacks.delete(id);
+        },
         async invoke(command: string, args: { id?: string; lifecycle?: string } = {}) {
           const state = localStorage.getItem('fixture-lifecycle') ?? 'active';
           switch (command) {
+            case 'plugin:event|listen':
+              return 1;
+            case 'plugin:event|unlisten':
+            case 'companion_active_run':
+            case 'plugin:window|set_title':
+              return null;
             case 'coven_runtime_status':
               return { available: true, version: 'fixture' };
             case 'coven_runtime_familiars':
@@ -59,7 +77,7 @@ test.beforeEach(async ({ page }) => {
 test('archives and restores across reload through the archived view', async ({ page }) => {
   await expect(page.getByText('Retained local history.')).toBeVisible();
   const archived = page.getByRole('checkbox', { name: 'Show archived chats' });
-  // The control lives inside a collapsed User settings disclosure.
+  // The control lives inside a collapsed sidebar options disclosure.
   await expect(archived).not.toBeVisible();
   await expect(page.getByRole('button', { name: /^(Active|Archived)$/ })).toHaveCount(0);
   await page.getByRole('button', { name: 'Chat actions' }).click();
@@ -76,7 +94,7 @@ test('archives and restores across reload through the archived view', async ({ p
   expect(await page.evaluate(() => localStorage.getItem('fixture-lifecycle'))).toBe('archived');
 
   // The archived view is the only route back to an archived chat.
-  await page.getByText('User settings', { exact: true }).click();
+  await page.locator('summary[aria-label="Sidebar options"]').click();
   await archived.check();
   await page.getByRole('button', { name: 'Lifecycle familiar', exact: true }).click();
   await expect(page.getByRole('textbox', { name: /^Message Lifecycle familiar/ })).toBeDisabled();
@@ -118,7 +136,7 @@ test('confirms app-local delete and never lists tombstones', async ({ page }) =>
   await expect(page.getByRole('button', { name: 'Chat actions' })).toHaveCount(0);
   const archived = page.getByRole('checkbox', { name: 'Show archived chats' });
   await expect(archived).not.toBeVisible();
-  await page.getByText('User settings', { exact: true }).click();
+  await page.locator('summary[aria-label="Sidebar options"]').click();
   await archived.check();
   await expect(page.getByText('No archived familiars.')).toBeVisible();
 });

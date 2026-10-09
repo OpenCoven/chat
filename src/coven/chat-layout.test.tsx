@@ -14,7 +14,6 @@ import {
   matchesFamiliar,
   PROMPT_LIMIT_BYTES,
   runStatusText,
-  SHORTCUTS,
   sameBlock,
   toolTurnSummary,
 } from './chat-layout';
@@ -355,6 +354,7 @@ describe('production Familiars layout', () => {
 
     const onArchivedFilter = vi.fn();
     render(<ChatLayout {...layoutProps()} onArchivedFilter={onArchivedFilter} />);
+    fireEvent.click(screen.getByLabelText('Sidebar options'));
     const toggle = screen.getByRole('checkbox', { name: 'Show archived chats' });
     expect(toggle).not.toBeChecked();
     fireEvent.click(toggle);
@@ -1574,17 +1574,11 @@ describe('notices, sizes and the shortcut reference', () => {
     expect(screen.getByText('3 bytes')).toBeInTheDocument();
   });
 
-  it('lists every shell shortcut at the foot of the familiar list', () => {
+  it('keeps the bottom-left rail free of settings and shortcut reference sections', () => {
     render(<ChatLayout {...layoutProps()} />);
-    const reference = screen.getByText('Keyboard shortcuts').closest('details');
-    expect(reference).not.toBeNull();
-    for (const [keys, action] of SHORTCUTS) {
-      expect(reference).toHaveTextContent(keys);
-      expect(reference).toHaveTextContent(action);
-    }
-    expect(SHORTCUTS.map(([keys]) => keys)).toEqual(
-      expect.arrayContaining(['Cmd/Ctrl+\\', 'Cmd/Ctrl+Shift+\\', 'Cmd/Ctrl+K']),
-    );
+    expect(screen.queryByText('Keyboard shortcuts')).not.toBeInTheDocument();
+    expect(screen.queryByText('User settings')).not.toBeInTheDocument();
+    expect(document.querySelector('.fr-sidebar-foot')).toBeNull();
   });
 });
 
