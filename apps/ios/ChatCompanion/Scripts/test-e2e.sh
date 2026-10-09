@@ -33,6 +33,26 @@ else
 fi
 cd "$app_dir"
 xcodegen generate
+# On hosted macOS runners the first connection to the fixture's LAN address
+# (a 192.168.64.x NAT interface there) has timed out after 12 s, while every
+# later one answered within a second, whichever test made it (#414). Reach the
+# fixture once from here, with a bound, before any simulator test does, and
+# say how long that took so the next failure is explicable.
+endpoint="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["endpoint"])' "$fixture_dir/receipt.json")"
+warm_started="$(date +%s)"
+answer=""
+for _ in {1..12}; do
+  code="$(curl --silent --output /dev/null --insecure --max-time 5 --write-out '%{http_code}' "$endpoint/v1/snapshot" || true)"
+  if [[ "$code" =~ ^[1-5][0-9][0-9]$ ]]; then answer="$code"; break; fi
+  sleep 1
+done
+if [[ -z "$answer" ]]; then
+  echo "Companion fixture at $endpoint did not answer within $(( $(date +%s) - warm_started ))s." >&2
+  /usr/libexec/ApplicationFirewall/socketfilterfw --getglobalstate >&2 || true
+  ifconfig >&2 || true
+  exit 1
+fi
+echo "Companion fixture answered HTTP $answer at $endpoint after $(( $(date +%s) - warm_started ))s."
 # Ad-hoc simulator signing supplies the application entitlement required by real
 # Keychain tests. Do not substitute an insecure simulator credential store.
 xcodebuild -project ChatCompanion.xcodeproj -scheme ChatCompanion \
