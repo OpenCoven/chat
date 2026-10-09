@@ -48,3 +48,4 @@ jobs:
         with:
           name: iphone-test-results
           path: ${{ runner.temp }}/chat-ios-derived/Logs/Test/*.xcresult
+          if-no-files-found: error

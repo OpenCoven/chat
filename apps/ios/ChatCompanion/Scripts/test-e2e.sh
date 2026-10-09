@@ -90,11 +90,20 @@ fi
 if ! xcodebuild -project ChatCompanion.xcodeproj -scheme ChatCompanion \
   -destination "$destination" -derivedDataPath "${CHAT_IOS_DERIVED_DATA:-$fixture_dir/DerivedData}" \
   -parallel-testing-enabled NO CODE_SIGN_IDENTITY=- CODE_SIGNING_ALLOWED=YES DEVELOPMENT_TEAM=LOCALTEST0 \
-  "${selection[@]}" test; then
+  ${selection[@]+"${selection[@]}"} test; then
   if [[ -s "$fixture_dir/simulator.log" ]]; then
     echo '--- simulator network log (errors) ---' >&2
     grep -E 'finished with error|NSURLError|boringssl|TLS|nw_connection|nw_endpoint' "$fixture_dir/simulator.log" | tail -60 >&2 || true
   fi
+  exit 1
+fi
+# A green step must mean tests ran: under bash 3.2, `set -u` and an empty
+# array expansion once ended this script before xcodebuild with the status
+# lost inside the `if` above, and the upload step only warned about the
+# missing results. Refuse to finish without a result bundle.
+results="${CHAT_IOS_DERIVED_DATA:-$fixture_dir/DerivedData}/Logs/Test"
+if ! ls "$results"/*.xcresult >/dev/null 2>&1; then
+  echo "No .xcresult under $results: the tests did not run." >&2
   exit 1
 fi
 xcodebuild -project ChatCompanion.xcodeproj -scheme ChatCompanion -configuration Release \
