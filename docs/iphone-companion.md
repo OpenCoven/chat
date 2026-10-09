@@ -58,6 +58,10 @@ apps/ios/ChatCompanion/Scripts/test-e2e.sh
 
 The script creates and removes its own simulator and temporary pairing state.
 `CHAT_IOS_DESTINATION` can select an existing simulator; that simulator is retained.
+`CHAT_IOS_UI_FLOW=0` runs the native unit tests only; CI sets it on pull requests
+without the `ci:full` label, because the simulator UI flow is not deterministic on
+hosted runners (#414). Pushes to `main`, labelled pull requests and a manual run
+with `ui_flow` on still run the whole flow.
 `CHAT_IOS_DERIVED_DATA` selects a persistent directory for Xcode test results.
 The fixture uses synthetic chats, is gated behind `companion-fixture`, and is
 absent from production builds. macOS Firewall may require permission for this

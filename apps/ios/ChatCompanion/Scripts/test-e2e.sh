@@ -5,8 +5,10 @@ repo_dir="$(cd "$app_dir/../../.." && pwd)"
 fixture_dir="$(mktemp -d "${TMPDIR:-/tmp}/chat-companion-test.XXXXXX")"
 fixture_pid=""
 simulator=""
+log_pid=""
 cleanup() {
   rm -f "$app_dir/TestSupport/LocalPairing.json"
+  if [[ -n "$log_pid" ]]; then kill "$log_pid" 2>/dev/null || true; wait "$log_pid" 2>/dev/null || true; fi
   if [[ -n "$fixture_pid" ]]; then kill "$fixture_pid" 2>/dev/null || true; wait "$fixture_pid" 2>/dev/null || true; fi
   if [[ -n "$simulator" ]]; then xcrun simctl shutdown "$simulator" 2>/dev/null || true; xcrun simctl delete "$simulator"; fi
   rm -rf "$fixture_dir"
@@ -67,10 +69,33 @@ if [[ -n "$simulator" ]]; then
   sleep 8
   echo "Simulator $simulator booted and opened the fixture address; warm-up took $(( $(date +%s) - warm_started ))s."
 fi
+# CHAT_IOS_UI_FLOW=0 runs the native unit tests only. The pinned-HTTPS UI flow
+# is still not deterministic on hosted runners (#414): its own first connection
+# from the UI-launched app has stalled past the client's 12 s request timeout
+# even after the warm-up above, so CI runs it on main, under the ci:full label
+# and on request, not on every pull request. Unset means everything, as before.
+selection=()
+if [[ "${CHAT_IOS_UI_FLOW:-1}" == "0" ]]; then
+  selection=(-only-testing:ChatCompanionTests)
+elif [[ -n "$simulator" ]]; then
+  # Keep the app's own network log so a failed pairing names its error code,
+  # which the app's user-facing copy deliberately does not.
+  xcrun simctl spawn "$simulator" log stream --style compact \
+    --predicate 'process CONTAINS "ChatCompanion" OR subsystem == "com.apple.network"' \
+    > "$fixture_dir/simulator.log" 2>/dev/null &
+  log_pid=$!
+fi
 # Ad-hoc simulator signing supplies the application entitlement required by real
 # Keychain tests. Do not substitute an insecure simulator credential store.
-xcodebuild -project ChatCompanion.xcodeproj -scheme ChatCompanion \
+if ! xcodebuild -project ChatCompanion.xcodeproj -scheme ChatCompanion \
   -destination "$destination" -derivedDataPath "${CHAT_IOS_DERIVED_DATA:-$fixture_dir/DerivedData}" \
-  -parallel-testing-enabled NO CODE_SIGN_IDENTITY=- CODE_SIGNING_ALLOWED=YES DEVELOPMENT_TEAM=LOCALTEST0 test
+  -parallel-testing-enabled NO CODE_SIGN_IDENTITY=- CODE_SIGNING_ALLOWED=YES DEVELOPMENT_TEAM=LOCALTEST0 \
+  "${selection[@]}" test; then
+  if [[ -s "$fixture_dir/simulator.log" ]]; then
+    echo '--- simulator network log (errors) ---' >&2
+    grep -E 'finished with error|NSURLError|boringssl|TLS|nw_connection|nw_endpoint' "$fixture_dir/simulator.log" | tail -60 >&2 || true
+  fi
+  exit 1
+fi
 xcodebuild -project ChatCompanion.xcodeproj -scheme ChatCompanion -configuration Release \
   -destination 'generic/platform=iOS' -derivedDataPath "$fixture_dir/DeviceBuild" CODE_SIGNING_ALLOWED=NO build
