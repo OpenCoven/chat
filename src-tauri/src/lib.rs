@@ -18,6 +18,8 @@ mod metadata;
 mod operation;
 mod screen_relay;
 mod transport;
+#[cfg(windows)]
+mod windows_job;
 
 use std::sync::{Arc, Mutex, MutexGuard};
 

@@ -324,7 +324,62 @@ pub(crate) fn resolve_cli() -> Result<PathBuf, String> {
         .ok_or_else(|| "Coven CLI is not installed. Install Coven CLI, then retry.".into())
 }
 
-struct OwnedChild(Child, bool);
+/// The Coven CLI process together with whatever it started. On Unix that is
+/// its process group; on Windows it is a kill-on-close Job Object, so that
+/// stopping a run always ends the whole tree. The flag records that the
+/// process has been reaped.
+struct OwnedChild(
+    Child,
+    bool,
+    #[cfg(windows)] Option<crate::windows_job::KillOnCloseJob>,
+);
+
+#[cfg(windows)]
+const CONTAINMENT_FAILED: &str =
+    "Could not contain the Coven process tree; the run was not started.";
+
+impl OwnedChild {
+    /// Spawns `command` inside its own containment: a process group on Unix,
+    /// a kill-on-close job on Windows (entered while suspended, so nothing it
+    /// starts can escape the job). `launch_error` is the message for a spawn
+    /// failure.
+    fn spawn(command: &mut Command, launch_error: &'static str) -> Result<Self, String> {
+        #[cfg(unix)]
+        {
+            use std::os::unix::process::CommandExt;
+            command.process_group(0);
+        }
+        #[cfg(windows)]
+        {
+            use std::os::windows::process::CommandExt;
+            use windows_sys::Win32::System::Threading::{CREATE_NO_WINDOW, CREATE_SUSPENDED};
+            command.creation_flags(CREATE_SUSPENDED | CREATE_NO_WINDOW);
+        }
+        #[allow(unused_mut)]
+        let mut child = command.spawn().map_err(|_| launch_error)?;
+        #[cfg(windows)]
+        {
+            let job = match crate::windows_job::contain(&child) {
+                Ok(job) => job,
+                Err(_) => {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    return Err(CONTAINMENT_FAILED.into());
+                }
+            };
+            if crate::windows_job::resume(&child).is_err() {
+                drop(job);
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err(CONTAINMENT_FAILED.into());
+            }
+            Ok(OwnedChild(child, false, Some(job)))
+        }
+        #[cfg(not(windows))]
+        Ok(OwnedChild(child, false))
+    }
+}
+
 impl Drop for OwnedChild {
     fn drop(&mut self) {
         #[cfg(unix)]
@@ -348,6 +403,9 @@ impl Drop for OwnedChild {
             let _ = self.0.kill();
             let _ = self.0.wait();
         }
+        // Closing the job terminates every descendant still running.
+        #[cfg(windows)]
+        drop(self.2.take());
     }
 }
 
@@ -465,17 +523,7 @@ fn execute_command_bounded(
         return Err(RUN_CANCELLED.into());
     }
     command.stdout(Stdio::piped()).stderr(Stdio::piped());
-    #[cfg(unix)]
-    {
-        use std::os::unix::process::CommandExt;
-        command.process_group(0);
-    }
-    let mut child = OwnedChild(
-        command
-            .spawn()
-            .map_err(|_| "Could not launch installed Coven CLI.")?,
-        false,
-    );
+    let mut child = OwnedChild::spawn(&mut command, "Could not launch installed Coven CLI.")?;
     let (sender, receiver) = mpsc::sync_channel(16);
     let stdout = child
         .0
@@ -597,17 +645,7 @@ pub(crate) fn execute_command_lines(
     }
     command.stdout(Stdio::piped()).stderr(Stdio::piped());
     command.env("NO_COLOR", "1");
-    #[cfg(unix)]
-    {
-        use std::os::unix::process::CommandExt;
-        command.process_group(0);
-    }
-    let mut child = OwnedChild(
-        command
-            .spawn()
-            .map_err(|_| "Could not start the installer.")?,
-        false,
-    );
+    let mut child = OwnedChild::spawn(&mut command, "Could not start the installer.")?;
     let (sender, receiver) = mpsc::sync_channel(16);
     let stdout = child
         .0
@@ -819,19 +857,23 @@ pub(crate) async fn coven_runtime_status() -> Result<Value, String> {
         Ok(match result {
             Ok(version) => {
                 let engine = cli_json(&["engine", "status", "--json"])?;
-                let installed = engine.get("installed").and_then(Value::as_bool)
+                let installed = engine
+                    .get("installed")
+                    .and_then(Value::as_bool)
                     .ok_or("Coven returned invalid engine readiness.")?;
                 // The pinned SDK exposes health only. Its real daemon discovery
                 // remains informative; chat uses CLI contracts, never Cave.
-                let sdk_health = if NativeCovenHealth::default().health().is_ok() { "ok" } else { "unavailable" };
+                let sdk_health = if NativeCovenHealth::default().health().is_ok() {
+                    "ok"
+                } else {
+                    "unavailable"
+                };
                 without_nulls(json!({
-                    "available": installed && cfg!(unix),
+                    "available": installed,
                     "version": String::from_utf8_lossy(&version).trim(),
                     "sdkHealth": sdk_health,
                     "transport": "cli",
-                    "error": if !cfg!(unix) {
-                        Some("Local Coven chat currently requires macOS or Linux for safe process-tree cancellation.")
-                    } else if !installed {
+                    "error": if !installed {
                         Some("The Coven engine is missing. Run coven engine install, then retry.")
                     } else { None },
                 }))
@@ -1616,13 +1658,6 @@ pub(crate) async fn coven_runtime_send(
     input: SendInput,
     on_event: Channel<Value>,
 ) -> Result<Value, String> {
-    if !cfg!(unix) {
-        return Err(
-            "Read-only chat process-tree cancellation is currently supported on macOS and Linux."
-                .into(),
-        );
-    }
-
     validate_input(&input)?;
     let data = app
         .path()
@@ -3519,6 +3554,58 @@ mod tests {
             execute_command_lines(command, &cancel, Duration::from_secs(5), &mut |_, _| Ok(()))
                 .unwrap_err();
         assert_eq!(error, RUN_CANCELLED);
+    }
+
+    #[cfg(windows)]
+    fn windows_process_is_alive(pid: u32) -> bool {
+        let listing = Command::new("tasklist")
+            .args(["/FI", &format!("PID eq {pid}"), "/NH", "/FO", "CSV"])
+            .output()
+            .expect("tasklist runs");
+        String::from_utf8_lossy(&listing.stdout).contains(&format!("\"{pid}\""))
+    }
+
+    /// Stopping a run must end what the CLI started, not only the CLI: the
+    /// grandchild here stands in for the engine and its harness.
+    #[cfg(windows)]
+    #[test]
+    fn windows_cancel_ends_the_whole_process_tree() {
+        let mut command = Command::new("powershell.exe");
+        command.args([
+            "-NoProfile",
+            "-NonInteractive",
+            "-Command",
+            "$p = Start-Process ping.exe -ArgumentList '-n','90','127.0.0.1' -PassThru -WindowStyle Hidden; \
+             [Console]::Out.WriteLine($p.Id); [Console]::Out.Flush(); Start-Sleep -Seconds 90",
+        ]);
+        let cancel = AtomicBool::new(false);
+        let mut grandchild: Option<u32> = None;
+        let mut on_line = |is_stderr: bool, line: &str| {
+            if !is_stderr && grandchild.is_none() {
+                grandchild = line.trim().parse().ok();
+                // Give the grandchild a moment to exist, then stop the run.
+                thread::sleep(Duration::from_millis(500));
+                cancel.store(true, Ordering::SeqCst);
+            }
+            Ok(())
+        };
+        let started = Instant::now();
+        let error = execute_command_lines(command, &cancel, Duration::from_secs(60), &mut on_line)
+            .unwrap_err();
+        assert_eq!(error, RUN_CANCELLED);
+        assert!(
+            started.elapsed() < Duration::from_secs(30),
+            "cancel must not wait out the run"
+        );
+        let pid = grandchild.expect("the script printed its grandchild's pid");
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while windows_process_is_alive(pid) && Instant::now() < deadline {
+            thread::sleep(Duration::from_millis(100));
+        }
+        assert!(
+            !windows_process_is_alive(pid),
+            "grandchild {pid} outlived the cancelled run"
+        );
     }
 
     #[cfg(unix)]
