@@ -18,11 +18,11 @@
   },
   "harness": {
     "repository": "OpenCoven/chat",
-    "revision": "9b5d86fc65515d7723e959728cf4f736a714bd54"
+    "revision": "8220f5435716ca36e08de57503303ebc05b0dbe0"
   },
   "harnessAuthority": {
-    "revision": "9b5d86fc65515d7723e959728cf4f736a714bd54",
-    "tree": "c5fff07b7d1dd00f26923dbfe8c7a4f354949aba",
+    "revision": "8220f5435716ca36e08de57503303ebc05b0dbe0",
+    "tree": "062da55a8d289b6753933ef6970f8e7a7480e8d1",
     "files": [
       {
         "path": "scripts/phase1-conformance.mjs",
@@ -153,13 +153,13 @@
     "productionDeltas": [
       {
         "path": "src-tauri/Cargo.toml",
-        "blob": "6c2925a04569b3cc7e503b2f84be2f92973d92a5",
-        "sha256": "ff3fe805b01cb054728b3f25c5f97c43f472a75715d4c6d53fe56d63417fd1bf"
+        "blob": "42b1e8698421a73f278eee46813b82b7e34f1cb4",
+        "sha256": "968a772920b1ea4781f63939f367509cbbc0be0889be6bc0ec4d9c264f21f741"
       },
       {
         "path": "src-tauri/Cargo.lock",
-        "blob": "2ccadb78bd156120e2871afa4c26a49bbafd023e",
-        "sha256": "fb70a813c6c034cf07f69c1fee06248a00777f32ac0c68815e4158f75bfd43da"
+        "blob": "fe5385c33d768e57c33c9d5e02d7265c0b6a98ea",
+        "sha256": "95e6456fc745c8c991202551788892a63c8a543bdac9582a236bf8c5570473ee"
       },
       {
         "path": "src-tauri/src/bin/phase1-native-rpc.rs",
@@ -198,8 +198,8 @@
       },
       {
         "path": "src-tauri/src/lib.rs",
-        "blob": "10c82a88c793c2e90bd216bc27d66c786675f4cc",
-        "sha256": "05f9ebc0c32b52556a94f7a77498c00c87e2468b08d50a35db75cbd4a50df146"
+        "blob": "be8e9a0b5a49beb869b599fdcd82063a134b4b0e",
+        "sha256": "b46543d22793aceaecf47cbe83de4be42b7979b4033585e71893319e47895778"
       }
     ]
   },
@@ -310,8 +310,8 @@
     "covenVersion": "0.1.0",
     "consumerLock": {
       "path": "pnpm-lock.yaml",
-      "size": 56222,
-      "sha256": "1721be3c4ac1c8d0e31690e0a6d4a8f77b59db1bb4b5ae31bf288eaadc652719"
+      "size": 97838,
+      "sha256": "5def67e3d18bbf757bc02178c8ae5ceda0cbb4fc41c4f5bf29305a3f08b01391"
     },
     "caveArtifacts": {
       "assertionEngine": {

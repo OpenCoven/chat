@@ -80,8 +80,8 @@ const committedHarnessAuthority = JSON.parse(
   readFileSync(resolve(projectRoot, 'phase1-conformance.lock.json'), 'utf8'),
 ).harnessAuthority;
 const expectedBehaviorAuthority = {
-  revision: '9b5d86fc65515d7723e959728cf4f736a714bd54',
-  tree: 'c5fff07b7d1dd00f26923dbfe8c7a4f354949aba',
+  revision: '8220f5435716ca36e08de57503303ebc05b0dbe0',
+  tree: '062da55a8d289b6753933ef6970f8e7a7480e8d1',
   files: [
     {
       path: 'scripts/owned-temp-directory.mjs',
@@ -281,8 +281,8 @@ const expectedEntries = {
     covenVersion: '0.1.0',
     consumerLock: {
       path: 'pnpm-lock.yaml',
-      size: 56222,
-      sha256: '1721be3c4ac1c8d0e31690e0a6d4a8f77b59db1bb4b5ae31bf288eaadc652719',
+      size: 97838,
+      sha256: '5def67e3d18bbf757bc02178c8ae5ceda0cbb4fc41c4f5bf29305a3f08b01391',
     },
     caveArtifacts: {
       assertionEngine: {
