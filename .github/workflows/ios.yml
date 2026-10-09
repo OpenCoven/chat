@@ -12,6 +12,11 @@ on:
       - 'src-tauri/**'
       - '.github/workflows/ios.yml'
   workflow_dispatch:
+    inputs:
+      ui_flow:
+        description: Also run the pinned-HTTPS UI flow in the simulator
+        type: boolean
+        default: false
 permissions:
   contents: read
 concurrency:
@@ -30,9 +35,12 @@ jobs:
           toolchain: 1.95.0
       - name: Install XcodeGen
         run: brew install xcodegen
+      # The UI flow is not deterministic on hosted runners (#414): it runs on
+      # main, under the ci:full label and on request, never on every PR.
       - name: Native unit tests, pinned HTTPS UI flow and Release device build
         env:
           CHAT_IOS_DERIVED_DATA: ${{ runner.temp }}/chat-ios-derived
+          CHAT_IOS_UI_FLOW: ${{ (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.ui_flow) || contains(github.event.pull_request.labels.*.name, 'ci:full')) && '1' || '0' }}
         run: apps/ios/ChatCompanion/Scripts/test-e2e.sh
       - name: Retain native test results
         if: always()
@@ -40,3 +48,4 @@ jobs:
         with:
           name: iphone-test-results
           path: ${{ runner.temp }}/chat-ios-derived/Logs/Test/*.xcresult
+          if-no-files-found: error
