@@ -30,7 +30,13 @@ final class CompanionFlowTests: XCTestCase {
       app.textFields["composer"].exists ? app.textFields["composer"] : app.textViews["composer"]
     composer.tap()
     composer.typeText("Hello from the iPhone")
-    app.buttons["send"].tap()
+    let send = app.buttons["send"]
+    // A transient polling failure disables Send until the next authenticated
+    // refresh. XCTest may tap a disabled button without reporting an error.
+    let readyToSend = XCTNSPredicateExpectation(
+      predicate: NSPredicate(format: "enabled == true AND hittable == true"), object: send)
+    XCTAssertEqual(XCTWaiter.wait(for: [readyToSend], timeout: 20), .completed)
+    send.tap()
     XCTAssertTrue(app.buttons["stop"].waitForExistence(timeout: 10))
     XCTAssertTrue(
       app.staticTexts.containing(NSPredicate(format: "label CONTAINS %@", "Fixture reply arrived."))
