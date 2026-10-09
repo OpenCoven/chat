@@ -53,6 +53,20 @@ if [[ -z "$answer" ]]; then
   exit 1
 fi
 echo "Companion fixture answered HTTP $answer at $endpoint after $(( $(date +%s) - warm_started ))s."
+# The host reaches the fixture at once, but the simulator's own first connection
+# to it has taken 5 to 17 s, and over the client's 12 s request timeout on the
+# runs that failed (#414). xcodebuild would otherwise boot the simulator and
+# start the first network test within seconds. Boot it here, wait until it is
+# fully up, and open the fixture's address from inside it once so that first
+# connection is spent before any test depends on it.
+if [[ -n "$simulator" ]]; then
+  xcrun simctl boot "$simulator"
+  xcrun simctl bootstatus "$simulator" -b
+  warm_started="$(date +%s)"
+  xcrun simctl openurl "$simulator" "$endpoint/v1/snapshot" || true
+  sleep 8
+  echo "Simulator $simulator booted and opened the fixture address; warm-up took $(( $(date +%s) - warm_started ))s."
+fi
 # Ad-hoc simulator signing supplies the application entitlement required by real
 # Keychain tests. Do not substitute an insecure simulator credential store.
 xcodebuild -project ChatCompanion.xcodeproj -scheme ChatCompanion \
