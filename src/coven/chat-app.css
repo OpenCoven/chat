@@ -503,6 +503,7 @@
 
 .coven-agent-search input {
   width: 100%;
+  min-height: 24px;
   min-width: 0;
   border: 0;
   background: transparent;
