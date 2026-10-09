@@ -65,8 +65,17 @@ if [[ -n "$simulator" ]]; then
   xcrun simctl boot "$simulator"
   xcrun simctl bootstatus "$simulator" -b
   warm_started="$(date +%s)"
-  xcrun simctl openurl "$simulator" "$endpoint/v1/snapshot" || true
+  # openurl has no timeout of its own and has hung for two minutes on a
+  # dropped connection (POSIX 60), after which xcodebuild could not find the
+  # device. Bound it, and make sure the device is still booted afterwards.
+  perl -e 'alarm 45; exec @ARGV' xcrun simctl openurl "$simulator" "$endpoint/v1/snapshot" \
+    || echo "Warm-up: the simulator could not open the fixture address within 45s; continuing." >&2
   sleep 8
+  if ! xcrun simctl list devices booted | grep -q "$simulator"; then
+    echo "Warm-up: simulator $simulator is no longer booted; booting it again." >&2
+    xcrun simctl boot "$simulator" || true
+    xcrun simctl bootstatus "$simulator" -b
+  fi
   echo "Simulator $simulator booted and opened the fixture address; warm-up took $(( $(date +%s) - warm_started ))s."
 fi
 # CHAT_IOS_UI_FLOW=0 runs the native unit tests only. The pinned-HTTPS UI flow
