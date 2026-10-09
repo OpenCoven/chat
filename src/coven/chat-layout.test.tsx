@@ -1517,6 +1517,38 @@ describe('notices, sizes and the shortcut reference', () => {
     expect(note.closest('.fr-familiar')).toBeNull();
     expect(screen.queryByText('Notice')).not.toBeInTheDocument();
     expect(container.querySelectorAll('.fr-familiar')).toHaveLength(1);
+    expect(screen.queryByRole('button', { name: 'Copy report' })).not.toBeInTheDocument();
+  });
+  it("renders a failed run's kept report as a notice with its own Copy control", async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    const original = Object.getOwnPropertyDescriptor(navigator, 'clipboard');
+    Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } });
+    const text = "This run failed. Coven's error output:\nexit 1";
+    try {
+      render(
+        <ChatLayout
+          {...layoutProps()}
+          connected
+          ready
+          familiars={[{ id: 'a', name: 'Astra' }]}
+          familiarId="a"
+          messages={[
+            { id: 'a1', role: 'assistant', text: 'Partial reply.' },
+            { id: 'd', role: 'notice', notice: 'diagnostic', text },
+          ]}
+        />,
+      );
+      const note = screen.getByRole('note');
+      expect(note).toHaveClass('coven-notice--diagnostic');
+      expect(note.querySelector('.coven-notice-text')).toHaveTextContent('exit 1');
+      expect(note.closest('.fr-familiar')).toBeNull();
+      fireEvent.click(screen.getByRole('button', { name: 'Copy report' }));
+      expect(writeText).toHaveBeenCalledWith(text);
+      await screen.findByText('Copied');
+    } finally {
+      if (original) Object.defineProperty(navigator, 'clipboard', original);
+      else Reflect.deleteProperty(navigator, 'clipboard');
+    }
   });
 
   it('shows attachment sizes in KiB above a kibibyte', () => {

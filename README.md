@@ -235,7 +235,10 @@ compose the next message while the familiar responds. A failed or cancelled
 send restores its attachments and restores its text only if you have not
 edited the new draft; later edits are never overwritten. While a failed run's
 error notice shows and the restored text or attachments are still in the
-composer, the notice offers **Try again**, which sends them once more.
+composer, the notice offers **Try again**, which sends them once more. What
+Coven reported about the failure is kept as the last line of the chat, with its
+own **Copy** control, so it is still there after the notice is dismissed or the
+app is reopened; when Coven gave no reason, the line says so.
 
 Assistant replies render Markdown headings, lists, emphasis, quotes, code,
 tables, and task lists. Wide code and tables scroll inside the message.

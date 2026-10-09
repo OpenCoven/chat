@@ -921,6 +921,23 @@
   text-wrap: balance;
 }
 
+/* A failed run's report: the same quiet line, but left-aligned and keeping
+   its line breaks so an error output reads as it was printed. */
+.coven-chat .coven-notice--diagnostic {
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  gap: 8px;
+  text-align: left;
+  text-wrap: wrap;
+}
+
+.coven-chat .coven-notice--diagnostic .coven-notice-text {
+  margin: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
 /* Raw engine output: a quiet mono block, addressed by no one. */
 .coven-chat .coven-output {
   padding: 8px 12px;
