@@ -450,8 +450,14 @@ export function ChatApp({
   }
 
   async function attach(files: File[]) {
-    if (lifecyclePending.current || selecting.current || activeRun.current || files.length === 0)
+    if (files.length === 0) return;
+    // A blocked attach used to return silently, leaving no chip and no banner —
+    // the "I can't tell if it attached" case. Surface the reason instead.
+    if (activeRun.current) {
+      setError('Finish or stop the current reply before attaching a file.');
       return;
+    }
+    if (lifecyclePending.current || selecting.current) return;
     const key = draftKey(navigationRef.current);
     selecting.current = true;
     setRetryKey('');
