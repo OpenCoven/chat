@@ -58,6 +58,10 @@ apps/ios/ChatCompanion/Scripts/test-e2e.sh
 
 The script creates and removes its own simulator and temporary pairing state.
 `CHAT_IOS_DESTINATION` can select an existing simulator; that simulator is retained.
+`CHAT_IOS_FIXTURE_IP=10.255.255.1` binds the fixture to that private-range alias of
+the loopback interface (added with `sudo ifconfig lo0 alias` if absent, removed on
+exit) instead of the Mac's LAN address; CI sets it because the simulator's
+connections to a hosted runner's NAT address drop now and then (#418).
 `CHAT_IOS_UI_FLOW=0` runs the native unit tests only; CI sets it on pull requests
 without the `ci:full` label, because the simulator UI flow is not deterministic on
 hosted runners (#414). Pushes to `main`, labelled pull requests and a manual run
