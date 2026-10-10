@@ -6,8 +6,10 @@ fixture_dir="$(mktemp -d "${TMPDIR:-/tmp}/chat-companion-test.XXXXXX")"
 fixture_pid=""
 simulator=""
 log_pid=""
+alias_added=""
 cleanup() {
   rm -f "$app_dir/TestSupport/LocalPairing.json"
+  if [[ -n "$alias_added" ]]; then sudo ifconfig lo0 -alias "$alias_added" 2>/dev/null || true; fi
   if [[ -n "$log_pid" ]]; then kill "$log_pid" 2>/dev/null || true; wait "$log_pid" 2>/dev/null || true; fi
   if [[ -n "$fixture_pid" ]]; then kill "$fixture_pid" 2>/dev/null || true; wait "$fixture_pid" 2>/dev/null || true; fi
   if [[ -n "$simulator" ]]; then xcrun simctl shutdown "$simulator" 2>/dev/null || true; xcrun simctl delete "$simulator"; fi
@@ -16,7 +18,21 @@ cleanup() {
 trap cleanup EXIT
 cd "$repo_dir"
 rustup run 1.95.0 cargo build --locked --manifest-path src-tauri/Cargo.toml --features companion-fixture --bin companion-fixture
-src-tauri/target/debug/companion-fixture "$fixture_dir/state" > "$fixture_dir/receipt.json" &
+# CHAT_IOS_FIXTURE_IP puts the fixture on a private-range alias of the loopback
+# interface instead of the machine's LAN address. On hosted runners the LAN
+# address is the VM's NAT interface, and the simulator's connects to it drop
+# now and then (#418); loopback never drops them. The phone accepts any
+# private IPv4 address and rejects 127.0.0.1, hence an alias such as
+# 10.255.255.1. Unset means the LAN address, as the app itself uses.
+fixture_args=()
+if [[ -n "${CHAT_IOS_FIXTURE_IP:-}" ]]; then
+  if ! ifconfig lo0 | grep -q "inet ${CHAT_IOS_FIXTURE_IP} "; then
+    sudo ifconfig lo0 alias "$CHAT_IOS_FIXTURE_IP" 255.255.255.255
+    alias_added="$CHAT_IOS_FIXTURE_IP"
+  fi
+  fixture_args=("$CHAT_IOS_FIXTURE_IP")
+fi
+src-tauri/target/debug/companion-fixture "$fixture_dir/state" ${fixture_args[@]+"${fixture_args[@]}"} > "$fixture_dir/receipt.json" &
 fixture_pid=$!
 for _ in {1..100}; do
   if [[ -s "$fixture_dir/receipt.json" ]]; then break; fi

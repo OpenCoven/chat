@@ -40,6 +40,9 @@ jobs:
       - name: Native unit tests, pinned HTTPS UI flow and Release device build
         env:
           CHAT_IOS_DERIVED_DATA: ${{ runner.temp }}/chat-ios-derived
+          # Loopback alias: the simulator's connects to the runner VM's NAT
+          # address drop now and then (#418); loopback never does.
+          CHAT_IOS_FIXTURE_IP: 10.255.255.1
           CHAT_IOS_UI_FLOW: ${{ (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.ui_flow) || contains(github.event.pull_request.labels.*.name, 'ci:full')) && '1' || '0' }}
         run: apps/ios/ChatCompanion/Scripts/test-e2e.sh
       - name: Retain native test results
