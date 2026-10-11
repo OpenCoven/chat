@@ -1,0 +1,304 @@
+/*
+ * An attached file as a card: a paper tile carrying a miniature of the file's
+ * first lines, its type badge, then its name and size. The tile tilts on hover
+ * like a page lifted off a desk; the card opens a Quick Look sheet.
+ */
+.coven-attachment-card {
+  position: relative;
+  display: inline-flex;
+  max-width: 240px;
+}
+
+.coven-attachment-face {
+  display: grid;
+  grid-template-columns: 40px minmax(0, 1fr);
+  align-items: center;
+  gap: 11px;
+  min-width: 0;
+  width: 100%;
+  padding: 7px 14px 7px 7px;
+  border: 1px solid var(--border-hairline);
+  border-radius: 12px;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.035), transparent 65%), var(--bg-panel);
+  color: var(--text-primary);
+  font: inherit;
+  text-align: left;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.28);
+  transition:
+    border-color var(--duration-fast, 120ms) var(--ease-standard, ease),
+    box-shadow 160ms var(--ease-standard, ease),
+    transform 160ms var(--ease-standard, ease);
+}
+
+button.coven-attachment-face {
+  cursor: zoom-in;
+}
+
+button.coven-attachment-face:hover {
+  border-color: var(--border-strong);
+  box-shadow:
+    0 6px 18px rgba(0, 0, 0, 0.32),
+    0 1px 2px rgba(0, 0, 0, 0.3);
+  transform: translateY(-1px);
+}
+
+button.coven-attachment-face:focus-visible {
+  outline: 2px solid var(--ring-focus);
+  outline-offset: 2px;
+}
+
+/* The paper: a tile with a folded top-right corner. */
+.coven-attachment-paper {
+  position: relative;
+  width: 40px;
+  height: 50px;
+  overflow: hidden;
+  border-radius: 4px;
+  background: linear-gradient(160deg, #f4f1ea, #e3ded2);
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.5) inset,
+    0 2px 6px rgba(0, 0, 0, 0.35);
+  clip-path: polygon(0 0, calc(100% - 9px) 0, 100% 9px, 100% 100%, 0 100%);
+  transform-origin: 50% 90%;
+  transition: transform 200ms var(--ease-standard, ease);
+}
+
+.coven-attachment-paper::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 9px;
+  height: 9px;
+  background: linear-gradient(225deg, transparent 50%, #c9c2b2 50%);
+}
+
+button.coven-attachment-face:hover .coven-attachment-paper,
+button.coven-attachment-face:focus-visible .coven-attachment-paper {
+  transform: rotate(-4deg) translateY(-1px);
+}
+
+/* The miniature: real text at a quarter scale, so the tile shows the file's shape. */
+.coven-attachment-thumb {
+  position: absolute;
+  top: 5px;
+  left: 4px;
+  width: 136px;
+  margin: 0;
+  color: #3b3a36;
+  font-family: var(--font-jetbrains-mono);
+  font-size: 10px;
+  line-height: 1.35;
+  white-space: pre;
+  overflow: hidden;
+  transform: scale(0.25);
+  transform-origin: top left;
+  pointer-events: none;
+}
+
+.coven-attachment-glyph {
+  display: grid;
+  place-items: center;
+  height: 100%;
+  color: #7d776b;
+}
+
+.coven-attachment-badge {
+  position: absolute;
+  left: 3px;
+  bottom: 3px;
+  padding: 1px 4px;
+  border-radius: 3px;
+  background: color-mix(in oklch, var(--accent-presence) 85%, black);
+  color: var(--accent-presence-foreground, #fff);
+  font-family: var(--font-jetbrains-mono);
+  font-size: 8px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  line-height: 1.3;
+}
+
+.coven-attachment-copy {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.coven-attachment-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12.5px;
+  font-weight: 500;
+}
+
+.coven-attachment-meta {
+  color: var(--text-muted);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.coven-attachment-remove {
+  position: absolute;
+  top: -8px;
+  right: -8px;
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 1px solid var(--border-strong);
+  border-radius: 50%;
+  background: var(--bg-elevated);
+  color: var(--text-secondary);
+  opacity: 0.7;
+  cursor: pointer;
+  transition: opacity var(--duration-fast, 120ms) var(--ease-standard, ease);
+}
+
+.coven-attachment-card:hover .coven-attachment-remove,
+.coven-attachment-remove:focus-visible {
+  opacity: 1;
+}
+
+.coven-attachment-remove:hover {
+  color: var(--text-primary);
+  background: var(--bg-hover);
+}
+
+.coven-attachment-remove:focus-visible {
+  outline: 2px solid var(--ring-focus);
+  outline-offset: 1px;
+}
+
+/* Quick Look: the whole file on a sheet, numbered, over a blurred window. */
+.coven-peek {
+  width: min(760px, calc(100vw - 48px));
+  max-height: min(78vh, 820px);
+  padding: 0;
+  border: 1px solid var(--border-strong);
+  border-radius: 16px;
+  background: var(--bg-panel);
+  color: var(--text-primary);
+  box-shadow:
+    0 30px 80px rgba(0, 0, 0, 0.55),
+    0 0 0 1px rgba(255, 255, 255, 0.04) inset;
+  overflow: hidden;
+}
+
+.coven-peek[open] {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  animation: coven-peek-in 180ms var(--ease-standard, ease);
+}
+
+.coven-peek::backdrop {
+  background: rgba(6, 6, 10, 0.55);
+  backdrop-filter: blur(6px);
+}
+
+@keyframes coven-peek-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px) scale(0.985);
+  }
+}
+
+.coven-peek-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 12px 12px 16px;
+  border-bottom: 1px solid var(--border-hairline);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.03), transparent);
+}
+
+.coven-attachment-badge.coven-peek-badge {
+  position: static;
+  padding: 3px 6px;
+  font-size: 10px;
+}
+
+.coven-peek-title-wrap {
+  display: grid;
+  flex: 1;
+  min-width: 0;
+}
+
+.coven-peek-title {
+  margin: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13.5px;
+  font-weight: 600;
+}
+
+.coven-peek-meta {
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.coven-peek-close {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+
+.coven-peek-close:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.coven-peek-close:focus-visible {
+  outline: 2px solid var(--ring-focus);
+}
+
+.coven-peek-body {
+  margin: 0;
+  padding: 12px 0 16px;
+  overflow: auto;
+  list-style: none;
+  counter-reset: peek-line;
+  font-family: var(--font-jetbrains-mono);
+  font-size: 12.5px;
+  line-height: 1.6;
+}
+
+.coven-peek-body li {
+  counter-increment: peek-line;
+  display: grid;
+  grid-template-columns: 4.5ch minmax(0, 1fr);
+  gap: 16px;
+  padding: 0 20px 0 12px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.coven-peek-body li::before {
+  content: counter(peek-line);
+  color: var(--text-muted);
+  text-align: right;
+  user-select: none;
+}
+
+.coven-peek-body li:hover {
+  background: color-mix(in srgb, var(--bg-hover) 60%, transparent);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .coven-attachment-face,
+  .coven-attachment-paper,
+  .coven-peek[open] {
+    transition: none;
+    animation: none;
+  }
+}

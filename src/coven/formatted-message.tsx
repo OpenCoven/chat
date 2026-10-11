@@ -1,9 +1,10 @@
-import { memo, type ReactNode, useState } from 'react';
+import { memo, type ReactNode, useEffect, useId, useRef, useState } from 'react';
 import Markdown, { type Components, defaultUrlTransform } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { CopyButton } from './copy-button';
 import './formatted-message.css';
-import { segmentToolCalls } from './tool-activity';
+import { usePreferences } from './preferences';
+import { segmentToolCalls, toolGroupSummary, toolKind } from './tool-activity';
 
 /**
  * The shape of the syntax-tree node react-markdown hands a component. Typed
@@ -125,7 +126,88 @@ export function resultSize(result: string): string {
   return lines === 1 ? '1 line' : `${lines} lines`;
 }
 
+/** Dispatched (bubbling) on a tool row to unfold the group holding it. */
+export const REVEAL_EVENT = 'coven:reveal';
+
+/** Consecutive calls from this many on fold into one summary line, when the reader keeps grouping on. */
+export const TOOL_GROUP_AT = 2;
+/** How many calls the summary line draws as pips before counting the rest. */
+const TOOL_PIPS = 12;
+
+/**
+ * A run of tool calls. Two or more fold into one line that says what they did
+ * ("Ran 4 commands and read 2 files"), with a pip per call so a failure or the
+ * live call shows without opening it; the line expands to the rows.
+ */
 export function ToolActivity({ rows }: { rows: readonly ToolRow[] }) {
+  const { groupTools } = usePreferences();
+  const [open, setOpen] = useState(false);
+  const listId = useId();
+  const group = useRef<HTMLDivElement>(null);
+  // Find in the conversation asks a folded group to show the call it landed on.
+  useEffect(() => {
+    const node = group.current;
+    if (!node) return;
+    const reveal = () => setOpen(true);
+    node.addEventListener(REVEAL_EVENT, reveal);
+    return () => node.removeEventListener(REVEAL_EVENT, reveal);
+  });
+  if (!groupTools || rows.length < TOOL_GROUP_AT) return <ToolRows rows={rows} />;
+  const failed = rows.filter((row) => row.isError).length;
+  const running = rows.find((row) => row.running);
+  const pips = rows.slice(-TOOL_PIPS);
+  const summary = toolGroupSummary(rows.map((row) => row.name));
+  return (
+    <div
+      ref={group}
+      className="coven-tool-group"
+      data-open={open || undefined}
+      data-running={running ? true : undefined}
+      data-error={failed ? true : undefined}
+    >
+      <button
+        type="button"
+        className="coven-tool-group-summary"
+        aria-expanded={open}
+        aria-controls={listId}
+        onClick={() => setOpen((value) => !value)}
+      >
+        <span className="coven-tool-group-pips" aria-hidden="true">
+          {rows.length > TOOL_PIPS ? (
+            <span className="coven-tool-group-more">+{rows.length - TOOL_PIPS}</span>
+          ) : null}
+          {pips.map((row, index) => (
+            <span
+              key={`${index}-${row.name}`}
+              className="coven-tool-pip"
+              data-kind={toolKind(row.name)}
+              data-error={row.isError || undefined}
+              data-running={row.running || undefined}
+            />
+          ))}
+        </span>
+        <span className="coven-tool-group-text">{summary}</span>
+        <span className="coven-tool-group-tail">
+          {running ? (
+            <span className="coven-tool-state coven-tool-state--running">
+              Running {running.name}
+            </span>
+          ) : null}
+          {failed ? <span className="coven-tool-state">{failed} failed</span> : null}
+          <span className="coven-tool-chevron" aria-hidden="true">
+            &#8250;
+          </span>
+        </span>
+      </button>
+      {/* Folded rows stay in the page, hidden, so find can still reach them. */}
+      <div id={listId} className="coven-tool-group-rows" hidden={!open}>
+        <ToolRows rows={rows} />
+      </div>
+    </div>
+  );
+}
+
+function ToolRows({ rows }: { rows: readonly ToolRow[] }) {
   const [expanded, setExpanded] = useState(false);
   const folded = !expanded && rows.length > TOOL_FOLD_AT;
   const first = folded ? rows.length - TOOL_FOLD_KEEP : 0;

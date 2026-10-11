@@ -1,0 +1,790 @@
+/*
+ * Settings: one sheet over a blurred window. A quiet section rail on the
+ * left, the section on the right as grouped cards. Depth comes from a soft
+ * accent glow and layered hairlines rather than heavy fills.
+ */
+.coven-settings {
+  width: min(900px, calc(100vw - 48px));
+  height: min(620px, calc(100vh - 64px));
+  max-width: none;
+  max-height: none;
+  padding: 0;
+  border: 1px solid var(--border-strong);
+  border-radius: 20px;
+  background:
+    radial-gradient(
+      120% 70% at 0% 0%,
+      color-mix(in oklch, var(--accent-presence) 9%, transparent),
+      transparent 60%
+    ),
+    radial-gradient(
+      90% 60% at 100% 100%,
+      color-mix(in oklch, var(--accent-violet, var(--accent-presence)) 6%, transparent),
+      transparent 70%
+    ), var(--bg-panel);
+  color: var(--text-primary);
+  box-shadow:
+    0 40px 120px rgba(0, 0, 0, 0.6),
+    0 0 0 1px rgba(255, 255, 255, 0.04) inset,
+    0 1px 0 rgba(255, 255, 255, 0.06) inset;
+  overflow: hidden;
+}
+
+.coven-settings[open] {
+  animation: coven-settings-in 220ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+.coven-settings::backdrop {
+  background: rgba(5, 5, 9, 0.6);
+  backdrop-filter: blur(10px) saturate(120%);
+}
+
+@keyframes coven-settings-in {
+  from {
+    opacity: 0;
+    transform: translateY(10px) scale(0.98);
+  }
+}
+
+.coven-settings-frame {
+  display: grid;
+  grid-template-columns: 212px minmax(0, 1fr);
+  height: 100%;
+}
+
+/* The section rail. */
+.coven-settings-nav {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  padding: 22px 12px;
+  border-right: 1px solid var(--border-hairline);
+  background: color-mix(in srgb, var(--bg-sunken) 55%, transparent);
+}
+
+.coven-settings-brand {
+  display: grid;
+  gap: 2px;
+  padding: 0 10px;
+}
+
+.coven-settings-eyebrow {
+  color: var(--text-muted);
+  font-size: 10.5px;
+  font-weight: 500;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.coven-settings-heading {
+  font-size: 18px;
+  font-weight: 600;
+  letter-spacing: -0.015em;
+}
+
+.coven-settings-nav ul {
+  display: grid;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.coven-settings-nav-item {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  height: 34px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 9px;
+  background: transparent;
+  color: var(--text-secondary);
+  font: inherit;
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+  transition:
+    background var(--duration-fast, 120ms) var(--ease-standard, ease),
+    color var(--duration-fast, 120ms) var(--ease-standard, ease);
+}
+
+.coven-settings-nav-item:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.coven-settings-nav-item[aria-current="page"] {
+  background:
+    linear-gradient(
+      90deg,
+      color-mix(in oklch, var(--accent-presence) 14%, transparent),
+      transparent 80%
+    ), var(--bg-elevated);
+  color: var(--text-primary);
+  box-shadow: 0 0 0 1px var(--border-hairline) inset;
+}
+
+.coven-settings-nav-item[aria-current="page"]::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 9px;
+  bottom: 9px;
+  width: 2px;
+  border-radius: 2px;
+  background: var(--accent-presence);
+  box-shadow: 0 0 10px var(--accent-presence);
+}
+
+.coven-settings-nav-item:focus-visible {
+  outline: 2px solid var(--ring-focus);
+  outline-offset: 1px;
+}
+
+.coven-settings-nav-icon {
+  display: grid;
+  place-items: center;
+  width: 18px;
+  color: var(--text-muted);
+  font-size: 14px;
+}
+
+.coven-settings-nav-item[aria-current="page"] .coven-settings-nav-icon {
+  color: var(--accent-presence);
+}
+
+/* The section. */
+.coven-settings-body {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  min-width: 0;
+}
+
+.coven-settings-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 26px 28px 14px 32px;
+}
+
+.coven-settings-head h2 {
+  margin: 0;
+  font-size: 21px;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+}
+
+.coven-settings-head p {
+  margin: 4px 0 0;
+  color: var(--text-muted);
+  font-size: 13px;
+}
+
+.coven-settings-close {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  flex-shrink: 0;
+  padding: 0;
+  border: 1px solid var(--border-hairline);
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--bg-elevated) 70%, transparent);
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+
+.coven-settings-close:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.coven-settings-close:focus-visible {
+  outline: 2px solid var(--ring-focus);
+  outline-offset: 2px;
+}
+
+.coven-settings-scroll {
+  display: grid;
+  align-content: start;
+  gap: 22px;
+  padding: 6px 32px 32px;
+  overflow-y: auto;
+}
+
+.coven-settings-group {
+  display: grid;
+  gap: 8px;
+}
+
+.coven-settings-group-title {
+  margin: 0;
+  padding-left: 2px;
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.coven-settings-card {
+  border: 1px solid var(--border-hairline);
+  border-radius: 14px;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.03), transparent 50%),
+    color-mix(in srgb, var(--bg-elevated) 55%, transparent);
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.03) inset;
+}
+
+.coven-settings-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  padding: 14px 16px;
+}
+
+.coven-settings-row + .coven-settings-row {
+  border-top: 1px solid var(--border-hairline);
+}
+
+.coven-settings-row-copy {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.coven-settings-row-label {
+  font-size: 13.5px;
+  font-weight: 500;
+}
+
+.coven-settings-row-hint {
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.coven-settings-row-control {
+  flex-shrink: 0;
+}
+
+.coven-settings-row-control:empty {
+  display: none;
+}
+
+/* A checkbox drawn as a switch. */
+.coven-switch {
+  appearance: none;
+  position: relative;
+  width: 42px;
+  height: 24px;
+  margin: 0;
+  border: 1px solid var(--border-strong);
+  border-radius: 12px;
+  background: var(--bg-sunken);
+  cursor: pointer;
+  transition:
+    background 160ms var(--ease-standard, ease),
+    border-color 160ms var(--ease-standard, ease);
+}
+
+.coven-switch::after {
+  content: "";
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: var(--text-secondary);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
+  transition:
+    transform 180ms cubic-bezier(0.3, 0.7, 0.2, 1.2),
+    background 160ms var(--ease-standard, ease);
+}
+
+.coven-switch:checked {
+  border-color: color-mix(in oklch, var(--accent-presence) 70%, transparent);
+  background: color-mix(in oklch, var(--accent-presence) 70%, var(--bg-sunken));
+}
+
+.coven-switch:checked::after {
+  transform: translateX(18px);
+  background: #fff;
+}
+
+.coven-switch:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.coven-switch:focus-visible {
+  outline: 2px solid var(--ring-focus);
+  outline-offset: 2px;
+}
+
+/* Text size: four tiles, each showing its own size. */
+.coven-text-sizes {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+  margin: 0;
+  padding: 12px;
+  border: 0;
+}
+
+.coven-text-size {
+  position: relative;
+  display: grid;
+  justify-items: center;
+  align-content: center;
+  gap: 6px;
+  height: 84px;
+  border: 1px solid var(--border-hairline);
+  border-radius: 11px;
+  background: color-mix(in srgb, var(--bg-sunken) 60%, transparent);
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition:
+    border-color 140ms var(--ease-standard, ease),
+    background 140ms var(--ease-standard, ease);
+}
+
+.coven-text-size:hover {
+  border-color: var(--border-strong);
+  color: var(--text-primary);
+}
+
+.coven-text-size[data-checked] {
+  border-color: color-mix(in oklch, var(--accent-presence) 65%, transparent);
+  background:
+    radial-gradient(
+      80% 80% at 50% 0%,
+      color-mix(in oklch, var(--accent-presence) 16%, transparent),
+      transparent
+    ), var(--bg-elevated);
+  color: var(--text-primary);
+  box-shadow: 0 0 0 3px color-mix(in oklch, var(--accent-presence) 14%, transparent);
+}
+
+.coven-text-size input {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.coven-text-size:has(input:focus-visible) {
+  outline: 2px solid var(--ring-focus);
+  outline-offset: 2px;
+}
+
+.coven-text-size-sample {
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  line-height: 1;
+}
+
+.coven-text-size-label {
+  font-size: 11.5px;
+}
+
+.coven-text-size-preview {
+  margin: 0;
+  padding: 12px 16px 14px;
+  border-top: 1px solid var(--border-hairline);
+  color: var(--text-secondary);
+  line-height: 1.6;
+}
+
+/* Access. */
+.coven-access-hero {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px 14px;
+  padding: 16px;
+  border: 1px solid var(--border-hairline);
+  border-radius: 14px;
+  background:
+    radial-gradient(
+      100% 120% at 0% 0%,
+      color-mix(in oklch, var(--accent-presence) 10%, transparent),
+      transparent 70%
+    ), color-mix(in srgb, var(--bg-elevated) 55%, transparent);
+}
+
+.coven-access-hero-copy {
+  display: grid;
+  flex: 1;
+  gap: 2px;
+  min-width: 160px;
+}
+
+.coven-access-hero-name {
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.coven-access-hero-hint {
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.coven-access-stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.coven-access-stat {
+  padding: 4px 10px;
+  border: 1px solid var(--border-hairline);
+  border-radius: 999px;
+  background: var(--bg-sunken);
+  color: var(--text-secondary);
+  font-size: 11.5px;
+  white-space: nowrap;
+}
+
+.coven-access-stat strong {
+  color: var(--text-primary);
+  font-variant-numeric: tabular-nums;
+}
+
+.coven-access-stat--write strong {
+  color: var(--color-warning);
+}
+
+.coven-access-filter {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 34px;
+  padding: 0 12px;
+  border: 1px solid var(--border-hairline);
+  border-radius: 10px;
+  background: var(--bg-sunken);
+  color: var(--text-muted);
+}
+
+.coven-access-filter:focus-within {
+  border-color: var(--border-strong);
+}
+
+.coven-access-filter input {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: var(--text-primary);
+  font: inherit;
+  font-size: 13px;
+}
+
+.coven-access-list {
+  margin: 0;
+  padding: 4px;
+  list-style: none;
+  border: 1px solid var(--border-hairline);
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--bg-elevated) 45%, transparent);
+}
+
+/* Name and access share the first line; the path gets the full second line. */
+.coven-access-item {
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr) auto;
+  grid-template-rows: auto auto;
+  column-gap: 10px;
+  row-gap: 2px;
+  align-items: center;
+  padding: 10px 12px;
+  border-radius: 10px;
+}
+
+.coven-access-item + .coven-access-item {
+  box-shadow: 0 -1px 0 var(--border-hairline);
+}
+
+.coven-access-item:hover {
+  background: var(--bg-hover);
+}
+
+.coven-access-icon {
+  grid-row: 1 / span 2;
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  background: var(--bg-sunken);
+  color: var(--text-muted);
+}
+
+.coven-access-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.coven-access-pill {
+  justify-self: end;
+  padding: 2px 8px;
+  border: 1px solid var(--border-hairline);
+  border-radius: 999px;
+  color: var(--text-secondary);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.coven-access-pill--write {
+  border-color: color-mix(in oklch, var(--color-warning) 40%, transparent);
+  background: color-mix(in oklch, var(--color-warning) 10%, transparent);
+  color: var(--color-warning);
+}
+
+.coven-access-path {
+  grid-column: 2;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-muted);
+  font-family: var(--font-jetbrains-mono);
+  font-size: 11.5px;
+}
+
+.coven-access-copy {
+  grid-column: 3;
+  grid-row: 2;
+  justify-self: end;
+  opacity: 0;
+  transition: opacity var(--duration-fast, 120ms) var(--ease-standard, ease);
+}
+
+.coven-access-item:hover .coven-access-copy,
+.coven-access-copy:focus-visible {
+  opacity: 1;
+}
+
+.coven-access-none {
+  padding: 18px 12px;
+  color: var(--text-muted);
+  font-size: 12.5px;
+  text-align: center;
+}
+
+.coven-settings-empty {
+  display: grid;
+  justify-items: center;
+  gap: 10px;
+  padding: 36px 24px;
+  border: 1px dashed var(--border-hairline);
+  border-radius: 14px;
+  color: var(--text-muted);
+  text-align: center;
+}
+
+.coven-settings-empty p {
+  max-width: 420px;
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.55;
+}
+
+.coven-settings-footnote {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.coven-settings-link {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--accent-presence);
+  font: inherit;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+
+.coven-settings-link:disabled {
+  color: var(--text-muted);
+  cursor: not-allowed;
+}
+
+/* Devices: the companion opener reads as a button here. */
+.coven-settings-companion .coven-companion-open {
+  padding: 6px 12px;
+  border: 1px solid var(--border-strong);
+  border-radius: 9px;
+  background: var(--bg-elevated);
+  font-size: 12.5px;
+}
+
+.coven-settings-companion .coven-companion-open:hover {
+  background: var(--bg-hover);
+}
+
+.coven-settings-button {
+  white-space: nowrap;
+}
+
+/* Shortcuts. */
+.coven-shortcuts {
+  padding: 4px 0;
+}
+
+.coven-shortcut {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 10px 16px;
+  font-size: 13px;
+}
+
+.coven-shortcut + .coven-shortcut {
+  border-top: 1px solid var(--border-hairline);
+}
+
+.coven-shortcut-keys {
+  display: inline-flex;
+  gap: 4px;
+}
+
+.coven-keycap {
+  display: inline-grid;
+  place-items: center;
+  min-width: 24px;
+  height: 24px;
+  padding: 0 7px;
+  border: 1px solid var(--border-strong);
+  border-bottom-width: 2px;
+  border-radius: 6px;
+  background: linear-gradient(180deg, var(--bg-hover), var(--bg-elevated));
+  color: var(--text-primary);
+  font-family: var(--font-inter, inherit);
+  font-size: 11.5px;
+  font-weight: 500;
+  line-height: 1;
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.06) inset;
+}
+
+/* About. */
+.coven-about-hero {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 18px;
+  border: 1px solid var(--border-hairline);
+  border-radius: 14px;
+  background:
+    radial-gradient(
+      120% 140% at 0% 50%,
+      color-mix(in oklch, var(--accent-presence) 14%, transparent),
+      transparent 70%
+    ), color-mix(in srgb, var(--bg-elevated) 50%, transparent);
+}
+
+.coven-about-hero > div {
+  display: grid;
+  gap: 2px;
+}
+
+.coven-about-mark {
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  border-radius: 12px;
+  background: linear-gradient(
+    140deg,
+    color-mix(in oklch, var(--accent-presence) 70%, white 10%),
+    color-mix(in oklch, var(--accent-presence) 50%, black)
+  );
+  color: #fff;
+  box-shadow:
+    0 8px 24px color-mix(in oklch, var(--accent-presence) 35%, transparent),
+    0 1px 0 rgba(255, 255, 255, 0.3) inset;
+}
+
+.coven-about-name {
+  font-size: 16px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+.coven-about-version {
+  color: var(--text-muted);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Narrow windows: the section rail becomes a scrolling row of tabs. */
+@media (max-width: 640px) {
+  .coven-settings {
+    width: calc(100vw - 16px);
+    height: calc(100vh - 32px);
+    border-radius: 16px;
+  }
+
+  .coven-settings-frame {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto minmax(0, 1fr);
+  }
+
+  .coven-settings-nav {
+    gap: 10px;
+    padding: 14px 12px 10px;
+    border-right: 0;
+    border-bottom: 1px solid var(--border-hairline);
+  }
+
+  .coven-settings-nav ul {
+    display: flex;
+    gap: 4px;
+    overflow-x: auto;
+  }
+
+  .coven-settings-nav-item {
+    width: auto;
+    white-space: nowrap;
+  }
+
+  .coven-settings-nav-item[aria-current="page"]::before {
+    display: none;
+  }
+
+  .coven-settings-head {
+    padding: 18px 16px 10px;
+  }
+
+  .coven-settings-scroll {
+    padding: 4px 16px 24px;
+  }
+
+  .coven-text-sizes {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .coven-settings[open],
+  .coven-switch,
+  .coven-switch::after {
+    animation: none;
+    transition: none;
+  }
+}

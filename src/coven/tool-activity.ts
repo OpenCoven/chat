@@ -115,3 +115,87 @@ export function segmentToolCalls(text: string): readonly MessageSegment[] {
   }
   return merged.filter((segment) => segment.kind === 'tool' || segment.text.trim() !== '');
 }
+
+/** What a tool call did, for the one-line summary of a group of calls. */
+export type ToolKind = 'command' | 'read' | 'edit' | 'search' | 'web' | 'other';
+
+const KIND_NAMES: Readonly<Record<Exclude<ToolKind, 'other'>, readonly string[]>> = {
+  command: [
+    'bash',
+    'shell',
+    'exec',
+    'execcommand',
+    'localshell',
+    'shellcommand',
+    'powershell',
+    'terminal',
+    'run',
+  ],
+  read: ['read', 'readfile', 'view', 'cat', 'notebookread', 'open'],
+  edit: [
+    'edit',
+    'multiedit',
+    'write',
+    'writefile',
+    'applypatch',
+    'patch',
+    'strreplace',
+    'create',
+    'notebookedit',
+  ],
+  search: [
+    'grep',
+    'glob',
+    'search',
+    'find',
+    'ls',
+    'list',
+    'listdir',
+    'listfiles',
+    'rg',
+    'codebasesearch',
+  ],
+  web: ['webfetch', 'websearch', 'fetch', 'browse', 'browser'],
+};
+
+/** Names compare without case, separators or a namespace (`functions.exec_command`). */
+export function toolKind(name: string): ToolKind {
+  const key = (name.split('.').pop() ?? name).toLowerCase().replace(/[^a-z]/g, '');
+  for (const [kind, names] of Object.entries(KIND_NAMES)) {
+    if (names.includes(key)) return kind as ToolKind;
+  }
+  return 'other';
+}
+
+const KIND_PHRASE: Readonly<Record<ToolKind, (count: number) => string>> = {
+  command: (n) => `ran ${n} ${n === 1 ? 'command' : 'commands'}`,
+  read: (n) => `read ${n} ${n === 1 ? 'file' : 'files'}`,
+  edit: (n) => `edited ${n} ${n === 1 ? 'file' : 'files'}`,
+  search: (n) => `searched ${n} ${n === 1 ? 'time' : 'times'}`,
+  web: (n) => `fetched ${n} ${n === 1 ? 'page' : 'pages'}`,
+  other: (n) => `used ${n} other ${n === 1 ? 'tool' : 'tools'}`,
+};
+
+const KIND_ORDER: readonly ToolKind[] = ['command', 'read', 'edit', 'search', 'web', 'other'];
+
+/**
+ * A group of calls in one line, most frequent kind first:
+ * "Ran 4 commands, read 2 files and edited 1 file". When every call is an
+ * unrecognised tool, the names themselves say more than "used 3 other tools".
+ */
+export function toolGroupSummary(names: readonly string[]): string {
+  const counts = new Map<ToolKind, number>();
+  for (const name of names) counts.set(toolKind(name), (counts.get(toolKind(name)) ?? 0) + 1);
+  if (counts.size === 1 && counts.has('other')) {
+    const unique = [...new Set(names)];
+    const listed = unique.slice(0, 3).join(', ');
+    const more = unique.length > 3 ? ` and ${unique.length - 3} more` : '';
+    return `Called ${listed}${more}`;
+  }
+  const phrases = [...counts.entries()]
+    .sort((a, b) => b[1] - a[1] || KIND_ORDER.indexOf(a[0]) - KIND_ORDER.indexOf(b[0]))
+    .map(([kind, count]) => KIND_PHRASE[kind](count));
+  const last = phrases.pop() ?? '';
+  const text = phrases.length ? `${phrases.join(', ')} and ${last}` : last;
+  return `${text.slice(0, 1).toUpperCase()}${text.slice(1)}`;
+}

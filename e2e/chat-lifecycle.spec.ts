@@ -1,6 +1,16 @@
-import { expect, test } from '@playwright/test';
+import { expect, type Page, test } from '@playwright/test';
 
 import { contrastFailures } from './contrast';
+
+/** Turns the archived view on or off in Settings, then closes Settings. */
+async function showArchived(page: Page, on: boolean) {
+  await page.getByRole('button', { name: 'Open settings' }).click();
+  const settings = page.getByRole('dialog', { name: 'Settings' });
+  await settings.getByRole('button', { name: 'Chats' }).click();
+  await settings.getByRole('checkbox', { name: 'Show archived chats' }).setChecked(on);
+  await page.keyboard.press('Escape');
+  await expect(settings).toHaveCount(0);
+}
 
 test.beforeEach(async ({ page }) => {
   await page.addInitScript(() => {
@@ -77,7 +87,7 @@ test.beforeEach(async ({ page }) => {
 test('archives and restores across reload through the archived view', async ({ page }) => {
   await expect(page.getByText('Retained local history.')).toBeVisible();
   const archived = page.getByRole('checkbox', { name: 'Show archived chats' });
-  // The control lives inside a collapsed sidebar options disclosure.
+  // The control lives in Settings, which starts closed.
   await expect(archived).not.toBeVisible();
   await expect(page.getByRole('button', { name: /^(Active|Archived)$/ })).toHaveCount(0);
   await page.getByRole('button', { name: 'Chat actions' }).click();
@@ -94,13 +104,12 @@ test('archives and restores across reload through the archived view', async ({ p
   expect(await page.evaluate(() => localStorage.getItem('fixture-lifecycle'))).toBe('archived');
 
   // The archived view is the only route back to an archived chat.
-  await page.locator('summary[aria-label="Sidebar options"]').click();
-  await archived.check();
+  await showArchived(page, true);
   await page.getByRole('button', { name: 'Lifecycle familiar', exact: true }).click();
   await expect(page.getByRole('textbox', { name: /^Message Lifecycle familiar/ })).toBeDisabled();
   await expect(page.getByText('Retained local history.')).toBeVisible();
   await page.getByRole('button', { name: 'Restore chat' }).click();
-  await archived.uncheck();
+  await showArchived(page, false);
   await page.getByRole('button', { name: 'Lifecycle familiar', exact: true }).click();
   await page.reload();
   await expect(page.getByRole('textbox', { name: /^Message Lifecycle familiar/ })).toBeEnabled();
@@ -136,8 +145,7 @@ test('confirms app-local delete and never lists tombstones', async ({ page }) =>
   await expect(page.getByRole('button', { name: 'Chat actions' })).toHaveCount(0);
   const archived = page.getByRole('checkbox', { name: 'Show archived chats' });
   await expect(archived).not.toBeVisible();
-  await page.locator('summary[aria-label="Sidebar options"]').click();
-  await archived.check();
+  await showArchived(page, true);
   await expect(page.getByText('No archived familiars.')).toBeVisible();
 });
 

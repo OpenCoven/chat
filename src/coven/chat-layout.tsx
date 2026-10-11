@@ -3,6 +3,7 @@ import {
   memo,
   type DragEvent as ReactDragEvent,
   type KeyboardEvent as ReactKeyboardEvent,
+  type ReactNode,
   type RefObject,
   useCallback,
   useEffect,
@@ -11,7 +12,6 @@ import {
   useState,
 } from 'react';
 import {
-  cx,
   FamButton,
   FamIconButton,
   INSPECTOR_TABS,
@@ -24,9 +24,9 @@ import { Icon } from '../design/minimal-icons';
 import type { ChatLifecycle, CovenProjectAccess } from '../lib/coven-runtime';
 import type { ScreenRelay } from '../lib/screen-relay';
 import { type SetWindowTitle, windowTitle } from '../lib/window-title';
-import { AttachmentChip } from '../ui/attachment-chip';
 import { Composer } from '../ui/composer';
 import { MenuPortalContainer } from '../ui/dropdown-menu';
+import { AttachmentCard } from './attachment-card';
 import { ATTACHMENT_ACCEPT, type ChatAttachment, formatAttachmentSize } from './attachments';
 import { ChatLifecycleControls } from './chat-lifecycle';
 import { CompanionPanel } from './companion-panel';
@@ -34,8 +34,14 @@ import { ContextPicker } from './context-picker';
 import { CopyButton } from './copy-button';
 import type { ChatMessage } from './events';
 import { FamiliarAvatar } from './familiar-avatar';
-import { FormattedMessage, ToolActivity, type ToolRow } from './formatted-message';
+import { FormattedMessage, REVEAL_EVENT, ToolActivity, type ToolRow } from './formatted-message';
 import { useMentionCompletion } from './mention-completion';
+import {
+  type Preferences,
+  PreferencesContext,
+  TEXT_SCALE,
+  useStoredPreferences,
+} from './preferences';
 import {
   LEFT_RAIL_HINT,
   LEFT_RAIL_SHORTCUT,
@@ -43,9 +49,12 @@ import {
   RIGHT_RAIL_SHORTCUT,
   SEARCH_HINT,
   SEARCH_SHORTCUT,
+  SETTINGS_HINT,
+  SETTINGS_SHORTCUT,
   useFindShortcut,
   useRailShortcuts,
   useSearchShortcut,
+  useSettingsShortcut,
   useStepShortcut,
   useTypeToCompose,
 } from './rail-shortcuts';
@@ -57,6 +66,7 @@ import {
   formatUpdatedCaption,
 } from './relative-time';
 import { type LoadRfb, ScreenViewer } from './screen-viewer';
+import { SettingsDialog, type SettingsSection } from './settings-dialog';
 import { useNow } from './use-now';
 import { useViewportTier } from './viewport';
 import '../design/familiars-shell.css';
@@ -279,6 +289,17 @@ export function matchesFamiliar(
   );
 }
 
+/** The inspector's one-line account of a familiar's declared project access. */
+export function accessSummary(
+  projects: readonly CovenProjectAccess[],
+  unavailable: boolean | undefined,
+): string {
+  if (!projects.length) return unavailable ? 'Unknown' : 'None declared';
+  const writes = projects.filter((project) => project.access === 'write').length;
+  const count = `${projects.length} ${projects.length === 1 ? 'project' : 'projects'}`;
+  return writes ? `${count} · ${writes} writable` : `${count} · read only`;
+}
+
 /** The Activity tab's account of the most recent run: how it ended, and how long it took. */
 export function lastRunText(run: Readonly<{ ms: number; outcome: 'reply' | 'error' | 'stopped' }>) {
   const took = formatElapsed(run.ms);
@@ -435,7 +456,7 @@ const TranscriptBlock = memo(
             <ul className="coven-history-attachments" aria-label="Message attachments">
               {block.message.attachments.map((file, index) => (
                 <li key={`${index}-${file.name}`}>
-                  <AttachmentChip name={file.name} meta={formatAttachmentSize(file.size)} />
+                  <AttachmentCard name={file.name} size={file.size} />
                 </li>
               ))}
             </ul>
@@ -555,6 +576,23 @@ const TranscriptBlocks = memo(function TranscriptBlocks({
   );
 });
 
+/** What every part of the shell reads from above: the menu portal root and the reader's preferences. */
+function ShellProviders({
+  shell,
+  preferences,
+  children,
+}: Readonly<{
+  shell: RefObject<HTMLDivElement | null>;
+  preferences: Preferences;
+  children: ReactNode;
+}>) {
+  return (
+    <PreferencesContext.Provider value={preferences}>
+      <MenuPortalContainer.Provider value={shell}>{children}</MenuPortalContainer.Provider>
+    </PreferencesContext.Provider>
+  );
+}
+
 export function ChatLayout(props: ChatLayoutProps) {
   const tier = useViewportTier();
   const [sidebar, setSidebar] = useState(() => tier !== 'compact');
@@ -562,6 +600,10 @@ export function ChatLayout(props: ChatLayoutProps) {
   const [query, setQuery] = useState('');
   const [tab, setTab] = useState<InspectorTab>('overview');
   const [screenOpen, setScreenOpen] = useState(false);
+  const [preferences, setPreferences] = useStoredPreferences();
+  // The open Settings section, or null while Settings is closed.
+  const [settings, setSettings] = useState<SettingsSection | null>(null);
+  const settingsOpener = useRef<HTMLElement | null>(null);
   const searchRef = useRef<HTMLInputElement>(null);
   // Cmd/Ctrl+K: the sidebar must be open (and no longer inert) before the
   // search box can take focus, so the request is settled after that render.
@@ -598,7 +640,8 @@ export function ChatLayout(props: ChatLayoutProps) {
   useEffect(() => {
     if (!scrim) return;
     const onKey = (event: KeyboardEvent) => {
-      if (event.key !== 'Escape') return;
+      // A dialog takes its own Escape; the rails behind it stay put.
+      if (event.key !== 'Escape' || document.querySelector('dialog[open]')) return;
       if (drawers) setSidebar(false);
       setInspector(false);
     };
@@ -636,6 +679,15 @@ export function ChatLayout(props: ChatLayoutProps) {
     if (!sidebar) openSidebar();
     setSearchFocus((n) => n + 1);
   });
+  function openSettings(section: SettingsSection = 'general') {
+    settingsOpener.current = activeControl();
+    setSettings(section);
+  }
+  const onSettingsShortcut = useCallback(() => {
+    settingsOpener.current = activeControl();
+    setSettings((open) => open ?? 'general');
+  }, []);
+  useSettingsShortcut(onSettingsShortcut);
   function chooseFamiliar(id: string) {
     props.onFamiliar(id);
     setComposerFocus((previous) => ({
@@ -662,6 +714,20 @@ export function ChatLayout(props: ChatLayoutProps) {
   // The host refuses a prompt over 32 KiB; say so before the send, not after.
   const draftBytes = new TextEncoder().encode(props.draft).length;
   const oversize = draftBytes > PROMPT_LIMIT_BYTES;
+  // Draft files decoded once per change; the cards preview their text.
+  const attachmentFiles = useMemo(
+    () =>
+      new Map(
+        (props.attachments ?? []).map((file) => [
+          file.id,
+          {
+            size: file.bytes.length,
+            text: new TextDecoder().decode(Uint8Array.from(file.bytes)),
+          },
+        ]),
+      ),
+    [props.attachments],
+  );
   // The familiar's declared access, write grants first so they stand out.
   const projectAccess = [...(familiar?.projectAccess ?? [])].sort(
     (a, b) =>
@@ -887,6 +953,15 @@ export function ChatLayout(props: ChatLayoutProps) {
       transcript.querySelector<HTMLElement>(`[data-block-id="${CSS.escape(activeMatch.group)}"]`);
     if (!element) return;
     element.dataset.findHit = 'true';
+    // A row inside a folded tool group unfolds first, then scrolls once shown.
+    if (element.closest('[hidden]')) {
+      element.dispatchEvent(new Event(REVEAL_EVENT, { bubbles: true }));
+      const frame = requestAnimationFrame(() => element.scrollIntoView?.({ block: 'center' }));
+      return () => {
+        cancelAnimationFrame(frame);
+        delete element.dataset.findHit;
+      };
+    }
     element.scrollIntoView?.({ block: 'center' });
     return () => {
       delete element.dataset.findHit;
@@ -948,7 +1023,7 @@ export function ChatLayout(props: ChatLayoutProps) {
     rows[next]?.focus();
   }
   return (
-    <MenuPortalContainer.Provider value={shellRef}>
+    <ShellProviders shell={shellRef} preferences={preferences}>
       <div
         ref={shellRef}
         className="fr-shell coven-chat"
@@ -957,6 +1032,7 @@ export function ChatLayout(props: ChatLayoutProps) {
         data-inspector={inspector ? 'open' : 'closed'}
         style={
           {
+            '--coven-text-scale': TEXT_SCALE[preferences.textSize],
             '--coven-sidebar-w': sidebar && !drawers ? '300px' : 'var(--coven-rail-tab-w)',
             '--coven-inspector-w':
               inspector && !inspectorOverlay ? '360px' : 'var(--coven-rail-tab-w)',
@@ -1038,25 +1114,16 @@ export function ChatLayout(props: ChatLayoutProps) {
                 <span className="fr-rail-toggle-label">Familiars</span>
                 <Icon name="sidebar-simple" size={15} />
               </button>
-              <details className="coven-sidebar-options">
-                <summary aria-label="Sidebar options" title="Sidebar options">
-                  ⋯
-                </summary>
-                <div className="coven-sidebar-options-menu">
-                  {props.onArchivedFilter && (
-                    <label>
-                      <input
-                        type="checkbox"
-                        checked={Boolean(props.archivedFilter)}
-                        disabled={props.lifecycleBusy}
-                        onChange={(event) => props.onArchivedFilter?.(event.target.checked)}
-                      />
-                      Show archived chats
-                    </label>
-                  )}
-                  <CompanionPanel />
-                </div>
-              </details>
+              <FamIconButton
+                icon="gear-six"
+                size="sm"
+                label="Settings"
+                title={SETTINGS_HINT}
+                aria-keyshortcuts={SETTINGS_SHORTCUT}
+                aria-haspopup="dialog"
+                className="coven-sidebar-settings"
+                onClick={() => openSettings()}
+              />
             </div>
             <label className="coven-agent-search">
               <Icon name="magnifying-glass" size={14} />
@@ -1241,6 +1308,14 @@ export function ChatLayout(props: ChatLayoutProps) {
                 // id is invalid and cannot be followed.
                 aria-controls={screenOpen ? 'coven-screen-viewer' : undefined}
                 onClick={() => setScreenOpen((open) => !open)}
+              />
+              <FamIconButton
+                icon="gear-six"
+                label="Open settings"
+                title={SETTINGS_HINT}
+                aria-keyshortcuts={SETTINGS_SHORTCUT}
+                aria-haspopup="dialog"
+                onClick={() => openSettings()}
               />
               <FamIconButton
                 icon="arrow-clockwise"
@@ -1504,6 +1579,17 @@ export function ChatLayout(props: ChatLayoutProps) {
                     name: file.name,
                     meta: formatAttachmentSize(file.bytes.length),
                   }))}
+                  renderAttachment={(attachment, remove) => {
+                    const file = attachmentFiles.get(attachment.id);
+                    return (
+                      <AttachmentCard
+                        name={attachment.name}
+                        size={file?.size ?? 0}
+                        text={file?.text}
+                        onRemove={remove}
+                      />
+                    );
+                  }}
                   {...(props.onAttach && !props.busy && !props.attaching
                     ? { onAttach: () => fileInput.current?.click() }
                     : {})}
@@ -1659,6 +1745,18 @@ export function ChatLayout(props: ChatLayoutProps) {
                           <span className="fr-row-value">Not reported</span>
                         )}
                       </div>
+                      <div className="fr-row">
+                        <span className="fr-row-label">Access</span>
+                        <button
+                          type="button"
+                          className="coven-access-summary"
+                          aria-haspopup="dialog"
+                          onClick={() => openSettings('access')}
+                        >
+                          {accessSummary(projectAccess, familiar.projectAccessUnavailable)}
+                          <span aria-hidden="true"> ›</span>
+                        </button>
+                      </div>
                     </div>
                   ) : null}
                   <FamButton
@@ -1668,60 +1766,6 @@ export function ChatLayout(props: ChatLayoutProps) {
                   >
                     Refresh local data
                   </FamButton>
-                </div>
-              ) : null}
-              {tab === 'access' ? (
-                <div className="fr-stack">
-                  {familiar ? (
-                    <div className="fr-card fr-card--lift coven-access">
-                      <span className="fr-eyebrow">Declared project access</span>
-                      {projectAccess.length ? (
-                        <div className="fr-rows coven-access-rows">
-                          {projectAccess.map((project) => (
-                            <div className="fr-row" key={`${project.path}:${project.access}`}>
-                              <span className="fr-row-copy">
-                                <span className="fr-row-label">{project.name}</span>
-                                <span className="fr-row-hint" title={project.path}>
-                                  {project.path}
-                                </span>
-                              </span>
-                              <span
-                                className={cx(
-                                  'fr-row-value',
-                                  project.access === 'write' && 'fr-row-value--warn',
-                                )}
-                              >
-                                {project.access === 'write' ? 'Read and write' : 'Read only'}
-                              </span>
-                            </div>
-                          ))}
-                        </div>
-                      ) : (
-                        <span className="fr-purpose">
-                          {familiar.projectAccessUnavailable
-                            ? `Chat could not read Coven's project registry or grants, so ${name}'s declared access is unknown. Check them in Coven, then refresh.`
-                            : `No project access is declared for ${name} in Coven's project registry or grants.`}
-                        </span>
-                      )}
-                    </div>
-                  ) : null}
-                  <div className="coven-details fr-card fr-card--lift">
-                    <h2>Access</h2>
-                    <p>
-                      Declared access comes from Coven's local project registry and grants; Chat
-                      shows it as declared and neither enforces nor extends it. Access rules and
-                      approvals are not exposed by this CLI integration.
-                    </p>
-                    <p>
-                      Configure your familiar in Coven. This app does not define or enforce an
-                      additional permission boundary.
-                    </p>
-                    <p>
-                      Text and code attachments are sent with your message. Show screen in the
-                      thread header opens a remote desktop over VNC; it starts view only. Tool
-                      approval controls are unavailable here.
-                    </p>
-                  </div>
                 </div>
               ) : null}
               {tab === 'activity' ? (
@@ -1780,7 +1824,37 @@ export function ChatLayout(props: ChatLayoutProps) {
             </section>
           </div>
         </aside>
+        {settings ? (
+          <SettingsDialog
+            section={settings}
+            onSection={setSettings}
+            onClose={() => {
+              setSettings(null);
+              settingsOpener.current?.focus();
+            }}
+            preferences={preferences}
+            onPreferences={setPreferences}
+            archivedFilter={props.archivedFilter}
+            onArchivedFilter={props.onArchivedFilter}
+            archivedFilterDisabled={props.lifecycleBusy}
+            familiar={
+              familiar
+                ? {
+                    name,
+                    avatarUrl: familiar.avatarUrl,
+                    projectAccess,
+                    projectAccessUnavailable: familiar.projectAccessUnavailable,
+                  }
+                : undefined
+            }
+            status={props.status}
+            connected={props.connected}
+            onRefresh={props.onRefresh}
+            refreshDisabled={Boolean(props.busy || props.loading || props.lifecycleBusy)}
+            companion={<CompanionPanel />}
+          />
+        ) : null}
       </div>
-    </MenuPortalContainer.Provider>
+    </ShellProviders>
   );
 }
