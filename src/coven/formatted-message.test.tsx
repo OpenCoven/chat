@@ -1,11 +1,23 @@
-import { fireEvent, render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen } from '@testing-library/react';
+import type { ReactNode } from 'react';
 import {
   FormattedMessage,
+  REVEAL_EVENT,
   resultSize,
   TOOL_FOLD_KEEP,
   ToolActivity,
   toolFoldLabel,
 } from './formatted-message';
+import { DEFAULT_PREFERENCES, PreferencesContext } from './preferences';
+
+/** Row-level behaviour, with grouping off so each call renders as its own row. */
+const ungrouped = {
+  wrapper: ({ children }: { children: ReactNode }) => (
+    <PreferencesContext.Provider value={{ ...DEFAULT_PREFERENCES, groupTools: false }}>
+      {children}
+    </PreferencesContext.Provider>
+  ),
+};
 
 test('renders headings, emphasis, lists, quotes, and fenced code as formatted text', () => {
   const { container } = render(
@@ -79,6 +91,7 @@ test('lifts tool activity summaries out of prose into labelled rows', () => {
         'I will check access first.✶ Bash(gh auth status 2>&1 | head -30; echo "---ORGS---"; gh api user/orgs ...)✶ Bash(find . -iname "*.html" 2>/dev/null ...)Then I will build the site.\n✶ Read(src/index.html)\nDone.'
       }
     />,
+    ungrouped,
   );
   const lists = screen.getAllByRole('list', { name: 'Tool activity' });
   const rows = screen.getAllByRole('listitem');
@@ -118,6 +131,7 @@ test('crossed-tools calls have concise, independently expandable native argument
   const args = '  echo "<script>alert(1)</script>" && printf \'[link](https://example.com)\'  ';
   const { container } = render(
     <FormattedMessage text={`Before.⚒ Bash(${args})⚒\uFE0F Read(src/app.ts)After.`} />,
+    ungrouped,
   );
   expect(screen.getAllByRole('listitem')).toHaveLength(2);
   const summary = screen.getByLabelText('Bash tool arguments');
@@ -144,7 +158,7 @@ test('crossed-tools calls have concise, independently expandable native argument
 
 test('raw details retain multiline, empty, and truncated arguments without formatting them', () => {
   const args = ' \tfirst\nsecond  ';
-  render(<FormattedMessage text={`⚒ Edit(${args})✳ Read()✶ Bash(echo "unfinished`} />);
+  render(<FormattedMessage text={`⚒ Edit(${args})✳ Read()✶ Bash(echo "unfinished`} />, ungrouped);
   expect(screen.getByLabelText('Edit raw arguments').querySelector('pre')?.textContent).toBe(args);
   expect(screen.getByLabelText('Read raw arguments').querySelector('pre')?.textContent).toBe('');
   expect(screen.getByLabelText('Bash raw arguments').querySelector('pre')?.textContent).toBe(
@@ -175,6 +189,7 @@ test('structured rows show the full input and the result once reported, and mark
         ]}
       />
     </div>,
+    ungrouped,
   );
   expect(screen.getAllByRole('listitem')).toHaveLength(3);
   expect(screen.getByLabelText('Bash raw arguments').querySelector('pre')?.textContent).toBe(raw);
@@ -225,6 +240,7 @@ test('marks the call a live run is executing as running', () => {
         { name: 'Bash', args: 'ls', running: true },
       ]}
     />,
+    ungrouped,
   );
   const rows = screen.getAllByRole('listitem');
   expect(rows[0]).not.toHaveAttribute('data-running');
@@ -240,7 +256,7 @@ test('folds a long run of calls to its newest, naming what it hides and how much
     result: 'ok',
     ...(index === 1 || index === 4 ? { isError: true } : {}),
   }));
-  render(<ToolActivity rows={rows} />);
+  render(<ToolActivity rows={rows} />, ungrouped);
   const calls = () =>
     screen.getAllByRole('listitem').filter((item) => item.classList.contains('coven-tool'));
   expect(calls()).toHaveLength(TOOL_FOLD_KEEP);
@@ -260,7 +276,7 @@ test('folds a long run of calls to its newest, naming what it hides and how much
 
 test('does not fold a short run of calls', () => {
   const rows = Array.from({ length: 10 }, (_, index) => ({ name: 'Bash', args: `step ${index}` }));
-  render(<ToolActivity rows={rows} />);
+  render(<ToolActivity rows={rows} />, ungrouped);
   expect(screen.getAllByRole('listitem')).toHaveLength(10);
   expect(screen.queryByRole('button', { name: /earlier tool/ })).not.toBeInTheDocument();
 });
@@ -279,6 +295,7 @@ test('a collapsed row says how much its result holds, and nothing while it is ru
         { name: 'Write', args: 'b.ts' },
       ]}
     />,
+    ungrouped,
   );
   const rows = screen.getAllByRole('listitem');
   expect(rows[0]).toHaveTextContent('3 lines');
@@ -299,4 +316,50 @@ test('external links show their address on hover unless the author gave a title'
     'https://example.com/docs',
   );
   expect(screen.getByRole('link', { name: 'titled' })).toHaveAttribute('title', 'The title');
+});
+
+describe('grouped tool calls', () => {
+  const lint = { name: 'Bash', args: 'pnpm lint' };
+  const rows = [
+    lint,
+    { name: 'Read', args: 'src/app.ts' },
+    { name: 'Bash', args: 'pnpm test', isError: true },
+  ];
+
+  test('fold two or more calls into one summary line that opens to the rows', () => {
+    render(<ToolActivity rows={rows} />);
+    const summary = screen.getByRole('button', { name: /Ran 2 commands and read 1 file/ });
+    expect(summary).toHaveAttribute('aria-expanded', 'false');
+    expect(summary).toHaveTextContent('1 failed');
+    expect(screen.getByLabelText('Read tool arguments')).not.toBeVisible();
+    fireEvent.click(summary);
+    expect(summary).toHaveAttribute('aria-expanded', 'true');
+    expect(screen.getByLabelText('Read tool arguments')).toBeVisible();
+  });
+
+  test('name the live call on the folded line', () => {
+    render(<ToolActivity rows={[lint, { name: 'Grep', args: 'TODO', running: true }]} />);
+    expect(screen.getByRole('button', { name: /Running Grep/ })).toBeInTheDocument();
+  });
+
+  test('leave a single call as its own row', () => {
+    render(<ToolActivity rows={[lint]} />);
+    expect(screen.queryByRole('button', { expanded: false, name: /Ran/ })).toBeNull();
+    expect(screen.getByLabelText('Bash tool arguments')).toBeVisible();
+  });
+
+  test('unfold when find asks for a call inside', () => {
+    const { container } = render(
+      <ToolActivity rows={rows.map((row, index) => ({ ...row, id: `c${index}` }))} />,
+    );
+    const row = container.querySelector('[data-find-id="c1"]');
+    expect(row).not.toBeNull();
+    act(() => {
+      row?.dispatchEvent(new Event(REVEAL_EVENT, { bubbles: true }));
+    });
+    expect(screen.getByRole('button', { name: /Ran 2 commands/ })).toHaveAttribute(
+      'aria-expanded',
+      'true',
+    );
+  });
 });

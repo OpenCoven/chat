@@ -152,6 +152,138 @@
   list-style: none;
 }
 
+/*
+ * A group of calls folded to one line: a pip per call, a sentence that says
+ * what they did, and the live or failed state at the end. Opening it lays the
+ * rows out beneath on the same hairline surface.
+ */
+.coven-formatted .coven-tool-group {
+  margin: 0.6em 0;
+  border: 1px solid var(--border-hairline);
+  border-radius: 10px;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.025), transparent 70%),
+    color-mix(in srgb, var(--bg-sunken) 60%, transparent);
+  transition: border-color var(--duration-fast, 120ms) var(--ease-standard, ease);
+}
+
+.coven-tool-group:hover,
+.coven-tool-group[data-open] {
+  border-color: var(--border-strong);
+}
+
+.coven-tool-group-summary {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  padding: 8px 12px;
+  border: 0;
+  border-radius: inherit;
+  background: transparent;
+  color: var(--text-secondary);
+  font: inherit;
+  font-size: 12.5px;
+  line-height: 1.4;
+  text-align: left;
+  cursor: pointer;
+}
+
+.coven-tool-group-summary:hover {
+  color: var(--text-primary);
+}
+
+.coven-tool-group-summary:focus-visible {
+  outline: 2px solid var(--ring-focus);
+  outline-offset: 2px;
+}
+
+.coven-tool-group-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.coven-tool-group-tail {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  font-family: var(--font-jetbrains-mono);
+  font-size: 11px;
+}
+
+/* One pip per call: kind sets the tint, failure and the live call override it. */
+.coven-tool-group-pips {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+}
+
+.coven-tool-pip {
+  width: 4px;
+  height: 12px;
+  border-radius: 2px;
+  background: color-mix(in oklch, var(--accent-presence) 55%, var(--bg-elevated));
+}
+
+.coven-tool-pip[data-kind="read"],
+.coven-tool-pip[data-kind="search"] {
+  background: color-mix(in oklch, var(--text-secondary) 55%, var(--bg-elevated));
+}
+
+.coven-tool-pip[data-kind="edit"] {
+  background: color-mix(in oklch, var(--color-warning) 70%, var(--bg-elevated));
+}
+
+.coven-tool-pip[data-kind="web"],
+.coven-tool-pip[data-kind="other"] {
+  background: color-mix(in oklch, var(--text-muted) 60%, var(--bg-elevated));
+}
+
+.coven-tool-pip[data-error] {
+  background: var(--color-danger);
+}
+
+.coven-tool-pip[data-running] {
+  background: var(--accent-presence);
+  animation: coven-tool-pip-pulse 1.1s ease-in-out infinite;
+}
+
+.coven-tool-group-more {
+  margin-right: 3px;
+  color: var(--text-muted);
+  font-family: var(--font-jetbrains-mono);
+  font-size: 10px;
+}
+
+@keyframes coven-tool-pip-pulse {
+  0%,
+  100% {
+    transform: scaleY(1);
+    opacity: 1;
+  }
+  50% {
+    transform: scaleY(0.55);
+    opacity: 0.6;
+  }
+}
+
+.coven-tool-group-rows {
+  padding: 0 6px 6px;
+}
+
+.coven-tool-group-rows .coven-tools {
+  margin: 0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .coven-tool-pip[data-running] {
+    animation: none;
+  }
+}
+
 /* A long run of calls folds to its newest; the control says what it hides. */
 .coven-tools-fold {
   display: flex;
@@ -220,9 +352,11 @@
 
 .coven-tool-chevron {
   color: var(--text-muted);
+  transition: transform var(--duration-fast, 120ms) var(--ease-standard, ease);
 }
 
-.coven-tool-details[open] .coven-tool-chevron {
+.coven-tool-details[open] .coven-tool-chevron,
+.coven-tool-group[data-open] > .coven-tool-group-summary .coven-tool-chevron {
   transform: rotate(90deg);
 }
 

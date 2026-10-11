@@ -117,3 +117,19 @@ export function useSearchShortcut(focusSearch: () => void) {
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [focusSearch]);
 }
+
+export const SETTINGS_SHORTCUT = 'Meta+, Control+,';
+export const SETTINGS_HINT = 'Settings (Cmd/Ctrl+,)';
+
+/** Cmd/Ctrl+, opens Settings, as in every Mac app. */
+export function useSettingsShortcut(open: () => void) {
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.shiftKey || !shellChord(event, 'Comma', ',')) return;
+      event.preventDefault();
+      open();
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [open]);
+}

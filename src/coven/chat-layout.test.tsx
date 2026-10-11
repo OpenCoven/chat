@@ -19,6 +19,14 @@ import {
 } from './chat-layout';
 import type { RfbClass } from './screen-viewer';
 
+/** Opens Settings from the thread header and moves to a section. */
+function openSettingsAt(section: string) {
+  fireEvent.click(screen.getByRole('button', { name: 'Open settings' }));
+  const dialog = screen.getByRole('dialog', { name: 'Settings' });
+  fireEvent.click(within(dialog).getByRole('button', { name: section }));
+  return within(dialog).getByRole('region', { name: section });
+}
+
 function layoutProps(): ChatLayoutProps {
   return {
     familiars: [],
@@ -116,6 +124,9 @@ describe('structured tool activity', () => {
         ]}
       />,
     );
+    // Two calls in a row fold to one line; the lone failed call stays a row.
+    expect(screen.getAllByRole('list', { name: 'Tool activity' })).toHaveLength(1);
+    fireEvent.click(screen.getByRole('button', { name: /Ran 1 command and read 1 file/ }));
     const lists = screen.getAllByRole('list', { name: 'Tool activity' });
     expect(lists).toHaveLength(2);
     expect(screen.getAllByRole('listitem')).toHaveLength(3);
@@ -354,8 +365,8 @@ describe('production Familiars layout', () => {
 
     const onArchivedFilter = vi.fn();
     render(<ChatLayout {...layoutProps()} onArchivedFilter={onArchivedFilter} />);
-    fireEvent.click(screen.getByLabelText('Sidebar options'));
-    const toggle = screen.getByRole('checkbox', { name: 'Show archived chats' });
+    const chats = openSettingsAt('Chats');
+    const toggle = within(chats).getByRole('checkbox', { name: 'Show archived chats' });
     expect(toggle).not.toBeChecked();
     fireEvent.click(toggle);
     expect(onArchivedFilter).toHaveBeenCalledWith(true);
@@ -424,12 +435,18 @@ describe('production Familiars layout', () => {
     expect(container.querySelector('.coven-compact-composer')).toBeInTheDocument();
     expect(screen.getByRole('textbox')).toHaveAttribute('rows', '1');
     expect(screen.getByRole('button', { name: 'Attach file' })).toBeEnabled();
-    expect(
-      screen.getByText('sent.md').closest('[data-slot="attachment-chip"]'),
-    ).toBeInTheDocument();
-    expect(
-      screen.getByText('notes.md').closest('[data-slot="attachment-chip"]'),
-    ).toBeInTheDocument();
+    // A sent file keeps its name and size only, so its card has no preview.
+    const sent = screen.getByText('sent.md').closest('.coven-attachment-card');
+    expect(sent).toBeInTheDocument();
+    expect(sent).not.toHaveAttribute('data-preview');
+    // A draft's card previews its text and opens it whole.
+    const draft = screen.getByRole('button', { name: 'Preview notes.md' });
+    expect(draft).toHaveTextContent('1 byte · 1 line');
+    fireEvent.click(draft);
+    const peek = screen.getByRole('dialog', { name: 'notes.md' });
+    expect(within(peek).getByRole('listitem')).toHaveTextContent('A');
+    fireEvent.click(within(peek).getByRole('button', { name: 'Close preview' }));
+    expect(screen.queryByRole('dialog', { name: 'notes.md' })).toBeNull();
   });
 
   it('keeps cancellation available while viewing an archived chat during a run', () => {
@@ -451,7 +468,7 @@ describe('production Familiars layout', () => {
       messages: [{ id: 'a', role: 'assistant' as const, text: 'A real reply' }],
     };
     render(<ChatLayout {...props} />);
-    fireEvent.click(screen.getByRole('button', { name: 'Access' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Activity' }));
     fireEvent.click(screen.getByRole('button', { name: 'Close inspector' }));
     const links = screen.getAllByRole('button', { name: "Show Local familiar's familiar card" });
     expect(links).toHaveLength(2);
@@ -537,8 +554,9 @@ describe('production Familiars layout', () => {
     expect(screen.queryByRole('button', { name: 'Switch familiar' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'New chat' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Import from Cave' })).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: 'Access' }));
-    expect(screen.getByText(/Access rules and approvals are not exposed/)).toBeInTheDocument();
+    expect(openSettingsAt('Access')).toHaveTextContent(
+      'Tool approval controls are not available in this app.',
+    );
   });
 
   it('collapses rails and forwards sends without attachment or command affordances', () => {
@@ -1162,10 +1180,9 @@ describe('inspector detail rows', () => {
 
   it('tells the reader the screen viewer exists instead of calling it unavailable', () => {
     render(<ChatLayout {...props()} familiarId="a" sessionId="s-a" />);
-    fireEvent.click(screen.getByRole('button', { name: 'Access' }));
-    const access = screen.getByRole('region', { name: 'Access' });
-    expect(access).toHaveTextContent('Show screen');
-    expect(access).not.toHaveTextContent('Screen sharing');
+    const devices = openSettingsAt('Devices');
+    expect(devices).toHaveTextContent('Show screen');
+    expect(devices).not.toHaveTextContent('Screen sharing');
   });
 });
 
@@ -1571,7 +1588,7 @@ describe('notices, sizes and the shortcut reference', () => {
       />,
     );
     expect(screen.getByText('39 KiB')).toBeInTheDocument();
-    expect(screen.getByText('3 bytes')).toBeInTheDocument();
+    expect(screen.getByText('3 bytes · 1 line')).toBeInTheDocument();
   });
 
   it('keeps the bottom-left rail free of settings and shortcut reference sections', () => {
@@ -1728,16 +1745,21 @@ describe('declared access and error copying', () => {
         familiarId="a"
       />,
     );
-    fireEvent.click(screen.getByRole('button', { name: 'Access' }));
+    // The inspector sums it up and links to the full list in Settings.
+    fireEvent.click(screen.getByRole('button', { name: /3 projects · 1 writable/ }));
     const access = screen.getByRole('region', { name: 'Access' });
-    expect(access).toHaveTextContent('Declared project access');
-    expect(access.textContent?.indexOf('chat')).toBeLessThan(
-      access.textContent?.indexOf('api') ?? -1,
-    );
-    expect(access).toHaveTextContent('chat/work/chatRead and write');
-    expect(access).toHaveTextContent('api/work/apiRead only');
+    const items = within(
+      within(access).getByRole('list', { name: "Astra's declared project access" }),
+    ).getAllByRole('listitem');
+    expect(items.map((item) => item.querySelector('.coven-access-name')?.textContent)).toEqual([
+      'chat',
+      'api',
+      'docs',
+    ]);
+    expect(items[0]).toHaveTextContent('chatRead and write/work/chat');
+    expect(items[1]).toHaveTextContent('apiRead only/work/api');
     expect(access).toHaveTextContent(/neither enforces nor extends/);
-    expect(access).toHaveTextContent(/Access rules and approvals are not exposed/);
+    expect(access).toHaveTextContent('Tool approval controls are not available in this app.');
   });
 
   it('tells "none declared" apart from "could not read"', () => {
@@ -1750,7 +1772,7 @@ describe('declared access and error copying', () => {
         familiarId="b"
       />,
     );
-    fireEvent.click(screen.getByRole('button', { name: 'Access' }));
+    openSettingsAt('Access');
     const access = () => screen.getByRole('region', { name: 'Access' });
     expect(access()).toHaveTextContent('No project access is declared for Bram');
     expect(access()).not.toHaveTextContent('could not read');
@@ -2512,5 +2534,60 @@ describe('screen toggle', () => {
     const open = screen.getByRole('button', { name: 'Hide screen' });
     expect(open).toHaveAttribute('aria-controls', 'coven-screen-viewer');
     expect(document.getElementById('coven-screen-viewer')).not.toBeNull();
+  });
+});
+
+describe('settings', () => {
+  afterEach(() => localStorage.clear());
+
+  it('opens with Cmd/Ctrl+, and lists the rail shortcuts', () => {
+    render(<ChatLayout {...layoutProps()} />);
+    fireEvent.keyDown(window, { key: ',', code: 'Comma', metaKey: true });
+    const dialog = screen.getByRole('dialog', { name: 'Settings' });
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Shortcuts' }));
+    const shortcuts = within(dialog).getByRole('region', { name: 'Shortcuts' });
+    expect(shortcuts).toHaveTextContent('Show or hide the familiars rail');
+    expect(shortcuts).toHaveTextContent('Show or hide the inspector rail');
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Close settings' }));
+    expect(screen.queryByRole('dialog', { name: 'Settings' })).toBeNull();
+  });
+
+  it('applies a text size at once and keeps it for the next window', () => {
+    const { container, unmount } = render(<ChatLayout {...layoutProps()} />);
+    const general = openSettingsAt('General');
+    fireEvent.click(within(general).getByRole('radio', { name: /Larger/ }));
+    const shell = container.querySelector<HTMLElement>('.coven-chat');
+    expect(shell?.style.getPropertyValue('--coven-text-scale')).toBe('1.22');
+    unmount();
+    const next = render(<ChatLayout {...layoutProps()} />);
+    expect(
+      next.container
+        .querySelector<HTMLElement>('.coven-chat')
+        ?.style.getPropertyValue('--coven-text-scale'),
+    ).toBe('1.22');
+  });
+
+  it('turns tool grouping off so every call is its own row', () => {
+    render(
+      <ChatLayout
+        {...layoutProps()}
+        familiars={[{ id: 'f', name: 'Astra' }]}
+        familiarId="f"
+        messages={[
+          { id: '1', role: 'tool', text: 'Bash', tool: { name: 'Bash', args: 'ls' } },
+          { id: '2', role: 'tool', text: 'Read', tool: { name: 'Read', args: 'a.ts' } },
+        ]}
+      />,
+    );
+    expect(screen.getByRole('button', { name: /Ran 1 command and read 1 file/ })).toBeVisible();
+    const general = openSettingsAt('General');
+    fireEvent.click(within(general).getByRole('checkbox', { name: 'Group tool calls' }));
+    expect(screen.queryByRole('button', { name: /Ran 1 command/ })).toBeNull();
+    expect(screen.getByLabelText('Read tool arguments')).toBeVisible();
+  });
+
+  it('leaves storage untouched until a preference changes', () => {
+    render(<ChatLayout {...layoutProps()} />);
+    expect(localStorage.getItem('opencoven.chat.preferences.v1')).toBeNull();
   });
 });

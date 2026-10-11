@@ -1033,7 +1033,7 @@ test('opens the familiar card from a reply with keyboard and pointer controls', 
   await composer.fill('Show a reply');
   await page.getByRole('button', { name: 'Send', exact: true }).click();
   await page.getByRole('button', { name: "Open Local familiar's familiar card" }).click();
-  await page.getByRole('button', { name: 'Access', exact: true }).click();
+  await page.getByRole('button', { name: 'Activity', exact: true }).click();
   await page.getByRole('button', { name: 'Close inspector' }).click();
   const triggers = page.getByRole('button', { name: "Show Local familiar's familiar card" });
   await triggers.first().focus();
@@ -1502,13 +1502,6 @@ for (const size of [
     await page.getByRole('log', { name: 'Messages' }).focus();
     await page.keyboard.press('Control+f');
     await expect(page.getByRole('searchbox', { name: 'Find in conversation' })).toBeVisible();
-    // Open the sidebar options so the controls folded inside are measured.
-    await page.evaluate(() => {
-      for (const details of document.querySelectorAll('details.coven-sidebar-options'))
-        (details as HTMLDetailsElement).open = true;
-    });
-    // The narrow window folds the sidebar away.
-    if (size.width > 480) await expect(page.getByText('Show archived chats')).toBeVisible();
     const failures = await page.evaluate(() => {
       const selector =
         'a[href], button, input:not([type="hidden"]), select, textarea, summary, [role="button"], [role="link"], [role="tab"], [role="menuitem"], [role="option"], [role="checkbox"], [role="switch"], [tabindex]:not([tabindex="-1"])';

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { segmentToolCalls } from './tool-activity';
+import { segmentToolCalls, toolGroupSummary, toolKind } from './tool-activity';
 
 describe('segmentToolCalls', () => {
   it.each([
@@ -121,5 +121,31 @@ describe('segmentToolCalls', () => {
       { kind: 'tool', name: 'Read', args: "notes/Sam's plan.md" },
       { kind: 'text', text: ' done' },
     ]);
+  });
+});
+
+describe('tool group summaries', () => {
+  it('classifies calls by what they do, whatever the provider calls them', () => {
+    expect(toolKind('Bash')).toBe('command');
+    expect(toolKind('functions.exec_command')).toBe('command');
+    expect(toolKind('Read')).toBe('read');
+    expect(toolKind('apply_patch')).toBe('edit');
+    expect(toolKind('MultiEdit')).toBe('edit');
+    expect(toolKind('Grep')).toBe('search');
+    expect(toolKind('WebFetch')).toBe('web');
+    expect(toolKind('TodoWrite')).toBe('other');
+  });
+
+  it('says what a run of calls did, most frequent first', () => {
+    expect(toolGroupSummary(['Bash', 'Read', 'Bash', 'Bash', 'Edit', 'Read'])).toBe(
+      'Ran 3 commands, read 2 files and edited 1 file',
+    );
+    expect(toolGroupSummary(['Grep', 'Glob'])).toBe('Searched 2 times');
+    expect(toolGroupSummary(['Bash', 'TodoWrite'])).toBe('Ran 1 command and used 1 other tool');
+  });
+
+  it('names unrecognised tools rather than counting them', () => {
+    expect(toolGroupSummary(['TodoWrite', 'Task'])).toBe('Called TodoWrite, Task');
+    expect(toolGroupSummary(['A', 'B', 'C', 'D', 'E'])).toBe('Called A, B, C and 2 more');
   });
 });

@@ -317,7 +317,7 @@
   /* The reading surface. Bumped 14 -> 16px so responses read comfortably at a
      normal viewing distance; letter-spacing relaxed off the shell's tight
      -0.004em since larger body text wants a touch more air. Reversible. */
-  font-size: 16px;
+  font-size: calc(16px * var(--coven-text-scale, 1));
   line-height: 1.7;
   letter-spacing: 0;
   white-space: pre-wrap;
@@ -418,19 +418,25 @@
   opacity: 1;
 }
 
-/* Declared project access in the inspector. */
-.coven-access {
-  display: grid;
-  gap: 8px;
-}
-
-.coven-chat .coven-access-rows {
+/* The inspector's access line opens Settings at Access, where the full list lives. */
+.coven-access-summary {
   padding: 0;
+  border: 0;
+  background: none;
+  color: var(--text-primary);
+  font: inherit;
+  text-align: right;
+  cursor: pointer;
 }
 
-.coven-chat .coven-access-rows .fr-row:last-child {
-  border-bottom: 0;
-  padding-bottom: 0;
+.coven-access-summary:hover {
+  color: var(--accent-presence);
+}
+
+.coven-access-summary:focus-visible {
+  outline: 2px solid var(--ring-focus);
+  outline-offset: 2px;
+  border-radius: 4px;
 }
 
 .coven-chat .coven-error-retry {
@@ -991,37 +997,8 @@
 .coven-sidebar-heading > .fr-rail-toggle {
   flex: 1;
 }
-.coven-sidebar-options {
+.coven-sidebar-settings {
   margin-right: 8px;
-}
-.coven-sidebar-options > summary {
-  list-style: none;
-  cursor: pointer;
-  padding: 8px;
-  border-radius: 6px;
-  font-size: 20px;
-  line-height: 1;
-}
-.coven-sidebar-options > summary::-webkit-details-marker {
-  display: none;
-}
-.coven-sidebar-options-menu {
-  position: absolute;
-  z-index: 10;
-  right: 8px;
-  top: 100%;
-  padding: 12px;
-  border: 1px solid var(--border-strong);
-  border-radius: 8px;
-  background: var(--bg-elevated);
-  box-shadow: 0 8px 24px #0003;
-  min-width: 200px;
-}
-.coven-sidebar-options-menu label {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  min-height: 32px;
 }
 
 /* ------------------------------------------------------------- composer */

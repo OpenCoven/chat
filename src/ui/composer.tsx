@@ -58,6 +58,8 @@ export type ComposerProps = Readonly<{
   onValueChange: (value: string) => void;
   attachments?: readonly ComposerAttachment[];
   onRemoveAttachment?: (id: string) => void;
+  /** Draws one attachment in place of the default chip; the host owns its remove control. */
+  renderAttachment?: (attachment: ComposerAttachment, onRemove?: () => void) => ReactNode;
   onSend?: () => void;
   allowAttachmentOnly?: boolean;
   running?: boolean;
@@ -88,6 +90,7 @@ export function Composer({
   onValueChange,
   attachments = [],
   onRemoveAttachment,
+  renderAttachment,
   onSend,
   allowAttachmentOnly = false,
   running = false,
@@ -198,17 +201,24 @@ export function Composer({
       />
       {attachments.length > 0 ? (
         <ul className="oc-composer-attachments" aria-label="Attachments">
-          {attachments.map((attachment) => (
-            <li key={attachment.id}>
-              <AttachmentChip
-                name={attachment.name}
-                meta={attachment.meta}
-                state={attachment.state}
-                progress={attachment.progress}
-                onRemove={onRemoveAttachment ? () => onRemoveAttachment(attachment.id) : undefined}
-              />
-            </li>
-          ))}
+          {attachments.map((attachment) => {
+            const remove = onRemoveAttachment ? () => onRemoveAttachment(attachment.id) : undefined;
+            return (
+              <li key={attachment.id}>
+                {renderAttachment ? (
+                  renderAttachment(attachment, remove)
+                ) : (
+                  <AttachmentChip
+                    name={attachment.name}
+                    meta={attachment.meta}
+                    state={attachment.state}
+                    progress={attachment.progress}
+                    onRemove={remove}
+                  />
+                )}
+              </li>
+            );
+          })}
         </ul>
       ) : null}
       <footer className="oc-composer-footer">

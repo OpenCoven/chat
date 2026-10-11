@@ -6,7 +6,8 @@
 .coven-history-attachments {
   display: flex;
   flex-wrap: wrap;
-  gap: 6px;
+  justify-content: flex-end;
+  gap: 8px;
   padding: 0;
   list-style: none;
 }
@@ -89,8 +90,12 @@
   border-radius: 50%;
   background: var(--bg-elevated);
 }
+/* Cards wrap to two rows before scrolling; the padding leaves room for each
+   card's remove control, which overhangs its corner. */
 .coven-chat .oc-composer-attachments {
   flex-wrap: wrap;
-  max-height: 96px;
+  gap: 10px;
+  max-height: 156px;
+  padding: 8px 8px 4px;
   overflow-y: auto;
 }
