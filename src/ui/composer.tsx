@@ -23,9 +23,18 @@ import { cn, type Density } from './utils';
  * - a `children` slot above the field for the host's inline `/` and `@` menus;
  * - the options caret opening the command palette.
  *
- * Modes and the model readout are dropped: here the ward, not a mode, decides
- * what a familiar may do.
+ * The model readout is dropped: here the ward, not a mode, decides what a
+ * familiar may do. The one mode kept is bash: with `enableBashMode`, a draft
+ * that opens with `!` is marked as a shell command (the `!` stays in the sent
+ * text, for the engine to act on) and the field reads back as one — a label
+ * and a monospace face — so a command never looks like prose.
  */
+export const BASH_PREFIX = '!';
+
+/** Whether the draft is a bash command: opted in, and starting with `!`. */
+export function isBashDraft(value: string, enabled: boolean): boolean {
+  return enabled && value.startsWith(BASH_PREFIX);
+}
 export type ComposerAttachment = Readonly<{
   id: string;
   name: string;
