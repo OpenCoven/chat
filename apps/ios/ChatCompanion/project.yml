@@ -5,6 +5,7 @@ options:
     iOS: "18.0"
 settings:
   base:
+    DEVELOPMENT_TEAM: 9LR8Z8UQ9X
     SWIFT_VERSION: "5.10"
     TARGETED_DEVICE_FAMILY: "1,2"
     SUPPORTS_MACCATALYST: NO

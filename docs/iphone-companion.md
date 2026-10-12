@@ -79,7 +79,10 @@ pair/send/stream/stop/relaunch/forget through the native UI.
 
 The `iPhone companion` GitHub workflow runs this path. Physical iPhone acceptance
 and TestFlight distribution are separate from simulator tests and unsigned device
-builds. To install on a physical device, open the generated Xcode project and
-select the appropriate Apple development team. Distribution needs a registered
-bundle ID, signing profiles, app record and App Store Connect upload; an unsigned
-Release build does not prove any of those.
+builds. `project.yml` signs under the Soul Protocol LLC team (`9LR8Z8UQ9X`), where
+the bundle ID `ai.opencoven.chat.companion` is registered. To install on a
+physical device, sign in to Xcode with an account on that team, open the
+generated project and run on the device. `test-e2e.sh` overrides the team and
+signing on the `xcodebuild` command line, so tests and CI need no team account.
+Distribution still needs signing profiles, an app record and an App Store Connect
+upload; an unsigned Release build does not prove any of those (#422).
