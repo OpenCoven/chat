@@ -772,6 +772,40 @@ mod tests {
         }
     }
 
+    /// Reads one HTTP/1.1 request: the header block, then as many body bytes as
+    /// its Content-Length declares, stopping early only if the client closes. A
+    /// single `read` may return part of a request; Windows does (#412), which
+    /// would also let a `!contains` assertion pass over bytes it never saw.
+    fn read_http_request(stream: &mut impl Read, buffer: &mut [u8]) -> usize {
+        let mut length = 0;
+        let header_end = loop {
+            if let Some(end) = buffer[..length].windows(4).position(|w| w == b"\r\n\r\n") {
+                break end + 4;
+            }
+            let read = stream.read(&mut buffer[length..]).unwrap();
+            if read == 0 {
+                return length;
+            }
+            length += read;
+        };
+        let body = String::from_utf8_lossy(&buffer[..header_end])
+            .to_ascii_lowercase()
+            .lines()
+            .find_map(|line| {
+                line.strip_prefix("content-length:")
+                    .map(|value| value.trim().parse::<usize>().unwrap())
+            })
+            .unwrap_or(0);
+        while length < header_end + body {
+            let read = stream.read(&mut buffer[length..]).unwrap();
+            if read == 0 {
+                break;
+            }
+            length += read;
+        }
+        length
+    }
+
     fn owner_record(endpoint: String) -> OwnerDiscoveryRecord {
         OwnerDiscoveryRecord {
             handle: String::new(),
@@ -923,7 +957,7 @@ mod tests {
         let server = thread::spawn(move || {
             let (mut stream, _) = listener.accept().unwrap();
             let mut request = [0_u8; 16 * 1024];
-            let length = stream.read(&mut request).unwrap();
+            let length = read_http_request(&mut stream, &mut request);
             request_tx
                 .send(String::from_utf8_lossy(&request[..length]).into_owned())
                 .unwrap();
@@ -976,7 +1010,7 @@ mod tests {
         let server = thread::spawn(move || {
             let (mut stream, _) = listener.accept().unwrap();
             let mut request = [0_u8; 16 * 1024];
-            let length = stream.read(&mut request).unwrap();
+            let length = read_http_request(&mut stream, &mut request);
             request_tx
                 .send(String::from_utf8_lossy(&request[..length]).into_owned())
                 .unwrap();
@@ -1023,7 +1057,7 @@ mod tests {
         let server = thread::spawn(move || {
             let (mut stream, _) = listener.accept().unwrap();
             let mut request = [0_u8; 16 * 1024];
-            let length = stream.read(&mut request).unwrap();
+            let length = read_http_request(&mut stream, &mut request);
             request_tx
                 .send(String::from_utf8_lossy(&request[..length]).into_owned())
                 .unwrap();
@@ -1067,7 +1101,7 @@ mod tests {
                     .set_read_timeout(Some(Duration::from_secs(2)))
                     .unwrap();
                 let mut request = [0_u8; 16 * 1024];
-                let length = stream.read(&mut request).unwrap();
+                let length = read_http_request(&mut stream, &mut request);
                 assert!(String::from_utf8_lossy(&request[..length])
                     .contains("x-coven-client-v1-authority-ciphertext:"));
                 accepted_tx.send(()).unwrap();
@@ -1159,7 +1193,7 @@ mod tests {
         let target = thread::spawn(move || {
             let (mut stream, _) = target_listener.accept().unwrap();
             let mut request = [0_u8; 4096];
-            let length = stream.read(&mut request).unwrap();
+            let length = read_http_request(&mut stream, &mut request);
             assert!(String::from_utf8_lossy(&request[..length])
                 .starts_with("GET /api/client/v1/health "));
             stream
