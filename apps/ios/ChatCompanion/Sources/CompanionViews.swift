@@ -4,7 +4,6 @@ struct CompanionRoot: View {
   @Bindable var model: CompanionModel
   @Environment(\.scenePhase) private var phase
   @State private var link = ""
-  @State private var scanner = false
   @State private var forget = false
   @State private var dismissSend = false
   @State private var discovery = Discovery()
@@ -13,7 +12,7 @@ struct CompanionRoot: View {
   var body: some View {
     NavigationStack {
       Group {
-        if model.pairing == nil { welcome } else { workspace }
+        if model.pairing == nil { PairingView(model: model, link: $link) } else { workspace }
       }
       .navigationTitle(model.pairing == nil ? "Coven Chat" : "Familiars")
       .toolbar {
@@ -48,25 +47,13 @@ struct CompanionRoot: View {
           "The previous send might have reached the Mac. Check before sending the same message again."
         )
       }
-      .sheet(isPresented: $scanner) {
-        NavigationStack {
-          PairingScanner { value in
-            link = value
-            scanner = false
-          }
-          .ignoresSafeArea(edges: .bottom)
-          .navigationTitle("Scan Mac's pairing code")
-          .toolbar {
-            ToolbarItem(placement: .cancellationAction) { Button("Cancel") { scanner = false } }
-          }
-        }
-      }
     }
-    .tint(.purple)
+    .tint(Palette.accent)
     .overlay {
       if phase != .active {
-        Color(.systemBackground).ignoresSafeArea().overlay {
-          Label("Coven Chat", systemImage: "sparkle").font(.title2)
+        Palette.bgBase.ignoresSafeArea().overlay {
+          Label("Coven Chat", systemImage: "sparkle").font(.title2).foregroundStyle(
+            Palette.textPrimary)
         }
       }
     }
@@ -93,49 +80,6 @@ struct CompanionRoot: View {
           for: .seconds(model.activeRun?.running == true || model.pendingRunId != nil ? 1 : 4))
       }
       discovery.stop()
-    }
-  }
-  private var welcome: some View {
-    ScrollView {
-      VStack(alignment: .leading, spacing: 24) {
-        Image(systemName: "sparkles.rectangle.stack").font(.system(size: 52)).foregroundStyle(
-          .purple
-        ).accessibilityHidden(true)
-        Text("Your familiars,\nwhere you are.").font(.largeTitle.bold())
-        Text(
-          "Connect to Chat on your Mac to read conversations and send a message. Your Mac runs Coven and keeps your chat history."
-        ).foregroundStyle(.secondary)
-        VStack(alignment: .leading, spacing: 12) {
-          Text("1. On your Mac, open Sidebar options (⋯), then iPhone companion.")
-          Text("2. Turn on companion. Keep both devices on the same local network.")
-          Button {
-            scanner = true
-          } label: {
-            Label("Pair with your Mac", systemImage: "qrcode.viewfinder").frame(maxWidth: .infinity)
-              .padding(.vertical, 6)
-          }
-          .buttonStyle(.borderedProminent)
-          TextField("Paste pairing link", text: $link, axis: .vertical)
-            .textFieldStyle(.roundedBorder).textInputAutocapitalization(.never)
-            .autocorrectionDisabled()
-            .lineLimit(2...4).accessibilityIdentifier("pairing-link")
-          Button(model.busy ? "Connecting…" : "Connect") {
-            let value = link
-            Task {
-              await model.pair(link: value)
-              if model.pairing != nil { link = "" }
-            }
-          }.buttonStyle(.bordered).disabled(link.isEmpty || model.busy).accessibilityIdentifier(
-            "connect")
-        }
-        if !model.error.isEmpty {
-          Text(model.error).foregroundStyle(.red).accessibilityIdentifier("connection-error")
-        }
-        if model.needsPairingCleanup { Button("Retry forgetting Mac") { model.forget() } }
-        Text(
-          "Pairing links grant access to your conversations. Only use the code from your own Mac."
-        ).font(.footnote).foregroundStyle(.secondary)
-      }.padding(24).frame(maxWidth: 560)
     }
   }
   private var workspace: some View {
@@ -246,7 +190,7 @@ private struct MessageRow: View {
       Text(message.text).textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading)
     }.padding(message.role == "user" ? 14 : 0)
       .background(
-        message.role == "user" ? Color.purple.opacity(0.08) : Color.clear,
+        message.role == "user" ? Palette.accent.opacity(0.08) : Color.clear,
         in: RoundedRectangle(cornerRadius: 16)
       )
       .accessibilityElement(children: .combine)

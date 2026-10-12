@@ -13,6 +13,10 @@ final class CompanionFlowTests: XCTestCase {
       app.buttons["Forget Mac"].tap()
       app.buttons["Forget Mac"].tap()
     }
+    // The link field starts folded on a device with a camera, where scanning is
+    // the main path; the simulator has no camera, so it starts open.
+    XCTAssertTrue(app.buttons["Pair with your Mac"].waitForExistence(timeout: 10))
+    if app.buttons["Enter pairing link"].exists { app.buttons["Enter pairing link"].tap() }
     let pairing =
       app.textFields["pairing-link"].exists
       ? app.textFields["pairing-link"] : app.textViews["pairing-link"]
