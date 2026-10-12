@@ -84,5 +84,27 @@ the bundle ID `ai.opencoven.chat.companion` is registered. To install on a
 physical device, sign in to Xcode with an account on that team, open the
 generated project and run on the device. `test-e2e.sh` overrides the team and
 signing on the `xcodebuild` command line, so tests and CI need no team account.
-Distribution still needs signing profiles, an app record and an App Store Connect
-upload; an unsigned Release build does not prove any of those (#422).
+
+## TestFlight
+
+`Scripts/testflight.sh` archives the app under the team and uploads it to App
+Store Connect. It uses the App Store Connect API key the desktop release
+notarizes with ([releasing](releasing.md)), so no Xcode sign-in is needed:
+
+```sh
+APPLE_API_KEY=<key id> APPLE_API_ISSUER=<issuer id> apps/ios/ChatCompanion/Scripts/testflight.sh
+```
+
+The `.p8` is read from `~/.appstoreconnect/private_keys/AuthKey_<key id>.p8`
+unless `APPLE_API_KEY_PATH` names another file. Xcode creates or refreshes the
+App Store provisioning profile through the key. The build number defaults to the
+commit count of `HEAD`, so upload from `main`; `CHAT_IOS_BUILD_NUMBER` overrides
+it. `CHAT_IOS_EXPORT=export` signs an `.ipa` and leaves it in a temporary folder
+without uploading.
+
+The upload needs an App Store Connect app record for the bundle ID. The App
+Store Connect API cannot create one, so create it once on the website under
+**Apps → New App**. A build appears in TestFlight after Apple finishes
+processing it; internal testers on the team can then install it from the
+TestFlight app. External testers need Beta App Review first. Physical-device
+acceptance is tracked in #422; a successful upload does not prove it.
