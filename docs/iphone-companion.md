@@ -10,8 +10,10 @@ required. This replaces the August Cave-dependent iOS implementation plans.
 1. In Chat on the Mac, open **Sidebar options** (⋯), then **iPhone companion**.
 2. Choose **Turn on companion**. If macOS asks, allow Chat to accept incoming
    connections. The listener binds only to the selected private LAN address.
-3. On iPhone, choose **Pair with your Mac** and scan the QR, or copy and paste
-   the private pairing link. Choose **Connect**.
+3. On iPhone, choose **Pair with your Mac** and scan the QR; the phone connects as
+   soon as it reads the code. To use the private pairing link instead, choose
+   **Enter pairing link**, paste it and choose **Connect**. A link opened from
+   elsewhere fills the field but still waits for **Connect**.
 
 A link grants access to Chat conversations and read-only agent runs. It contains
 an HTTPS endpoint, a random bearer and the SHA-256 fingerprint of the Mac's
