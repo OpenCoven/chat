@@ -142,6 +142,26 @@ fn find_claude(search: &std::ffi::OsStr, home: Option<&Path>) -> Option<PathBuf>
         .find(|candidate| candidate.is_file())
 }
 
+/// Claude Code, if it is installed where Chat can find it.
+pub(crate) fn claude_path() -> Option<PathBuf> {
+    tool_search_path()
+        .ok()
+        .and_then(|search| find_claude(&search, home().ok().as_deref()))
+}
+
+/// The installed engine executable, as `coven engine status` reports it.
+fn engine_path() -> Option<PathBuf> {
+    let status = cli_json(&["engine", "status", "--json"]).ok()?;
+    if status.get("installed").and_then(Value::as_bool) != Some(true) {
+        return None;
+    }
+    status
+        .get("path")
+        .and_then(Value::as_str)
+        .map(PathBuf::from)
+        .filter(|path| path.is_absolute() && path.is_file())
+}
+
 /// The model-provider step is satisfied by any route that is signed in: the
 /// engine's own sign-in, a Claude subscription through Claude Code, or
 /// ChatGPT through the engine's Codex sign-in.
@@ -166,13 +186,7 @@ fn check() -> Result<Value, String> {
             "familiar": { "ok": false, "count": 0 },
         }));
     }
-    let claude = json_sign_in(
-        tool_search_path()
-            .ok()
-            .and_then(|search| find_claude(&search, home().ok().as_deref()))
-            .as_deref(),
-        &["auth", "status", "--json"],
-    );
+    let claude = json_sign_in(claude_path().as_deref(), &["auth", "status", "--json"]);
     if resolve_cli().is_err() {
         return Ok(json!({
             "platform": { "ok": true, "os": std::env::consts::OS },
@@ -192,19 +206,8 @@ fn check() -> Result<Value, String> {
     .map(|bytes| String::from_utf8_lossy(&bytes).trim().to_owned())
     .ok()
     .filter(|version| !version.is_empty() && version.len() <= 256);
-    let engine_status = cli_json(&["engine", "status", "--json"]).ok();
-    let engine_installed = engine_status
-        .as_ref()
-        .and_then(|status| status.get("installed"))
-        .and_then(Value::as_bool)
-        == Some(true);
-    let engine_path = engine_status
-        .as_ref()
-        .filter(|_| engine_installed)
-        .and_then(|status| status.get("path"))
-        .and_then(Value::as_str)
-        .map(PathBuf::from)
-        .filter(|path| path.is_absolute() && path.is_file());
+    let engine_path = engine_path();
+    let engine_installed = engine_path.is_some();
     // Ask the engine directly, as `coven run` starts it, so the answer reflects
     // the sign-in a chat run will actually use.
     let engine = json_sign_in(engine_path.as_deref(), &["auth", "status", "--json"]);
@@ -276,6 +279,8 @@ impl Drop for ActiveRun {
 enum SetupStep {
     InstallCoven,
     InstallEngine,
+    SignInClaude,
+    SignInChatgpt,
 }
 
 impl SetupStep {
@@ -283,9 +288,25 @@ impl SetupStep {
         match step {
             "install_coven" => Ok(Self::InstallCoven),
             "install_engine" => Ok(Self::InstallEngine),
+            "sign_in_claude" => Ok(Self::SignInClaude),
+            "sign_in_chatgpt" => Ok(Self::SignInChatgpt),
             _ => Err("Unknown setup step.".into()),
         }
     }
+}
+
+/// The first web address in a line of output, for a sign-in link the tool
+/// prints in case it could not open the browser itself.
+fn link_in(line: &str) -> Option<&str> {
+    let start = line.find("https://")?;
+    let link = line[start..]
+        .split(char::is_whitespace)
+        .next()?
+        .trim_end_matches(['.', ',', ')', ']', '>', '"', '\'']);
+    (link.len() > "https://".len()
+        && link.len() <= 2048
+        && link.chars().all(|c| c.is_ascii_graphic()))
+    .then_some(link)
 }
 
 fn shown_line(line: &str) -> String {
@@ -297,35 +318,91 @@ fn shown_line(line: &str) -> String {
         .to_owned()
 }
 
-/// Runs `coven engine install`, passing each line of its output to `on_event`
-/// as `{ type: "line", text }`.
-fn install_engine(
+/// Sign-in waits for the person to finish in their browser.
+const SIGN_IN_TIMEOUT: Duration = Duration::from_secs(10 * 60);
+
+/// Runs `program args`, passing each line of its output to `on_event` as
+/// `{ type: "line", text }`, and returns the last line for a failure message.
+fn stream_tool(
+    program: &Path,
+    args: &[&str],
+    timeout: Duration,
     cancel: &AtomicBool,
     on_event: &mut dyn FnMut(Value) -> Result<(), String>,
-) -> Result<Value, String> {
-    let mut command = Command::new(resolve_cli()?);
+) -> Result<(i32, String), String> {
+    let mut command = Command::new(program);
     command
-        .args(["engine", "install"])
+        .args(args)
         .stdin(Stdio::null())
         .current_dir(home()?)
         .env("PATH", tool_search_path()?);
     let mut last = String::new();
-    let code = execute_command_lines(command, cancel, ENGINE_INSTALL_TIMEOUT, &mut |_, line| {
+    let code = execute_command_lines(command, cancel, timeout, &mut |_, line| {
         let text = shown_line(line);
         if text.is_empty() {
             return Ok(());
         }
         last.clone_from(&text);
+        if let Some(link) = link_in(&text) {
+            on_event(json!({ "type": "link", "url": link }))?;
+        }
         on_event(json!({ "type": "line", "text": text }))
     })?;
+    Ok((code, last))
+}
+
+fn failed(what: &str, last: &str) -> String {
+    if last.is_empty() {
+        format!("{what} did not finish. Try again.")
+    } else {
+        format!("{what} did not finish: {last}")
+    }
+}
+
+/// Runs `coven engine install`.
+fn install_engine(
+    cancel: &AtomicBool,
+    on_event: &mut dyn FnMut(Value) -> Result<(), String>,
+) -> Result<Value, String> {
+    let (code, last) = stream_tool(
+        &resolve_cli()?,
+        &["engine", "install"],
+        ENGINE_INSTALL_TIMEOUT,
+        cancel,
+        on_event,
+    )?;
     if code != 0 {
-        return Err(if last.is_empty() {
-            "The engine could not be installed. Try again.".to_owned()
-        } else {
-            format!("The engine could not be installed: {last}")
-        });
+        return Err(failed("The engine install", &last));
     }
     Ok(json!({ "installed": true }))
+}
+
+/// Starts a provider's own browser sign-in and waits for the person to
+/// finish it. The tool opens the browser itself and prints a link to use if
+/// it could not, which reaches the window as a line.
+fn sign_in(
+    step: SetupStep,
+    cancel: &AtomicBool,
+    on_event: &mut dyn FnMut(Value) -> Result<(), String>,
+) -> Result<Value, String> {
+    let (program, args, what): (PathBuf, &[&str], &str) = match step {
+        SetupStep::SignInClaude => (
+            claude_path().ok_or("Install Claude Code first, then choose Check again.")?,
+            &["auth", "login", "--claudeai"],
+            "Signing in with Claude",
+        ),
+        SetupStep::SignInChatgpt => (
+            engine_path().ok_or("Install the engine first.")?,
+            &["codex", "login"],
+            "Signing in with ChatGPT",
+        ),
+        _ => return Err("Unknown setup step.".into()),
+    };
+    let (code, last) = stream_tool(&program, args, SIGN_IN_TIMEOUT, cancel, on_event)?;
+    if code != 0 {
+        return Err(failed(what, &last));
+    }
+    Ok(json!({ "signedIn": true }))
 }
 
 /// Runs one setup step, streaming progress to `on_event`. Only one step runs
@@ -348,14 +425,19 @@ pub(crate) async fn setup_run(
             };
             crate::coven_install::install(&cancel, &mut send).await
         }
-        SetupStep::InstallEngine => {
+        SetupStep::InstallEngine | SetupStep::SignInClaude | SetupStep::SignInChatgpt => {
             let cancel = cancel.clone();
             blocking(move || {
-                install_engine(&cancel, &mut |event| {
+                let mut send = |event: Value| {
                     on_event
                         .send(event)
                         .map_err(|_| "The setup window closed.".to_owned())
-                })
+                };
+                if step == SetupStep::InstallEngine {
+                    install_engine(&cancel, &mut send)
+                } else {
+                    sign_in(step, &cancel, &mut send)
+                }
             })
             .await
         }
@@ -413,6 +495,23 @@ mod tests {
         let (second, _) = ActiveRun::start("run-two").unwrap();
         drop(second);
         assert!(setup_cancel("run-two".into()).is_err());
+    }
+
+    #[test]
+    fn sign_in_links_are_found_in_tool_output() {
+        assert_eq!(
+            link_in(
+                "If the browser did not open, visit: https://auth.example.com/oauth?code=1&x=2."
+            ),
+            Some("https://auth.example.com/oauth?code=1&x=2")
+        );
+        assert_eq!(
+            link_in("Open (https://claude.ai/login) to continue"),
+            Some("https://claude.ai/login")
+        );
+        assert_eq!(link_in("Waiting for the browser…"), None);
+        assert_eq!(link_in("https://"), None);
+        assert_eq!(link_in(&format!("https://{}", "a".repeat(3000))), None);
     }
 
     #[test]

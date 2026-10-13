@@ -806,9 +806,11 @@ describe('Phase 1 specification guards', () => {
     const setup = readText('src-tauri/src/setup.rs');
     expect(setup).toMatch(/pub\(crate\)\s+async\s+fn\s+setup_check\(\)/);
     expect(setup).toMatch(
-      /"install_coven" => Ok\(Self::InstallCoven\),\s*"install_engine" => Ok\(Self::InstallEngine\),\s*_ => Err/,
+      /"install_coven" => Ok\(Self::InstallCoven\),\s*"install_engine" => Ok\(Self::InstallEngine\),\s*"sign_in_claude" => Ok\(Self::SignInClaude\),\s*"sign_in_chatgpt" => Ok\(Self::SignInChatgpt\),\s*_ => Err/,
     );
-    expect(setup).toContain('.args(["engine", "install"])');
+    expect(setup).toContain('&["auth", "login", "--claudeai"]');
+    expect(setup).toContain('&["codex", "login"]');
+    expect(setup).toContain('&["engine", "install"]');
     // The only address Coven is installed from is the pinned release.
     const install = readText('src-tauri/src/coven_install.rs');
     expect(install).toContain(

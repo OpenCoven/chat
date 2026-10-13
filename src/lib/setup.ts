@@ -23,12 +23,18 @@ export type SetupReport = {
   familiar: { ok: boolean; count: number };
 };
 /** A step Chat can complete for the person. */
-export type SetupRunStep = 'install_coven' | 'install_engine';
+export type SetupRunStep =
+  | 'install_coven'
+  | 'install_engine'
+  | 'sign_in_claude'
+  | 'sign_in_chatgpt';
 /** Progress from a running step: download bytes, a stage, or a line of output. */
 export type SetupRunEvent =
   | { type: 'progress'; stage: 'download'; received: number; total: number }
   | { type: 'progress'; stage: 'install' }
-  | { type: 'line'; text: string };
+  | { type: 'line'; text: string }
+  /** A sign-in address the tool printed in case it could not open the browser. */
+  | { type: 'link'; url: string };
 export type Setup = {
   /** `null` outside the desktop app, where there is nothing to set up. */
   check(): Promise<SetupReport | null>;
@@ -71,6 +77,14 @@ function report(value: unknown): value is SetupReport {
 function runEvent(value: unknown): value is SetupRunEvent {
   if (!record(value)) return false;
   if (value.type === 'line') return typeof value.text === 'string' && value.text.length <= 512;
+  if (value.type === 'link') {
+    if (typeof value.url !== 'string' || value.url.length > 2048) return false;
+    try {
+      return new URL(value.url).protocol === 'https:';
+    } catch {
+      return false;
+    }
+  }
   if (value.type !== 'progress') return false;
   if (value.stage === 'install') return true;
   return (

@@ -82,7 +82,7 @@ describe('first-run setup', () => {
     expect(within(step('Coven')).getByText('npm install -g @opencoven/cli')).toBeInTheDocument();
     expect(within(step('Coven engine')).getByText('Install Coven first.')).toBeInTheDocument();
     expect(within(step('Model sign-in')).getByText(CURL)).toBeInTheDocument();
-    expect(within(step('Model sign-in')).getByText('claude auth login')).toBeInTheDocument();
+    expect(within(step('Model sign-in')).getByText('Then choose Check again.')).toBeInTheDocument();
     // Coven is required: there is no way past this step yet.
     expect(screen.queryByRole('button', { name: 'Continue to Chat' })).not.toBeInTheDocument();
   });
@@ -269,5 +269,71 @@ describe('first-run setup', () => {
     expect(within(step('Coven')).getByRole('alert')).toHaveTextContent(
       'Stopped. You can start it again.',
     );
+  });
+
+  it('signs in with Claude from the setup screen and shows the fallback link', async () => {
+    const signedOut = report({
+      signIn: {
+        ok: false,
+        engine: 'signed-out',
+        claude: 'signed-out',
+        chatgpt: 'signed-out',
+        claudeInstaller: CURL,
+      },
+    });
+    const checks = [signedOut, report()];
+    let emit: (event: import('../lib/setup').SetupRunEvent) => void = () => {};
+    let finish: () => void = () => {};
+    const run = vi.fn((_id: string, _step: string, onEvent: typeof emit) => {
+      emit = onEvent;
+      return new Promise<void>((resolve) => {
+        finish = resolve;
+      });
+    });
+    await renderWith({ check: vi.fn(async () => checks.shift() ?? report()), run });
+    expect(
+      within(step('Model sign-in')).getByRole('button', { name: 'Sign in with ChatGPT' }),
+    ).toBeInTheDocument();
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Sign in with Claude' }));
+    });
+    expect(run).toHaveBeenCalledWith(expect.any(String), 'sign_in_claude', expect.any(Function));
+    expect(screen.getByText(/Finish signing in in your browser/)).toBeInTheDocument();
+    await act(async () => {
+      emit({ type: 'link', url: 'https://claude.ai/oauth/authorize?code=abc' });
+    });
+    expect(
+      within(step('Model sign-in')).getByText('https://claude.ai/oauth/authorize?code=abc'),
+    ).toBeInTheDocument();
+    await act(async () => {
+      finish();
+    });
+    expect(screen.getByText('The chat')).toBeInTheDocument();
+  });
+
+  it('offers ChatGPT sign-in only once the engine is installed', async () => {
+    const run = vi.fn(async () => {});
+    await renderWith({
+      check: vi.fn(async () =>
+        report({
+          engine: { ok: false },
+          signIn: {
+            ok: false,
+            engine: 'missing',
+            claude: 'missing',
+            chatgpt: 'missing',
+            claudeInstaller: CURL,
+          },
+        }),
+      ),
+      run,
+    });
+    expect(
+      within(step('Model sign-in')).queryByRole('button', { name: 'Sign in with ChatGPT' }),
+    ).not.toBeInTheDocument();
+    expect(
+      within(step('Model sign-in')).queryByRole('button', { name: 'Sign in with Claude' }),
+    ).not.toBeInTheDocument();
+    expect(within(step('Model sign-in')).getByText(CURL)).toBeInTheDocument();
   });
 });

@@ -30,6 +30,8 @@ type Run = {
   received?: number;
   total?: number;
   line?: string;
+  /** A sign-in address to use if the browser did not open. */
+  link?: string;
 };
 type Runner = {
   run: Run | null;
@@ -48,6 +50,7 @@ function runId() {
 
 function advance(run: Run, event: SetupRunEvent): Run {
   if (event.type === 'line') return { ...run, line: event.text };
+  if (event.type === 'link') return { ...run, link: event.url };
   if (event.stage === 'install') return { ...run, stage: 'install' };
   return { ...run, stage: 'download', received: event.received, total: event.total };
 }
@@ -163,7 +166,7 @@ export function Onboarding({
           <ol className="coven-onboarding-steps">
             <CovenStep report={phase.report} runner={runner} />
             <EngineStep report={phase.report} runner={runner} />
-            <SignInStep report={phase.report} />
+            <SignInStep report={phase.report} runner={runner} />
             <FamiliarStep report={phase.report} />
           </ol>
         )}
@@ -215,6 +218,9 @@ function percent(run: Run) {
 }
 
 function describe(run: Run) {
+  if (run.step === 'sign_in_claude' || run.step === 'sign_in_chatgpt') {
+    return 'Finish signing in in your browser, then come back here.';
+  }
   if (run.step === 'install_engine') return run.line ?? 'Installing the engine…';
   if (run.stage === 'download') return `Downloading Coven… ${percent(run)}%`;
   if (run.stage === 'install') return 'Installing Coven…';
@@ -242,6 +248,12 @@ function RunControls({
           {...(measured ? { value: active.received ?? 0, max: active.total } : {})}
         />
         <output className="coven-onboarding-run-status">{describe(active)}</output>
+        {active.link ? (
+          <div className="coven-onboarding-link">
+            <p>If your browser did not open, copy this link into it:</p>
+            <Command command={active.link} />
+          </div>
+        ) : null}
         <FamButton size="sm" onClick={runner.stop}>
           Cancel
         </FamButton>
@@ -329,7 +341,7 @@ function EngineStep({ report, runner }: { report: SetupReport; runner: Runner })
   );
 }
 
-function SignInStep({ report }: { report: SetupReport }) {
+function SignInStep({ report, runner }: { report: SetupReport; runner: Runner }) {
   const { signIn } = report;
   if (signIn.ok) {
     const route =
@@ -344,22 +356,33 @@ function SignInStep({ report }: { report: SetupReport }) {
       </Step>
     );
   }
+  const shell = report.platform.os === 'windows' ? 'a PowerShell window' : 'a terminal';
   return (
     <Step title="Model sign-in" done={false}>
-      <p>Familiars need a model to answer. To use your Claude subscription:</p>
+      <p>Familiars need a model to answer. Sign in with an account you already have.</p>
       {signIn.claude === 'missing' ? (
         <>
-          <p>
-            Install Claude Code in a{' '}
-            {report.platform.os === 'windows' ? 'PowerShell window' : 'terminal'}:
-          </p>
+          <p>To use your Claude subscription, first install Claude Code in {shell}:</p>
           <Command command={signIn.claudeInstaller} />
-          <p>Then sign in:</p>
+          <p>Then choose Check again.</p>
+        </>
+      ) : runner.available ? (
+        <>
+          <RunControls step="sign_in_claude" label="Sign in with Claude" runner={runner} />
+          <details className="coven-onboarding-manual">
+            <summary>Sign in in a terminal instead</summary>
+            <Command command="claude auth login" />
+          </details>
         </>
       ) : (
-        <p>Sign in to Claude Code in a terminal:</p>
+        <>
+          <p>Sign in to Claude Code in a terminal:</p>
+          <Command command="claude auth login" />
+        </>
       )}
-      <Command command="claude auth login" />
+      {report.engine.ok && runner.available ? (
+        <RunControls step="sign_in_chatgpt" label="Sign in with ChatGPT" runner={runner} />
+      ) : null}
     </Step>
   );
 }

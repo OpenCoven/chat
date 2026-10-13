@@ -151,11 +151,17 @@ When everything is in place, nothing is shown and the chat opens as usual. Other
 - A failed step says why and offers **Try again**.
 - **Install it in a terminal instead** shows the command for each step, for people who'd rather run it themselves.
 
-Sign-in and familiars show the exact command that completes them, with a **Copy** control. **Check again** re-runs every check, and the chat opens as soon as they pass.
+**Sign in:** sign-in uses accounts you already have.
+- **Sign in with Claude:** with Claude Code installed, this runs Claude Code's own browser sign-in for your Claude subscription. Without Claude Code, setup shows Anthropic's installer command instead.
+- **Sign in with ChatGPT:** once the engine is installed, this runs the engine's ChatGPT sign-in.
+- **Fallback link:** both tools open your browser themselves. If one prints a link instead, setup shows it with a **Copy** control.
+- **Finder launches:** Chat tells the engine where Claude Code is, so runs started from a Chat opened in Finder still reach it.
+
+A familiar shows how to create one, with a **Copy** control. **Check again** re-runs every check, and the chat opens as soon as they pass.
 
 Coven and its engine are required. When only sign-in or a familiar is missing, **Continue to Chat** opens the chat anyway, so a sign-in the check can't see, such as an API key in the environment, never blocks a working setup.
 
-The checks start Coven, the engine and Claude Code only to ask their status. Chat installs something only when you choose **Install Coven** or **Install the engine**, and never signs in for you.
+The checks start Coven, the engine and Claude Code only to ask their status. Chat installs something only when you choose **Install Coven** or **Install the engine**. Sign-in always happens in your browser, with the provider; Chat never sees your password or keys.
 
 ## Local runtime
 

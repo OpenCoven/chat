@@ -585,6 +585,13 @@ fn run_process_input(
         command.current_dir(home()?);
     }
     command.env("PATH", tool_search_path()?);
+    // The engine reaches a Claude subscription through Claude Code, which it
+    // looks up on PATH alone; name it so a launch from Finder still finds it.
+    if std::env::var_os("COVEN_CODE_CLAUDE_BIN").is_none() {
+        if let Some(claude) = crate::setup::claude_path() {
+            command.env("COVEN_CODE_CLAUDE_BIN", claude);
+        }
+    }
     let output_limit = if args == ["sessions", "--all", "--json"] {
         LEDGER_METADATA_LIMIT
     } else {

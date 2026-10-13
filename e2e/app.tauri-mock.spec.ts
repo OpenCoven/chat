@@ -800,8 +800,11 @@ test('a new install opens on first-run setup, which names each missing step', as
   await expect(
     page.getByRole('region', { name: 'Coven engine' }).getByText('Install Coven first.'),
   ).toBeVisible();
+  // Claude Code is not installed in this fixture, so setup names its installer.
   await expect(
-    page.getByRole('region', { name: 'Model sign-in' }).getByText('claude auth login'),
+    page
+      .getByRole('region', { name: 'Model sign-in' })
+      .getByText('curl -fsSL https://claude.ai/install.sh | bash'),
   ).toBeVisible();
   // Without Coven there is nothing to continue to, and the chat is not mounted.
   await expect(page.getByRole('button', { name: 'Continue to Chat' })).toHaveCount(0);

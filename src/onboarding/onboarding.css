@@ -145,3 +145,9 @@
   display: grid;
   gap: 6px;
 }
+
+.coven-onboarding-link {
+  display: grid;
+  flex: 1 1 100%;
+  gap: 4px;
+}

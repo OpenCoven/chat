@@ -78,6 +78,9 @@ describe('setup bridge', () => {
       channel.onmessage({ type: 'line', text: 'Engine ready' });
       channel.onmessage({ type: 'line', text: 'x'.repeat(600) });
       channel.onmessage({ type: 'secret', text: 'ignored' });
+      channel.onmessage({ type: 'link', url: 'https://claude.ai/login?x=1' });
+      channel.onmessage({ type: 'link', url: 'javascript:alert(1)' });
+      channel.onmessage({ type: 'link', url: 'not a url' });
       return { installed: true };
     });
     const events: unknown[] = [];
@@ -95,6 +98,7 @@ describe('setup bridge', () => {
       { type: 'progress', stage: 'download', received: 5, total: 10 },
       { type: 'progress', stage: 'install' },
       { type: 'line', text: 'Engine ready' },
+      { type: 'link', url: 'https://claude.ai/login?x=1' },
     ]);
   });
 
