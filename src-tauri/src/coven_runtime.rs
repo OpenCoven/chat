@@ -335,6 +335,7 @@ fn cli_candidates(
     package: &str,
     home: Option<&Path>,
     app_data: Option<&Path>,
+    local_app_data: Option<&Path>,
     path: Option<&std::ffi::OsStr>,
 ) -> Vec<PathBuf> {
     let name = if windows { "coven.exe" } else { "coven" };
@@ -347,6 +348,10 @@ fn cli_candidates(
         ));
     }
     if windows {
+        // Where Chat's first-run setup installs Coven.
+        if let Some(local_app_data) = local_app_data {
+            candidates.push(crate::coven_install::windows_install_dir(local_app_data).join(name));
+        }
         // npm's default global prefix on Windows is %APPDATA%\npm.
         if let Some(app_data) = app_data {
             candidates.push(npm_native_cli(
@@ -402,12 +407,16 @@ pub(crate) fn resolve_cli() -> Result<PathBuf, String> {
     let app_data = std::env::var_os("APPDATA")
         .map(PathBuf::from)
         .filter(|path| path.is_absolute());
+    let local_app_data = std::env::var_os("LOCALAPPDATA")
+        .map(PathBuf::from)
+        .filter(|path| path.is_absolute());
     let path = std::env::var_os("PATH");
     cli_candidates(
         cfg!(windows),
         platform_package(),
         home().ok().as_deref(),
         app_data.as_deref(),
+        local_app_data.as_deref(),
         path.as_deref(),
     )
     .into_iter()
@@ -3759,11 +3768,13 @@ mod tests {
         let npm_prefix = app_data.join("npm");
         let tools = root.join("Tools");
         let path = std::env::join_paths([&npm_prefix, &tools]).unwrap();
+        let local_app_data = home.join("AppData").join("Local");
         let candidates = cli_candidates(
             true,
             "cli-windows",
             Some(&home),
             Some(&app_data),
+            Some(&local_app_data),
             Some(&path),
         );
 
@@ -3773,6 +3784,12 @@ mod tests {
             "node_modules/@opencoven/cli/node_modules/@opencoven/cli-windows/bin/coven.exe"
         ));
         let native_at = candidates.iter().position(|path| path == &native).unwrap();
+        let chat_install = local_app_data.join("Programs/OpenCoven/Coven/coven.exe");
+        let chat_install_at = candidates
+            .iter()
+            .position(|path| path.components().eq(chat_install.components()))
+            .unwrap();
+        assert!(chat_install_at < native_at);
         let path_entry_at = candidates
             .iter()
             .position(|path| path == &npm_prefix.join("coven.exe"))
@@ -3804,7 +3821,7 @@ mod tests {
         for version in ["v9.0.0", "v22.2.0", "v22.11.0", "system", "v24.x"] {
             std::fs::create_dir_all(versions.join(version)).unwrap();
         }
-        let candidates = cli_candidates(false, "cli-macos", Some(&home), None, None);
+        let candidates = cli_candidates(false, "cli-macos", Some(&home), None, None, None);
         std::fs::remove_dir_all(&home).unwrap();
 
         let position = |version: &str| {
@@ -3846,7 +3863,7 @@ mod tests {
             std::fs::set_permissions(file, std::fs::Permissions::from_mode(0o755)).unwrap();
         }
         let path = std::env::join_paths([&bin]).unwrap();
-        let found = cli_candidates(false, "cli-macos", None, None, Some(&path))
+        let found = cli_candidates(false, "cli-macos", None, None, None, Some(&path))
             .into_iter()
             .find(|path| executable(path));
         std::fs::remove_dir_all(&root).unwrap();

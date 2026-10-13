@@ -76,9 +76,10 @@ const screenRelayCommands = [
   'coven_screen_send',
   'coven_screen_disconnect',
 ];
-// First-run setup reads what a new person still needs. It takes no
-// arguments, so nothing the webview chooses reaches a process it starts.
-const setupCommands = ['setup_check'];
+// First-run setup reads what a new person still needs and runs a fixed set of
+// install steps. The webview chooses a step by name and nothing else: no
+// address, path or argument it sends reaches a download or a process.
+const setupCommands = ['setup_check', 'setup_run', 'setup_cancel'];
 
 function readText(relativePath: string) {
   return readFileSync(resolve(projectRoot, relativePath), 'utf8');
@@ -802,11 +803,18 @@ describe('Phase 1 specification guards', () => {
       ...setupCommands.map((command) => `setup::${command}`),
       ...expected,
     ]);
-    for (const command of setupCommands) {
-      expect(readText('src-tauri/src/setup.rs')).toMatch(
-        new RegExp(`pub\\(crate\\)\\s+async\\s+fn\\s+${command}\\(\\)`),
-      );
-    }
+    const setup = readText('src-tauri/src/setup.rs');
+    expect(setup).toMatch(/pub\(crate\)\s+async\s+fn\s+setup_check\(\)/);
+    expect(setup).toMatch(
+      /"install_coven" => Ok\(Self::InstallCoven\),\s*"install_engine" => Ok\(Self::InstallEngine\),\s*_ => Err/,
+    );
+    expect(setup).toContain('.args(["engine", "install"])');
+    // The only address Coven is installed from is the pinned release.
+    const install = readText('src-tauri/src/coven_install.rs');
+    expect(install).toContain(
+      '"https://github.com/OpenCoven/coven/releases/download/v{COVEN_VERSION}/{}"',
+    );
+    expect(install).toContain('hex(&hasher.finalize()) != release.sha256');
 
     for (const command of expected) {
       expect(lib).toContain(command);

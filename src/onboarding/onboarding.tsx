@@ -8,6 +8,8 @@ import {
   createSetup,
   type Setup,
   type SetupReport,
+  type SetupRunEvent,
+  type SetupRunStep,
   setupComplete,
 } from '../lib/setup';
 import './onboarding.css';
@@ -19,6 +21,36 @@ type Phase =
   | { kind: 'report'; report: SetupReport }
   | { kind: 'failed'; message: string }
   | { kind: 'chat' };
+
+/** A step Chat is completing, with its latest progress. */
+type Run = {
+  step: SetupRunStep;
+  id: string;
+  stage?: 'download' | 'install';
+  received?: number;
+  total?: number;
+  line?: string;
+};
+type Runner = {
+  run: Run | null;
+  failure: { step: SetupRunStep; message: string } | null;
+  start: (step: SetupRunStep) => void;
+  stop: () => void;
+  available: boolean;
+};
+
+/** The native message for a stopped run. */
+const RUN_CANCELLED = 'Coven run cancelled.';
+
+function runId() {
+  return `setup-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+}
+
+function advance(run: Run, event: SetupRunEvent): Run {
+  if (event.type === 'line') return { ...run, line: event.text };
+  if (event.stage === 'install') return { ...run, stage: 'install' };
+  return { ...run, stage: 'download', received: event.received, total: event.total };
+}
 
 /**
  * First-run setup in front of the chat. It checks what a new person still
@@ -36,22 +68,27 @@ export function Onboarding({
 }) {
   const [phase, setPhase] = useState<Phase>({ kind: 'checking' });
   const [rechecking, setRechecking] = useState(false);
+  const [run, setRun] = useState<Run | null>(null);
+  const [failure, setFailure] = useState<Runner['failure']>(null);
   const latest = useRef(0);
-  const check = useCallback(async () => {
+  const running = useRef(false);
+  const check = useCallback(async (): Promise<SetupReport | null> => {
     const id = ++latest.current;
     setRechecking(true);
     try {
       const report = await setup.check();
-      if (id !== latest.current) return;
+      if (id !== latest.current) return null;
       setPhase(
         report === null || setupComplete(report) ? { kind: 'chat' } : { kind: 'report', report },
       );
+      return report;
     } catch (error) {
-      if (id !== latest.current) return;
+      if (id !== latest.current) return null;
       setPhase({
         kind: 'failed',
         message: error instanceof Error ? error.message : 'Chat could not check your setup.',
       });
+      return null;
     } finally {
       if (id === latest.current) setRechecking(false);
     }
@@ -59,6 +96,51 @@ export function Onboarding({
   useEffect(() => {
     void check();
   }, [check]);
+
+  const start = useCallback(
+    async (step: SetupRunStep) => {
+      if (!setup.run || running.current) return;
+      running.current = true;
+      setFailure(null);
+      let next: SetupRunStep | null = step;
+      while (next) {
+        const current: SetupRunStep = next;
+        next = null;
+        const id = runId();
+        setRun({ step: current, id });
+        try {
+          await setup.run(id, current, (event) =>
+            setRun((value) => (value?.id === id ? advance(value, event) : value)),
+          );
+        } catch (error) {
+          setFailure({
+            step: current,
+            message:
+              error instanceof Error ? error.message : 'This setup step did not finish. Try again.',
+          });
+          break;
+        } finally {
+          setRun(null);
+        }
+        const report = await check();
+        // Installing Coven continues straight on to its engine.
+        if (current === 'install_coven' && report?.coven.ok && !report.engine.ok) {
+          next = 'install_engine';
+        }
+      }
+      running.current = false;
+    },
+    [setup, check],
+  );
+  const runner: Runner = {
+    run,
+    failure,
+    start: (step) => void start(step),
+    stop: () => {
+      if (run && setup.cancel) void setup.cancel(run.id).catch(() => undefined);
+    },
+    available: Boolean(setup.run),
+  };
 
   if (phase.kind === 'chat') return children;
   return (
@@ -79,18 +161,22 @@ export function Onboarding({
           </p>
         ) : (
           <ol className="coven-onboarding-steps">
-            <CovenStep report={phase.report} />
-            <EngineStep report={phase.report} />
+            <CovenStep report={phase.report} runner={runner} />
+            <EngineStep report={phase.report} runner={runner} />
             <SignInStep report={phase.report} />
             <FamiliarStep report={phase.report} />
           </ol>
         )}
         {phase.kind === 'checking' ? null : (
           <footer className="coven-onboarding-actions">
-            <FamButton variant="primary" disabled={rechecking} onClick={() => void check()}>
+            <FamButton
+              variant="primary"
+              disabled={rechecking || run !== null}
+              onClick={() => void check()}
+            >
               {rechecking ? 'Checking…' : 'Check again'}
             </FamButton>
-            {phase.kind === 'failed' || chatReachable(phase.report) ? (
+            {run === null && (phase.kind === 'failed' || chatReachable(phase.report)) ? (
               <FamButton onClick={() => setPhase({ kind: 'chat' })}>Continue to Chat</FamButton>
             ) : null}
           </footer>
@@ -124,7 +210,66 @@ function Command({ command }: { command: string }) {
   );
 }
 
-function CovenStep({ report }: { report: SetupReport }) {
+function percent(run: Run) {
+  return run.total ? Math.min(100, Math.floor(((run.received ?? 0) / run.total) * 100)) : 0;
+}
+
+function describe(run: Run) {
+  if (run.step === 'install_engine') return run.line ?? 'Installing the engine…';
+  if (run.stage === 'download') return `Downloading Coven… ${percent(run)}%`;
+  if (run.stage === 'install') return 'Installing Coven…';
+  return 'Starting…';
+}
+
+/** The button that completes a step, its live progress, and why it stopped. */
+function RunControls({
+  step,
+  label,
+  runner,
+}: {
+  step: SetupRunStep;
+  label: string;
+  runner: Runner;
+}) {
+  const active = runner.run?.step === step ? runner.run : null;
+  const failure = runner.failure?.step === step ? runner.failure.message : null;
+  if (active) {
+    const measured = active.stage === 'download' && active.total;
+    return (
+      <div className="coven-onboarding-run">
+        <progress
+          aria-label={`${label} progress`}
+          {...(measured ? { value: active.received ?? 0, max: active.total } : {})}
+        />
+        <output className="coven-onboarding-run-status">{describe(active)}</output>
+        <FamButton size="sm" onClick={runner.stop}>
+          Cancel
+        </FamButton>
+      </div>
+    );
+  }
+  return (
+    <>
+      <span>
+        <FamButton
+          variant="primary"
+          size="sm"
+          disabled={runner.run !== null}
+          onClick={() => runner.start(step)}
+        >
+          {failure ? 'Try again' : label}
+        </FamButton>
+      </span>
+      {failure ? (
+        <p className="coven-onboarding-failure" role="alert">
+          {failure === RUN_CANCELLED ? 'Stopped. You can start it again.' : failure}
+        </p>
+      ) : null}
+    </>
+  );
+}
+
+function CovenStep({ report, runner }: { report: SetupReport; runner: Runner }) {
   if (!report.platform.ok) {
     return (
       <Step title="Coven" done={false}>
@@ -136,6 +281,16 @@ function CovenStep({ report }: { report: SetupReport }) {
     <Step title="Coven" done={report.coven.ok}>
       {report.coven.ok ? (
         <p>{report.coven.version ? `Installed: ${report.coven.version}.` : 'Installed.'}</p>
+      ) : runner.available ? (
+        <>
+          <p>Coven runs your familiars on this computer. Chat installs it, then its engine.</p>
+          <RunControls step="install_coven" label="Install Coven" runner={runner} />
+          <details className="coven-onboarding-manual">
+            <summary>Install it in a terminal instead</summary>
+            <p>This way needs Node.js.</p>
+            <Command command="npm install -g @opencoven/cli" />
+          </details>
+        </>
       ) : (
         <>
           <p>
@@ -148,11 +303,20 @@ function CovenStep({ report }: { report: SetupReport }) {
   );
 }
 
-function EngineStep({ report }: { report: SetupReport }) {
+function EngineStep({ report, runner }: { report: SetupReport; runner: Runner }) {
   return (
     <Step title="Coven engine" done={report.engine.ok}>
       {report.engine.ok ? (
         <p>Installed.</p>
+      ) : report.coven.ok && runner.available ? (
+        <>
+          <p>The engine is what answers your messages.</p>
+          <RunControls step="install_engine" label="Install the engine" runner={runner} />
+          <details className="coven-onboarding-manual">
+            <summary>Install it in a terminal instead</summary>
+            <Command command="coven engine install" />
+          </details>
+        </>
       ) : report.coven.ok ? (
         <>
           <p>The engine is what answers your messages. Run this in a terminal:</p>

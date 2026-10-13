@@ -10,6 +10,7 @@ pub mod companion;
 pub mod conformance;
 mod connection;
 mod coven;
+mod coven_install;
 mod coven_runtime;
 mod familiar_avatar;
 mod hpke_bound;
@@ -283,6 +284,8 @@ fn builder() -> tauri::Builder<tauri::Wry> {
             screen_relay::coven_screen_send,
             screen_relay::coven_screen_disconnect,
             setup::setup_check,
+            setup::setup_run,
+            setup::setup_cancel,
             app_identity,
             app_installation_id,
             cave_read_discovery,

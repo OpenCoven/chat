@@ -1,4 +1,4 @@
-import { invoke } from '@tauri-apps/api/core';
+import { Channel, invoke } from '@tauri-apps/api/core';
 import { canUseTauriCommands, type InvokeCommand } from './desktop-host';
 
 /** Whether one route to a model provider is usable. */
@@ -22,9 +22,19 @@ export type SetupReport = {
   };
   familiar: { ok: boolean; count: number };
 };
+/** A step Chat can complete for the person. */
+export type SetupRunStep = 'install_coven' | 'install_engine';
+/** Progress from a running step: download bytes, a stage, or a line of output. */
+export type SetupRunEvent =
+  | { type: 'progress'; stage: 'download'; received: number; total: number }
+  | { type: 'progress'; stage: 'install' }
+  | { type: 'line'; text: string };
 export type Setup = {
   /** `null` outside the desktop app, where there is nothing to set up. */
   check(): Promise<SetupReport | null>;
+  /** Runs one step; resolves when it finishes and rejects with a readable reason. */
+  run?(runId: string, step: SetupRunStep, onEvent: (event: SetupRunEvent) => void): Promise<void>;
+  cancel?(runId: string): Promise<void>;
 };
 
 const SIGN_IN_STATES: readonly string[] = ['signed-in', 'signed-out', 'missing', 'unknown'];
@@ -58,6 +68,20 @@ function report(value: unknown): value is SetupReport {
   );
 }
 
+function runEvent(value: unknown): value is SetupRunEvent {
+  if (!record(value)) return false;
+  if (value.type === 'line') return typeof value.text === 'string' && value.text.length <= 512;
+  if (value.type !== 'progress') return false;
+  if (value.stage === 'install') return true;
+  return (
+    value.stage === 'download' &&
+    Number.isSafeInteger(value.received) &&
+    Number.isSafeInteger(value.total) &&
+    (value.received as number) >= 0 &&
+    (value.total as number) > 0
+  );
+}
+
 /** Every step is done: Chat can open on a conversation. */
 export function setupComplete(value: SetupReport): boolean {
   return (
@@ -80,19 +104,41 @@ export function createSetup(
 ): Setup {
   const available = options.available ?? canUseTauriCommands;
   const invokeCommand = options.invoke ?? invoke;
+  async function call(
+    command: string,
+    fallback: string,
+    args?: Record<string, unknown>,
+  ): Promise<unknown> {
+    try {
+      return args ? await invokeCommand(command, args) : await invokeCommand(command);
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : typeof error === 'string' ? error : '';
+      throw new Error(message.slice(0, 2048) || fallback);
+    }
+  }
   return {
     async check() {
       if (!available()) return null;
-      let value: unknown;
-      try {
-        value = await invokeCommand('setup_check');
-      } catch (error) {
-        const message =
-          error instanceof Error ? error.message : typeof error === 'string' ? error : '';
-        throw new Error(message.slice(0, 2048) || 'Chat could not check your setup.');
-      }
+      const value = await call('setup_check', 'Chat could not check your setup.');
       if (!report(value)) throw new Error('Chat received an invalid setup report.');
       return value;
+    },
+    async run(runId, step, onEvent) {
+      if (!available()) throw new Error('Setup requires the desktop app.');
+      const channel = new Channel<unknown>();
+      channel.onmessage = (value) => {
+        if (runEvent(value)) onEvent(value);
+      };
+      await call('setup_run', 'This setup step did not finish. Try again.', {
+        runId,
+        step,
+        onEvent: channel,
+      });
+    },
+    async cancel(runId) {
+      if (!available()) return;
+      await call('setup_cancel', 'This setup step could not be stopped.', { runId });
     },
   };
 }

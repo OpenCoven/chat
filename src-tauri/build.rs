@@ -17,6 +17,8 @@ const NATIVE_COMMANDS: &[&str] = &[
     "coven_screen_send",
     "coven_screen_disconnect",
     "setup_check",
+    "setup_run",
+    "setup_cancel",
     "app_identity",
     "app_installation_id",
     "cave_read_discovery",

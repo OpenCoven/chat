@@ -168,4 +168,106 @@ describe('first-run setup', () => {
     await renderWith({ check });
     expect(within(step('Model sign-in')).getByText('Signed in with ChatGPT.')).toBeInTheDocument();
   });
+
+  it('installs Coven, then its engine, with live progress, and opens the chat', async () => {
+    const missing = report({
+      coven: { ok: false },
+      engine: { ok: false },
+      familiar: { ok: true, count: 1 },
+    });
+    const covenOnly = report({ engine: { ok: false } });
+    const checks = [missing, covenOnly, report()];
+    const steps: string[] = [];
+    let finish: () => void = () => {};
+    let emit: (event: import('../lib/setup').SetupRunEvent) => void = () => {};
+    const setup: Setup = {
+      check: vi.fn(async () => checks.shift() ?? report()),
+      run: vi.fn((_id, step, onEvent) => {
+        steps.push(step);
+        emit = onEvent;
+        return new Promise<void>((resolve) => {
+          finish = resolve;
+        });
+      }),
+      cancel: vi.fn(async () => {}),
+    };
+    await renderWith(setup);
+    expect(
+      within(step('Coven')).getByText(/Chat installs it, then its engine/),
+    ).toBeInTheDocument();
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Install Coven' }));
+    });
+    await act(async () => {
+      emit({ type: 'progress', stage: 'download', received: 6, total: 12 });
+    });
+    expect(screen.getByText('Downloading Coven… 50%')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Check again' })).toBeDisabled();
+    await act(async () => {
+      emit({ type: 'progress', stage: 'install' });
+    });
+    expect(screen.getByText('Installing Coven…')).toBeInTheDocument();
+    await act(async () => {
+      finish();
+    });
+    // Coven is in; the engine starts on its own.
+    expect(steps).toEqual(['install_coven', 'install_engine']);
+    await act(async () => {
+      emit({ type: 'line', text: 'Downloading coven-code 0.8.0' });
+    });
+    expect(
+      within(step('Coven engine')).getByText('Downloading coven-code 0.8.0'),
+    ).toBeInTheDocument();
+    await act(async () => {
+      finish();
+    });
+    expect(screen.getByText('The chat')).toBeInTheDocument();
+  });
+
+  it('reports a failed install and offers to try again', async () => {
+    const setup: Setup = {
+      check: vi.fn(async () => report({ coven: { ok: false }, engine: { ok: false } })),
+      run: vi.fn(async () => {
+        throw new Error(
+          'Coven could not be downloaded. Check your internet connection, then try again.',
+        );
+      }),
+    };
+    await renderWith(setup);
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Install Coven' }));
+    });
+    expect(within(step('Coven')).getByRole('alert')).toHaveTextContent(
+      'Coven could not be downloaded.',
+    );
+    expect(within(step('Coven')).getByRole('button', { name: 'Try again' })).toBeInTheDocument();
+  });
+
+  it('stops a running install with Cancel', async () => {
+    let reject: (error: Error) => void = () => {};
+    const cancel = vi.fn(async () => {
+      reject(new Error('Coven run cancelled.'));
+    });
+    const setup: Setup = {
+      check: vi.fn(async () => report({ coven: { ok: false }, engine: { ok: false } })),
+      run: vi.fn(
+        () =>
+          new Promise<void>((_, fail) => {
+            reject = fail;
+          }),
+      ),
+      cancel,
+    };
+    await renderWith(setup);
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Install Coven' }));
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+    });
+    expect(cancel).toHaveBeenCalledWith(expect.stringMatching(/^setup-/));
+    expect(within(step('Coven')).getByRole('alert')).toHaveTextContent(
+      'Stopped. You can start it again.',
+    );
+  });
 });

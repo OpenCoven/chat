@@ -41,6 +41,8 @@ async function installRuntimeFixture(
       const avatarUrl = portrait.toDataURL('image/png');
       const callbacks = new Map<number, (data: unknown) => void>();
       let callbackId = 0;
+      // What first-run setup has installed during this page's life.
+      const installed = { coven: false, engine: false };
       let rejectRun: ((error: Error) => void) | undefined;
       type FixtureHead = {
         session: {
@@ -89,8 +91,11 @@ async function installRuntimeFixture(
               case 'setup_check':
                 return {
                   platform: { ok: true, os: 'macos' },
-                  coven: setupComplete ? { ok: true, version: 'fixture' } : { ok: false },
-                  engine: { ok: setupComplete },
+                  coven:
+                    setupComplete || installed.coven
+                      ? { ok: true, version: 'fixture' }
+                      : { ok: false },
+                  engine: { ok: setupComplete || installed.engine },
                   signIn: {
                     ok: setupComplete,
                     engine: setupComplete ? 'signed-in' : 'missing',
@@ -152,6 +157,40 @@ async function installRuntimeFixture(
                 );
                 if (!selected) throw new Error('Unexpected session read.');
                 return selected;
+              }
+              case 'setup_run': {
+                const channel = args.onEvent;
+                const step = args.step;
+                if (
+                  typeof args.runId !== 'string' ||
+                  (step !== 'install_coven' && step !== 'install_engine') ||
+                  typeof channel !== 'object' ||
+                  !channel ||
+                  !('id' in channel) ||
+                  typeof channel.id !== 'number'
+                )
+                  throw new Error('Invalid setup boundary.');
+                const callback = callbacks.get(channel.id);
+                if (!callback) throw new Error('Setup callback not registered.');
+                const events =
+                  step === 'install_coven'
+                    ? [
+                        { type: 'progress', stage: 'download', received: 0, total: 100 },
+                        { type: 'progress', stage: 'download', received: 50, total: 100 },
+                        { type: 'progress', stage: 'download', received: 100, total: 100 },
+                        { type: 'progress', stage: 'install' },
+                      ]
+                    : [
+                        { type: 'line', text: 'Downloading coven-code 0.8.0' },
+                        { type: 'line', text: 'Engine ready' },
+                      ];
+                events.forEach((message, index) => {
+                  callback({ index, message });
+                });
+                callback({ index: events.length, end: true });
+                if (step === 'install_coven') installed.coven = true;
+                else installed.engine = true;
+                return step === 'install_coven' ? { version: 'fixture' } : { installed: true };
               }
               case 'coven_runtime_send': {
                 const input = args.input;
@@ -753,6 +792,9 @@ test('a new install opens on first-run setup, which names each missing step', as
   await page.goto('/');
   await expect(page.getByRole('heading', { name: 'Set up Coven Chat' })).toBeVisible();
   const coven = page.getByRole('region', { name: 'Coven' });
+  await expect(coven.getByRole('button', { name: 'Install Coven' })).toBeEnabled();
+  // The terminal route stays one click away for people who prefer it.
+  await coven.getByText('Install it in a terminal instead').click();
   await expect(coven.getByText('npm install -g @opencoven/cli')).toBeVisible();
   await expect(coven.getByRole('button', { name: 'Copy command' })).toBeVisible();
   await expect(
@@ -769,6 +811,23 @@ test('a new install opens on first-run setup, which names each missing step', as
       (command) => !observationCommands.includes(command),
     ),
   ).toEqual(['setup_check']);
+});
+
+test('Install Coven installs Coven and then its engine from the setup screen', async ({ page }) => {
+  await installRuntimeFixture(page, false);
+  await page.goto('/');
+  await page.getByRole('button', { name: 'Install Coven' }).click();
+  const coven = page.getByRole('region', { name: 'Coven' });
+  const engine = page.getByRole('region', { name: 'Coven engine' });
+  await expect(coven.getByText('Installed: fixture.')).toBeVisible();
+  await expect(engine.getByText('Installed.')).toBeVisible();
+  // Both required steps are done, so the chat is one click away.
+  await expect(page.getByRole('button', { name: 'Continue to Chat' })).toBeVisible();
+  const calls = (await page.evaluate(() => window.__covenFixture.calls)).filter(
+    (command) => !observationCommands.includes(command),
+  );
+  expect(calls.filter((command) => command === 'setup_run')).toHaveLength(2);
+  expect(calls).not.toContain('coven_runtime_send');
 });
 
 test('the chat still names the missing CLI when Coven goes away after setup', async ({ page }) => {

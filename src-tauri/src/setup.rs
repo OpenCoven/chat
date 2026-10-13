@@ -6,11 +6,15 @@
 use std::{
     path::{Path, PathBuf},
     process::{Command, Stdio},
-    sync::atomic::AtomicBool,
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc, Mutex,
+    },
     time::Duration,
 };
 
 use serde_json::{json, Value};
+use tauri::ipc::Channel;
 
 use crate::coven_runtime::{
     blocking, cli_json, execute_command_lines, home, resolve_cli, run_process, tool_search_path,
@@ -231,9 +235,194 @@ pub(crate) async fn setup_check() -> Result<Value, String> {
     blocking(check).await
 }
 
+/// `coven engine install` downloads and verifies the engine; give it time.
+const ENGINE_INSTALL_TIMEOUT: Duration = Duration::from_secs(20 * 60);
+/// A progress line is shown, not stored; longer lines are cut.
+const LINE_LIMIT: usize = 512;
+
+/// The one setup run allowed at a time, with its cancellation flag.
+static ACTIVE_RUN: Mutex<Option<(String, Arc<AtomicBool>)>> = Mutex::new(None);
+
+/// Clears `ACTIVE_RUN` when the run ends, however it ends.
+struct ActiveRun(String);
+
+impl ActiveRun {
+    fn start(run_id: &str) -> Result<(Self, Arc<AtomicBool>), String> {
+        let mut active = ACTIVE_RUN
+            .lock()
+            .map_err(|_| "Setup is unavailable. Restart Coven Chat.")?;
+        if active.is_some() {
+            return Err("Another setup step is still running.".into());
+        }
+        let cancel = Arc::new(AtomicBool::new(false));
+        *active = Some((run_id.to_owned(), cancel.clone()));
+        Ok((Self(run_id.to_owned()), cancel))
+    }
+}
+
+impl Drop for ActiveRun {
+    fn drop(&mut self) {
+        if let Ok(mut active) = ACTIVE_RUN.lock() {
+            if active.as_ref().is_some_and(|(id, _)| id == &self.0) {
+                *active = None;
+            }
+        }
+    }
+}
+
+/// The steps the window may ask for. Each maps to a fixed action: no string
+/// from the window reaches a download address, a path or a command line.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum SetupStep {
+    InstallCoven,
+    InstallEngine,
+}
+
+impl SetupStep {
+    fn parse(step: &str) -> Result<Self, String> {
+        match step {
+            "install_coven" => Ok(Self::InstallCoven),
+            "install_engine" => Ok(Self::InstallEngine),
+            _ => Err("Unknown setup step.".into()),
+        }
+    }
+}
+
+fn shown_line(line: &str) -> String {
+    line.chars()
+        .filter(|c| !c.is_control())
+        .take(LINE_LIMIT)
+        .collect::<String>()
+        .trim()
+        .to_owned()
+}
+
+/// Runs `coven engine install`, passing each line of its output to `on_event`
+/// as `{ type: "line", text }`.
+fn install_engine(
+    cancel: &AtomicBool,
+    on_event: &mut dyn FnMut(Value) -> Result<(), String>,
+) -> Result<Value, String> {
+    let mut command = Command::new(resolve_cli()?);
+    command
+        .args(["engine", "install"])
+        .stdin(Stdio::null())
+        .current_dir(home()?)
+        .env("PATH", tool_search_path()?);
+    let mut last = String::new();
+    let code = execute_command_lines(command, cancel, ENGINE_INSTALL_TIMEOUT, &mut |_, line| {
+        let text = shown_line(line);
+        if text.is_empty() {
+            return Ok(());
+        }
+        last.clone_from(&text);
+        on_event(json!({ "type": "line", "text": text }))
+    })?;
+    if code != 0 {
+        return Err(if last.is_empty() {
+            "The engine could not be installed. Try again.".to_owned()
+        } else {
+            format!("The engine could not be installed: {last}")
+        });
+    }
+    Ok(json!({ "installed": true }))
+}
+
+/// Runs one setup step, streaming progress to `on_event`. Only one step runs
+/// at a time; `setup_cancel` with the same `run_id` stops it.
+#[tauri::command]
+pub(crate) async fn setup_run(
+    run_id: String,
+    step: String,
+    on_event: Channel<Value>,
+) -> Result<Value, String> {
+    crate::coven_runtime::validate_id(&run_id)?;
+    let step = SetupStep::parse(&step)?;
+    let (registration, cancel) = ActiveRun::start(&run_id)?;
+    let result = match step {
+        SetupStep::InstallCoven => {
+            let mut send = |event: Value| {
+                on_event
+                    .send(event)
+                    .map_err(|_| "The setup window closed.".to_owned())
+            };
+            crate::coven_install::install(&cancel, &mut send).await
+        }
+        SetupStep::InstallEngine => {
+            let cancel = cancel.clone();
+            blocking(move || {
+                install_engine(&cancel, &mut |event| {
+                    on_event
+                        .send(event)
+                        .map_err(|_| "The setup window closed.".to_owned())
+                })
+            })
+            .await
+        }
+    };
+    drop(registration);
+    result
+}
+
+/// Stops the setup run with this `run_id`, if it is still running.
+#[tauri::command]
+pub(crate) fn setup_cancel(run_id: String) -> Result<(), String> {
+    crate::coven_runtime::validate_id(&run_id)?;
+    let active = ACTIVE_RUN
+        .lock()
+        .map_err(|_| "Setup is unavailable. Restart Coven Chat.")?;
+    match active.as_ref() {
+        Some((id, cancel)) if id == &run_id => {
+            cancel.store(true, Ordering::SeqCst);
+            Ok(())
+        }
+        _ => Err("No setup step matches this identifier.".into()),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn setup_steps_are_a_fixed_set() {
+        assert_eq!(
+            SetupStep::parse("install_coven"),
+            Ok(SetupStep::InstallCoven)
+        );
+        assert_eq!(
+            SetupStep::parse("install_engine"),
+            Ok(SetupStep::InstallEngine)
+        );
+        for step in ["", "install", "INSTALL_COVEN", "install_coven ", "rm -rf"] {
+            assert!(SetupStep::parse(step).is_err(), "{step:?}");
+        }
+    }
+
+    #[test]
+    fn one_setup_run_at_a_time_and_cancel_matches_its_id() {
+        let (first, cancel) = ActiveRun::start("run-one").unwrap();
+        assert_eq!(
+            ActiveRun::start("run-two").err().as_deref(),
+            Some("Another setup step is still running.")
+        );
+        assert!(setup_cancel("run-two".into()).is_err());
+        setup_cancel("run-one".into()).unwrap();
+        assert!(cancel.load(Ordering::SeqCst));
+        drop(first);
+        let (second, _) = ActiveRun::start("run-two").unwrap();
+        drop(second);
+        assert!(setup_cancel("run-two".into()).is_err());
+    }
+
+    #[test]
+    fn shown_lines_are_bounded_and_plain() {
+        assert_eq!(
+            shown_line("  \u{1b}[32mDownloading\u{1b}[0m 40%\r "),
+            "[32mDownloading[0m 40%"
+        );
+        assert_eq!(shown_line(&"x".repeat(5000)).len(), LINE_LIMIT);
+    }
 
     #[test]
     fn logged_in_reads_only_the_json_flag() {
