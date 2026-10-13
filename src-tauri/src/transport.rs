@@ -1155,8 +1155,11 @@ mod tests {
             Some(crate::cave::NativeDiagnostic::new("aborted", false))
         );
 
+        // The budget has to outlast connecting and sending, or the timeout
+        // fires before the server sees the request. That takes about 30 ms on
+        // windows-2025 runners, where a 25 ms budget failed every run (#412).
         let timed = tauri::async_runtime::block_on(registry.run(
-            NativeOperationInput::new(SECOND_OPERATION_ATTEMPT.to_owned(), 25).unwrap(),
+            NativeOperationInput::new(SECOND_OPERATION_ATTEMPT.to_owned(), 1_000).unwrap(),
             ConstrainedTransport.authenticated_read(
                 &authority,
                 "native-bearer",
