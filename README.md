@@ -157,7 +157,7 @@ When everything is in place, nothing is shown and the chat opens as usual. Other
 - **Fallback link:** both tools open your browser themselves. If one prints a link instead, setup shows it with a **Copy** control.
 - **Finder launches:** Chat tells the engine where Claude Code is, so runs started from a Chat opened in Finder still reach it.
 
-A familiar shows how to create one, with a **Copy** control. **Check again** re-runs every check, and the chat opens as soon as they pass.
+**A familiar:** once Coven is installed, name your first familiar and choose **Create familiar**. Coven adds it to its familiar list and creates its workspace, and the chat opens when every step is done. A name that's already taken, or that has no letters or numbers, is explained in plain words, and nothing is changed. **Check again** re-runs every check, and the chat opens as soon as they pass.
 
 Coven and its engine are required. When only sign-in or a familiar is missing, **Continue to Chat** opens the chat anyway, so a sign-in the check can't see, such as an API key in the environment, never blocks a working setup.
 

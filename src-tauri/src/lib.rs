@@ -286,6 +286,7 @@ fn builder() -> tauri::Builder<tauri::Wry> {
             setup::setup_check,
             setup::setup_run,
             setup::setup_cancel,
+            setup::setup_create_familiar,
             app_identity,
             app_installation_id,
             cave_read_discovery,

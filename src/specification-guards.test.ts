@@ -77,9 +77,9 @@ const screenRelayCommands = [
   'coven_screen_disconnect',
 ];
 // First-run setup reads what a new person still needs and runs a fixed set of
-// install steps. The webview chooses a step by name and nothing else: no
-// address, path or argument it sends reaches a download or a process.
-const setupCommands = ['setup_check', 'setup_run', 'setup_cancel'];
+// install steps. The webview chooses a step by name; the only text it sends
+// to a process is a familiar's name, validated in Rust and passed after `--`.
+const setupCommands = ['setup_check', 'setup_run', 'setup_cancel', 'setup_create_familiar'];
 
 function readText(relativePath: string) {
   return readFileSync(resolve(projectRoot, relativePath), 'utf8');
@@ -810,6 +810,8 @@ describe('Phase 1 specification guards', () => {
     );
     expect(setup).toContain('&["auth", "login", "--claudeai"]');
     expect(setup).toContain('&["codex", "login"]');
+    expect(setup).toContain('&["familiars", "create", "--json", "--", &name]');
+    expect(setup).toContain('let name = familiar_name(name)?;');
     expect(setup).toContain('&["engine", "install"]');
     // The only address Coven is installed from is the pinned release.
     const install = readText('src-tauri/src/coven_install.rs');

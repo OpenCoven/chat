@@ -24,6 +24,7 @@
     "allow-setup-check",
     "allow-setup-run",
     "allow-setup-cancel",
+    "allow-setup-create-familiar",
     "core:window:allow-set-title"
   ]
 }

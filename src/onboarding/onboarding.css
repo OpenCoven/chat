@@ -151,3 +151,26 @@
   flex: 1 1 100%;
   gap: 4px;
 }
+
+.coven-onboarding-familiar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.coven-onboarding-input {
+  flex: 1 1 180px;
+  min-width: 0;
+  padding: 6px 10px;
+  border: 1px solid var(--border-hairline);
+  border-radius: 8px;
+  background: var(--bg-base);
+  color: var(--text-primary);
+  font: inherit;
+}
+
+.coven-onboarding-input:focus-visible {
+  outline: 2px solid var(--ring-focus, var(--accent-presence));
+  outline-offset: 1px;
+}

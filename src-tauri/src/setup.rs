@@ -446,6 +446,81 @@ pub(crate) async fn setup_run(
     result
 }
 
+/// The longest familiar name setup accepts.
+const FAMILIAR_NAME_LIMIT: usize = 64;
+
+/// The one value from the window that reaches a command: a familiar's name.
+/// It must be a short line of text with a letter or number in it, and it is
+/// passed to Coven as a single argument after `--`, never parsed as a flag.
+fn familiar_name(name: &str) -> Result<String, String> {
+    let name = name.trim();
+    if name.is_empty() {
+        return Err("Give your familiar a name.".into());
+    }
+    if name.chars().count() > FAMILIAR_NAME_LIMIT {
+        return Err(format!(
+            "Keep the name to {FAMILIAR_NAME_LIMIT} characters or fewer."
+        ));
+    }
+    if name.chars().any(char::is_control) {
+        return Err("Use one line of text for the name.".into());
+    }
+    if !name.chars().any(|c| c.is_ascii_alphanumeric()) {
+        return Err("Use at least one letter or number in the name.".into());
+    }
+    Ok(name.to_owned())
+}
+
+/// Coven's `familiars create --json` answer, in words a person can act on.
+fn created_familiar(code: i32, stdout: &str) -> Result<Value, String> {
+    let Ok(answer) = serde_json::from_str::<Value>(stdout.trim()) else {
+        return Err(
+            "This version of Coven cannot create familiars yet. Update Coven, then try again."
+                .into(),
+        );
+    };
+    if code == 0 && answer.get("created").and_then(Value::as_bool) == Some(true) {
+        let id = answer.get("id").and_then(Value::as_str).unwrap_or_default();
+        let name = answer
+            .get("displayName")
+            .and_then(Value::as_str)
+            .unwrap_or_default();
+        if id.is_empty() || name.is_empty() {
+            return Err("Coven returned an invalid familiar.".into());
+        }
+        return Ok(json!({ "id": id, "displayName": name }));
+    }
+    Err(match answer
+        .pointer("/error/code")
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+    {
+        "familiar_exists" => "You already have a familiar with that name. Choose another name.",
+        "invalid_id" | "invalid_argument" => "Use letters or numbers in the name, then try again.",
+        "roster_invalid" => {
+            "Coven's list of familiars has a problem, so nothing was added. Fix it, then try again."
+        }
+        "roster_changed" => "Your familiars changed at the same moment. Try again.",
+        _ => "The familiar could not be created. Try again.",
+    }
+    .into())
+}
+
+fn create_familiar(name: &str) -> Result<Value, String> {
+    let name = familiar_name(name)?;
+    let (code, stdout) = probe(
+        &resolve_cli()?,
+        &["familiars", "create", "--json", "--", &name],
+    )?;
+    created_familiar(code, &stdout)
+}
+
+/// Creates a familiar named `name` through Coven, which owns the roster.
+#[tauri::command]
+pub(crate) async fn setup_create_familiar(name: String) -> Result<Value, String> {
+    blocking(move || create_familiar(&name)).await
+}
+
 /// Stops the setup run with this `run_id`, if it is still running.
 #[tauri::command]
 pub(crate) fn setup_cancel(run_id: String) -> Result<(), String> {
@@ -495,6 +570,42 @@ mod tests {
         let (second, _) = ActiveRun::start("run-two").unwrap();
         drop(second);
         assert!(setup_cancel("run-two".into()).is_err());
+    }
+
+    #[test]
+    fn familiar_names_are_one_short_line_with_a_letter_or_number() {
+        assert_eq!(familiar_name("  Astra  ").as_deref(), Ok("Astra"));
+        assert_eq!(familiar_name("Nova 2").as_deref(), Ok("Nova 2"));
+        assert_eq!(familiar_name("--id").as_deref(), Ok("--id"));
+        for bad in ["", "   ", "Astra\nNova", "Tab\there", "!!!", "✨✨"] {
+            assert!(familiar_name(bad).is_err(), "{bad:?}");
+        }
+        assert!(familiar_name(&"a".repeat(65)).is_err());
+        assert!(familiar_name(&"a".repeat(64)).is_ok());
+    }
+
+    #[test]
+    fn coven_create_answers_become_plain_results() {
+        let created = r#"{"id":"astra","displayName":"Astra","workspace":"/w","created":true}"#;
+        assert_eq!(
+            created_familiar(0, created),
+            Ok(json!({ "id": "astra", "displayName": "Astra" }))
+        );
+        let exists = r#"{"created":false,"error":{"code":"familiar_exists","message":"familiar `astra` already exists in /x"}}"#;
+        let error = created_familiar(1, exists).unwrap_err();
+        assert!(error.starts_with("You already have a familiar"), "{error}");
+        assert!(!error.contains("/x"), "no paths reach the window: {error}");
+        assert!(
+            created_familiar(1, r#"{"created":false,"error":{"code":"roster_changed"}}"#)
+                .unwrap_err()
+                .contains("Try again")
+        );
+        assert!(
+            created_familiar(2, "error: unexpected argument 'Astra' found")
+                .unwrap_err()
+                .contains("Update Coven")
+        );
+        assert!(created_familiar(0, r#"{"created":true}"#).is_err());
     }
 
     #[test]

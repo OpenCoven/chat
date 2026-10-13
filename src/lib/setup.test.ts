@@ -114,4 +114,13 @@ describe('setup bridge', () => {
     await setup.cancel?.('setup-2');
     expect(invoke).toHaveBeenLastCalledWith('setup_cancel', { runId: 'setup-2' });
   });
+
+  it('creates a familiar and checks what Coven returned', async () => {
+    const invoke = vi.fn(async () => ({ id: 'astra', displayName: 'Astra' }));
+    const setup = createSetup({ available: () => true, invoke });
+    expect(await setup.createFamiliar?.('Astra')).toEqual({ id: 'astra', displayName: 'Astra' });
+    expect(invoke).toHaveBeenCalledWith('setup_create_familiar', { name: 'Astra' });
+    invoke.mockResolvedValueOnce({ id: '', displayName: 'Astra' });
+    await expect(setup.createFamiliar?.('Astra')).rejects.toThrow('invalid familiar');
+  });
 });

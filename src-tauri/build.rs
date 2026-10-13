@@ -19,6 +19,7 @@ const NATIVE_COMMANDS: &[&str] = &[
     "setup_check",
     "setup_run",
     "setup_cancel",
+    "setup_create_familiar",
     "app_identity",
     "app_installation_id",
     "cave_read_discovery",
