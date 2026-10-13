@@ -988,7 +988,12 @@ jobs:
           # The .app tar was only needed for the smoke test; it is not a release
           # asset, so it is excluded here.
           while IFS= read -r -d '' artifact; do
+            # GitHub serves an uploaded asset with each space replaced by a
+            # dot. Rename to that here, before SHA256SUMS and latest.json are
+            # written, so both name the files people download (assetName in
+            # scripts/release-smoke.mjs).
             name=$(basename "${artifact}")
+            name="${name// /.}"
             destination="release/${name}"
             if [ -e "${destination}" ]; then
               echo "::error::Duplicate release asset name: ${name}"

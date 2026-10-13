@@ -17,13 +17,24 @@ const UPDATER_MANIFEST = 'latest.json';
 const MAC_TARGETS = ['aarch64-apple-darwin', 'x86_64-apple-darwin'];
 
 /**
- * Installer names exactly as the release build targets emit them. Windows is
+ * The name GitHub gives an uploaded asset: it replaces each space with a dot,
+ * so `OpenCoven Chat_0.0.3_x64.dmg` is served as `OpenCoven.Chat_0.0.3_x64.dmg`.
+ * The publish job renames the files the same way before writing SHA256SUMS and
+ * latest.json, so both name what people actually download (v0.0.2 and v0.0.3
+ * listed the spaced names, and `shasum -c` reported every download missing).
+ */
+export function assetName(name) {
+  return name.replaceAll(' ', '.');
+}
+
+/**
+ * Installer names as published: the build targets' names, under assetName. Windows is
  * deferred until Windows code signing is set up (#356), so its `.msi` and
  * `.exe` are absent here and refused as unexpected assets if one appears.
  * Restore them together with the Windows entry in release.yml's build matrix.
  */
 export function expectedInstallers(version, product = PRODUCT_NAME) {
-  const prefix = `${product}_${version}`;
+  const prefix = `${assetName(product)}_${version}`;
   return [
     `${prefix}_aarch64.dmg`,
     `${prefix}_x64.dmg`,
@@ -37,10 +48,11 @@ export function expectedInstallers(version, product = PRODUCT_NAME) {
  * archive carries no arch, so the build job prefixes it with its target.
  */
 export function expectedUpdaterArchives(version, product = PRODUCT_NAME) {
-  const prefix = `${product}_${version}`;
+  const stem = assetName(product);
+  const prefix = `${stem}_${version}`;
   return new Map([
-    [`${MAC_TARGETS[0]}-${product}.app.tar.gz`, 'darwin-aarch64'],
-    [`${MAC_TARGETS[1]}-${product}.app.tar.gz`, 'darwin-x86_64'],
+    [`${MAC_TARGETS[0]}-${stem}.app.tar.gz`, 'darwin-aarch64'],
+    [`${MAC_TARGETS[1]}-${stem}.app.tar.gz`, 'darwin-x86_64'],
     [`${prefix}_x64_en-US.msi.zip`, 'windows-x86_64'],
     [`${prefix}_x64-setup.nsis.zip`, 'windows-x86_64'],
     [`${prefix}_amd64.AppImage.tar.gz`, 'linux-x86_64'],
