@@ -52,8 +52,12 @@ struct CompanionRoot: View {
     .overlay {
       if phase != .active {
         Palette.bgBase.ignoresSafeArea().overlay {
-          Label("Coven Chat", systemImage: "sparkle").font(.title2).foregroundStyle(
-            Palette.textPrimary)
+          Label {
+            Text("Coven Chat")
+          } icon: {
+            Image("ChatLogo").resizable().scaledToFit().frame(width: 30, height: 30)
+          }
+          .font(.title2).foregroundStyle(Palette.textPrimary)
         }
       }
     }

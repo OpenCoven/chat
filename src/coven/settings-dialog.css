@@ -703,21 +703,12 @@
   gap: 2px;
 }
 
+/* The Chat app icon (assets/brand/chat-app-icon-rounded.svg) carries its own tile. */
 .coven-about-mark {
-  display: grid;
-  place-items: center;
+  display: block;
+  flex: none;
   width: 44px;
   height: 44px;
-  border-radius: 12px;
-  background: linear-gradient(
-    140deg,
-    color-mix(in oklch, var(--accent-presence) 70%, white 10%),
-    color-mix(in oklch, var(--accent-presence) 50%, black)
-  );
-  color: #fff;
-  box-shadow:
-    0 8px 24px color-mix(in oklch, var(--accent-presence) 35%, transparent),
-    0 1px 0 rgba(255, 255, 255, 0.3) inset;
 }
 
 .coven-about-name {

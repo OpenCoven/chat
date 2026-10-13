@@ -128,8 +128,10 @@ struct PairingView: View {
         .frame(width: 84, height: 84)
         .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
     } else {
-      Image(systemName: "sparkles")
-        .font(.system(size: 38, weight: .semibold))
+      Image("ChatLogo")
+        .resizable()
+        .scaledToFit()
+        .frame(width: 52, height: 52)
         .foregroundStyle(Palette.accent)
     }
   }

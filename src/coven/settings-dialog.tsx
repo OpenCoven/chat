@@ -1,4 +1,5 @@
 import { type ReactNode, useEffect, useId, useRef, useState } from 'react';
+import chatIconUrl from '../../assets/brand/chat-app-icon-rounded.svg';
 import packageJson from '../../package.json';
 import { cx } from '../design/familiars-ui';
 import { Icon, type IconName } from '../design/minimal-icons';
@@ -487,9 +488,7 @@ function AboutSection({ status, connected, onRefresh, refreshDisabled }: Setting
   return (
     <>
       <div className="coven-about-hero">
-        <span className="coven-about-mark" aria-hidden="true">
-          <Icon name="sparkle" size={20} />
-        </span>
+        <img className="coven-about-mark" src={chatIconUrl} alt="" width={44} height={44} />
         <div>
           <span className="coven-about-name">Coven Chat</span>
           <span className="coven-about-version">Version {packageJson.version}</span>
