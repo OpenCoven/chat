@@ -1840,6 +1840,12 @@ ${source.slice(start, end)}
       expect(source).toContain(
         'RevalidateFailedProcessOpen(\n                            processId,\n                            supervisedSid,\n                            openError,',
       );
+      // An unreadable WTS SID is rechecked a bounded number of times, then fails closed (#206).
+      expect(source).toContain('private const int UnreadableProcessSidRechecks = 3;');
+      expect(source).toContain(
+        'EnumerateProcessPrimaryTokenSids()\n        {\n            return ResolveUnreadableProcessSids(',
+      );
+      expect(source).toContain('if (attempt == UnreadableProcessSidRechecks)');
 
       const terminalStart = source.indexOf(
         'private WindowsJobRunResult RunProducerAsUserAndQuarantineCore(',

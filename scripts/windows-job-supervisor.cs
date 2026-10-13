@@ -5448,8 +5448,64 @@ namespace OpenCoven
             return matches;
         }
 
+        // An exiting process can briefly lose its readable primary token while
+        // WTS still lists it. Look again a bounded number of times, and return
+        // only an enumeration in which every such row is gone or readable.
+        private const int UnreadableProcessSidRechecks = 3;
+
         private static Dictionary<uint, string>
             EnumerateProcessPrimaryTokenSids()
+        {
+            return ResolveUnreadableProcessSids(
+                new Func<Tuple<Dictionary<uint, string>, Dictionary<uint, uint>>>(
+                    EnumerateProcessPrimaryTokenSidRows),
+                delegate { Thread.Sleep(50); });
+        }
+
+        private static Dictionary<uint, string> ResolveUnreadableProcessSids(
+            Func<Tuple<Dictionary<uint, string>, Dictionary<uint, uint>>> enumerateRows,
+            Action pause)
+        {
+            if (enumerateRows == null)
+            {
+                throw new ArgumentNullException("enumerateRows");
+            }
+            if (pause == null)
+            {
+                throw new ArgumentNullException("pause");
+            }
+            for (int attempt = 0; ; attempt++)
+            {
+                Tuple<Dictionary<uint, string>, Dictionary<uint, uint>> rows =
+                    enumerateRows();
+                if (rows == null || rows.Item1 == null || rows.Item2 == null)
+                {
+                    throw new InvalidOperationException(
+                        "System-wide WTS process SID enumeration was ambiguous.");
+                }
+                if (rows.Item2.Count == 0)
+                {
+                    return rows.Item1;
+                }
+                if (attempt == UnreadableProcessSidRechecks)
+                {
+                    // A row that stays unreadable fails closed, never skipped.
+                    foreach (KeyValuePair<uint, uint> unreadable in rows.Item2)
+                    {
+                        throw new InvalidOperationException(String.Format(
+                            CultureInfo.InvariantCulture,
+                            "WTS process primary token SID query was ambiguous "
+                                + "for process {0} in session {1}.",
+                            unreadable.Key,
+                            unreadable.Value));
+                    }
+                }
+                pause();
+            }
+        }
+
+        private static Tuple<Dictionary<uint, string>, Dictionary<uint, uint>>
+            EnumerateProcessPrimaryTokenSidRows()
         {
             uint level = 1;
             IntPtr buffer = IntPtr.Zero;
@@ -5481,6 +5537,8 @@ namespace OpenCoven
             Exception failure = null;
             Dictionary<uint, string> processes =
                 new Dictionary<uint, string>();
+            Dictionary<uint, uint> unreadable =
+                new Dictionary<uint, uint>();
             try
             {
                 int size = Marshal.SizeOf(typeof(WTS_PROCESS_INFO_EXW));
@@ -5500,17 +5558,20 @@ namespace OpenCoven
                         {
                             continue;
                         }
-                        throw new InvalidOperationException(String.Format(
-                            CultureInfo.InvariantCulture,
-                            "WTS process primary token SID query was ambiguous "
-                                + "for process {0} in session {1}.",
-                            information.ProcessId,
-                            information.SessionId));
+                        if (processes.ContainsKey(information.ProcessId) ||
+                            unreadable.ContainsKey(information.ProcessId))
+                        {
+                            throw new InvalidOperationException(
+                                "WTS process enumeration returned a duplicate PID.");
+                        }
+                        unreadable.Add(information.ProcessId, information.SessionId);
+                        continue;
                     }
                     string sid = ConvertNativeSidToString(
                         information.pUserSid,
                         "WTS process primary token SID conversion failed.");
-                    if (processes.ContainsKey(information.ProcessId))
+                    if (processes.ContainsKey(information.ProcessId) ||
+                        unreadable.ContainsKey(information.ProcessId))
                     {
                         throw new InvalidOperationException(
                             "WTS process enumeration returned a duplicate PID.");
@@ -5540,7 +5601,7 @@ namespace OpenCoven
             {
                 throw failure;
             }
-            return processes;
+            return Tuple.Create(processes, unreadable);
         }
 
         private static string QueryProcessPrimaryTokenSid(
