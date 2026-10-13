@@ -1,10 +1,13 @@
 import { Channel, invoke } from '@tauri-apps/api/core';
 import { canUseTauriCommands, type InvokeCommand } from './desktop-host';
 
+/** The next install step when Coven is not ready: the CLI itself, or its engine. */
+export type CovenSetupStep = 'install-cli' | 'install-engine';
 export type CovenStatus = {
   available: boolean;
   version?: string;
   error?: string;
+  setup?: CovenSetupStep;
   sdkHealth?: 'ok' | 'unavailable';
   transport?: 'cli';
 };
@@ -94,7 +97,8 @@ function status(value: unknown): value is CovenStatus {
     optionalText(value.version, 256) &&
     optionalText(value.error, 2048) &&
     oneOf(value.sdkHealth, ['ok', 'unavailable']) &&
-    oneOf(value.transport, ['cli'])
+    oneOf(value.transport, ['cli']) &&
+    oneOf(value.setup, ['install-cli', 'install-engine'])
   );
 }
 function familiar(value: unknown): value is CovenFamiliar {

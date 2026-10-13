@@ -1,0 +1,31 @@
+.coven-setup-step {
+  display: grid;
+  gap: 6px;
+  justify-items: center;
+  width: 100%;
+  margin-top: 4px;
+  padding: 14px 16px;
+  border: 1px solid var(--border-hairline);
+  border-radius: 12px;
+  background: var(--bg-sunken);
+}
+
+.coven-setup-step-title {
+  font-weight: 600;
+}
+
+.coven-setup-step-text {
+  color: var(--text-muted);
+}
+
+.coven-setup-step-command {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  max-width: 100%;
+}
+
+.coven-setup-step-command code {
+  overflow-wrap: anywhere;
+  user-select: all;
+}

@@ -10,6 +10,7 @@ import {
   type CovenRunEvent,
   type CovenRuntime,
   type CovenSession,
+  type CovenSetupStep,
   createCovenRuntime,
 } from '../lib/coven-runtime';
 import { defaultScreenRelay, type ScreenRelay } from '../lib/screen-relay';
@@ -138,6 +139,7 @@ export function ChatApp({
   >({});
   const [status, setStatus] = useState('Checking local Coven...');
   const [available, setAvailable] = useState(false);
+  const [setup, setSetup] = useState<CovenSetupStep | undefined>();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(saved.error);
   const [localBusy, setBusy] = useState(false);
@@ -197,6 +199,7 @@ export function ChatApp({
     setCancelling(false);
     setLoading(true);
     setAvailable(false);
+    setSetup(undefined);
     setEvents([]);
     setRunOutputs({});
     async function start() {
@@ -204,6 +207,7 @@ export function ChatApp({
         const health = await runtime.status();
         if (lifetime.current !== life) return;
         if (!health.available) {
+          setSetup(health.setup);
           setStatus(
             health.error ?? 'Install the Coven CLI, then reopen the desktop app and refresh.',
           );
@@ -764,6 +768,7 @@ export function ChatApp({
           : `${status}\nSaved navigation could not be restored and is preserved unchanged. Drafts are memory-only until you recover the saved navigation outside this app and reopen this window.`
       }
       connected={available}
+      setup={setup}
       ready={
         available &&
         Boolean(navigation.familiarId) &&
