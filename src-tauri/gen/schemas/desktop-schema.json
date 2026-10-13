@@ -387,10 +387,22 @@
           "markdownDescription": "Enables the coven_screen_send command without any pre-configured scope."
         },
         {
+          "description": "Enables the setup_cancel command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-setup-cancel",
+          "markdownDescription": "Enables the setup_cancel command without any pre-configured scope."
+        },
+        {
           "description": "Enables the setup_check command without any pre-configured scope.",
           "type": "string",
           "const": "allow-setup-check",
           "markdownDescription": "Enables the setup_check command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the setup_run command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-setup-run",
+          "markdownDescription": "Enables the setup_run command without any pre-configured scope."
         },
         {
           "description": "Denies the app_identity command without any pre-configured scope.",
@@ -603,10 +615,22 @@
           "markdownDescription": "Denies the coven_screen_send command without any pre-configured scope."
         },
         {
+          "description": "Denies the setup_cancel command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-setup-cancel",
+          "markdownDescription": "Denies the setup_cancel command without any pre-configured scope."
+        },
+        {
           "description": "Denies the setup_check command without any pre-configured scope.",
           "type": "string",
           "const": "deny-setup-check",
           "markdownDescription": "Denies the setup_check command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the setup_run command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-setup-run",
+          "markdownDescription": "Denies the setup_run command without any pre-configured scope."
         },
         {
           "description": "Default core plugins set.\n#### This default permission set includes:\n\n- `core:path:default`\n- `core:event:default`\n- `core:window:default`\n- `core:webview:default`\n- `core:app:default`\n- `core:image:default`\n- `core:resources:default`\n- `core:menu:default`\n- `core:tray:default`",

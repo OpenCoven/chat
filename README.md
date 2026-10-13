@@ -136,16 +136,32 @@ Before the chat opens, Chat checks what it needs:
 - **Sign-in:** a model provider is signed in, through the engine's own sign-in, a Claude subscription in Claude Code, or ChatGPT.
 - **Familiar:** at least one familiar exists.
 
-When everything is in place, nothing is shown and the chat opens as usual.
+When everything is in place, nothing is shown and the chat opens as usual. Otherwise **Set up Coven Chat** lists each step, and Chat can complete the first two itself.
 
-Otherwise **Set up Coven Chat** lists each step:
-- **Done steps** are marked done.
-- **Missing steps** show the exact command that completes them, with a **Copy** control, for example `npm install -g @opencoven/cli`, `coven engine install`, or Claude Code's installer and `claude auth login`.
-- **Check again** re-runs the checks, and the chat opens as soon as they pass.
+**Install Coven:**
+1. Chat downloads Coven's pinned release for this computer from `github.com/OpenCoven/coven`.
+2. Before unpacking, it checks the download against a SHA-256 built into Chat.
+3. It installs only the release's own executables, into `~/.local/bin` on macOS and Linux, or `%LOCALAPPDATA%\Programs\OpenCoven\Coven` on Windows. Chat already looks for Coven in both.
+4. It then goes straight on to install the engine.
+
+**Install the engine:** Chat runs `coven engine install`, which downloads and verifies the engine itself, and shows its output as it goes.
+
+**Controls:**
+- Each install shows its progress and can be stopped with **Cancel**.
+- A failed step says why and offers **Try again**.
+- **Install it in a terminal instead** shows the command for each step, for people who'd rather run it themselves.
+
+**Sign in:** sign-in uses accounts you already have.
+- **Sign in with Claude:** with Claude Code installed, this runs Claude Code's own browser sign-in for your Claude subscription. Without Claude Code, setup shows Anthropic's installer command instead.
+- **Sign in with ChatGPT:** once the engine is installed, this runs the engine's ChatGPT sign-in.
+- **Fallback link:** both tools open your browser themselves. If one prints a link instead, setup shows it with a **Copy** control.
+- **Finder launches:** Chat tells the engine where Claude Code is, so runs started from a Chat opened in Finder still reach it.
+
+A familiar shows how to create one, with a **Copy** control. **Check again** re-runs every check, and the chat opens as soon as they pass.
 
 Coven and its engine are required. When only sign-in or a familiar is missing, **Continue to Chat** opens the chat anyway, so a sign-in the check can't see, such as an API key in the environment, never blocks a working setup.
 
-The checks are read-only. Chat starts Coven, the engine and Claude Code only to ask their status, and never installs anything or signs in for you.
+The checks start Coven, the engine and Claude Code only to ask their status. Chat installs something only when you choose **Install Coven** or **Install the engine**. Sign-in always happens in your browser, with the provider; Chat never sees your password or keys.
 
 ## Local runtime
 
