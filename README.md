@@ -12,6 +12,12 @@ corepack pnpm install:clean
 corepack pnpm app:dev
 ```
 
+Chat finds a Coven CLI installed with `npm install -g @opencoven/cli`, under
+npm's default folder on macOS, Linux and Windows, any nvm-managed Node, or an
+npm prefix on your PATH. It also looks in `~/.local/bin`, `~/.cargo/bin` and
+your PATH, so a launch from Finder or the Start menu doesn't depend on your
+shell setup.
+
 The desktop window opens the familiar list, transcript, composer, and
 familiar inspector at `/`. Old `?demo=` links no longer select different
 applications. `VITE_DEFAULT_DEMO` and `app:build:demo` are removed.
