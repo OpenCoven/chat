@@ -264,6 +264,39 @@ describe('release workflow specification', () => {
     );
   });
 
+  test('notarizes and staples the disk images, not only the app inside', () => {
+    const build = job('build', 'publish');
+    const step = (name: string) => build.indexOf(`- name: ${name}`);
+    const notarize = build.slice(
+      step('Notarize and staple the disk images'),
+      step('Remove the notarization key'),
+    );
+    const smoke = build.slice(step('Smoke-test artifacts'));
+
+    // Tauri notarizes the .app and then wraps it in a .dmg it never submits,
+    // so v0.0.2 and v0.0.3 shipped images Gatekeeper reports as "Unnotarized
+    // Developer ID" (#407). The images go to Apple after the build, while the
+    // key file still exists, and before anything is staged.
+    expect(step('Build installers')).toBeLessThan(step('Notarize and staple the disk images'));
+    expect(step('Notarize and staple the disk images')).toBeLessThan(
+      step('Remove the notarization key'),
+    );
+    expect(step('Remove the notarization key')).toBeLessThan(step('Stage artifacts'));
+    expect(notarize).toContain(
+      "if: runner.os == 'macOS' && steps.signing.outputs.macos_signed == 'true'",
+    );
+    expect(notarize).toContain(`"\${RUNNER_TEMP}/AuthKey_\${APPLE_API_KEY}.p8"`);
+    expect(notarize).toContain('xcrun notarytool submit');
+    expect(notarize).toContain(`if [ "\${status}" != "Accepted" ]; then`);
+    expect(notarize).toContain(`xcrun stapler staple "\${dmg}"`);
+
+    // The artifact check holds the staged image to the same standard.
+    expect(smoke).toContain(`xcrun stapler validate "\${dmg}"`);
+    expect(smoke).toContain(
+      `spctl --assess --type open --context context:primary-signature --verbose=2 "\${dmg}"`,
+    );
+  });
+
   test('refuses to build or stage an unsigned artifact on the production path', () => {
     const build = job('build', 'publish');
     const signing = build.slice(

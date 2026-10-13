@@ -221,6 +221,14 @@ artifact check runs `codesign` and `spctl` whatever the signing step reported.
 This closed a real gap: on 2026-10-07 an `APPLE_ID` saved as an empty value
 let a re-run of v0.0.2 build unsigned and publish (#356).
 
+The disk images are notarized too, not only the app inside them. Tauri
+notarizes and staples the `.app`, then builds the `.dmg` around it without
+submitting it, so v0.0.2 and v0.0.3 shipped images that `spctl --type open`
+rejects as "Unnotarized Developer ID" (#407). The app inside was still
+accepted, so nobody was blocked. `Notarize and staple the disk images` now
+submits each `.dmg` with the same credentials, staples the ticket and checks
+it, and the artifact check refuses an image without one.
+
 The distinction matters when rehearsing before the certificates exist. On such
 a run, each platform whose secrets are absent builds unsigned — no
 notarization, no Authenticode — so a green result says nothing about whether
@@ -371,7 +379,7 @@ The product name contains a space, so installer filenames look like
 Per release, the workflow publishes:
 
 - **macOS**: `OpenCoven Chat.app` (packaged) + `.dmg` for `aarch64` and
-  `x86_64`, signed and notarized when Apple secrets are present. The Intel
+  `x86_64`. The app and the image are each signed, notarized and stapled. The Intel
   target runs natively on GitHub's `macos-15-intel` runner rather than
   cross-compiling on Apple silicon.
 - **Windows**: deferred; see the top of this document. When restored, it
