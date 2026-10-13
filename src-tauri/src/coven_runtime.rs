@@ -291,37 +291,128 @@ fn platform_package() -> &'static str {
     }
 }
 
-pub(crate) fn resolve_cli() -> Result<PathBuf, String> {
-    let name = if cfg!(windows) { "coven.exe" } else { "coven" };
+/// The platform's native Coven executable inside an npm `node_modules`
+/// directory, below the `@opencoven/cli` wrapper that npm puts on PATH.
+fn npm_native_cli(node_modules: &Path, package: &str, name: &str) -> PathBuf {
+    node_modules
+        .join("@opencoven")
+        .join("cli")
+        .join("node_modules")
+        .join("@opencoven")
+        .join(package)
+        .join("bin")
+        .join(name)
+}
+
+/// Node versions under an nvm directory, newest first, so a Finder launch
+/// (which does not see the shell's PATH) still finds an nvm-installed Coven.
+fn nvm_node_versions(versions: &Path) -> Vec<PathBuf> {
+    let Ok(entries) = std::fs::read_dir(versions) else {
+        return Vec::new();
+    };
+    let mut found: Vec<(Vec<u64>, PathBuf)> = entries
+        .filter_map(Result::ok)
+        .filter_map(|entry| {
+            let name = entry.file_name().into_string().ok()?;
+            let version = name
+                .strip_prefix('v')?
+                .split('.')
+                .map(str::parse::<u64>)
+                .collect::<Result<Vec<_>, _>>()
+                .ok()?;
+            Some((version, entry.path()))
+        })
+        .collect();
+    found.sort_by(|a, b| b.0.cmp(&a.0));
+    found.into_iter().map(|(_, path)| path).collect()
+}
+
+/// Where Coven may be installed, in order of preference. The npm package's
+/// native executable comes before its wrapper: the wrapper needs Node, and on
+/// Windows npm exposes it only as `coven.cmd`, never `coven.exe`.
+fn cli_candidates(
+    windows: bool,
+    package: &str,
+    home: Option<&Path>,
+    app_data: Option<&Path>,
+    path: Option<&std::ffi::OsStr>,
+) -> Vec<PathBuf> {
+    let name = if windows { "coven.exe" } else { "coven" };
     let mut candidates = Vec::new();
-    if let Ok(home) = home() {
-        // Prefer the npm package's native executable, not its env-node wrapper:
-        // Finder launches need neither a shell PATH nor Node to run Coven.
-        candidates.push(home.join(format!(
-            ".local/lib/node_modules/@opencoven/cli/node_modules/@opencoven/{}/bin/{name}",
-            platform_package()
-        )));
+    if let Some(home) = home {
+        candidates.push(npm_native_cli(
+            &home.join(".local/lib/node_modules"),
+            package,
+            name,
+        ));
+    }
+    if windows {
+        // npm's default global prefix on Windows is %APPDATA%\npm.
+        if let Some(app_data) = app_data {
+            candidates.push(npm_native_cli(
+                &app_data.join("npm").join("node_modules"),
+                package,
+                name,
+            ));
+        }
+    }
+    if let Some(home) = home {
         candidates.push(home.join(".local/bin").join(name));
         candidates.push(home.join(".cargo/bin").join(name));
+        if !windows {
+            for version in nvm_node_versions(&home.join(".nvm/versions/node")) {
+                candidates.push(npm_native_cli(
+                    &version.join("lib/node_modules"),
+                    package,
+                    name,
+                ));
+            }
+        }
     }
-    for prefix in ["/opt/homebrew", "/usr/local", "/usr"] {
-        candidates.push(PathBuf::from(prefix).join(format!(
-            "lib/node_modules/@opencoven/cli/node_modules/@opencoven/{}/bin/{name}",
-            platform_package()
-        )));
-        candidates.push(PathBuf::from(prefix).join("bin").join(name));
+    if !windows {
+        for prefix in ["/opt/homebrew", "/usr/local", "/usr"] {
+            candidates.push(npm_native_cli(
+                &PathBuf::from(prefix).join("lib/node_modules"),
+                package,
+                name,
+            ));
+            candidates.push(PathBuf::from(prefix).join("bin").join(name));
+        }
     }
-    if let Some(path) = std::env::var_os("PATH") {
-        candidates.extend(
-            std::env::split_paths(&path)
-                .filter(|path| path.is_absolute())
-                .map(|path| path.join(name)),
-        );
+    if let Some(path) = path {
+        for directory in std::env::split_paths(path).filter(|path| path.is_absolute()) {
+            // An npm prefix on PATH: `<prefix>` itself on Windows, `<prefix>/bin` elsewhere.
+            let node_modules = if windows {
+                Some(directory.join("node_modules"))
+            } else {
+                directory
+                    .parent()
+                    .map(|prefix| prefix.join("lib/node_modules"))
+            };
+            if let Some(node_modules) = node_modules {
+                candidates.push(npm_native_cli(&node_modules, package, name));
+            }
+            candidates.push(directory.join(name));
+        }
     }
     candidates
-        .into_iter()
-        .find(|path| executable(path))
-        .ok_or_else(|| "Coven CLI is not installed. Install Coven CLI, then retry.".into())
+}
+
+pub(crate) fn resolve_cli() -> Result<PathBuf, String> {
+    let app_data = std::env::var_os("APPDATA")
+        .map(PathBuf::from)
+        .filter(|path| path.is_absolute());
+    let path = std::env::var_os("PATH");
+    cli_candidates(
+        cfg!(windows),
+        platform_package(),
+        home().ok().as_deref(),
+        app_data.as_deref(),
+        path.as_deref(),
+    )
+    .into_iter()
+    .find(|path| executable(path))
+    .ok_or_else(|| "Coven CLI is not installed. Install Coven CLI, then retry.".into())
 }
 
 /// The Coven CLI process together with whatever it started. On Unix that is
@@ -3652,5 +3743,107 @@ mod tests {
             .unwrap();
         assert_eq!(code, 0);
         assert_eq!(seen, vec!["a\tb".to_owned()]);
+    }
+
+    #[test]
+    fn cli_candidates_find_the_npm_native_executable_on_windows() {
+        let root = std::env::temp_dir().join(format!("opencoven-cli-{}", uuid::Uuid::new_v4()));
+        let home = root.join("Users").join("val");
+        let app_data = home.join("AppData").join("Roaming");
+        let npm_prefix = app_data.join("npm");
+        let tools = root.join("Tools");
+        let path = std::env::join_paths([&npm_prefix, &tools]).unwrap();
+        let candidates = cli_candidates(
+            true,
+            "cli-windows",
+            Some(&home),
+            Some(&app_data),
+            Some(&path),
+        );
+
+        // npm on Windows puts only coven.cmd in its prefix; the executable lives in node_modules.
+        let native = npm_native_cli(&npm_prefix.join("node_modules"), "cli-windows", "coven.exe");
+        assert!(native.ends_with(
+            "node_modules/@opencoven/cli/node_modules/@opencoven/cli-windows/bin/coven.exe"
+        ));
+        let native_at = candidates.iter().position(|path| path == &native).unwrap();
+        let path_entry_at = candidates
+            .iter()
+            .position(|path| path == &npm_prefix.join("coven.exe"))
+            .unwrap();
+        assert!(native_at < path_entry_at);
+        let tools_native = npm_native_cli(&tools.join("node_modules"), "cli-windows", "coven.exe");
+        assert!(
+            candidates
+                .iter()
+                .position(|path| path == &tools_native)
+                .unwrap()
+                < candidates
+                    .iter()
+                    .position(|path| path == &tools.join("coven.exe"))
+                    .unwrap()
+        );
+        assert!(candidates
+            .iter()
+            .all(|path| path.extension().is_some_and(|ext| ext == "exe")));
+        assert!(!candidates
+            .iter()
+            .any(|path| path.starts_with("/opt/homebrew")));
+    }
+
+    #[test]
+    fn cli_candidates_check_nvm_versions_newest_first() {
+        let home = std::env::temp_dir().join(format!("opencoven-nvm-{}", uuid::Uuid::new_v4()));
+        let versions = home.join(".nvm/versions/node");
+        for version in ["v9.0.0", "v22.2.0", "v22.11.0", "system", "v24.x"] {
+            std::fs::create_dir_all(versions.join(version)).unwrap();
+        }
+        let candidates = cli_candidates(false, "cli-macos", Some(&home), None, None);
+        std::fs::remove_dir_all(&home).unwrap();
+
+        let position = |version: &str| {
+            let native = npm_native_cli(
+                &versions.join(version).join("lib/node_modules"),
+                "cli-macos",
+                "coven",
+            );
+            candidates.iter().position(|path| path == &native)
+        };
+        let (newest, middle, oldest) = (
+            position("v22.11.0").unwrap(),
+            position("v22.2.0").unwrap(),
+            position("v9.0.0").unwrap(),
+        );
+        assert!(newest < middle && middle < oldest);
+        assert_eq!(position("system"), None);
+        assert_eq!(position("v24.x"), None);
+        // nvm comes after the user's own ~/.local and ~/.cargo installs.
+        assert!(
+            candidates
+                .iter()
+                .position(|path| path == &home.join(".cargo/bin/coven"))
+                .unwrap()
+                < newest
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn cli_resolution_prefers_the_native_executable_over_the_node_wrapper() {
+        use std::os::unix::fs::PermissionsExt;
+        let root = std::env::temp_dir().join(format!("opencoven-prefix-{}", uuid::Uuid::new_v4()));
+        let bin = root.join("bin");
+        let native = npm_native_cli(&root.join("lib/node_modules"), "cli-macos", "coven");
+        for file in [&bin.join("coven"), &native] {
+            std::fs::create_dir_all(file.parent().unwrap()).unwrap();
+            std::fs::write(file, "#!/bin/sh\n").unwrap();
+            std::fs::set_permissions(file, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
+        let path = std::env::join_paths([&bin]).unwrap();
+        let found = cli_candidates(false, "cli-macos", None, None, Some(&path))
+            .into_iter()
+            .find(|path| executable(path));
+        std::fs::remove_dir_all(&root).unwrap();
+        assert_eq!(found, Some(native));
     }
 }
