@@ -25,9 +25,12 @@ async function installRuntimeFixture(
   // stream the structured tool shapes the runtime documents.
   stream?: Record<string, unknown>[],
   observerFailure = false,
+  // First-run setup's own answer. It normally follows `available`; a test of
+  // the chat's disconnected state sets it so Coven goes missing after setup.
+  setupComplete = available,
 ) {
   await page.addInitScript(
-    ({ ready, reply, population, stream, observerFailure }) => {
+    ({ ready, reply, population, stream, observerFailure, setupComplete }) => {
       const portrait = document.createElement('canvas');
       portrait.width = 2;
       portrait.height = 2;
@@ -83,6 +86,20 @@ async function installRuntimeFixture(
               case 'plugin:event|unlisten':
               case 'companion_active_run':
                 return null;
+              case 'setup_check':
+                return {
+                  platform: { ok: true, os: 'macos' },
+                  coven: setupComplete ? { ok: true, version: 'fixture' } : { ok: false },
+                  engine: { ok: setupComplete },
+                  signIn: {
+                    ok: setupComplete,
+                    engine: setupComplete ? 'signed-in' : 'missing',
+                    claude: 'missing',
+                    chatgpt: 'missing',
+                    claudeInstaller: 'curl -fsSL https://claude.ai/install.sh | bash',
+                  },
+                  familiar: { ok: setupComplete, count: setupComplete ? 1 : 0 },
+                };
               case 'coven_runtime_status':
                 return ready
                   ? {
@@ -236,7 +253,7 @@ async function installRuntimeFixture(
         },
       });
     },
-    { ready: available, reply, population, stream, observerFailure },
+    { ready: available, reply, population, stream, observerFailure, setupComplete },
   );
 }
 
@@ -517,7 +534,10 @@ test('streams and reloads CLI chat without any Cave or pairing invocation', asyn
   expect(commands).toContain('coven_runtime_read');
   expect(
     commands.every(
-      (command) => command.startsWith('coven_runtime_') || observationCommands.includes(command),
+      (command) =>
+        command.startsWith('coven_runtime_') ||
+        command === 'setup_check' ||
+        observationCommands.includes(command),
     ),
   ).toBe(true);
   expect(commands.some((command) => /cave|import|pair/.test(command))).toBe(false);
@@ -659,7 +679,7 @@ test('keeps cancellation available after switching to another familiar', async (
 // "verified" a combination (`ready` without a selection) that cannot occur.
 test.describe('empty transcript states', () => {
   test('names the missing runtime rather than a familiar choice', async ({ page }) => {
-    await installRuntimeFixture(page, false);
+    await installRuntimeFixture(page, false, undefined, 1, undefined, false, true);
     await page.goto('/');
     await expect(
       page.getByText('Connect to your local Coven CLI to see real conversations here.'),
@@ -728,8 +748,31 @@ test.describe('empty transcript states', () => {
   });
 });
 
-test('missing CLI shows actionable setup in the same interface', async ({ page }) => {
+test('a new install opens on first-run setup, which names each missing step', async ({ page }) => {
   await installRuntimeFixture(page, false);
+  await page.goto('/');
+  await expect(page.getByRole('heading', { name: 'Set up Coven Chat' })).toBeVisible();
+  const coven = page.getByRole('region', { name: 'Coven' });
+  await expect(coven.getByText('npm install -g @opencoven/cli')).toBeVisible();
+  await expect(coven.getByRole('button', { name: 'Copy command' })).toBeVisible();
+  await expect(
+    page.getByRole('region', { name: 'Coven engine' }).getByText('Install Coven first.'),
+  ).toBeVisible();
+  await expect(
+    page.getByRole('region', { name: 'Model sign-in' }).getByText('claude auth login'),
+  ).toBeVisible();
+  // Without Coven there is nothing to continue to, and the chat is not mounted.
+  await expect(page.getByRole('button', { name: 'Continue to Chat' })).toHaveCount(0);
+  await expect(page.getByRole('textbox', { name: 'Message', exact: true })).toHaveCount(0);
+  expect(
+    (await page.evaluate(() => window.__covenFixture.calls)).filter(
+      (command) => !observationCommands.includes(command),
+    ),
+  ).toEqual(['setup_check']);
+});
+
+test('the chat still names the missing CLI when Coven goes away after setup', async ({ page }) => {
+  await installRuntimeFixture(page, false, undefined, 1, undefined, false, true);
   await page.goto('/');
   await expect(page.locator('.fr-shell')).toBeVisible();
   await expect(page.getByText(/Coven CLI is not installed/)).toBeVisible();
@@ -748,7 +791,7 @@ test('missing CLI shows actionable setup in the same interface', async ({ page }
     (await page.evaluate(() => window.__covenFixture.calls)).filter(
       (command) => !observationCommands.includes(command),
     ),
-  ).toEqual(['coven_runtime_status']);
+  ).toEqual(['setup_check', 'coven_runtime_status']);
 });
 
 test('renders native PNG avatars in the familiar list, conversation, and inspector', async ({
@@ -1255,7 +1298,10 @@ test('renders runtime-reported tool calls as rows with input, result and a runni
   const commands = await page.evaluate(() => window.__covenFixture.calls);
   expect(
     commands.every(
-      (invoked) => invoked.startsWith('coven_runtime_') || observationCommands.includes(invoked),
+      (invoked) =>
+        invoked.startsWith('coven_runtime_') ||
+        invoked === 'setup_check' ||
+        observationCommands.includes(invoked),
     ),
   ).toBe(true);
 });

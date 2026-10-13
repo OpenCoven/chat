@@ -1,0 +1,111 @@
+/* The root also carries `.fr-shell` for its palette and type; these undo the
+   chat's three-column layout and minimum width. */
+.fr-shell.coven-onboarding {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  place-items: center;
+  height: auto;
+  min-height: 100vh;
+  min-width: 0;
+  overflow: auto;
+  padding: 32px 16px;
+}
+
+.coven-onboarding-card {
+  width: min(560px, 100%);
+  display: grid;
+  gap: 20px;
+}
+
+.coven-onboarding-header {
+  display: grid;
+  gap: 8px;
+  justify-items: center;
+  text-align: center;
+}
+
+.coven-onboarding-header h1 {
+  margin: 4px 0 0;
+  font-size: 20px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+.coven-onboarding-header p,
+.coven-onboarding-status {
+  display: block;
+  margin: 0;
+  color: var(--text-muted);
+  text-align: center;
+}
+
+.coven-onboarding-steps {
+  display: grid;
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.coven-onboarding-step {
+  display: grid;
+  grid-template-columns: 18px 1fr;
+  gap: 12px;
+  padding: 14px 16px;
+  border: 1px solid var(--border-hairline);
+  border-radius: 12px;
+  background: var(--bg-sunken);
+}
+
+.coven-onboarding-step > svg {
+  margin-top: 2px;
+  color: var(--text-muted);
+}
+
+.coven-onboarding-step[data-done="true"] > svg {
+  color: var(--accent-presence);
+}
+
+.coven-onboarding-step section {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+
+.coven-onboarding-step h2 {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.coven-onboarding-step p {
+  margin: 0;
+  color: var(--text-muted);
+}
+
+.coven-onboarding-command {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.coven-onboarding-command code {
+  overflow-wrap: anywhere;
+  user-select: all;
+}
+
+.coven-onboarding-actions {
+  display: flex;
+  justify-content: center;
+  gap: 10px;
+}
+
+.coven-onboarding-visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}

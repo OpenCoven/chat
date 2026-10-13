@@ -76,6 +76,9 @@ const screenRelayCommands = [
   'coven_screen_send',
   'coven_screen_disconnect',
 ];
+// First-run setup reads what a new person still needs. It takes no
+// arguments, so nothing the webview chooses reaches a process it starts.
+const setupCommands = ['setup_check'];
 
 function readText(relativePath: string) {
   return readFileSync(resolve(projectRoot, relativePath), 'utf8');
@@ -251,7 +254,7 @@ describe('Phase 1 specification guards', () => {
       ...companionCommands.map((command) => `allow-${command.replaceAll('_', '-')}`),
       'core:event:allow-listen',
       'core:event:allow-unlisten',
-      ...[...covenRuntimeCommands, ...screenRelayCommands].map(
+      ...[...covenRuntimeCommands, ...screenRelayCommands, ...setupCommands].map(
         (command) => `allow-${command.replaceAll('_', '-')}`,
       ),
       'core:window:allow-set-title',
@@ -729,6 +732,7 @@ describe('Phase 1 specification guards', () => {
       ...companionCommands,
       ...covenRuntimeCommands,
       ...screenRelayCommands,
+      ...setupCommands,
       'app_identity',
       'app_installation_id',
       'cave_read_discovery',
@@ -795,8 +799,14 @@ describe('Phase 1 specification guards', () => {
       ...companionCommands.map((command) => `companion::${command}`),
       ...covenRuntimeCommands.map((command) => `coven_runtime::${command}`),
       ...screenRelayCommands.map((command) => `screen_relay::${command}`),
+      ...setupCommands.map((command) => `setup::${command}`),
       ...expected,
     ]);
+    for (const command of setupCommands) {
+      expect(readText('src-tauri/src/setup.rs')).toMatch(
+        new RegExp(`pub\\(crate\\)\\s+async\\s+fn\\s+${command}\\(\\)`),
+      );
+    }
 
     for (const command of expected) {
       expect(lib).toContain(command);

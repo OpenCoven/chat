@@ -44,8 +44,10 @@ Backend modules worth knowing before touching chat behaviour:
 - `chat_origin.rs` — only app-owned history may become a familiar's head.
 - `coven_runtime.rs` — spawns the CLI, streams run events, enforces send rules.
 
-`src/main.tsx` mounts `src/coven/chat-app.tsx` at `/` and nothing else. The
-former demo shell, the Cave-connected app, and the IndexedDB chat store were
+`src/main.tsx` mounts `src/coven/chat-app.tsx` at `/`, inside
+`src/onboarding/onboarding.tsx`. That is first-run setup: it runs the read-only
+`setup_check` (`src-tauri/src/setup.rs`) and shows the chat once Coven is ready.
+The former demo shell, the Cave-connected app, and the IndexedDB chat store were
 removed; `?demo=` is gone. If a file is not reachable from `main.tsx`, the
 user cannot see it.
 

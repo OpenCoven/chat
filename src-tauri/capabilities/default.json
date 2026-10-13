@@ -21,6 +21,7 @@
     "allow-coven-screen-connect",
     "allow-coven-screen-send",
     "allow-coven-screen-disconnect",
+    "allow-setup-check",
     "core:window:allow-set-title"
   ]
 }

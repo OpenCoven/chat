@@ -46,6 +46,20 @@ test.beforeEach(async ({ page }) => {
             case 'companion_active_run':
             case 'plugin:window|set_title':
               return null;
+            case 'setup_check':
+              return {
+                platform: { ok: true, os: 'macos' },
+                coven: { ok: true, version: 'fixture' },
+                engine: { ok: true },
+                signIn: {
+                  ok: true,
+                  engine: 'signed-in',
+                  claude: 'missing',
+                  chatgpt: 'missing',
+                  claudeInstaller: 'curl -fsSL https://claude.ai/install.sh | bash',
+                },
+                familiar: { ok: true, count: 1 },
+              };
             case 'coven_runtime_status':
               return { available: true, version: 'fixture' };
             case 'coven_runtime_familiars':

@@ -4,6 +4,7 @@ import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 
 import { ChatApp } from './coven/chat-app';
+import { Onboarding } from './onboarding/onboarding';
 import './styles.css';
 import './ui/ui.css';
 
@@ -15,6 +16,8 @@ if (!rootElement) {
 
 createRoot(rootElement).render(
   <StrictMode>
-    <ChatApp />
+    <Onboarding>
+      <ChatApp />
+    </Onboarding>
   </StrictMode>,
 );

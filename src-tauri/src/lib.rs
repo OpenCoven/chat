@@ -17,6 +17,7 @@ mod keyring;
 mod metadata;
 mod operation;
 mod screen_relay;
+mod setup;
 mod transport;
 #[cfg(windows)]
 mod windows_job;
@@ -281,6 +282,7 @@ fn builder() -> tauri::Builder<tauri::Wry> {
             screen_relay::coven_screen_connect,
             screen_relay::coven_screen_send,
             screen_relay::coven_screen_disconnect,
+            setup::setup_check,
             app_identity,
             app_installation_id,
             cave_read_discovery,
