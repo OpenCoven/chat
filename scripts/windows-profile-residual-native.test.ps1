@@ -339,6 +339,35 @@ namespace OpenCoven.Tests {
                 if (!Released) throw new InvalidOperationException("The delayed holder was not released at the cleanup boundary.");
             }
         }
+        // Records when userenv unregistration is first observed on the cleanup stopwatch.
+        // The residual deadline starts only after DeleteProfileW returns, so the time from
+        // here to return bounds that one window without the phases before it.
+        public sealed class UnregistrationClock : IDisposable {
+            private readonly ManualResetEventSlim stop = new ManualResetEventSlim();
+            private readonly Task poll;
+            private long observedTicks = -1;
+            public UnregistrationClock(string sid, System.Diagnostics.Stopwatch elapsed) {
+                if (!Registered(sid)) throw new InvalidOperationException("The profile was not registered before cleanup.");
+                poll = Task.Run(() => {
+                    while (Registered(sid)) {
+                        if (stop.Wait(10)) return;
+                    }
+                    Interlocked.Exchange(ref observedTicks, elapsed.Elapsed.Ticks);
+                });
+            }
+            public TimeSpan Since(TimeSpan returned) {
+                stop.Set();
+                poll.GetAwaiter().GetResult();
+                long ticks = Interlocked.Read(ref observedTicks);
+                if (ticks < 0) throw new InvalidOperationException("Profile unregistration was not observed during cleanup.");
+                return returned - TimeSpan.FromTicks(ticks);
+            }
+            public void Dispose() {
+                stop.Set();
+                try { poll.GetAwaiter().GetResult(); }
+                finally { stop.Dispose(); }
+            }
+        }
     }
 }
 '@
@@ -383,6 +412,9 @@ function Test-ResidualPath([string]$Path) {
     if ($cause -is [IO.FileNotFoundException] -or $cause -is [IO.DirectoryNotFoundException]) { return $false }
     throw
   }
+}
+function Format-Seconds([TimeSpan]$Span) {
+  return $Span.TotalSeconds.ToString('0.00', [Globalization.CultureInfo]::InvariantCulture) + 's'
 }
 function Assert-ResidualFailure([Exception]$Failure, [string]$Expected) {
   if ($null -eq $Failure) { throw "Expected native residual failure was absent: $Expected." }
@@ -549,6 +581,7 @@ foreach ($case in @('delayed', 'persistent', 'denied', 'readonly', 'junction', '
   $application = $null
   $held = $null
   $delayed = $null
+  $unregistration = $null
   $originalParentAcl = $null
   $originalFileAcl = $null
   $readDeniedPath = $null
@@ -699,12 +732,18 @@ foreach ($case in @('delayed', 'persistent', 'denied', 'readonly', 'junction', '
       }
     }
     $failure = $null
+    # These cases spend the whole 10 s residual window by design, so time that window alone.
+    $fullWindow = $case -in @('persistent', 'unauthorized', 'disabled-unregistered')
     $elapsed = [Diagnostics.Stopwatch]::StartNew()
+    if ($fullWindow) {
+      $unregistration = [OpenCoven.Tests.ProfileResidualNativeFixture+UnregistrationClock]::new($user.Sid, $elapsed)
+    }
     try {
       if ($useCore) {
         $deleteCore.Invoke($null, [object[]]@([string]$user.Sid, [string]$profile, $identity)) | Out-Null
       } else { $user.Dispose() }
     } catch { $failure = $_.Exception }
+    $total = $elapsed.Elapsed
     switch ($case) {
       'persistent' { Assert-ResidualFailure $failure 'residual=win32-32' }
       'denied' {
@@ -731,7 +770,19 @@ foreach ($case in @('delayed', 'persistent', 'denied', 'readonly', 'junction', '
         if ($case -eq 'delayed') { $delayed.RequireReleased() }
       }
     }
-    if ($elapsed.Elapsed -gt [TimeSpan]::FromSeconds(20)) { throw 'Residual cleanup reset or exceeded its finite budget.' }
+    $timing = 'total=' + (Format-Seconds $total)
+    if ($fullWindow) {
+      $window = $unregistration.Since($total)
+      $timing += ';after-unregistration=' + (Format-Seconds $window)
+      Write-Host "Native residual timing: case=$case;$timing."
+      # The window cannot end before its 10 s deadline. Windows runners measured 10.7-13.1 s,
+      # and one restart would take it to 20 s or more.
+      if ($window -lt [TimeSpan]::FromSeconds(9.5) -or $window -gt [TimeSpan]::FromSeconds(18)) {
+        throw "Residual cleanup window was outside its 10 s deadline: $timing."
+      }
+    }
+    $budget = if ($fullWindow) { 30 } else { 20 }
+    if ($total -gt [TimeSpan]::FromSeconds($budget)) { throw "Residual cleanup reset or exceeded its finite budget: $timing." }
     if ([IO.File]::ReadAllText($canary) -cne 'external-canary') { throw 'An external sentinel was modified.' }
     if ($case -eq 'readonly-hardlink' -and
         ([IO.File]::GetAttributes($canary) -band [IO.FileAttributes]::ReadOnly) -eq 0) {
@@ -746,6 +797,7 @@ foreach ($case in @('delayed', 'persistent', 'denied', 'readonly', 'junction', '
     # Each independently owned resource gets a teardown stage, including after polling faults.
     [OpenCoven.Tests.ProfileResidualNativeFixture]::RunTeardown([Action[]]@(
       { if ($null -ne $delayed) { $delayed.Dispose() } },
+      { if ($null -ne $unregistration) { $unregistration.Dispose() } },
       { if ($null -ne $held) { $held.Dispose() } },
       { if ($null -ne $job) { $job.Dispose() } },
       { if ($null -ne $application) { $application.Dispose() } },
