@@ -365,8 +365,15 @@ with a new key.
 
 ## 5. Artifacts produced
 
-The product name contains a space, so installer filenames look like
-`OpenCoven Chat_0.0.2_aarch64.dmg`. Always quote artifact paths in scripts.
+The product name contains a space, so the build produces names like
+`OpenCoven Chat_0.0.3_aarch64.dmg`. GitHub serves an uploaded asset with each
+space replaced by a dot, so the publish job renames every asset that way
+(`OpenCoven.Chat_0.0.3_aarch64.dmg`) before it writes `SHA256SUMS` and
+`latest.json`. Both then name the files people download, and
+`shasum -a 256 -c SHA256SUMS` works on a folder of downloads. Releases up to
+v0.0.3 listed the spaced names, so their downloads must be renamed back before
+`shasum -c`. Always quote artifact paths in scripts, since build output still
+has the space.
 
 Per release, the workflow publishes:
 

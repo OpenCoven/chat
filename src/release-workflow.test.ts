@@ -133,6 +133,21 @@ describe('release workflow specification', () => {
     }
   });
 
+  test('publishes assets under the names GitHub serves them by', () => {
+    const publish = job('publish');
+
+    // GitHub turns each space in an uploaded name into a dot. v0.0.2 and
+    // v0.0.3 wrote SHA256SUMS with the spaced build names, so `shasum -c`
+    // reported every download missing, and latest.json would have pointed the
+    // updater at URLs that do not exist. The rename happens while flattening,
+    // before either file is written.
+    const rename = publish.indexOf(`name="\${name// /.}"`);
+    expect(rename).toBeGreaterThan(publish.indexOf('- name: Flatten and inventory artifacts'));
+    expect(rename).toBeLessThan(publish.indexOf('Duplicate release asset name'));
+    expect(rename).toBeLessThan(publish.indexOf('- name: Generate latest.json updater manifest'));
+    expect(rename).toBeLessThan(publish.indexOf('- name: Generate and verify SHA256SUMS'));
+  });
+
   test('never hands Tauri incomplete Apple credentials', () => {
     const build = job('build', 'publish');
 

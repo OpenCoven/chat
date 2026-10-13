@@ -80,20 +80,33 @@ describe('release smoke test', () => {
     expect(smoke(release()).signing.state).toBe('required');
   });
 
-  it('matches the installer names the rehearsal release actually produced', () => {
-    // Windows is deferred until Windows code signing is set up (#356).
-    expect(expectedInstallers('0.0.1')).toEqual([
-      'OpenCoven Chat_0.0.1_aarch64.dmg',
-      'OpenCoven Chat_0.0.1_x64.dmg',
-      'OpenCoven Chat_0.0.1_amd64.AppImage',
-      'OpenCoven Chat_0.0.1_amd64.deb',
+  it('names installers the way GitHub serves them', () => {
+    // GitHub turns each space in an uploaded name into a dot, as the v0.0.3
+    // downloads show. Windows is deferred until Windows code signing is set
+    // up (#356).
+    expect(expectedInstallers('0.0.3')).toEqual([
+      'OpenCoven.Chat_0.0.3_aarch64.dmg',
+      'OpenCoven.Chat_0.0.3_x64.dmg',
+      'OpenCoven.Chat_0.0.3_amd64.AppImage',
+      'OpenCoven.Chat_0.0.3_amd64.deb',
     ]);
+    expect([...expectedUpdaterArchives('0.0.3').keys()]).toContain(
+      'aarch64-apple-darwin-OpenCoven.Chat.app.tar.gz',
+    );
+  });
+
+  it('refuses an installer that kept the space in its name', () => {
+    // SHA256SUMS would then list a name nobody can download.
+    const name = `OpenCoven Chat_${VERSION}_x64.dmg`;
+    expect(smoke(release({ [name]: 'installer' })).failures).toContain(
+      `Unexpected release asset: ${name}.`,
+    );
   });
 
   it.each([`x64_en-US.msi`, `x64-setup.exe`])(
     'refuses a Windows %s while Windows is deferred',
     (suffix) => {
-      const name = `OpenCoven Chat_${VERSION}_${suffix}`;
+      const name = `OpenCoven.Chat_${VERSION}_${suffix}`;
       expect(smoke(release({ [name]: 'installer' })).failures).toContain(
         `Unexpected release asset: ${name}.`,
       );
@@ -123,7 +136,7 @@ describe('release smoke test', () => {
   });
 
   it('fails an asset from another version or product', () => {
-    const stray = `OpenCoven Chat_9.9.9_x64.dmg`;
+    const stray = `OpenCoven.Chat_9.9.9_x64.dmg`;
     expect(smoke(release({ [stray]: 'old' })).failures).toContain(
       `Unexpected release asset: ${stray}.`,
     );
