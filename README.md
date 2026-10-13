@@ -128,6 +128,25 @@ the empty thread also shows the one command that installs it
 control. Chat never runs it for you; run it in a terminal, then choose
 **Check again**.
 
+## First-run setup
+
+Before the chat opens, Chat checks what it needs:
+- **Coven:** the Coven CLI is installed.
+- **Engine:** the Coven engine is installed.
+- **Sign-in:** a model provider is signed in, through the engine's own sign-in, a Claude subscription in Claude Code, or ChatGPT.
+- **Familiar:** at least one familiar exists.
+
+When everything is in place, nothing is shown and the chat opens as usual.
+
+Otherwise **Set up Coven Chat** lists each step:
+- **Done steps** are marked done.
+- **Missing steps** show the exact command that completes them, with a **Copy** control, for example `npm install -g @opencoven/cli`, `coven engine install`, or Claude Code's installer and `claude auth login`.
+- **Check again** re-runs the checks, and the chat opens as soon as they pass.
+
+Coven and its engine are required. When only sign-in or a familiar is missing, **Continue to Chat** opens the chat anyway, so a sign-in the check can't see, such as an API key in the environment, never blocks a working setup.
+
+The checks are read-only. Chat starts Coven, the engine and Claude Code only to ask their status, and never installs anything or signs in for you.
+
 ## Local runtime
 
 The desktop host owns access to Coven. The browser does not execute commands,

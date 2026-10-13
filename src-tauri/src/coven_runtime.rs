@@ -33,7 +33,7 @@ pub(crate) const TRANSCRIPT_LIMIT: usize = OUTPUT_LIMIT + 256 * 1024;
 const LEDGER_METADATA_LIMIT: usize = 16 * 1024 * 1024;
 const ERROR_LIMIT: usize = 8192;
 pub(crate) const RUN_CANCELLED: &str = "Coven run cancelled.";
-const READ_TIMEOUT: Duration = Duration::from_secs(20);
+pub(crate) const READ_TIMEOUT: Duration = Duration::from_secs(20);
 const RUN_TIMEOUT: Duration = Duration::from_secs(600);
 const SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(25);
 const HISTORY_SESSION_LIMIT: usize = 64;
@@ -530,6 +530,20 @@ fn pipe_reader(
         })
 }
 
+/// The PATH given to Coven and the tools it starts, so harness discovery does
+/// not depend on Finder's minimal PATH.
+pub(crate) fn tool_search_path() -> Result<std::ffi::OsString, String> {
+    let mut path = vec![home()?.join(".local/bin"), home()?.join(".cargo/bin")];
+    path.extend([
+        PathBuf::from("/opt/homebrew/bin"),
+        PathBuf::from("/usr/local/bin"),
+    ]);
+    if let Some(inherited) = std::env::var_os("PATH") {
+        path.extend(std::env::split_paths(&inherited).filter(|p| p.is_absolute()));
+    }
+    std::env::join_paths(path).map_err(|_| "Invalid executable search path.".to_owned())
+}
+
 pub(crate) fn run_process(
     args: &[String],
     cwd: Option<&Path>,
@@ -561,19 +575,7 @@ fn run_process_input(
     } else {
         command.current_dir(home()?);
     }
-    // Also make harness discovery independent of Finder's minimal PATH.
-    let mut path = vec![home()?.join(".local/bin"), home()?.join(".cargo/bin")];
-    path.extend([
-        PathBuf::from("/opt/homebrew/bin"),
-        PathBuf::from("/usr/local/bin"),
-    ]);
-    if let Some(inherited) = std::env::var_os("PATH") {
-        path.extend(std::env::split_paths(&inherited).filter(|p| p.is_absolute()));
-    }
-    command.env(
-        "PATH",
-        std::env::join_paths(path).map_err(|_| "Invalid executable search path.")?,
-    );
+    command.env("PATH", tool_search_path()?);
     let output_limit = if args == ["sessions", "--all", "--json"] {
         LEDGER_METADATA_LIMIT
     } else {
@@ -724,7 +726,6 @@ fn stderr_text(errors: &[u8]) -> String {
 /// stderr is per read chunk: a stderr line may land between two stdout lines
 /// that were written contiguously. Both streams draw on one shared
 /// `OUTPUT_LIMIT` budget; exceeding it aborts the run.
-#[allow(dead_code)] // wired in Task 12
 pub(crate) fn execute_command_lines(
     mut command: Command,
     cancel: &AtomicBool,
@@ -918,7 +919,7 @@ fn run_arguments(
     Ok(args)
 }
 
-async fn blocking<T: Send + 'static>(
+pub(crate) async fn blocking<T: Send + 'static>(
     work: impl FnOnce() -> Result<T, String> + Send + 'static,
 ) -> Result<T, String> {
     static WORKERS: OnceLock<Arc<tokio::sync::Semaphore>> = OnceLock::new();

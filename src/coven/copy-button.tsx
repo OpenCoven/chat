@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { cx } from '../design/familiars-ui';
 import { Icon } from '../design/minimal-icons';
 import { copyText } from './copy-text';
+import './copy-button.css';
 
 type CopyState = 'idle' | 'copied' | 'failed';
 /** How long the outcome stays on the button before it reads "Copy" again. */

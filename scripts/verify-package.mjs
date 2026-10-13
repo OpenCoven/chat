@@ -44,6 +44,7 @@ export const ALLOWED_PERMISSIONS = [
   'allow-coven-screen-connect',
   'allow-coven-screen-send',
   'allow-coven-screen-disconnect',
+  'allow-setup-check',
   'core:window:allow-set-title',
 ];
 const FORBIDDEN_PERMISSION =
