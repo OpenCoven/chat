@@ -1,3 +1,5 @@
+<p align="center"><img src="assets/brand/chat-app-icon-rounded.svg" width="96" height="96" alt="Coven Chat logo: the OpenCoven crown inside a speech bubble"></p>
+
 # OpenCoven Chat
 
 OpenCoven Chat uses one desktop interface: the Familiars Redesign, connected
