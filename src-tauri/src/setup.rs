@@ -176,6 +176,19 @@ fn sign_in_report(engine: SignIn, claude: SignIn, chatgpt: SignIn) -> Value {
     })
 }
 
+/// `coven --version` without its parenthetical status, which the setup
+/// steps already report in their own words: "coven 0.4.9 (engine not
+/// installed, pinned 0.8.0)" becomes "coven 0.4.9".
+fn shown_version(output: &str) -> String {
+    let first = output.lines().next().unwrap_or_default();
+    first
+        .split(" (")
+        .next()
+        .unwrap_or_default()
+        .trim()
+        .to_owned()
+}
+
 fn check() -> Result<Value, String> {
     if !supported_platform() {
         return Ok(json!({
@@ -203,7 +216,7 @@ fn check() -> Result<Value, String> {
         READ_TIMEOUT,
         None,
     )
-    .map(|bytes| String::from_utf8_lossy(&bytes).trim().to_owned())
+    .map(|bytes| shown_version(&String::from_utf8_lossy(&bytes)))
     .ok()
     .filter(|version| !version.is_empty() && version.len() <= 256);
     let engine_path = engine_path();
@@ -573,6 +586,16 @@ mod tests {
     }
 
     #[test]
+    fn versions_drop_their_parenthetical_status() {
+        assert_eq!(
+            shown_version("coven v0.4.8-10-ge6fc281f (engine not installed, pinned 0.8.0)\n"),
+            "coven v0.4.8-10-ge6fc281f"
+        );
+        assert_eq!(shown_version("coven 0.4.9\nmore"), "coven 0.4.9");
+        assert_eq!(shown_version(""), "");
+    }
+
+    #[test]
     fn familiar_names_are_one_short_line_with_a_letter_or_number() {
         assert_eq!(familiar_name("  Astra  ").as_deref(), Ok("Astra"));
         assert_eq!(familiar_name("Nova 2").as_deref(), Ok("Nova 2"));
@@ -708,5 +731,23 @@ mod tests {
         assert_eq!(exit_code_sign_in(Some(&codex_out), &[]), SignIn::SignedOut);
         assert_eq!(exit_code_sign_in(Some(&codex_broken), &[]), SignIn::Unknown);
         std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    /// Runs the real check as a brand-new person would meet it. Run with a
+    /// scratch home so nothing reads or writes your own setup:
+    /// `HOME=$(mktemp -d) COVEN_HOME=$HOME/.coven cargo test --lib live_check -- --ignored --nocapture`.
+    #[test]
+    #[ignore = "starts the installed Coven and Claude Code; run with a scratch HOME and COVEN_HOME"]
+    fn live_check_in_a_scratch_home() {
+        let home = home().unwrap();
+        let coven_home = std::env::var_os("COVEN_HOME").map(PathBuf::from).unwrap();
+        assert!(
+            coven_home.starts_with(&home),
+            "point COVEN_HOME inside the scratch HOME"
+        );
+        let report = check().unwrap();
+        println!("{}", serde_json::to_string_pretty(&report).unwrap());
+        assert_eq!(report["platform"]["ok"], json!(true));
+        assert_eq!(report["familiar"]["count"], json!(0));
     }
 }
