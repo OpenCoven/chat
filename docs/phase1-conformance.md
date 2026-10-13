@@ -1405,8 +1405,10 @@ query, and closes the handle. Fixed labels and numeric OS codes distinguish
 open-not-found, open failure, exited, live readable/unreadable token, invalid
 token, and wait failure without emitting a SID. The observation describes the
 newly opened handle; it cannot establish continuity or reuse relative to the
-original WTS row. Chat #206 remains open until native evidence explains the
-ambiguity. Standalone `scripts/windows-process-sid-diagnostics.test.ps1` tests
+original WTS row. The two recurrences it reported were `open-not-found:87`, a
+process already gone, so the supervisor now rechecks such rows a bounded number
+of times (see the system-wide process proof below); the reporter still runs
+when a row stays unreadable. Standalone `scripts/windows-process-sid-diagnostics.test.ps1` tests
 exercise states and call/cleanup bounds and also run in the native suite.
 The native suite additionally checks one real self-process observation through a
 nested failure report; terminal-attempt wrapping preserves the inner exception
@@ -1659,7 +1661,12 @@ infer absence from Job membership. Every exact-SID process must normally be
 opened, rechecked by primary token, terminated, waited, and reaped. If
 `OpenProcess` reports only a reviewed stale/nonexistent PID error, the broker
 immediately repeats the WTS enumeration and accepts the race only when the PID
-is absent or no longer has the exact isolated SID. A still-matching PID, access
+is absent or no longer has the exact isolated SID. WTS can also list an exiting
+process outside session 0 without a readable SID (#206). The broker then
+enumerates again, at most three times 50 ms apart, and uses only an enumeration
+in which every such row is gone or has a readable SID; those rows then go
+through the exact-SID matching above. A row still unreadable after the last
+recheck is a WTS/SID-query ambiguity. A still-matching PID, access
 denial, WTS/SID-query ambiguity, termination failure, or wait failure is fatal.
 Scheduler cleanup, BITS cleanup, and SID-wide drain repeat until three bounded
 consecutive rounds observe no attributable registration, running task,
@@ -2040,7 +2047,7 @@ revision authorities can therefore have different workflow hashes:
 
 | File | Bytes | SHA-256 |
 | --- | ---: | --- |
-| `.github/workflows/client-v1-conformance.yml` | 181,684 | `93858b9056614e5bcfd0ffc02fdf38b4b4408364f7b1916491133c92050d5ab5` |
+| `.github/workflows/client-v1-conformance.yml` | 182,280 | `3b0d2ba8173a479f2d64d8e018f6fd8093711c87d179c5a37b78403921a81709` |
 | `scripts/contract-canary.mjs` | 40,618 | `a4c2fe0a5eb6a5ff4653de5374c34c0fb46907c6806a5d23b86d8b37206ef958` |
 | `scripts/executable-resolution.mjs` | 9,154 | `31e3c412ff8c835f14522f36a59e91f4a4ba82913210ae8e3b4455217503f430` |
 | `scripts/owned-temp-directory.mjs` | 9,205 | `1ba30d2d5f0312143e2837956899a4f3f116f3619937d5d9756ff197ecb2a325` |
@@ -2065,8 +2072,8 @@ revision authorities can therefore have different workflow hashes:
 | `scripts/unix-producer-supervisor.test.sh` | 13,348 | `a8c6f48915b0c86a704a7ddc28eaa7f808ae0a3ddfcdb38c0c23ac0d83738f6d` |
 | `scripts/phase1-windows-supervisor-build.sh` | 4,646 | `713a9e0282887ade3e243b5ba175794d74cdb02c28c38dcd41491c9505812770` |
 | `scripts/phase1-windows-supervisor-install.ps1` | 1,743 | `2baab275f0bb6789884cded5f6185d00bfa5348b9e7c3ad1e5575353639101d5` |
-| `scripts/windows-job-supervisor.cs` | 397,084 | `ec56ad9daf9cfd2e92de4420cfc5ce328e09a76b627a8253ef35f2e9ef151669` |
-| `scripts/windows-job-supervisor.test.ps1` | 201,048 | `0b9828c2cd801799bc0055fe4047e1e914ee7fcc921345dee6b0caa3a389386a` |
+| `scripts/windows-job-supervisor.cs` | 399,778 | `b175670ed6eb74ecf4916f43fdb14f15281836f9d74746e5008a6af9c72f15e5` |
+| `scripts/windows-job-supervisor.test.ps1` | 206,688 | `de658abd2f567623889a0d6a585508311a6045b938d075ee1e02125db28561e9` |
 | `scripts/windows-quota-diagnostics.test.ps1` | 45,628 | `2a2f59c95e14d7687cc258d52ed233062a793ba516a2b0d18d9a473a3ed79d96` |
 | `scripts/windows-owner-directory-quota.test.ps1` | 14,789 | `a6fccce4e1e41b06c655bc1a70bf870ba115f0848ee647777d2606294483cd1f` |
 | `scripts/windows-quota-isolated-reader.test.ps1` | 24,200 | `22f3baa7272f0bf7f03e44b3dec98398a96e64a8b507ce5b11925bd777d58a31` |

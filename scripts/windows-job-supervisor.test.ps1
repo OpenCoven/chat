@@ -479,6 +479,148 @@ if ($revalidationSteps.Count -ne 0) {
   throw 'Matching process access denial did not remain fail closed.'
 }
 
+# WTS can list an exiting process without a readable primary-token SID (#206).
+# The bounded recheck returns only an enumeration in which every such row is
+# gone or readable, and fails closed when one stays unreadable.
+$resolveUnreadableProcessSids = [OpenCoven.WindowsJobSupervisor].GetMethod(
+  'ResolveUnreadableProcessSids',
+  [Reflection.BindingFlags]'NonPublic,Static'
+)
+if ($null -eq $resolveUnreadableProcessSids) {
+  throw 'The bounded unreadable process SID recheck is missing.'
+}
+function New-ProcessSidRows {
+  param(
+    [hashtable]$Readable = @{},
+    [hashtable]$Unreadable = @{}
+  )
+  $readableRows = [Collections.Generic.Dictionary[uint32, string]]::new()
+  foreach ($processId in $Readable.Keys) {
+    $readableRows.Add([uint32]$processId, [string]$Readable[$processId])
+  }
+  $unreadableRows = [Collections.Generic.Dictionary[uint32, uint32]]::new()
+  foreach ($processId in $Unreadable.Keys) {
+    $unreadableRows.Add([uint32]$processId, [uint32]$Unreadable[$processId])
+  }
+  return [Tuple[Collections.Generic.Dictionary[uint32, string], Collections.Generic.Dictionary[uint32, uint32]]]::new(
+    $readableRows,
+    $unreadableRows
+  )
+}
+$sidRecheckRows = [Collections.Generic.Queue[object]]::new()
+$sidRecheckSteps = [Collections.Generic.List[string]]::new()
+$sidRecheckArguments = [object[]]@(
+  [Func[Tuple[Collections.Generic.Dictionary[uint32, string], Collections.Generic.Dictionary[uint32, uint32]]]]{
+    $sidRecheckSteps.Add('enumerate')
+    return $sidRecheckRows.Dequeue()
+  },
+  [Action]{ $sidRecheckSteps.Add('pause') }
+)
+function Reset-UnreadableSidRecheck {
+  param([Parameter(Mandatory)][object[]]$Rows)
+  $sidRecheckRows.Clear()
+  $sidRecheckSteps.Clear()
+  foreach ($row in $Rows) { $sidRecheckRows.Enqueue($row) }
+}
+$supervisedTestSid = 'S-1-5-21-1-2-3-1001'
+
+Reset-UnreadableSidRecheck -Rows @(
+  (New-ProcessSidRows -Readable @{ 4100 = 'S-1-5-18' })
+)
+$readableRows = $resolveUnreadableProcessSids.Invoke($null, $sidRecheckArguments)
+if (
+  $readableRows.Count -ne 1 -or
+  $readableRows[[uint32]4100] -cne 'S-1-5-18' -or
+  [string]::Join(',', $sidRecheckSteps) -cne 'enumerate'
+) {
+  throw 'A fully readable WTS enumeration was not returned unchanged.'
+}
+
+Reset-UnreadableSidRecheck -Rows @(
+  (New-ProcessSidRows -Readable @{ 4100 = 'S-1-5-18' } -Unreadable @{ 4242 = 2 }),
+  (New-ProcessSidRows -Readable @{ 4100 = 'S-1-5-18' })
+)
+$exitedRows = $resolveUnreadableProcessSids.Invoke($null, $sidRecheckArguments)
+if (
+  $exitedRows.Count -ne 1 -or
+  $exitedRows.ContainsKey([uint32]4242) -or
+  [string]::Join(',', $sidRecheckSteps) -cne 'enumerate,pause,enumerate'
+) {
+  throw 'An exited process with an unreadable WTS SID was not rechecked.'
+}
+
+Reset-UnreadableSidRecheck -Rows @(
+  (New-ProcessSidRows -Unreadable @{ 4242 = 2 }),
+  (New-ProcessSidRows -Readable @{ 4242 = 'S-1-5-18' })
+)
+$reusedRows = $resolveUnreadableProcessSids.Invoke($null, $sidRecheckArguments)
+if (
+  $reusedRows.Count -ne 1 -or
+  $reusedRows[[uint32]4242] -cne 'S-1-5-18' -or
+  [string]::Join(',', $sidRecheckSteps) -cne 'enumerate,pause,enumerate'
+) {
+  throw 'A reused PID was not returned with its readable SID.'
+}
+
+Reset-UnreadableSidRecheck -Rows @(
+  (New-ProcessSidRows -Unreadable @{ 4242 = 2 }),
+  (New-ProcessSidRows -Unreadable @{ 4242 = 2 }),
+  (New-ProcessSidRows -Readable @{ 4242 = $supervisedTestSid })
+)
+$matchingRows = $resolveUnreadableProcessSids.Invoke($null, $sidRecheckArguments)
+if (
+  $matchingRows.Count -ne 1 -or
+  $matchingRows[[uint32]4242] -cne $supervisedTestSid -or
+  [string]::Join(',', $sidRecheckSteps) -cne 'enumerate,pause,enumerate,pause,enumerate'
+) {
+  throw 'A process that became readable as the supervised SID was not returned for draining.'
+}
+
+$persistentRow = New-ProcessSidRows -Readable @{ 4100 = 'S-1-5-18' } -Unreadable @{ 4242 = 2 }
+Reset-UnreadableSidRecheck -Rows @($persistentRow, $persistentRow, $persistentRow, $persistentRow)
+Assert-ExpectedReflectionFailure `
+  -Operation { $resolveUnreadableProcessSids.Invoke($null, $sidRecheckArguments) } `
+  -ExpectedType ([InvalidOperationException]) `
+  -ExpectedMessage 'WTS process primary token SID query was ambiguous for process 4242 in session 2.' `
+  -Failure 'A persistently unreadable WTS SID returned an unexpected reflection failure.'
+if (
+  [string]::Join(',', $sidRecheckSteps) -cne
+    'enumerate,pause,enumerate,pause,enumerate,pause,enumerate' -or
+  $sidRecheckRows.Count -ne 0
+) {
+  throw 'A persistently unreadable WTS SID was not held to its bounded recheck.'
+}
+
+$lateRow = New-ProcessSidRows -Unreadable @{ 5151 = 3 }
+Reset-UnreadableSidRecheck -Rows @(
+  (New-ProcessSidRows -Unreadable @{ 4242 = 2 }),
+  $lateRow,
+  $lateRow,
+  $lateRow
+)
+Assert-ExpectedReflectionFailure `
+  -Operation { $resolveUnreadableProcessSids.Invoke($null, $sidRecheckArguments) } `
+  -ExpectedType ([InvalidOperationException]) `
+  -ExpectedMessage 'WTS process primary token SID query was ambiguous for process 5151 in session 3.' `
+  -Failure 'An unreadable WTS SID first seen during a recheck was skipped.'
+
+Assert-ExpectedReflectionFailure `
+  -Operation {
+    $resolveUnreadableProcessSids.Invoke(
+      $null,
+      [object[]]@(
+        [Func[Tuple[Collections.Generic.Dictionary[uint32, string], Collections.Generic.Dictionary[uint32, uint32]]]]{
+          return $null
+        },
+        [Action]{ throw 'A missing WTS enumeration must not pause.' }
+      )
+    )
+  } `
+  -ExpectedType ([InvalidOperationException]) `
+  -ExpectedMessage 'System-wide WTS process SID enumeration was ambiguous.' `
+  -Failure 'A missing WTS enumeration was not refused.'
+Write-Host 'Bounded unreadable WTS SID recheck cases passed.'
+
 function Invoke-QuarantineSequenceProbe {
   param(
     [Parameter(Mandatory)][AllowEmptyCollection()][Collections.Generic.List[string]]$Steps,
