@@ -94,6 +94,7 @@ async function installRuntimeFixture(
                   : {
                       available: false,
                       error: 'Coven CLI is not installed. Install Coven CLI, then retry.',
+                      setup: 'install-cli',
                     };
               case 'coven_runtime_familiars':
                 return Array.from({ length: population }, (_, index) => ({
@@ -732,6 +733,10 @@ test('missing CLI shows actionable setup in the same interface', async ({ page }
   await page.goto('/');
   await expect(page.locator('.fr-shell')).toBeVisible();
   await expect(page.getByText(/Coven CLI is not installed/)).toBeVisible();
+  // The empty transcript names the exact command, with a copy control.
+  const step = page.getByRole('region', { name: 'Install the Coven CLI' });
+  await expect(step.getByText('npm install -g @opencoven/cli')).toBeVisible();
+  await expect(step.getByRole('button', { name: 'Copy command' })).toBeVisible();
   const composer = page.getByRole('textbox', { name: 'Message', exact: true });
   await expect(composer).toBeDisabled();
   // The field names the missing runtime, matching the transcript behind it.

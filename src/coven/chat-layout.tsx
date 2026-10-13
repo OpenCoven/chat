@@ -21,7 +21,7 @@ import {
   titleCase,
 } from '../design/familiars-ui';
 import { Icon } from '../design/minimal-icons';
-import type { ChatLifecycle, CovenProjectAccess } from '../lib/coven-runtime';
+import type { ChatLifecycle, CovenProjectAccess, CovenSetupStep } from '../lib/coven-runtime';
 import type { ScreenRelay } from '../lib/screen-relay';
 import { type SetWindowTitle, windowTitle } from '../lib/window-title';
 import { Composer } from '../ui/composer';
@@ -67,6 +67,7 @@ import {
 } from './relative-time';
 import { type LoadRfb, ScreenViewer } from './screen-viewer';
 import { SettingsDialog, type SettingsSection } from './settings-dialog';
+import { SetupStep } from './setup-step';
 import { useNow } from './use-now';
 import { useViewportTier } from './viewport';
 import '../design/familiars-shell.css';
@@ -106,6 +107,8 @@ export type ChatLayoutProps = Readonly<{
   ready: boolean;
   /** Real runtime availability. `ready` also demands a live, non-archived selection. */
   connected: boolean;
+  /** The install step Coven reported as missing, shown while it is not connected. */
+  setup?: CovenSetupStep | undefined;
   readOnly?: boolean;
   selectedArchived?: boolean;
   archivedFilter?: boolean;
@@ -1499,6 +1502,7 @@ export function ChatLayout(props: ChatLayoutProps) {
                   <span className="fr-empty-text">
                     {emptyThreadText(props.connected, familiar?.name, props.familiars.length > 0)}
                   </span>
+                  {!props.connected && props.setup ? <SetupStep step={props.setup} /> : null}
                   {!props.connected || !props.familiars.length ? (
                     <FamButton size="sm" disabled={refreshBlocked} onClick={props.onRefresh}>
                       {props.connected ? 'Check for familiars' : 'Check again'}

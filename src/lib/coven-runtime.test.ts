@@ -152,6 +152,7 @@ describe('Coven runtime', () => {
     { available: true, version: 3 },
     { available: true, sdkHealth: 'fine' },
     { available: true, transport: 'ipc' },
+    { available: false, setup: 'install-node' },
   ])('rejects malformed native status fields: %j', async (status) => {
     const runtime = createCovenRuntime({
       available: () => true,
@@ -162,6 +163,15 @@ describe('Coven runtime', () => {
 
   it('accepts a fully populated native status', async () => {
     const status = { available: true, version: '1.2.3', sdkHealth: 'ok', transport: 'cli' };
+    const runtime = createCovenRuntime({
+      available: () => true,
+      invoke: vi.fn().mockResolvedValue(status),
+    });
+    expect(await runtime.status()).toEqual(status);
+  });
+
+  it.each(['install-cli', 'install-engine'])('accepts the %s setup step', async (setup) => {
+    const status = { available: false, error: 'Missing.', setup };
     const runtime = createCovenRuntime({
       available: () => true,
       invoke: vi.fn().mockResolvedValue(status),

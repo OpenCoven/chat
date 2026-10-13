@@ -847,6 +847,10 @@ async fn blocking<T: Send + 'static>(
 #[tauri::command]
 pub(crate) async fn coven_runtime_status() -> Result<Value, String> {
     blocking(|| {
+        // A missing CLI is the first setup step, not a failure to read Coven.
+        if let Err(error) = resolve_cli() {
+            return Ok(json!({"available": false, "setup": "install-cli", "error": error}));
+        }
         let result = run_process(
             &["--version".into()],
             None,
@@ -876,6 +880,7 @@ pub(crate) async fn coven_runtime_status() -> Result<Value, String> {
                     "error": if !installed {
                         Some("The Coven engine is missing. Run coven engine install, then retry.")
                     } else { None },
+                    "setup": if !installed { Some("install-engine") } else { None },
                 }))
             }
             Err(error) => json!({"available": false, "error": error}),

@@ -74,6 +74,31 @@ describe('empty transcript copy', () => {
     expect(screen.queryByText(/Select a familiar/)).not.toBeInTheDocument();
   });
 
+  it.each([
+    ['install-cli', 'Install the Coven CLI', 'npm install -g @opencoven/cli'],
+    ['install-engine', 'Install the Coven engine', 'coven engine install'],
+  ] as const)('shows the %s command while Coven is not connected', (setup, title, command) => {
+    render(<ChatLayout {...layoutProps()} setup={setup} />);
+    const step = screen.getByRole('region', { name: title });
+    expect(within(step).getByText(command)).toBeInTheDocument();
+    expect(within(step).getByRole('button', { name: 'Copy command' })).toBeInTheDocument();
+    expect(within(step).getByText(/choose Check again/)).toBeInTheDocument();
+    // The control the step names is on screen next to it.
+    expect(screen.getAllByRole('button', { name: 'Check again' }).length).toBeGreaterThan(0);
+  });
+
+  it('drops the setup step once Coven is connected', () => {
+    render(
+      <ChatLayout
+        {...layoutProps()}
+        familiars={[{ id: 'f', name: 'Astra' }]}
+        connected
+        setup="install-cli"
+      />,
+    );
+    expect(screen.queryByText('npm install -g @opencoven/cli')).not.toBeInTheDocument();
+  });
+
   it('does not claim the CLI is down when it is up but nothing is selected', () => {
     // `ready` is false here in the real app (it demands a selection), so this
     // is precisely the state that used to read "Connect to your local Coven CLI".

@@ -116,7 +116,11 @@ With a connected CLI but no familiars configured, the empty thread and the
 composer say so, rather than asking you to select from an empty list, and
 the empty thread and the empty familiar list each offer **Check for
 familiars**, which refreshes Coven. Without a connected CLI they offer
-**Check again** instead.
+**Check again** instead. When the Coven CLI or its engine isn't installed,
+the empty thread also shows the one command that installs it
+(`npm install -g @opencoven/cli` or `coven engine install`) with a **Copy**
+control. Chat never runs it for you; run it in a terminal, then choose
+**Check again**.
 
 ## Local runtime
 
