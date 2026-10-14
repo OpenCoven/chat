@@ -303,10 +303,18 @@ describe('release workflow specification', () => {
     expect(notarize).toContain(`"\${RUNNER_TEMP}/AuthKey_\${APPLE_API_KEY}.p8"`);
     expect(notarize).toContain('xcrun notarytool submit');
     expect(notarize).toContain(`if [ "\${status}" != "Accepted" ]; then`);
-    expect(notarize).toContain(`xcrun stapler staple "\${dmg}"`);
+    // stapler reaches api.apple-cloudkit.com for both staple and validate,
+    // and exit 68 covers a dropped connection as well as a missing ticket;
+    // three Intel jobs failed that way on 2026-10-14 after the ticket was
+    // issued (#461). Both steps therefore retry each call.
+    expect(notarize).toContain('stapler_retry() {');
+    expect(notarize).toContain(`stapler_retry staple "\${dmg}"`);
+    expect(notarize).toContain(`stapler_retry validate "\${dmg}"`);
 
     // The artifact check holds the staged image to the same standard.
-    expect(smoke).toContain(`xcrun stapler validate "\${dmg}"`);
+    expect(smoke).toContain('stapler_retry() {');
+    expect(smoke).toContain(`stapler_retry validate "\${dmg}"`);
+    expect(smoke).not.toContain(`xcrun stapler validate "\${dmg}"`);
     expect(smoke).toContain(
       `spctl --assess --type open --context context:primary-signature --verbose=2 "\${dmg}"`,
     );
