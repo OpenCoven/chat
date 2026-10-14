@@ -2047,7 +2047,7 @@ revision authorities can therefore have different workflow hashes:
 
 | File | Bytes | SHA-256 |
 | --- | ---: | --- |
-| `.github/workflows/client-v1-conformance.yml` | 182,280 | `3b0d2ba8173a479f2d64d8e018f6fd8093711c87d179c5a37b78403921a81709` |
+| `.github/workflows/client-v1-conformance.yml` | 183,220 | `d71071d3a3d99472021e6b90e2299cc1b87b720a65356086ff205874e202b7fa` |
 | `scripts/contract-canary.mjs` | 40,618 | `a4c2fe0a5eb6a5ff4653de5374c34c0fb46907c6806a5d23b86d8b37206ef958` |
 | `scripts/executable-resolution.mjs` | 9,154 | `31e3c412ff8c835f14522f36a59e91f4a4ba82913210ae8e3b4455217503f430` |
 | `scripts/owned-temp-directory.mjs` | 9,205 | `1ba30d2d5f0312143e2837956899a4f3f116f3619937d5d9756ff197ecb2a325` |
@@ -2072,7 +2072,7 @@ revision authorities can therefore have different workflow hashes:
 | `scripts/unix-producer-supervisor.test.sh` | 13,348 | `a8c6f48915b0c86a704a7ddc28eaa7f808ae0a3ddfcdb38c0c23ac0d83738f6d` |
 | `scripts/phase1-windows-supervisor-build.sh` | 4,646 | `713a9e0282887ade3e243b5ba175794d74cdb02c28c38dcd41491c9505812770` |
 | `scripts/phase1-windows-supervisor-install.ps1` | 1,743 | `2baab275f0bb6789884cded5f6185d00bfa5348b9e7c3ad1e5575353639101d5` |
-| `scripts/windows-job-supervisor.cs` | 399,778 | `b175670ed6eb74ecf4916f43fdb14f15281836f9d74746e5008a6af9c72f15e5` |
+| `scripts/windows-job-supervisor.cs` | 402,329 | `1f6a6d210b3551688dcb530bc4513f9f18578b35e681720139afec26b372c823` |
 | `scripts/windows-job-supervisor.test.ps1` | 206,688 | `de658abd2f567623889a0d6a585508311a6045b938d075ee1e02125db28561e9` |
 | `scripts/windows-quota-diagnostics.test.ps1` | 45,628 | `2a2f59c95e14d7687cc258d52ed233062a793ba516a2b0d18d9a473a3ed79d96` |
 | `scripts/windows-owner-directory-quota.test.ps1` | 14,789 | `a6fccce4e1e41b06c655bc1a70bf870ba115f0848ee647777d2606294483cd1f` |
@@ -2082,7 +2082,7 @@ revision authorities can therefore have different workflow hashes:
 | `scripts/windows-cleanup-delete-diagnostics.test.ps1` | 7,433 | `e9d30285a1fe0ad035637621c6a3840eb8a6194b2f23e1a4aa188c5884cd0c64` |
 | `scripts/windows-profile-cleanup-characterization.test.ps1` | 11,549 | `00052aab05d01785d225999536002fe17585fd80ff71b537b6ebed088b4549d7` |
 | `scripts/windows-profile-residual-policy.test.ps1` | 14,847 | `2a8517338ffc84d38967d11d3ade3f58d4d7004f5437da890da30a1cb0dda417` |
-| `scripts/windows-profile-residual-native.test.ps1` | 50,117 | `1526a99951752b3173d37ad9815f76d9300452e39277b0c8903cd8f0f1ebea90` |
+| `scripts/windows-profile-residual-native.test.ps1` | 55,009 | `e1e4063c67951fd97e31b461aa38a83ee97f085722cca4eb5c441ed4b6b550f9` |
 | `scripts/windows-process-sid-diagnostics.cs` | 4,054 | `cd4b1c16a759ce4e63b87c82c4be0dbee9c0b48e9bfd3851eb966c303918e1a2` |
 | `scripts/windows-process-sid-diagnostics.test.ps1` | 7,316 | `c83e2d63355fb95c8220045115a3b8106b7507b7132d235ad74eb0283f6c481f` |
 | `scripts/windows-staging-binding.test.ps1` | 885 | `56514e709e34b68e0692bd5c3bd91c8bea0a01fd281ded33920f83c2ab653182` |

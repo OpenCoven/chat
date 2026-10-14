@@ -341,7 +341,8 @@ namespace OpenCoven.Tests {
         }
         // Records when userenv unregistration is first observed on the cleanup stopwatch.
         // The residual deadline starts only after DeleteProfileW returns, so the time from
-        // here to return bounds that one window without the phases before it.
+        // here to return covers that one window without the phases before it. It is printed
+        // for the log; the window itself is proven by the supervisor's own evidence.
         public sealed class UnregistrationClock : IDisposable {
             private readonly ManualResetEventSlim stop = new ManualResetEventSlim();
             private readonly Task poll;
@@ -436,6 +437,41 @@ function Assert-ResidualFailure([Exception]$Failure, [string]$Expected) {
     throw ("Native residual failure had the wrong bounded category: expected=$Expected;observed=" +
       [string]::Join(',', $categories) + '.')
   }
+}
+
+$windowKey = [string][OpenCoven.WindowsJobSupervisor].GetField(
+  'ProfileResidualWindowKey', [Reflection.BindingFlags]'NonPublic,Static').GetValue($null)
+if ($windowKey -cne 'OpenCoven.ProfileResidualWindow') { throw 'Residual window evidence key changed its contract.' }
+# The supervisor stamps one profile cleanup failure with the delete loop's duration, every
+# residual window start, the moment the window expired and the window clock's own reading.
+function Get-ResidualWindow([Exception]$Failure) {
+  if ($null -eq $Failure) { return $null }
+  $queue = [Collections.Generic.Queue[Exception]]::new()
+  $queue.Enqueue($Failure)
+  $visited = 0
+  while ($queue.Count -gt 0) {
+    if ($visited -ge 32) { throw 'Native residual exception graph exceeded its bound.' }
+    $visited++
+    $item = $queue.Dequeue()
+    $evidence = $item.Data[$windowKey]
+    if ($evidence -is [string]) {
+      $match = [regex]::Match($evidence,
+        '^delete-ms=(?<delete>\d+);starts=(?<starts>\d+(?:,\d+)*);expired=(?<expired>\d+);elapsed-ms=(?<elapsed>\d+);frequency=(?<frequency>\d+)$')
+      if (-not $match.Success) { throw "Residual window evidence changed its contract: $evidence." }
+      $starts = [long[]]($match.Groups['starts'].Value.Split(',') | ForEach-Object { [long]$_ })
+      return @{
+        DeleteMs = [long]$match.Groups['delete'].Value
+        Starts = $starts
+        Expired = [long]$match.Groups['expired'].Value
+        ElapsedMs = [long]$match.Groups['elapsed'].Value
+        Frequency = [long]$match.Groups['frequency'].Value
+      }
+    }
+    if ($item -is [AggregateException]) {
+      foreach ($inner in $item.InnerExceptions) { $queue.Enqueue($inner) }
+    } elseif ($null -ne $item.InnerException) { $queue.Enqueue($item.InnerException) }
+  }
+  return $null
 }
 
 $profileFailureType = [OpenCoven.WindowsJobSupervisor].GetNestedType(
@@ -539,6 +575,38 @@ if ($invalidSharing -isnot [InvalidOperationException] -or
     $invalidSharing.Message -cne 'Residual deletion handles must deny delete sharing.') {
   throw 'Residual deletion admitted delete sharing or reached native code before rejecting it.'
 }
+$describeWindow = [OpenCoven.WindowsJobSupervisor].GetMethod(
+  'DescribeProfileResidualWindow', [Reflection.BindingFlags]'NonPublic,Static')
+if ($null -eq $describeWindow) { throw 'Residual window evidence describer is absent.' }
+$windowClock = [Diagnostics.Stopwatch]::StartNew()
+$windowStarts = [Collections.Generic.List[long]]::new()
+$windowStarts.Add([Diagnostics.Stopwatch]::GetTimestamp())
+$windowStarts.Add([Diagnostics.Stopwatch]::GetTimestamp())
+$windowProbe = [InvalidOperationException]::new('probe')
+$windowProbe.Data[$windowKey] = [string]$describeWindow.Invoke($null,
+  [object[]]@([TimeSpan]::FromMilliseconds(1234.9), $windowStarts, $windowClock))
+$windowEvidence = Get-ResidualWindow ([AggregateException]::new([Exception[]]@([InvalidOperationException]::new('outer', $windowProbe))))
+if ($null -eq $windowEvidence -or $windowEvidence.DeleteMs -ne 1234 -or $windowEvidence.Starts.Count -ne 2 -or
+    $windowEvidence.Starts[0] -ne $windowStarts[0] -or $windowEvidence.Starts[1] -ne $windowStarts[1] -or
+    $windowEvidence.Expired -lt $windowStarts[1] -or $windowEvidence.ElapsedMs -lt 0 -or
+    $windowEvidence.Frequency -ne [Diagnostics.Stopwatch]::Frequency) {
+  throw 'Residual window evidence did not round-trip through the failure graph.'
+}
+if ($null -ne (Get-ResidualWindow ([InvalidOperationException]::new('bare')))) {
+  throw 'Residual window evidence was found on a failure that carries none.'
+}
+foreach ($invalid in @(
+    @([TimeSpan]::FromSeconds(-1), $windowStarts, $windowClock),
+    @([TimeSpan]::Zero, [Collections.Generic.List[long]]::new(), $windowClock),
+    @([TimeSpan]::Zero, $null, $windowClock),
+    @([TimeSpan]::Zero, $windowStarts, $null))) {
+  $rejected = $null
+  try { $describeWindow.Invoke($null, [object[]]$invalid) | Out-Null } catch { $rejected = $_.Exception.GetBaseException() }
+  if ($rejected -isnot [ArgumentException] -or $rejected.Message -cne 'Invalid profile residual window evidence.') {
+    throw 'Residual window evidence accepted invalid inputs.'
+  }
+}
+Write-Host 'Portable residual window evidence passed.'
 Write-Host 'Portable residual failure classification passed.'
 if ($PortableOnly) { return }
 
@@ -771,14 +839,26 @@ foreach ($case in @('delayed', 'persistent', 'denied', 'readonly', 'junction', '
       }
     }
     $timing = 'total=' + (Format-Seconds $total)
+    $evidence = Get-ResidualWindow $failure
+    if ($null -ne $evidence) {
+      $timing += ';delete=' + (Format-Seconds ([TimeSpan]::FromMilliseconds($evidence.DeleteMs))) +
+        ';window=' + (Format-Seconds ([TimeSpan]::FromMilliseconds($evidence.ElapsedMs))) +
+        ';windows=' + $evidence.Starts.Count
+    }
     if ($fullWindow) {
       $window = $unregistration.Since($total)
       $timing += ';after-unregistration=' + (Format-Seconds $window)
       Write-Host "Native residual timing: case=$case;$timing."
-      # The window cannot end before its 10 s deadline. Windows runners measured 10.7-13.1 s,
-      # and one restart would take it to 20 s or more.
-      if ($window -lt [TimeSpan]::FromSeconds(9.5) -or $window -gt [TimeSpan]::FromSeconds(18)) {
-        throw "Residual cleanup window was outside its 10 s deadline: $timing."
+      # Wall-clock time cannot tell a slow runner from a window that was reopened part-way
+      # through: a restart at 8.8 s and one slow window both end near 18.8 s (#453). The
+      # supervisor's own evidence can. Exactly one window opened, it ran to its 10 s deadline,
+      # and its clock agrees with its recorded start, so it was never reset.
+      if ($null -eq $evidence) { throw "Residual cleanup failure carried no window evidence: $timing." }
+      if ($evidence.Starts.Count -ne 1) { throw "Residual cleanup opened its window more than once: $timing." }
+      if ($evidence.ElapsedMs -lt 10000) { throw "Residual cleanup window ended before its 10 s deadline: $timing." }
+      $windowWall = ($evidence.Expired - $evidence.Starts[0]) / [double]$evidence.Frequency
+      if ([Math]::Abs($windowWall - ($evidence.ElapsedMs / 1000.0)) -gt 0.5) {
+        throw "Residual cleanup window clock disagrees with its recorded start: $timing."
       }
     }
     $budget = if ($fullWindow) { 30 } else { 20 }

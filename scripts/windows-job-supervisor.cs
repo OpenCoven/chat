@@ -3376,6 +3376,13 @@ namespace OpenCoven
                 lastDeleteError = error;
                 Thread.Sleep(100);
             }
+            // The residual window opens exactly once, here, once the delete loop has returned.
+            // Its start is recorded so a cleanup failure carries how many windows ran and when.
+            // The native regression reads that evidence instead of bounding wall-clock time,
+            // which cannot tell a slow runner from a window that was reopened part-way through.
+            TimeSpan deletePhase = deleteTimer.Elapsed;
+            List<long> residualWindowStarts = new List<long>();
+            residualWindowStarts.Add(Stopwatch.GetTimestamp());
             Stopwatch timer = Stopwatch.StartNew();
             int residualEntries = 0;
             try
@@ -3405,6 +3412,39 @@ namespace OpenCoven
                     lastDeleteError,
                     "Ephemeral Windows profile deletion remained blocked.");
             }
+            catch (ProfileCleanupException failure)
+            {
+                failure.Data[ProfileResidualWindowKey] =
+                    DescribeProfileResidualWindow(deletePhase, residualWindowStarts, timer);
+                throw;
+            }
+        }
+
+        internal const string ProfileResidualWindowKey = "OpenCoven.ProfileResidualWindow";
+
+        // Evidence attached to one profile cleanup failure: how long the delete loop ran, every
+        // residual window start and the moment the window expired as Stopwatch.GetTimestamp
+        // ticks, and the elapsed time the window's own clock reports. A window that was reopened
+        // shows a second start; a clock that was reset disagrees with the timestamps. Neither
+        // needs a wall-clock ceiling to detect.
+        internal static string DescribeProfileResidualWindow(
+            TimeSpan deletePhase, IList<long> starts, Stopwatch window)
+        {
+            if (deletePhase < TimeSpan.Zero || starts == null || starts.Count < 1 || window == null)
+                throw new ArgumentException("Invalid profile residual window evidence.");
+            StringBuilder evidence = new StringBuilder();
+            evidence.Append("delete-ms=").Append(
+                ((long)deletePhase.TotalMilliseconds).ToString(CultureInfo.InvariantCulture));
+            evidence.Append(";starts=");
+            for (int index = 0; index < starts.Count; index++)
+            {
+                if (index > 0) evidence.Append(',');
+                evidence.Append(starts[index].ToString(CultureInfo.InvariantCulture));
+            }
+            evidence.Append(";expired=").Append(Stopwatch.GetTimestamp().ToString(CultureInfo.InvariantCulture));
+            evidence.Append(";elapsed-ms=").Append(window.ElapsedMilliseconds.ToString(CultureInfo.InvariantCulture));
+            evidence.Append(";frequency=").Append(Stopwatch.Frequency.ToString(CultureInfo.InvariantCulture));
+            return evidence.ToString();
         }
 
         internal sealed class ProfileCleanupIdentity
