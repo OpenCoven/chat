@@ -1412,7 +1412,10 @@ mod windows_cleanup {
 
         let final_grant = rpc.issue(&[TARGET_A]);
         assert_eq!(rpc.cleanup(&final_grant)["ok"], true);
-        for account in [INSTALLATION_ACCOUNT.to_owned(), credential_account(TARGET_A)] {
+        for account in [
+            INSTALLATION_ACCOUNT.to_owned(),
+            credential_account(TARGET_A),
+        ] {
             assert!(
                 !entry_present(&service, &account),
                 "final cleanup reported success but {account} survived in {service}"
