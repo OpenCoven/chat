@@ -37,7 +37,7 @@ function writeChecksums(dir: string, names: string[]) {
   writeFileSync(join(dir, 'SHA256SUMS'), `${lines.join('\n')}\n`);
 }
 
-/** A complete release directory: the four installers plus SHA256SUMS. */
+/** A complete release directory: every installer plus SHA256SUMS. */
 function release(extra: Record<string, string> = {}) {
   const dir = tempDir('release-smoke-');
   const files: Record<string, string> = {};
@@ -62,7 +62,12 @@ function rootWith(mutate: (conf: Record<string, unknown>) => void) {
 
 const smoke = (
   releaseDir: string,
-  options: { root?: string; tag?: string; allowUnsigned?: boolean } = {},
+  options: {
+    root?: string;
+    tag?: string;
+    allowUnsigned?: boolean;
+    windowsSigning?: 'signed' | 'unsigned';
+  } = {},
 ) =>
   smokeTestRelease({ releaseDir, root: options.root ?? projectRoot, version: VERSION, ...options });
 
@@ -74,21 +79,43 @@ describe('release smoke test', () => {
     expect(report.installers).toEqual(expectedInstallers(VERSION));
     expect(report.updater.state).toBe('disabled');
     expect(report.signing.state).toBe('unsigned');
+    expect(report.signing.windows.state).toBe('unsigned');
   });
 
   it('reports signing as required when the run did not allow unsigned artifacts', () => {
     expect(smoke(release()).signing.state).toBe('required');
   });
 
+  it('reports the Windows installers as unsigned unless the build job signed them', () => {
+    // Windows ships unsigned by decision (#411), so the default is the truth
+    // and `signed` has to be stated by the publish job from the build job's
+    // output. An allow_unsigned rehearsal is unsigned whatever it claims.
+    expect(smoke(release()).signing.windows).toMatchObject({ state: 'unsigned' });
+    expect(smoke(release(), { windowsSigning: 'unsigned' }).signing.windows.reason).toContain(
+      'SmartScreen',
+    );
+    expect(smoke(release(), { windowsSigning: 'signed' }).signing.windows).toMatchObject({
+      state: 'signed',
+    });
+    expect(
+      smoke(release(), { windowsSigning: 'signed', allowUnsigned: true }).signing.windows.state,
+    ).toBe('unsigned');
+    expect(() => smoke(release(), { windowsSigning: 'maybe' as unknown as 'signed' })).toThrow(
+      'windowsSigning must be one of signed, unsigned',
+    );
+  });
+
   it('names installers the way GitHub serves them', () => {
     // GitHub turns each space in an uploaded name into a dot, as the v0.0.3
-    // downloads show. Windows is deferred until Windows code signing is set
-    // up (#356).
-    expect(expectedInstallers('0.0.3')).toEqual([
-      'OpenCoven.Chat_0.0.3_aarch64.dmg',
-      'OpenCoven.Chat_0.0.3_x64.dmg',
-      'OpenCoven.Chat_0.0.3_amd64.AppImage',
-      'OpenCoven.Chat_0.0.3_amd64.deb',
+    // downloads show. The Windows names are Tauri's: `_x64_en-US.msi` from
+    // WiX and `_x64-setup.exe` from NSIS.
+    expect(expectedInstallers('0.0.5')).toEqual([
+      'OpenCoven.Chat_0.0.5_aarch64.dmg',
+      'OpenCoven.Chat_0.0.5_x64.dmg',
+      'OpenCoven.Chat_0.0.5_x64_en-US.msi',
+      'OpenCoven.Chat_0.0.5_x64-setup.exe',
+      'OpenCoven.Chat_0.0.5_amd64.AppImage',
+      'OpenCoven.Chat_0.0.5_amd64.deb',
     ]);
     expect([...expectedUpdaterArchives('0.0.3').keys()]).toContain(
       'aarch64-apple-darwin-OpenCoven.Chat.app.tar.gz',
@@ -103,15 +130,16 @@ describe('release smoke test', () => {
     );
   });
 
-  it.each([`x64_en-US.msi`, `x64-setup.exe`])(
-    'refuses a Windows %s while Windows is deferred',
-    (suffix) => {
+  it('refuses a Windows installer with an unexpected locale or architecture', () => {
+    // The names come from Tauri's bundler; a change there would otherwise
+    // publish an installer SHA256SUMS and the notes do not name.
+    for (const suffix of ['x64_de-DE.msi', 'arm64-setup.exe']) {
       const name = `OpenCoven.Chat_${VERSION}_${suffix}`;
       expect(smoke(release({ [name]: 'installer' })).failures).toContain(
         `Unexpected release asset: ${name}.`,
       );
-    },
-  );
+    }
+  });
 
   it.each(expectedInstallers('X').map((_, index) => index))(
     'fails when installer %i is missing',
@@ -295,7 +323,26 @@ describe('release smoke test', () => {
       },
     );
     expect(clean.status).toBe(0);
-    expect(JSON.parse(clean.stdout)).toMatchObject({ ok: true, signing: { state: 'unsigned' } });
+    expect(JSON.parse(clean.stdout)).toMatchObject({
+      ok: true,
+      signing: { state: 'unsigned', windows: { state: 'unsigned' } },
+    });
+    const signedWindows = spawnSync(
+      process.execPath,
+      [script, '--dir', release(), '--version', VERSION, '--windows-signing', 'signed'],
+      { cwd: projectRoot, encoding: 'utf8' },
+    );
+    expect(signedWindows.status).toBe(0);
+    expect(JSON.parse(signedWindows.stdout)).toMatchObject({
+      signing: { state: 'required', windows: { state: 'signed' } },
+    });
+    const badFlag = spawnSync(
+      process.execPath,
+      [script, '--dir', release(), '--version', VERSION, '--windows-signing', 'maybe'],
+      { cwd: projectRoot, encoding: 'utf8' },
+    );
+    expect(badFlag.status).toBe(1);
+    expect(badFlag.stderr).toContain('windowsSigning must be one of signed, unsigned');
     const broken = release();
     rmSync(join(broken, 'SHA256SUMS'));
     const failed = spawnSync(process.execPath, [script, '--dir', broken, '--version', VERSION], {

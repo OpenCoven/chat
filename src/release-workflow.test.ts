@@ -338,22 +338,62 @@ describe('release workflow specification', () => {
     expect(smoke).not.toContain('(unsigned build: skipping codesign/spctl)');
   });
 
-  test('defers Windows as a whole, never as an unsigned build', () => {
+  test('ships Windows unsigned by decision, and says so wherever it matters', () => {
     const verify = job('verify-tag', 'build');
     const build = job('build', 'publish');
+    const publish = job('publish');
+    const signing = build.slice(
+      build.indexOf('name: Determine signing availability'),
+      build.indexOf('- name: Import Windows signing certificate'),
+    );
+    const windowsCheck = build.slice(
+      build.indexOf('- name: Verify Windows installer metadata and signatures'),
+      build.indexOf('uses: actions/upload-artifact@'),
+    );
 
-    // No Windows build runs, so the gate does not wait on Windows secrets.
-    expect(build).not.toMatch(/^\s+- platform: windows-x86_64$/m);
-    expect(verify).not.toMatch(/WINDOWS_CERTIFICATE: \$\{\{ secrets\./);
-    for (const platform of ['macos-aarch64', 'macos-x86_64', 'linux-x86_64']) {
+    // Windows builds on every path (decided 2026-10-14; #411 tracks signing).
+    // The runner is pinned by name so a tag always builds on the image it was
+    // rehearsed on.
+    for (const platform of ['macos-aarch64', 'macos-x86_64', 'windows-x86_64', 'linux-x86_64']) {
       expect(build).toMatch(new RegExp(`^\\s+- platform: ${platform}$`, 'm'));
     }
+    expect(build).toMatch(
+      /runner: windows-2025\s+target: x86_64-pc-windows-msvc\s+bundles: msi,nsis/,
+    );
 
-    // The restore recipe travels with the matrix, and the Windows signing
-    // steps stay ready for it rather than being deleted.
-    expect(build).toContain('Windows is deferred until Windows code signing is set up');
+    // The gate does not wait on Windows secrets, and the build job does not
+    // refuse their absence. A half-set is still refused on the production
+    // path, and the signing steps stay in place for when both exist.
+    expect(verify).not.toMatch(/WINDOWS_CERTIFICATE: \$\{\{ secrets\./);
+    expect(signing).toContain('the Windows installers in this release are UNSIGNED');
+    expect(signing).not.toContain(
+      'Windows signing material is absent or incomplete on the production path',
+    );
+    expect(signing).toContain(
+      'Only one of WINDOWS_CERTIFICATE and WINDOWS_CERTIFICATE_PASSWORD is set',
+    );
     expect(build).toContain('Import Windows signing certificate');
-    expect(build).toContain('Verify Windows Authenticode signatures');
+    expect(build).toContain('Configure Tauri Windows signing');
+
+    // The installers' version and product name are read back from the files
+    // Windows shows people, and the Authenticode state is held to the signing
+    // step's decision in both directions.
+    expect(windowsCheck).toContain("if: runner.os == 'Windows'");
+    expect(windowsCheck).toContain(`EXPECTED_VERSION: \${{ needs.verify-tag.outputs.version }}`);
+    expect(windowsCheck).toContain("WHERE Property = '$property'");
+    expect(windowsCheck).toContain('$installer.VersionInfo.ProductVersion');
+    expect(windowsCheck).toContain("if ($signature.Status -ne 'Valid')");
+    expect(windowsCheck).toContain("if ($signature.Status -ne 'NotSigned')");
+
+    // The decision reaches the publish job: the smoke report records it, and
+    // the generated release body tells Windows users what SmartScreen will do.
+    expect(build).toContain(`windows_signed: \${{ steps.signing.outputs.windows_signed }}`);
+    expect(publish).toContain(`WINDOWS_SIGNED: \${{ needs.build.outputs.windows_signed }}`);
+    expect(publish).toContain('args+=(--windows-signing unsigned)');
+    expect(publish).toContain('args+=(--windows-signing signed)');
+    expect(publish).toContain('**Run anyway**');
+    expect(releasingGuide).toContain('SmartScreen');
+    expect(releasingGuide).not.toContain('Windows is deferred');
   });
 
   test('documents conditional updates and the current storage boundary', () => {

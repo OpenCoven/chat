@@ -28,20 +28,23 @@ export function assetName(name) {
 }
 
 /**
- * Installer names as published: the build targets' names, under assetName. Windows is
- * deferred until Windows code signing is set up (#356), so its `.msi` and
- * `.exe` are absent here and refused as unexpected assets if one appears.
- * Restore them together with the Windows entry in release.yml's build matrix.
+ * Installer names as published: the build targets' names, under assetName.
+ * The Windows installers ship unsigned by decision (2026-10-14; #411 tracks
+ * a signing route); the report's `signing.windows` says which it was.
  */
 export function expectedInstallers(version, product = PRODUCT_NAME) {
   const prefix = `${assetName(product)}_${version}`;
   return [
     `${prefix}_aarch64.dmg`,
     `${prefix}_x64.dmg`,
+    `${prefix}_x64_en-US.msi`,
+    `${prefix}_x64-setup.exe`,
     `${prefix}_amd64.AppImage`,
     `${prefix}_amd64.deb`,
   ];
 }
+
+const WINDOWS_SIGNING_STATES = ['signed', 'unsigned'];
 
 /**
  * Updater archives mapped to their Tauri updater platform key. The macOS
@@ -97,7 +100,19 @@ export function parseChecksums(text) {
   return { entries, problems };
 }
 
-export function smokeTestRelease({ releaseDir, root, version, tag, allowUnsigned = false }) {
+export function smokeTestRelease({
+  releaseDir,
+  root,
+  version,
+  tag,
+  allowUnsigned = false,
+  windowsSigning = 'unsigned',
+}) {
+  if (!WINDOWS_SIGNING_STATES.includes(windowsSigning)) {
+    throw new Error(
+      `windowsSigning must be one of ${WINDOWS_SIGNING_STATES.join(', ')}, not ${JSON.stringify(windowsSigning)}.`,
+    );
+  }
   const failures = [];
   const fail = (message) => failures.push(message);
 
@@ -226,15 +241,32 @@ export function smokeTestRelease({ releaseDir, root, version, tag, allowUnsigned
         },
     // Code signatures are verified in the build jobs; this records what the
     // run declared so the summary cannot read as signed when it was not.
-    signing: allowUnsigned
-      ? {
-          state: 'unsigned',
-          reason: 'allow_unsigned rehearsal; these artifacts must not be handed to users',
-        }
-      : {
-          state: 'required',
-          reason: 'signing material was required by verify-tag and checked in the build jobs',
-        },
+    // `state` covers the platforms whose signing is required (macOS);
+    // `windows` records the Windows build job's decision separately, because
+    // Windows may ship unsigned on the production path.
+    signing: {
+      ...(allowUnsigned
+        ? {
+            state: 'unsigned',
+            reason: 'allow_unsigned rehearsal; these artifacts must not be handed to users',
+          }
+        : {
+            state: 'required',
+            reason: 'signing material was required by verify-tag and checked in the build jobs',
+          }),
+      windows:
+        windowsSigning === 'signed' && !allowUnsigned
+          ? {
+              state: 'signed',
+              reason:
+                'WINDOWS_CERTIFICATE was configured; Authenticode verified in the Windows build job',
+            }
+          : {
+              state: 'unsigned',
+              reason:
+                'no Windows code-signing certificate is configured (#411); SmartScreen warns before the installer runs',
+            },
+    },
   };
 }
 
@@ -246,13 +278,17 @@ function parseArguments(argv) {
       options.allowUnsigned = true;
       continue;
     }
-    const key = { '--dir': 'releaseDir', '--version': 'version', '--tag': 'tag', '--root': 'root' }[
-      flag
-    ];
+    const key = {
+      '--dir': 'releaseDir',
+      '--version': 'version',
+      '--tag': 'tag',
+      '--root': 'root',
+      '--windows-signing': 'windowsSigning',
+    }[flag];
     const value = argv[index + 1];
     if (key === undefined || value === undefined || value.startsWith('--')) {
       throw new Error(
-        `Usage: release-smoke.mjs --dir <release> --version <x.y.z> [--tag <vX.Y.Z>] [--root <repo>] [--allow-unsigned] (bad argument ${flag})`,
+        `Usage: release-smoke.mjs --dir <release> --version <x.y.z> [--tag <vX.Y.Z>] [--root <repo>] [--allow-unsigned] [--windows-signing signed|unsigned] (bad argument ${flag})`,
       );
     }
     options[key] = value;

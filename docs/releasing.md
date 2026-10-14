@@ -3,20 +3,24 @@
 This document is the runbook for cutting a public release of **OpenCoven Chat**
 (`ai.opencoven.chat`). Releases are driven entirely by pushing a **signed,
 annotated `v*` tag**. The `.github/workflows/release.yml` pipeline does the
-rest: it verifies the tag, builds signed installers for macOS and Linux,
-checksums them, conditionally generates the updater manifest when auto-update
-is configured, and publishes a GitHub Release.
+rest: it verifies the tag, builds installers for macOS, Windows and Linux
+(signed and notarized on macOS), checksums them, and
+conditionally generates the updater manifest when auto-update is configured,
+then publishes a GitHub Release.
 
-**Windows is deferred** until Windows code signing is set up (decided
-2026-10-05 on #356). Certificate authorities have issued code-signing keys
-only on hardware tokens or cloud HSMs since June 2023, so the exportable
-`.pfx` that `WINDOWS_CERTIFICATE` expects is no longer obtainable. The app
-itself can send on Windows: runs are contained in a kill-on-close Job Object, so
-Stop ends the whole process tree. The Windows signing steps stay in
-`release.yml`. To restore Windows, re-add its build-matrix entry, require the two
-`WINDOWS_*` secrets in `verify-tag`, and add its installers back to
-`scripts/release-smoke.mjs`, all in the same change. The comment above the
-matrix spells this out.
+**Windows ships unsigned for now** (decided 2026-10-14; Windows was deferred
+from v0.0.2 to v0.0.4 on #356). Certificate authorities have issued
+code-signing keys only on hardware tokens or cloud HSMs since June 2023, so
+the exportable `.pfx` that `WINDOWS_CERTIFICATE` expects is no longer
+obtainable, and choosing a hosted signing route is #411. Until it is chosen,
+the `.msi` and `.exe` carry no Authenticode signature: Windows SmartScreen
+shows "Windows protected your PC" the first time one runs, and the person
+chooses **More info** then **Run anyway**. The generated release body and the
+release notes both say so. The build job refuses nothing on Windows except a
+half-set of the two `WINDOWS_*` secrets; when both are present it signs the
+installers and verifies the signature, with no other change. The app itself
+works on Windows: runs are contained in a kill-on-close Job Object, so Stop
+ends the whole process tree.
 
 The first public release is **v0.0.2**.
 
@@ -111,13 +115,13 @@ Run through this in order. Every step is runnable as written.
    - build installers on each platform and smoke-test them,
    - generate `SHA256SUMS` and, only when signed updater artifacts exist,
      `latest.json`,
-   - smoke-test the assembled release with `scripts/release-smoke.mjs`: all four
+   - smoke-test the assembled release with `scripts/release-smoke.mjs`: all six
      installers present once and non-empty, `SHA256SUMS` covering every asset
      and matching its bytes, the tag, `package.json`, `tauri.conf.json` and
      `Cargo.toml` versions agreeing, the product name and identifier
      unchanged, and no updater asset unless `createUpdaterArtifacts` is on. The
      job summary states the updater and signing state, including an
-     `allow_unsigned` rehearsal,
+     `allow_unsigned` rehearsal and whether the Windows installers were signed,
    - publish the GitHub Release (a **pre-release** if the tag has a suffix such
      as `-rc.1` or `-beta`, or if its major version is `0`).
 
@@ -260,13 +264,14 @@ App Store Connect API key (`APPLE_API_ISSUER`, `APPLE_API_KEY`,
 app-specific password (`APPLE_ID`, `APPLE_PASSWORD`). The API key is a team
 credential, which is why it is preferred: on 2026-10-06 four app-specific
 passwords in a row were rejected with `401 Invalid credentials` because the
-Apple ID was not on the team. The two
-Windows secrets are not required while Windows is deferred. This used to be a warning, and a warning is the wrong shape for it: the
+Apple ID was not on the team. The two Windows secrets are optional: Windows
+ships unsigned by decision (see the top of this document), and the build job
+signs the Windows installers only when both are set. For the Apple secrets
+this used to be a warning, and a warning is the wrong shape for it: the
 default outcome of a missing secret was a *published* unsigned release and a
 yellow annotation nobody reads. An unsigned `.app` will not open past
-Gatekeeper, an unsigned `.msi` is flagged by SmartScreen, and the tag cannot be
-reused to correct it — `verify-tag` refuses to replace an existing Release, so
-the version is spent.
+Gatekeeper, and the tag cannot be reused to correct it — `verify-tag` refuses
+to replace an existing Release, so the version is spent.
 
 To build deliberately unsigned artifacts — rehearsing the pipeline before the
 certificates exist, for instance — dispatch the workflow manually with
@@ -292,8 +297,8 @@ adds an independent local SSH check.
 | `APPLE_ID` | Apple ID used for notarization (alternative to the API key) | `release-signing` |
 | `APPLE_PASSWORD` | app-specific password for that Apple ID (alternative to the API key) | `release-signing` |
 | `APPLE_TEAM_ID` | Apple Developer Team ID | `release-signing` |
-| `WINDOWS_CERTIFICATE` | base64 of the Authenticode code-signing `.pfx` (not required while Windows is deferred) | `release-signing` |
-| `WINDOWS_CERTIFICATE_PASSWORD` | password for the `.pfx` (not required while Windows is deferred) | `release-signing` |
+| `WINDOWS_CERTIFICATE` | base64 of an Authenticode code-signing `.pfx` (optional: with its password set, the Windows installers are signed; otherwise they ship unsigned, see #411) | `release-signing` |
+| `WINDOWS_CERTIFICATE_PASSWORD` | password for the `.pfx` (optional; set both or neither) | `release-signing` |
 | `TAURI_SIGNING_PRIVATE_KEY` | Tauri updater private key (signs updater artifacts) | `release-signing` |
 | `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` | password for the updater private key | `release-signing` |
 | `TAG_ALLOWED_SIGNERS` | allowed-signers file contents for verifying SSH-signed tags | `release-signing` |
@@ -389,8 +394,11 @@ Per release, the workflow publishes:
   `x86_64`. The app and the image are each signed, notarized and stapled. The Intel
   target runs natively on GitHub's `macos-15-intel` runner rather than
   cross-compiling on Apple silicon.
-- **Windows**: deferred; see the top of this document. When restored, it
-  publishes `.msi` and NSIS `.exe` for `x86_64`, Authenticode-signed.
+- **Windows**: `.msi` (WiX, `_x64_en-US`) and NSIS `.exe` (`_x64-setup`) for
+  `x86_64`, built on `windows-2025`. Unsigned until #411 is settled; the build
+  job reads the product name and version back from both installers and
+  records the Authenticode state (`NotSigned`, or `Valid` once a certificate
+  is configured).
 - **Linux**: `.AppImage` and `.deb` for `x86_64`.
 - **`SHA256SUMS`**: checksums for every asset. Verify with
   `shasum -a 256 -c SHA256SUMS`.
