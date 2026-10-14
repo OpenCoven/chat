@@ -14,7 +14,11 @@ export type ReleaseSmokeReport = {
   updater:
     | { state: 'enabled'; archives: string[]; manifest: boolean }
     | { state: 'disabled'; reason: string };
-  signing: { state: 'unsigned' | 'required'; reason: string };
+  signing: {
+    state: 'unsigned' | 'required';
+    reason: string;
+    windows: { state: 'signed' | 'unsigned'; reason: string };
+  };
 };
 
 export function smokeTestRelease(options: {
@@ -23,4 +27,5 @@ export function smokeTestRelease(options: {
   version: string;
   tag?: string;
   allowUnsigned?: boolean;
+  windowsSigning?: 'signed' | 'unsigned';
 }): ReleaseSmokeReport;

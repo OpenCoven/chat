@@ -171,9 +171,12 @@ jobs:
       # absence is the expected state rather than an omission, and the build job
       # still reports it as a notice.
       #
-      # WINDOWS_CERTIFICATE and its password are absent too, for as long as
-      # Windows is deferred: the build matrix has no Windows entry, so nothing
-      # here would use them. They return with that entry.
+      # WINDOWS_CERTIFICATE and its password are absent too, by decision rather
+      # than omission: Windows ships unsigned (decided 2026-10-14; #411 tracks
+      # a signing route, since certificate authorities no longer issue the
+      # exportable .pfx this path expects). The build job signs the Windows
+      # installers whenever both secrets are present and says plainly when
+      # they are not. Add them to this list once a route is chosen.
       - name: Require signing material
         shell: bash
         env:
@@ -370,6 +373,11 @@ jobs:
     environment: release-signing
     permissions:
       contents: read
+    outputs:
+      # The same two secrets are read on every runner, so every matrix job
+      # writes the same value here. The publish job reads it to describe the
+      # Windows installers' signing state in the smoke report and the notes.
+      windows_signed: ${{ steps.signing.outputs.windows_signed }}
     env:
       # Installers are staged here, NOT in `dist/`. `dist/` is Vite's build
       # output (tauri.conf.json: beforeBuildCommand `pnpm build`, frontendDist
@@ -398,17 +406,18 @@ jobs:
             runner: macos-15-intel
             target: x86_64-apple-darwin
             bundles: app,dmg
-          # Windows is deferred until Windows code signing is set up (decided
-          # 2026-10-05 on #356): certificate authorities no longer issue the
-          # exportable .pfx that WINDOWS_CERTIFICATE expects. The Windows signing
-          # steps below stay in place. To restore Windows, re-add this entry
-          #   - platform: windows-x86_64
-          #     runner: windows-latest
-          #     target: x86_64-pc-windows-msvc
-          #     bundles: msi,nsis
-          # and, in the same change, require the two WINDOWS_* secrets in
-          # verify-tag and add the Windows installers back to
-          # scripts/release-smoke.mjs.
+          # Windows ships UNSIGNED, by decision (2026-10-14): certificate
+          # authorities no longer issue the exportable .pfx that the signing
+          # steps below expect, and a signing route is still being chosen on
+          # #411. SmartScreen warns on first launch, and the release notes say
+          # so. The signing steps stay in place and run as soon as both
+          # WINDOWS_* secrets exist. windows-2025 is pinned by name, like
+          # ubuntu-22.04, so a runner-image rollover cannot change what a tag
+          # builds with.
+          - platform: windows-x86_64
+            runner: windows-2025
+            target: x86_64-pc-windows-msvc
+            bundles: msi,nsis
           - platform: linux-x86_64
             runner: ubuntu-22.04
             target: x86_64-unknown-linux-gnu
@@ -524,12 +533,17 @@ jobs:
             fi
             echo "::warning::Apple signing material is absent or incomplete; producing an UNSIGNED, un-notarized macOS build. This is only reachable via allow_unsigned; do not publish these artifacts."
           fi
+          # Windows is the one platform that may build unsigned on the
+          # production path (decided 2026-10-14; see the matrix comment and
+          # #411). A half-set of the two secrets is still refused there: that
+          # is not a decision, it is a typo.
           if [ "${{ runner.os }}" = "Windows" ] && [ "${windows_signed}" = "false" ]; then
-            if [ "${ALLOW_UNSIGNED:-false}" != "true" ]; then
-              echo "::error::Windows signing material is absent or incomplete on the production path; refusing to build unsigned."
+            if { [ -n "${WINDOWS_CERTIFICATE:-}" ] || [ -n "${WINDOWS_CERTIFICATE_PASSWORD:-}" ]; } &&
+               [ "${ALLOW_UNSIGNED:-false}" != "true" ]; then
+              echo "::error::Only one of WINDOWS_CERTIFICATE and WINDOWS_CERTIFICATE_PASSWORD is set. Set both to sign the Windows installers, or neither to build them unsigned."
               exit 1
             fi
-            echo "::warning::Windows signing material is absent or incomplete; producing an UNSIGNED Windows build. This is only reachable via allow_unsigned; do not publish these artifacts."
+            echo "::warning::WINDOWS_CERTIFICATE is not configured; the Windows installers in this release are UNSIGNED and Windows SmartScreen will warn before they run. #411 tracks a signing route."
           fi
           if [ "${updater_signed}" = "false" ]; then
             echo "::notice::TAURI_SIGNING_PRIVATE_KEY is not set; updater artifacts and latest.json are not produced. Auto-update is opt-in and currently disabled (no plugins.updater / createUpdaterArtifacts:false). See docs/releasing.md."
@@ -922,20 +936,69 @@ jobs:
           esac
           echo "Smoke test passed for ${{ matrix.platform }}."
 
-      - name: Verify Windows Authenticode signatures
-        if: runner.os == 'Windows' && steps.signing.outputs.windows_signed == 'true'
+      # The bash smoke test above only proves the installers exist. What
+      # Windows shows people -- the version under Apps & features and the
+      # product name in the installer's properties -- is read back here, and
+      # the Authenticode state is held to what the signing step decided: a
+      # signed run requires a valid signature on every installer, an unsigned
+      # run states NotSigned in the log rather than implying anything else.
+      - name: Verify Windows installer metadata and signatures
+        if: runner.os == 'Windows'
         shell: pwsh
+        env:
+          EXPECTED_VERSION: ${{ needs.verify-tag.outputs.version }}
+          WINDOWS_SIGNED: ${{ steps.signing.outputs.windows_signed }}
         run: |
           Set-StrictMode -Version Latest
           $ErrorActionPreference = 'Stop'
           $installers = @(Get-ChildItem -Path "$env:STAGE_DIR/*" -File -Include *.msi,*.exe)
-          if ($installers.Count -eq 0) {
-            throw 'No Windows installers were staged for signature verification.'
+          if ($installers.Count -ne 2) {
+            throw "Expected one .msi and one .exe in $env:STAGE_DIR, found $($installers.Count): $($installers.Name -join ', ')"
           }
+
+          # The Property table is what msiexec and Apps & features read.
+          function Get-MsiProperty([string] $path, [string] $property) {
+            $installer = New-Object -ComObject WindowsInstaller.Installer
+            $database = $installer.GetType().InvokeMember('OpenDatabase', 'InvokeMethod', $null, $installer, @($path, 0))
+            $query = "SELECT Value FROM Property WHERE Property = '$property'"
+            $view = $database.GetType().InvokeMember('OpenView', 'InvokeMethod', $null, $database, $query)
+            $view.GetType().InvokeMember('Execute', 'InvokeMethod', $null, $view, $null) | Out-Null
+            $record = $view.GetType().InvokeMember('Fetch', 'InvokeMethod', $null, $view, $null)
+            if ($null -eq $record) { throw "$path has no $property property." }
+            $value = $record.GetType().InvokeMember('StringData', 'GetProperty', $null, $record, 1)
+            $view.GetType().InvokeMember('Close', 'InvokeMethod', $null, $view, $null) | Out-Null
+            return $value
+          }
+
           foreach ($installer in $installers) {
+            if ($installer.Extension -eq '.msi') {
+              $name = Get-MsiProperty $installer.FullName 'ProductName'
+              $version = Get-MsiProperty $installer.FullName 'ProductVersion'
+            } else {
+              # Tauri's NSIS template writes ProductName and ProductVersion
+              # into the installer's version resource.
+              $name = $installer.VersionInfo.ProductName
+              $version = $installer.VersionInfo.ProductVersion
+            }
+            if ($name -ne 'OpenCoven Chat') {
+              throw "$($installer.Name) names product '$name', expected 'OpenCoven Chat'."
+            }
+            if ($version -ne $env:EXPECTED_VERSION) {
+              throw "$($installer.Name) reports version '$version', expected $env:EXPECTED_VERSION."
+            }
+            Write-Host "  ok: $($installer.Name) is $name $version"
+
             $signature = Get-AuthenticodeSignature -FilePath $installer.FullName
-            if ($signature.Status -ne 'Valid') {
-              throw "$($installer.Name) has invalid Authenticode status: $($signature.Status)"
+            if ($env:WINDOWS_SIGNED -eq 'true') {
+              if ($signature.Status -ne 'Valid') {
+                throw "$($installer.Name) has invalid Authenticode status: $($signature.Status)"
+              }
+              Write-Host "  ok: $($installer.Name) is signed by $($signature.SignerCertificate.Subject)"
+            } else {
+              if ($signature.Status -ne 'NotSigned') {
+                throw "$($installer.Name) has Authenticode status $($signature.Status), but this run built unsigned."
+              }
+              Write-Host "::warning::$($installer.Name) is NOT signed (Authenticode status NotSigned); SmartScreen will warn before it runs."
             }
           }
 
@@ -1113,19 +1176,25 @@ jobs:
           echo "Verifying checksums..."
           shasum -a 256 -c SHA256SUMS
 
-      # Check the assembled set as a whole before anything is published: all
-      # four installers exactly once, SHA256SUMS covering every asset, version
-      # and identity agreeing with the tagged tree, and the updater and signing
+      # Check the assembled set as a whole before anything is published: every
+      # installer exactly once, SHA256SUMS covering every asset, version and
+      # identity agreeing with the tagged tree, and the updater and signing
       # state stated in the summary rather than implied.
       - name: Smoke-test the assembled release
         shell: bash
         env:
           ALLOW_UNSIGNED: ${{ inputs.allow_unsigned }}
+          WINDOWS_SIGNED: ${{ needs.build.outputs.windows_signed }}
         run: |
           set -euo pipefail
           args=(--dir release --version "${VERSION}" --tag "${TAG}")
           if [ "${ALLOW_UNSIGNED:-false}" = "true" ]; then
             args+=(--allow-unsigned)
+          fi
+          if [ "${WINDOWS_SIGNED}" = "true" ]; then
+            args+=(--windows-signing signed)
+          else
+            args+=(--windows-signing unsigned)
           fi
           # Capture the status so a failing report still reaches the summary.
           status=0
@@ -1153,6 +1222,7 @@ jobs:
           # run that is not a dry run; this repeats the refusal where the
           # release is actually created.
           ALLOW_UNSIGNED: ${{ inputs.allow_unsigned }}
+          WINDOWS_SIGNED: ${{ needs.build.outputs.windows_signed }}
         run: |
           set -euo pipefail
 
@@ -1182,11 +1252,21 @@ jobs:
           else
             updater_note='This release has no `latest.json`; auto-update is not enabled.'
           fi
+          # The Windows installers' signing state is a fact about the download,
+          # so the generated body states it even before the human-written notes
+          # are applied (docs/releasing.md § 1, step 10).
+          if [ "${WINDOWS_SIGNED}" = "true" ]; then
+            windows_note='The Windows installers are Authenticode-signed.'
+          else
+            windows_note='**Windows:** the `.msi` and `.exe` installers are not code-signed yet, so Windows SmartScreen shows "Windows protected your PC" the first time one runs. Check the download against `SHA256SUMS` first, then choose **More info** and **Run anyway**.'
+          fi
           notes="Automated release of OpenCoven Chat ${VERSION}.
 
           Verify downloads against \`SHA256SUMS\`:
 
               shasum -a 256 -c SHA256SUMS
+
+          ${windows_note}
 
           ${updater_note}"
 
