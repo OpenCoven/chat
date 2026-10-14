@@ -47,6 +47,7 @@ export const ALLOWED_PERMISSIONS = [
   'allow-setup-check',
   'allow-setup-run',
   'allow-setup-cancel',
+  'allow-setup-create-familiar',
   'core:window:allow-set-title',
 ];
 const FORBIDDEN_PERMISSION =

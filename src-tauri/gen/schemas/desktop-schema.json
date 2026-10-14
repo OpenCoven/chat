@@ -399,6 +399,12 @@
           "markdownDescription": "Enables the setup_check command without any pre-configured scope."
         },
         {
+          "description": "Enables the setup_create_familiar command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-setup-create-familiar",
+          "markdownDescription": "Enables the setup_create_familiar command without any pre-configured scope."
+        },
+        {
           "description": "Enables the setup_run command without any pre-configured scope.",
           "type": "string",
           "const": "allow-setup-run",
@@ -625,6 +631,12 @@
           "type": "string",
           "const": "deny-setup-check",
           "markdownDescription": "Denies the setup_check command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the setup_create_familiar command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-setup-create-familiar",
+          "markdownDescription": "Denies the setup_create_familiar command without any pre-configured scope."
         },
         {
           "description": "Denies the setup_run command without any pre-configured scope.",

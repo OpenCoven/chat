@@ -336,4 +336,40 @@ describe('first-run setup', () => {
     ).not.toBeInTheDocument();
     expect(within(step('Model sign-in')).getByText(CURL)).toBeInTheDocument();
   });
+
+  it('creates the first familiar by name and opens the chat', async () => {
+    const noFamiliar = report({ familiar: { ok: false, count: 0 } });
+    const checks = [noFamiliar, report()];
+    const createFamiliar = vi.fn(async (name: string) => ({ id: 'astra', displayName: name }));
+    await renderWith({ check: vi.fn(async () => checks.shift() ?? report()), createFamiliar });
+    const familiar = step('A familiar');
+    const button = within(familiar).getByRole('button', { name: 'Create familiar' });
+    expect(button).toBeDisabled();
+    fireEvent.change(within(familiar).getByRole('textbox', { name: 'Familiar name' }), {
+      target: { value: 'Astra' },
+    });
+    await act(async () => {
+      fireEvent.click(button);
+    });
+    expect(createFamiliar).toHaveBeenCalledWith('Astra');
+    expect(screen.getByText('The chat')).toBeInTheDocument();
+  });
+
+  it('says why a familiar was not created and keeps the name', async () => {
+    const createFamiliar = vi.fn(async () => {
+      throw new Error('You already have a familiar with that name. Choose another name.');
+    });
+    await renderWith({
+      check: vi.fn(async () => report({ familiar: { ok: false, count: 0 } })),
+      createFamiliar,
+    });
+    const familiar = step('A familiar');
+    const input = within(familiar).getByRole('textbox', { name: 'Familiar name' });
+    fireEvent.change(input, { target: { value: 'Astra' } });
+    await act(async () => {
+      fireEvent.click(within(familiar).getByRole('button', { name: 'Create familiar' }));
+    });
+    expect(within(familiar).getByRole('alert')).toHaveTextContent('already have a familiar');
+    expect(input).toHaveValue('Astra');
+  });
 });

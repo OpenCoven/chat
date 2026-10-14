@@ -167,7 +167,7 @@ export function Onboarding({
             <CovenStep report={phase.report} runner={runner} />
             <EngineStep report={phase.report} runner={runner} />
             <SignInStep report={phase.report} runner={runner} />
-            <FamiliarStep report={phase.report} />
+            <FamiliarStep report={phase.report} setup={setup} onCreated={() => void check()} />
           </ol>
         )}
         {phase.kind === 'checking' ? null : (
@@ -387,15 +387,75 @@ function SignInStep({ report, runner }: { report: SetupReport; runner: Runner })
   );
 }
 
-function FamiliarStep({ report }: { report: SetupReport }) {
+function FamiliarStep({
+  report,
+  setup,
+  onCreated,
+}: {
+  report: SetupReport;
+  setup: Setup;
+  onCreated: () => void;
+}) {
   const { count, ok } = report.familiar;
-  return (
-    <Step title="A familiar" done={ok}>
-      {ok ? (
+  const [name, setName] = useState('');
+  const [creating, setCreating] = useState(false);
+  const [failure, setFailure] = useState('');
+  if (ok) {
+    return (
+      <Step title="A familiar" done>
         <p>{count === 1 ? 'One familiar is ready.' : `${count} familiars are ready.`}</p>
-      ) : (
-        <p>You do not have a familiar yet. Creating your first one here is coming next.</p>
-      )}
+      </Step>
+    );
+  }
+  if (!setup.createFamiliar || !report.coven.ok) {
+    return (
+      <Step title="A familiar" done={false}>
+        <p>
+          {report.coven.ok
+            ? 'You do not have a familiar yet.'
+            : 'Install Coven first, then create your first familiar here.'}
+        </p>
+      </Step>
+    );
+  }
+  const create = setup.createFamiliar;
+  return (
+    <Step title="A familiar" done={false}>
+      <p>A familiar is who you chat with. Give your first one a name.</p>
+      <form
+        className="coven-onboarding-familiar"
+        onSubmit={(event) => {
+          event.preventDefault();
+          if (creating) return;
+          setCreating(true);
+          setFailure('');
+          create(name)
+            .then(onCreated)
+            .catch((error: unknown) =>
+              setFailure(
+                error instanceof Error ? error.message : 'The familiar could not be created.',
+              ),
+            )
+            .finally(() => setCreating(false));
+        }}
+      >
+        <input
+          aria-label="Familiar name"
+          className="coven-onboarding-input"
+          maxLength={64}
+          placeholder="Astra"
+          value={name}
+          onChange={(event) => setName(event.target.value)}
+        />
+        <FamButton variant="primary" size="sm" type="submit" disabled={creating || !name.trim()}>
+          {creating ? 'Creating…' : 'Create familiar'}
+        </FamButton>
+      </form>
+      {failure ? (
+        <p className="coven-onboarding-failure" role="alert">
+          {failure}
+        </p>
+      ) : null}
     </Step>
   );
 }

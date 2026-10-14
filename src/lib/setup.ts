@@ -41,6 +41,8 @@ export type Setup = {
   /** Runs one step; resolves when it finishes and rejects with a readable reason. */
   run?(runId: string, step: SetupRunStep, onEvent: (event: SetupRunEvent) => void): Promise<void>;
   cancel?(runId: string): Promise<void>;
+  /** Creates a familiar through Coven; rejects with a reason a person can act on. */
+  createFamiliar?(name: string): Promise<{ id: string; displayName: string }>;
 };
 
 const SIGN_IN_STATES: readonly string[] = ['signed-in', 'signed-out', 'missing', 'unknown'];
@@ -153,6 +155,24 @@ export function createSetup(
     async cancel(runId) {
       if (!available()) return;
       await call('setup_cancel', 'This setup step could not be stopped.', { runId });
+    },
+    async createFamiliar(name) {
+      if (!available()) throw new Error('Setup requires the desktop app.');
+      const value = await call('setup_create_familiar', 'The familiar could not be created.', {
+        name,
+      });
+      if (
+        !record(value) ||
+        typeof value.id !== 'string' ||
+        value.id.length === 0 ||
+        value.id.length > 64 ||
+        typeof value.displayName !== 'string' ||
+        value.displayName.length === 0 ||
+        value.displayName.length > 256
+      ) {
+        throw new Error('Coven returned an invalid familiar.');
+      }
+      return { id: value.id, displayName: value.displayName };
     },
   };
 }
