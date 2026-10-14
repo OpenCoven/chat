@@ -151,12 +151,16 @@ async function cleanupRoot(owned: OwnedRoot) {
     }
     expect(processIsOpenable(pid)).toBe(false);
   }
+  // A target binary that has just exited can stay locked for a moment while
+  // Windows releases its image section, and Defender scans a freshly copied
+  // executable. Node retries EPERM and EBUSY only when asked (#446).
+  const removal = { recursive: true, force: true, maxRetries: 20, retryDelay: 100 } as const;
   for (const entry of readdirSync(owned.path)) {
-    rmSync(resolve(owned.path, entry), { recursive: true, force: true });
+    rmSync(resolve(owned.path, entry), removal);
   }
   expect(readdirSync(owned.path)).toEqual([]);
   assertFleetHelperUnchanged();
-  rmSync(owned.path, { recursive: true, force: true });
+  rmSync(owned.path, removal);
   roots.splice(roots.indexOf(owned), 1);
 }
 

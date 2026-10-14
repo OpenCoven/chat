@@ -1366,7 +1366,10 @@ mod windows_cleanup {
             credential_account(TARGET_A),
             credential_account(TARGET_B),
         ] {
-            assert!(!entry_present(&service, &account));
+            assert!(
+                !entry_present(&service, &account),
+                "cleanup reported success but {account} survived in {service}"
+            );
         }
         assert!(entry_present(&service, &credential_account(UNRELATED)));
         assert!(entry_present(&unrelated_service, &unrelated_account));
@@ -1409,8 +1412,15 @@ mod windows_cleanup {
 
         let final_grant = rpc.issue(&[TARGET_A]);
         assert_eq!(rpc.cleanup(&final_grant)["ok"], true);
-        assert!(!entry_present(&service, INSTALLATION_ACCOUNT));
-        assert!(!entry_present(&service, &credential_account(TARGET_A)));
+        for account in [
+            INSTALLATION_ACCOUNT.to_owned(),
+            credential_account(TARGET_A),
+        ] {
+            assert!(
+                !entry_present(&service, &account),
+                "final cleanup reported success but {account} survived in {service}"
+            );
+        }
         assert!(entry_present(&service, &credential_account(UNRELATED)));
         assert!(entry_present(&unrelated_service, &unrelated_account));
         rpc.shutdown();
