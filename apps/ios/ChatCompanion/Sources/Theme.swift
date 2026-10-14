@@ -17,6 +17,9 @@ enum Palette {
   static let accentForeground = dynamic(dark: 0x0C0C0E, light: 0xFFFFFF)
   static let warning = dynamic(dark: 0xCDAB76, light: 0x945A00)
   static let danger = dynamic(dark: 0xCD7671, light: 0xB63132)
+  /// A live connection or a reply in progress. The desktop greys its success
+  /// token; a phone glanced at across a room needs the dot to read as "on".
+  static let online = dynamic(dark: 0x8FCB9B, light: 0x2F8F57)
 
   private static func dynamic(dark: Int, light: Int) -> Color {
     dynamic(dark: (dark, 1), light: (light, 1))

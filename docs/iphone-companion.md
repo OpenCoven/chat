@@ -30,11 +30,28 @@ Chat running. Public URLs, relays and cellular access are not supported.
 
 ## Chat
 
-Select a familiar to read its recent Chat history. Send text and watch replies
-arrive, or stop an active run. A run started on either device occupies the same
-runtime; a second send cannot bypass it. Archived chats are readable; restore
-one on the Mac before sending. Attachments, write approvals, remote shell and
-push notifications are not part of this version.
+Tap the familiar's name at the top to switch familiars. Each card shows the
+familiar's description, its current chat, and whether it is replying or
+archived. Send text and watch replies arrive, or stop an active run.
+
+Replies render as Markdown, the way Chat on the Mac shows them:
+
+- headings, lists, task lists, quotes and tables;
+- code blocks with a **Copy** button (long blocks fold after 24 lines);
+- tool calls fold into one line, such as "Read 2 files and ran 1 command",
+  which you tap to see each call. While a reply runs, its last line says what
+  the familiar is doing, such as "Running a command…".
+
+Long-press a reply to copy it as text or Markdown, to select part of it, or to
+share it. Long-press one of your own messages to copy it or, when the composer
+is empty, to edit it as a new message. Pull down to refresh.
+**⋯ › Connection Details** shows the Mac's address, the certificate fingerprint
+the phone checks, and the app version.
+
+A run started on either device occupies the same runtime; a second send cannot
+bypass it. Archived chats are readable; restore one on the Mac before sending.
+Attachments, write approvals, remote shell and push notifications are not part
+of this version.
 
 A connection failure never automatically sends the message again. The phone
 checks the original request receipt after reconnecting. If its outcome remains

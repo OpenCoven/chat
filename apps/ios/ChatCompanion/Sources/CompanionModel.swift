@@ -20,7 +20,7 @@ import Observation
   private(set) var status = "Connect to your Mac"
   private var drafts: [String: String] = [:]
   private var sessionId: String?
-  private var historyReady = false
+  private(set) var historyReady = false
   private var generation = 0
   private var selection = 0
   private var refreshing = false
