@@ -679,6 +679,22 @@ jobs:
           APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
         run: |
           set -euo pipefail
+          # Apple's ticket service (api.apple-cloudkit.com) dropped the
+          # connection mid-request three times on macos-15-intel on 2026-10-14
+          # (#461): once here, twice in the smoke test, each after the ticket
+          # had been issued and the image stapled. stapler exits 68 for that
+          # as well as for a missing ticket, so each call gets a few attempts
+          # with a pause between. A real rejection fails all of them.
+          stapler_retry() {
+            local attempt
+            for attempt in 1 2 3 4 5; do
+              if xcrun stapler "$@"; then return 0; fi
+              echo "stapler $1 failed (attempt ${attempt} of 5); retrying in 20s..."
+              sleep 20
+            done
+            echo "::error::stapler $* failed on every attempt."
+            return 1
+          }
           # Same key file `Build installers` wrote; the next step removes it.
           case "${NOTARY}" in
             api-key)
@@ -710,8 +726,8 @@ jobs:
               if [ -n "${id}" ]; then xcrun notarytool log "${id}" "${credentials[@]}" || true; fi
               exit 1
             fi
-            xcrun stapler staple "${dmg}"
-            xcrun stapler validate "${dmg}"
+            stapler_retry staple "${dmg}"
+            stapler_retry validate "${dmg}"
             spctl --assess --type open --context context:primary-signature --verbose=2 "${dmg}"
           done
           [ "${found}" -eq 1 ] || { echo "::error::No .dmg was produced to notarize."; exit 1; }
@@ -811,6 +827,22 @@ jobs:
           TARGET: ${{ matrix.target }}
         run: |
           set -euo pipefail
+          # Apple's ticket service (api.apple-cloudkit.com) dropped the
+          # connection mid-request three times on macos-15-intel on 2026-10-14
+          # (#461): once here, twice in the smoke test, each after the ticket
+          # had been issued and the image stapled. stapler exits 68 for that
+          # as well as for a missing ticket, so each call gets a few attempts
+          # with a pause between. A real rejection fails all of them.
+          stapler_retry() {
+            local attempt
+            for attempt in 1 2 3 4 5; do
+              if xcrun stapler "$@"; then return 0; fi
+              echo "stapler $1 failed (attempt ${attempt} of 5); retrying in 20s..."
+              sleep 20
+            done
+            echo "::error::stapler $* failed on every attempt."
+            return 1
+          }
           cd "${STAGE_DIR}"
 
           assert_nonempty() {
@@ -877,8 +909,8 @@ jobs:
                   # The image is what people download, so its own ticket is
                   # checked too, not only the app's (#407).
                   for dmg in *.dmg; do
-                    xcrun stapler validate "${dmg}" || {
-                      echo "::error::${dmg} has no stapled notarization ticket."; exit 1; }
+                    stapler_retry validate "${dmg}" || {
+                      echo "::error::${dmg} has no stapled notarization ticket, or Apple's ticket service could not be reached (#461)."; exit 1; }
                     spctl --assess --type open --context context:primary-signature --verbose=2 "${dmg}" || {
                       echo "::error::spctl assessment failed for ${dmg}."; exit 1; }
                   done
