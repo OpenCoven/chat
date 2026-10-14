@@ -12,21 +12,10 @@ struct CompanionRoot: View {
   var body: some View {
     NavigationStack {
       Group {
-        if model.pairing == nil { PairingView(model: model, link: $link) } else { workspace }
-      }
-      .navigationTitle(model.pairing == nil ? "Coven Chat" : "Familiars")
-      .toolbar {
-        if model.pairing != nil {
-          ToolbarItem(placement: .topBarTrailing) {
-            Menu {
-              Button("Refresh", systemImage: "arrow.clockwise") { Task { await model.refresh() } }
-              Button("Forget Mac", systemImage: "link.badge.plus", role: .destructive) {
-                forget = true
-              }
-            } label: {
-              Image(systemName: "ellipsis.circle").accessibilityLabel("Connection options")
-            }
-          }
+        if model.pairing == nil {
+          PairingView(model: model, link: $link)
+        } else {
+          Workspace(model: model, forget: $forget, dismissSend: $dismissSend)
         }
       }
       .confirmationDialog("Forget this Mac?", isPresented: $forget, titleVisibility: .visible) {
@@ -86,117 +75,376 @@ struct CompanionRoot: View {
       discovery.stop()
     }
   }
-  private var workspace: some View {
-    VStack(spacing: 0) {
-      VStack(alignment: .leading, spacing: 8) {
-        Label(model.status, systemImage: model.connected ? "checkmark.circle" : "wifi.slash")
-          .font(.caption).foregroundStyle(model.connected ? Color.secondary : Color.orange)
-          .accessibilityIdentifier("connection-status")
-        if !model.familiars.isEmpty {
-          Picker(
-            "Familiar",
-            selection: Binding(
-              get: { model.selectedId ?? "" }, set: { value in Task { await model.select(value) } })
-          ) {
-            ForEach(model.familiars) { familiar in Text(familiar.displayName).tag(familiar.id) }
-          }.pickerStyle(.menu).accessibilityIdentifier("familiar-picker")
+}
+
+/// The paired screen: the chosen familiar in a glass header, its chat as a
+/// Markdown reader, and a floating composer.
+private struct Workspace: View {
+  @Bindable var model: CompanionModel
+  @Binding var forget: Bool
+  @Binding var dismissSend: Bool
+  @State private var picking = false
+  @State private var details = false
+  /// Set from Connection Details, which asks to forget only once it has closed:
+  /// a confirmation cannot present while a sheet is still dismissing.
+  @State private var forgetAfterDetails = false
+  @State private var scroll = ScrollPosition(edge: .bottom)
+  @State private var atBottom = true
+  @FocusState private var composing: Bool
+  @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+  private var familiar: Familiar? { model.familiars.first { $0.id == model.selectedId } }
+  private var replyingId: String? {
+    model.activeRun?.running == true ? model.activeRun?.familiarId : nil
+  }
+
+  var body: some View {
+    let page = content
+      .safeAreaInset(edge: .top, spacing: 0) { header }
+      .safeAreaInset(edge: .bottom, spacing: 0) { composer }
+      .background(backdrop.ignoresSafeArea())
+      .toolbarVisibility(.hidden, for: .navigationBar)
+    return page
+      .sheet(isPresented: $picking) { picker }
+      .sheet(isPresented: $details) {
+        if forgetAfterDetails {
+          forgetAfterDetails = false
+          forget = true
         }
-        if !model.error.isEmpty {
-          Text(model.error).font(.callout).foregroundStyle(.red).accessibilityIdentifier(
-            "connection-error")
-          if model.pendingRunId != nil && model.activeRun?.running != true {
-            Button("Review uncertain send") { dismissSend = true }.font(.callout)
-          }
-        }
-      }.frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal).padding(.vertical, 10)
-      Divider()
-      if model.familiars.isEmpty {
-        ContentUnavailableView(
-          "No familiars", systemImage: "sparkles",
-          description: Text(
-            model.connected
-              ? "Configure a familiar in Coven on your Mac, then refresh."
-              : "Waiting for your Mac to reconnect."))
-      } else {
-        transcript
+      } content: {
+        connection
       }
-      Divider()
-      composer
+      .modifier(RunHaptics(pendingRunId: model.pendingRunId, running: model.activeRun?.running))
+  }
+
+  private var picker: some View {
+    FamiliarPicker(
+      familiars: model.familiars, sessions: model.sessions, selectedId: model.selectedId,
+      respondingId: replyingId
+    ) { id in Task { await model.select(id) } }
+  }
+
+  @ViewBuilder private var connection: some View {
+    if let pairing = model.pairing {
+      ConnectionDetails(
+        pairing: pairing, status: model.status, connected: model.connected,
+        familiarCount: model.familiars.count
+      ) { forgetAfterDetails = true }
     }
   }
-  private var transcript: some View {
-    ScrollViewReader { proxy in
-      ScrollView {
-        LazyVStack(alignment: .leading, spacing: 20) {
-          if model.hasMore {
-            Text("Showing recent history. Open Chat on your Mac for earlier turns.").font(.footnote)
-              .foregroundStyle(.secondary)
-          }
-          if model.messages.isEmpty && model.shownRun == nil {
-            Text("Start a conversation with your familiar.").foregroundStyle(.secondary).padding(
-              .top, 32)
-          }
-          ForEach(model.messages) { message in MessageRow(message: message) }
-          if let run = model.shownRun {
-            ForEach(run.messages) { message in MessageRow(message: message) }
-            if model.activeRun?.running == true {
-              Label("Responding…", systemImage: "ellipsis").font(.callout).foregroundStyle(
-                .secondary
-              ).accessibilityIdentifier("run-status")
+
+  private var backdrop: some View {
+    ZStack {
+      Palette.bgBase
+      RadialGradient(
+        colors: [Palette.accent.opacity(0.10), .clear], center: .init(x: 0.5, y: 0),
+        startRadius: 0, endRadius: 420)
+    }
+  }
+
+  // MARK: Header
+
+  private var header: some View {
+    HStack(spacing: 12) {
+      if let familiar {
+        FamiliarAvatar(familiar: familiar, size: 40, glowing: replyingId == familiar.id)
+          .onTapGesture { picking = true }
+        VStack(alignment: .leading, spacing: 2) {
+          Button {
+            picking = true
+          } label: {
+            HStack(spacing: 5) {
+              Text(familiar.displayName).font(.headline).foregroundStyle(Palette.textPrimary)
+                .lineLimit(1)
+              Image(systemName: "chevron.down")
+                .font(.caption.weight(.bold)).foregroundStyle(Palette.textMuted)
             }
+            .contentShape(Rectangle())
           }
-          Color.clear.frame(height: 1).id("latest")
-        }.padding().frame(maxWidth: 760, alignment: .leading).frame(maxWidth: .infinity)
+          .buttonStyle(.plain)
+          .accessibilityLabel("Familiar: \(familiar.displayName)")
+          .accessibilityHint("Choose another familiar")
+          .accessibilityIdentifier("familiar-picker")
+          connectionLine
+        }
+      } else {
+        Image("ChatLogo").resizable().scaledToFit().frame(width: 28, height: 28)
+          .foregroundStyle(Palette.textPrimary).accessibilityHidden(true)
+        VStack(alignment: .leading, spacing: 2) {
+          Text("Coven Chat").font(.headline).foregroundStyle(Palette.textPrimary)
+          connectionLine
+        }
       }
-      .defaultScrollAnchor(.bottom)
-      .onChange(of: model.selectedId) { _, _ in proxy.scrollTo("latest", anchor: .bottom) }
-      .accessibilityIdentifier("transcript")
+      Spacer(minLength: 8)
+      Menu {
+        Button("Refresh", systemImage: "arrow.clockwise") { Task { await model.refresh() } }
+        Button("Connection Details", systemImage: "info.circle") { details = true }
+        Divider()
+        Button("Forget Mac", systemImage: "link.badge.plus", role: .destructive) {
+          forget = true
+        }
+      } label: {
+        Image(systemName: "ellipsis")
+          .font(.body.weight(.semibold)).foregroundStyle(Palette.textPrimary)
+          .frame(width: 40, height: 40)
+          .glass(.control, cornerRadius: 20)
+          .accessibilityLabel("Connection options")
+      }
+    }
+    .padding(.horizontal, 16).padding(.top, 6).padding(.bottom, 10)
+    .background {
+      Rectangle().fill(.ultraThinMaterial)
+        .overlay(alignment: .bottom) { Rectangle().fill(Palette.border).frame(height: 1) }
+        .ignoresSafeArea(edges: .top)
     }
   }
+
+  private var connectionLine: some View {
+    HStack(spacing: 6) {
+      Circle().fill(model.connected ? Palette.online : Palette.warning).frame(width: 6, height: 6)
+      Text(model.status).font(.caption).foregroundStyle(Palette.textSecondary).lineLimit(1)
+    }
+    .accessibilityElement(children: .combine)
+    .accessibilityIdentifier("connection-status")
+  }
+
+  // MARK: Transcript
+
+  @ViewBuilder private var content: some View {
+    if model.familiars.isEmpty {
+      ContentUnavailableView {
+        Label("No familiars", systemImage: "sparkles")
+      } description: {
+        Text(
+          model.connected
+            ? "Configure a familiar in Coven on your Mac, then refresh."
+            : "Waiting for your Mac to reconnect.")
+      } actions: {
+        if model.connected {
+          Button("Refresh") { Task { await model.refresh() } }.buttonStyle(.bordered)
+        }
+      }
+      .frame(maxWidth: .infinity, maxHeight: .infinity)
+    } else {
+      transcript
+    }
+  }
+
+  private var transcript: some View {
+    let history = TranscriptItem.build(model.messages)
+    let run = model.shownRun.map { TranscriptItem.build($0.messages) } ?? []
+    return ScrollView {
+      LazyVStack(alignment: .leading, spacing: 18) {
+        if model.hasMore {
+          NoticeView(
+            text: "Showing recent history. Open Chat on your Mac for earlier turns.",
+            symbol: "clock.arrow.circlepath")
+        }
+        ForEach(history) { item in row(item) }
+        if model.shownRun != nil {
+          ForEach(run) { item in row(item) }
+          if model.activeRun?.running == true {
+            WorkingIndicator(familiar: familiar, phase: Self.phase(run))
+              .accessibilityIdentifier("run-status")
+          }
+        }
+      }
+      .padding(.horizontal, 18).padding(.vertical, 16)
+      .frame(maxWidth: 760, alignment: .leading).frame(maxWidth: .infinity)
+    }
+    .scrollPosition($scroll)
+    .defaultScrollAnchor(.bottom)
+    .scrollDismissesKeyboard(.interactively)
+    .refreshable { await model.refresh() }
+    .onScrollGeometryChange(for: Bool.self) { geometry in
+      geometry.visibleRect.maxY >= geometry.contentSize.height - 80
+    } action: { _, bottom in
+      atBottom = bottom
+    }
+    .onChange(of: contentMark) { _, _ in
+      if atBottom { withAnimation(reduceMotion ? nil : .smooth) { scroll.scrollTo(edge: .bottom) } }
+    }
+    .onChange(of: model.selectedId) { _, _ in scroll.scrollTo(edge: .bottom) }
+    .overlay(alignment: .bottom) {
+      if !atBottom {
+        Button {
+          withAnimation(reduceMotion ? nil : .smooth) { scroll.scrollTo(edge: .bottom) }
+        } label: {
+          Image(systemName: "arrow.down")
+            .font(.subheadline.weight(.bold)).foregroundStyle(Palette.textPrimary)
+            .frame(width: 38, height: 38)
+            .glass(.control, cornerRadius: 19)
+        }
+        .accessibilityLabel("Scroll to latest")
+        .padding(.bottom, 10)
+        .transition(.scale(scale: 0.8).combined(with: .opacity))
+      }
+    }
+    .overlay {
+      // Outside the scroll view, which anchors short content to the bottom.
+      if model.messages.isEmpty && model.shownRun == nil {
+        if model.connected && !model.historyReady { ProgressView() } else { emptyState }
+      }
+    }
+    .animation(reduceMotion ? nil : .snappy, value: atBottom)
+    .accessibilityIdentifier("transcript")
+  }
+
+  /// Changes whenever the transcript grows, to follow it while at the bottom.
+  private var contentMark: String {
+    let run = model.shownRun
+    return
+      "\(model.messages.count)|\(run?.messages.count ?? 0)|\(run?.messages.last?.text.count ?? 0)|\(model.activeRun?.running == true)"
+  }
+
+  @ViewBuilder private func row(_ item: TranscriptItem) -> some View {
+    switch item {
+    case .user(_, let text):
+      UserBubble(
+        text: text,
+        onReuse: model.draft.isEmpty && !model.archived
+          ? {
+            model.draft = text
+            composing = true
+          } : nil)
+    case .reply(_, let text):
+      ReplyView(text: text).equatable()
+    case .tools(_, let calls):
+      ToolGroupView(calls: calls)
+    case .notice(_, let text):
+      NoticeView(text: text)
+    }
+  }
+
+  /// What the running reply is doing, from the last thing it wrote.
+  static func phase(_ items: [TranscriptItem]) -> String {
+    switch items.last {
+    case .tools(_, let calls):
+      calls.last(where: { $0.name != nil }).map { ToolKind(name: $0.name).progress } ?? "Working"
+    case .reply: "Writing"
+    default: "Thinking"
+    }
+  }
+
+  private var emptyState: some View {
+    VStack(spacing: 14) {
+      FamiliarAvatar(familiar: familiar, size: 76, glowing: true)
+      Text("Chat with \(familiar?.displayName ?? "your familiar")")
+        .font(.title2.weight(.semibold)).foregroundStyle(Palette.textPrimary)
+      if let description = familiar?.description, !description.isEmpty {
+        Text(description).font(.subheadline).foregroundStyle(Palette.textSecondary)
+          .multilineTextAlignment(.center).lineLimit(3)
+      }
+      Text("Messages you send here run on your Mac.")
+        .font(.footnote).foregroundStyle(Palette.textMuted)
+    }
+    .padding(.horizontal, 32)
+    .frame(maxWidth: 520)
+  }
+
+  // MARK: Composer
+
   private var composer: some View {
-    VStack(alignment: .leading, spacing: 10) {
+    VStack(alignment: .leading, spacing: 8) {
+      if !model.error.isEmpty { errorCard }
       if model.archived {
-        Text("This chat is archived. Restore it on your Mac to send a message.").font(.callout)
-          .foregroundStyle(.secondary)
+        NoticeView(
+          text: "This chat is archived. Restore it on your Mac to send a message.",
+          symbol: "archivebox")
       }
       if let run = model.activeRun, run.running, run.familiarId != model.selectedId {
-        Text("Another familiar is responding.").font(.caption).foregroundStyle(.secondary)
+        let name = model.familiars.first { $0.id == run.familiarId }?.displayName
+        NoticeView(
+          text: "\(name ?? "Another familiar") is replying. You can send once it finishes.",
+          symbol: "hourglass")
       }
-      HStack(alignment: .bottom, spacing: 12) {
-        TextField("Message your familiar", text: $model.draft, axis: .vertical)
-          .lineLimit(1...6).textFieldStyle(.roundedBorder).disabled(
-            model.selectedId == nil || model.archived
-          )
-          .accessibilityIdentifier("composer")
-        if model.activeRun?.running == true {
-          Button("Stop", systemImage: "stop.fill") { Task { await model.stop() } }
-            .labelStyle(.iconOnly).buttonStyle(.bordered).disabled(model.busy)
-            .accessibilityIdentifier("stop")
-        } else {
-          Button("Send", systemImage: "arrow.up") { Task { await model.send() } }
-            .labelStyle(.iconOnly).buttonStyle(.borderedProminent).disabled(!model.canSend)
-            .accessibilityIdentifier("send")
+      HStack(alignment: .bottom, spacing: 6) {
+        TextField(
+          "Message \(familiar?.displayName ?? "your familiar")", text: $model.draft, axis: .vertical
+        )
+        .lineLimit(1...6)
+        .focused($composing)
+        .padding(.leading, 16).padding(.vertical, 11)
+        .disabled(model.selectedId == nil || model.archived)
+        .accessibilityIdentifier("composer")
+        action.padding(4)
+      }
+      .glass(.control, cornerRadius: 24)
+      .accentGlow(active: composing)
+      if model.draft.utf8.count > 32768 {
+        Text("Message is too long (maximum 32,768 bytes).")
+          .font(.caption).foregroundStyle(Palette.danger)
+      }
+    }
+    .padding(.horizontal, 12).padding(.top, 10).padding(.bottom, 8)
+    .background {
+      LinearGradient(
+        colors: [Palette.bgBase.opacity(0), Palette.bgBase.opacity(0.92), Palette.bgBase],
+        startPoint: .top, endPoint: .bottom
+      )
+      .ignoresSafeArea()
+    }
+  }
+
+  @ViewBuilder private var action: some View {
+    if model.activeRun?.running == true {
+      Button {
+        Task { await model.stop() }
+      } label: {
+        Image(systemName: "stop.fill")
+          .font(.footnote.weight(.bold)).foregroundStyle(Palette.bgBase)
+          .frame(width: 36, height: 36)
+          .background(Palette.textPrimary, in: Circle())
+      }
+      .disabled(model.busy)
+      .accessibilityLabel("Stop")
+      .accessibilityIdentifier("stop")
+    } else {
+      Button {
+        Task { await model.send() }
+      } label: {
+        Image(systemName: "arrow.up")
+          .font(.body.weight(.bold))
+          .foregroundStyle(model.canSend ? Palette.accentForeground : Palette.textMuted)
+          .frame(width: 36, height: 36)
+          .background(model.canSend ? Palette.accent : Palette.bgElevated, in: Circle())
+      }
+      .disabled(!model.canSend)
+      .accessibilityLabel("Send")
+      .accessibilityIdentifier("send")
+    }
+  }
+
+  private var errorCard: some View {
+    HStack(alignment: .top, spacing: 10) {
+      Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(Palette.warning)
+      VStack(alignment: .leading, spacing: 6) {
+        Text(model.error).font(.footnote).foregroundStyle(Palette.textPrimary)
+          .fixedSize(horizontal: false, vertical: true)
+          .accessibilityIdentifier("connection-error")
+        if model.pendingRunId != nil && model.activeRun?.running != true {
+          Button("Review uncertain send") { dismissSend = true }
+            .font(.footnote.weight(.semibold))
         }
       }
-      if model.draft.utf8.count > 32768 {
-        Text("Message is too long (maximum 32,768 bytes).").font(.caption).foregroundStyle(.red)
-      }
-    }.padding().background(.bar)
+      Spacer(minLength: 0)
+    }
+    .padding(12)
+    .glass(.raised, cornerRadius: 16)
   }
 }
 
-private struct MessageRow: View {
-  let message: Message
-  var body: some View {
-    VStack(alignment: .leading, spacing: 6) {
-      Text(message.role == "user" ? "You" : message.role == "assistant" ? "Familiar" : "Activity")
-        .font(.caption.weight(.semibold)).foregroundStyle(.secondary)
-      Text(message.text).textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading)
-    }.padding(message.role == "user" ? 14 : 0)
-      .background(
-        message.role == "user" ? Palette.accent.opacity(0.08) : Color.clear,
-        in: RoundedRectangle(cornerRadius: 16)
-      )
-      .accessibilityElement(children: .combine)
+/// A light tap when a message leaves, and a success tap when its reply ends.
+private struct RunHaptics: ViewModifier {
+  let pendingRunId: String?
+  let running: Bool?
+  func body(content: Content) -> some View {
+    content
+      .sensoryFeedback(.impact(weight: .light), trigger: pendingRunId) {
+        (old: String?, new: String?) in old == nil && new != nil
+      }
+      .sensoryFeedback(.success, trigger: running) { (old: Bool?, new: Bool?) in
+        old == true && new == false
+      }
   }
 }
