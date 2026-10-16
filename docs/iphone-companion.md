@@ -25,6 +25,9 @@ in memory on the phone; Chat continues to save history on the Mac.
 **Turn off** closes the listener and its connections without revoking pairing.
 Turn it on again to permit saved phones. **Forget paired phones** rotates access
 for all phones. **Forget Mac** on iPhone deletes that phone's saved pairing.
+Deleting the app does not: iOS keeps the pairing in the Keychain, so a
+reinstalled app opens already connected. Use **Forget Mac** before you delete
+the app or hand the phone on (#465).
 The listener starts off when the desktop app launches. Keep the Mac awake and
 Chat running. Public URLs, relays and cellular access are not supported.
 
@@ -96,9 +99,9 @@ exists. The test suite checks malformed links, incorrect certificates/tokens,
 Keychain replacement/deletion, forgotten-client races, uncertain sends, and
 pair/send/stream/stop/relaunch/forget through the native UI.
 
-The `iPhone companion` GitHub workflow runs this path. Physical iPhone acceptance
-and TestFlight distribution are separate from simulator tests and unsigned device
-builds. `project.yml` signs under the Soul Protocol LLC team (`9LR8Z8UQ9X`), where
+The `iPhone companion` GitHub workflow runs this path. Simulator tests and
+unsigned device builds do not prove physical-device behaviour or TestFlight
+distribution; see [Device acceptance](#device-acceptance). `project.yml` signs under the Soul Protocol LLC team (`9LR8Z8UQ9X`), where
 the bundle ID `ai.opencoven.chat.companion` is registered. To install on a
 physical device, sign in to Xcode with an account on that team, open the
 generated project and run on the device. `test-e2e.sh` overrides the team and
@@ -124,6 +127,46 @@ without uploading.
 The upload needs an App Store Connect app record for the bundle ID. The App
 Store Connect API cannot create one, so create it once on the website under
 **Apps → New App**. A build appears in TestFlight after Apple finishes
-processing it; internal testers on the team can then install it from the
-TestFlight app. External testers need Beta App Review first. Physical-device
-acceptance is tracked in #422; a successful upload does not prove it.
+processing it. External testers need Beta App Review first.
+
+### Install from TestFlight
+
+1. Accept the TestFlight invitation for **Coven Chat** sent to your Apple ID.
+   Internal testers are members of the team's *Internal* group, which can see
+   every build.
+2. On the iPhone, open the **TestFlight** app, choose **Coven Chat** and tap
+   **Install** (or **Update**). TestFlight installs the newest build; earlier
+   builds are under **Previous Builds**.
+3. Open Coven Chat and pair it with your Mac as described in
+   [Connect](#connect).
+
+A successful upload does not prove the app works on a device; that is what the
+device acceptance run below is for.
+
+To tell which build a phone runs, use App Store Connect, not `devicectl`: a
+TestFlight install reports `builtByDeveloper: true` in `xcrun devicectl device
+info apps`, the same as an Xcode install. A TestFlight install raises the
+build's `installCount` in App Store Connect.
+
+## Device acceptance
+
+Accepted on 2026-10-15 on an iPhone 16 Pro Max running iOS 27.0.1, with
+TestFlight build 0.2.0 (1454) and the published Chat 0.0.5 on macOS 26.7.1
+(#422). On a physical phone, against the shipped desktop app:
+
+- pairing by scanning the QR with the camera, and by **Enter pairing link**;
+- reading, sending, streaming and **Stop** over the real Wi-Fi network, through
+  the Mac's firewall rule for the shipped app;
+- reconnecting by itself after the Mac sleeps and after its Wi-Fi drops;
+- keeping the pairing across an app relaunch and a phone restart, and
+  removing it with **Forget Mac**;
+- recovering a reply after the app spends 30 seconds in the background;
+- not sending a message twice when the network drops during the send.
+
+Not proven yet:
+
+- **Local Network permission.** iOS 27.0.1 never asked for it and lists no
+  Local Network switch for the app, although the app declares it and browses
+  `_coven-chat._tcp`. The denied state could not be tested (#465).
+- **A change of the Mac's address while paired.** The Mac kept its address
+  when its Wi-Fi was turned off and on.
