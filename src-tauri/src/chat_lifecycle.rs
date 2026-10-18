@@ -1,5 +1,5 @@
 use std::{
-    collections::{BTreeMap, HashSet},
+    collections::{BTreeMap, BTreeSet, HashSet},
     fs::{self, File, OpenOptions},
     io::{Read, Write},
     path::Path,
@@ -130,6 +130,79 @@ fn remove_transcripts(data: &Path, id: &str) -> Result<(), String> {
         }
     }
     Ok(())
+}
+
+/// Removes what Delete chat left behind before it removed whole chats: the
+/// remaining transcripts of chats you deleted, and staged attachment folders
+/// no remaining transcript names. Coven's session list (`listing`, from
+/// `coven sessions --all --json`) still records each deleted chat's earlier
+/// turns, which is how they are found. A session a live chat continues is
+/// kept, and so is every conversation you didn't delete. Callers hold the runs
+/// lock with no run active, then STORAGE_LOCK: a run stages its attachments
+/// before its transcript names them.
+pub(crate) fn sweep_deleted_leftovers(
+    data: &Path,
+    listing: &serde_json::Value,
+) -> Result<(), String> {
+    const FAILED: &str = "Chat could not remove files left by deleted chats.";
+    let directory = crate::coven_runtime::transcripts_dir(data, false)?;
+    let states = load(data)?;
+    let mut live = HashSet::new();
+    for head in crate::chat_canonical::load(data)?.into_values().flatten() {
+        if states.get(&head) != Some(&Lifecycle::Deleted) {
+            live.extend(lineage(data, &head));
+        }
+    }
+    let sessions = listing
+        .get("sessions")
+        .and_then(serde_json::Value::as_array)
+        .ok_or("Coven returned invalid sessions.")?;
+    let mut leftovers = BTreeSet::new();
+    for (id, _) in states.iter().filter(|(_, s)| **s == Lifecycle::Deleted) {
+        let record = sessions
+            .iter()
+            .find(|session| session["id"].as_str() == Some(id));
+        if let Some(record) = record {
+            let turns =
+                crate::coven_runtime::history_sessions(record, sessions).unwrap_or_default();
+            leftovers.extend(
+                turns
+                    .iter()
+                    .filter_map(|turn| Some(turn["id"].as_str()?.to_owned())),
+            );
+        }
+        leftovers.extend(lineage(data, id));
+    }
+    for session in leftovers.iter().filter(|session| !live.contains(*session)) {
+        if !crate::chat_origin::has_chat_origin(data, session).unwrap_or(false) {
+            continue;
+        }
+        if let Some(run) = attachment_run(data, session) {
+            crate::coven_runtime::attachments::remove(data, &run).map_err(|_| FAILED)?;
+        }
+        match fs::remove_file(directory.join(format!("{session}.jsonl"))) {
+            Ok(()) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(_) => return Err(FAILED.into()),
+        }
+    }
+    let mut named = HashSet::new();
+    match fs::read_dir(&directory) {
+        Ok(entries) => {
+            for entry in entries.flatten() {
+                let name = entry.file_name();
+                let Some(id) = name.to_str().and_then(|name| name.strip_suffix(".jsonl")) else {
+                    continue;
+                };
+                if crate::coven_runtime::validate_id(id).is_ok() {
+                    named.extend(attachment_run(data, id));
+                }
+            }
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(_) => return Err(FAILED.into()),
+    }
+    crate::coven_runtime::attachments::sweep(data, &named).map_err(|_| FAILED.into())
 }
 
 /// The folder session `id`'s attachments were staged in, as its saved input
@@ -329,6 +402,70 @@ mod tests {
         assert!(unattributed.exists());
         change(&data, "escape", Lifecycle::Deleted).unwrap();
         assert!(outside.join("keep").exists());
+        fs::remove_dir_all(data).unwrap();
+    }
+
+    /// Coven's own record of a session, as `coven sessions --all --json` lists it.
+    fn listed(id: &str, group: Option<&str>, familiar: &str, at: &str) -> serde_json::Value {
+        json!({"id":id,"conversation_id":group,"familiar_id":familiar,
+            "project_root":"/work","harness":"coven-code","created_at":at})
+    }
+
+    #[test]
+    fn sweep_removes_only_what_deleted_chats_left_behind() {
+        let data = std::env::temp_dir().join(uuid::Uuid::new_v4().to_string());
+        let transcripts = data.join("coven-transcripts");
+        let attachments = data.join("coven-attachments");
+        fs::create_dir_all(&transcripts).unwrap();
+        fs::create_dir_all(&attachments).unwrap();
+        let exists = |id: &str| transcripts.join(format!("{id}.jsonl")).exists();
+        // Deleted before Delete removed every turn: the newest turn and its
+        // record are gone, its earlier turns and their attachments remain.
+        let p1_folder = write_attached_turn(&data, "p1", None, "run-p1");
+        write_turn(&transcripts, "p2", Some("p1"));
+        // A live chat, and an older conversation nobody deleted.
+        write_turn(&transcripts, "l1", None);
+        let live_folder = write_attached_turn(&data, "live", Some("l1"), "run-live");
+        write_turn(&transcripts, "old", None);
+        // A deleted chat whose first turn a live chat continues.
+        write_turn(&transcripts, "shared", None);
+        write_turn(&transcripts, "cont", Some("shared"));
+        // A staged folder no saved input names, and a stray file.
+        let legacy = attachments.join("run-legacy");
+        fs::create_dir_all(&legacy).unwrap();
+        fs::write(attachments.join("retained"), "x").unwrap();
+        fs::write(
+            data.join("chat-lifecycle-v1.json"),
+            json!({"h":"deleted","h2":"deleted"}).to_string(),
+        )
+        .unwrap();
+        fs::write(
+            data.join("chat-canonical-v1.json"),
+            json!({"f1":null,"f2":"live","f3":"cont"}).to_string(),
+        )
+        .unwrap();
+        let listing = json!({"sessions":[
+            listed("old", None, "f2", "2026-09-01T00:00:00Z"),
+            listed("p1", None, "f1", "2026-09-02T00:00:00Z"),
+            listed("p2", Some("p1"), "f1", "2026-09-03T00:00:00Z"),
+            listed("h", Some("p1"), "f1", "2026-09-04T00:00:00Z"),
+            listed("l1", None, "f2", "2026-09-05T00:00:00Z"),
+            listed("live", Some("l1"), "f2", "2026-09-06T00:00:00Z"),
+            listed("shared", None, "f3", "2026-09-07T00:00:00Z"),
+            listed("h2", Some("shared"), "f3", "2026-09-08T00:00:00Z"),
+            listed("cont", Some("shared"), "f3", "2026-09-09T00:00:00Z"),
+        ]});
+
+        sweep_deleted_leftovers(&data, &listing).unwrap();
+        assert!(!exists("p1"), "a deleted chat's first turn must go");
+        assert!(!exists("p2"), "a deleted chat's later turn must go");
+        assert!(!p1_folder.exists(), "its attachments must go");
+        assert!(!legacy.exists(), "a folder no saved input names must go");
+        for kept in ["l1", "live", "old", "shared", "cont"] {
+            assert!(exists(kept), "{kept} was not deleted and must stay");
+        }
+        assert!(live_folder.exists(), "a live chat's attachments must stay");
+        assert!(attachments.join("retained").exists());
         fs::remove_dir_all(data).unwrap();
     }
 

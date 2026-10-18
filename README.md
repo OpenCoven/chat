@@ -297,7 +297,8 @@ preserved, and archive state survives refreshes and app restarts.
 
 **Delete chat** asks for confirmation and is strictly app-local. It removes every saved transcript
 the chat is made of (Chat saves one per message you send), the attachments sent in the chat, and
-that chat's local draft. Attachments sent with v0.0.5 or earlier stay in Chat's app data folder.
+that chat's local draft. Once per launch, Chat also removes what chats deleted in v0.0.5 or
+earlier left behind, and staged attachment copies that no saved message names.
 
 What deleting does and doesn't do:
 
