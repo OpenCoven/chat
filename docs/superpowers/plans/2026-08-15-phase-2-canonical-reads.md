@@ -1,6 +1,9 @@
 # Phase 2 Canonical Reads Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **Status (2026-10-18):** Partially delivered. coven-cave ships the client-v1 familiars, projects
+> and conversations reads (no commands or search) and the sdk ships `canonical-reads.ts`, but #333
+> deleted the Chat reads shell (#89) after #277 made Chat a Coven CLI front end. `README.md` is the
+> product contract. Historical record; do not execute.
 
 **Goal:** Display canonical familiars, permitted projects, unified conversations, search results, and selected transcripts in Chat while exposing equivalent bounded SDK/CLI reads for Cave and Coven.
 

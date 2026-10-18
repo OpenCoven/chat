@@ -1,20 +1,24 @@
 # Bounded Windows supervisor source
 
-> **Status (2026-10-18):** The deployment gates this page lists were met. Protected runs
-> 36033589858 (2026-09-24) and 36222464391 (2026-09-26) passed native Windows and
-> three-platform acceptance with the bounded block. The supervisor C# has changed since
-> then (`24eed8f3` on 2026-10-13, `01332b0c` on 2026-10-14), and no protected run has used
-> the current source. Today the C# is 402,329 bytes and the workflow is 183,220 bytes.
-> Where the text below says a gate "remains" or verification is "required", it describes
-> the page's last edit on 2026-09-12.
+> **Status (2026-10-18):** The deployment gates this page lists were met.
+> Protected runs 36033589858 (2026-09-24) and 36222464391 (2026-09-26) passed
+> native Windows and three-platform acceptance with the bounded block. The
+> supervisor C# has changed since then (`24eed8f3` on 2026-10-13, `01332b0c` on
+> 2026-10-14), and no protected run has used the current source. Today the C#
+> is 402,329 bytes and the workflow is 183,220 bytes. Where the text below says
+> a gate "remains" or verification is "required", it describes the page's last
+> edit on 2026-09-12.
 
-The workflow uses the bounded source block.
+The workflow doesn't carry the supervisor C# inline. It carries a bounded,
+gzip-compressed source block instead, rendered by
+`scripts/windows-supervisor-source.mjs`.
 
-At the compression checkpoint, the inline form occupied 511,778 bytes of GitHub's 512,000-byte workflow
-allowance. The initial bounded form occupied 161,836 bytes and retained the same 329,668
-bytes of C#. The source renderer in `scripts/windows-supervisor-source.mjs`
-recovers space for the profile lifecycle and shared quota repair. The canonical C# remains
-`scripts/windows-job-supervisor.cs`; compression does not change its behavior.
+At the compression checkpoint, the inline form occupied 511,778 bytes of
+GitHub's 512,000-byte workflow allowance. The initial bounded form occupied
+161,836 bytes and retained the same 329,668 bytes of C#. The renderer recovers
+space for the profile lifecycle and shared quota repair. The canonical C#
+remains `scripts/windows-job-supervisor.cs`; compression doesn't change its
+behavior.
 
 The renderer uses level-9 gzip with a zero timestamp and a platform-neutral OS
 header byte. Generate and verify with the reviewed Node 24.18.1 toolchain and its
@@ -66,7 +70,7 @@ and verifies profile-directory, registry, account, and artifact-root removal.
 
 The accounting follow-up atomically creates `.coven` with a strict application
 ACL and retains handles for that directory and its profile ancestor. Profile
-owner/writer validation matches native discovery; application ACL validation
+owner and writer validation matches native discovery; application ACL validation
 requires the exact isolated-user, SYSTEM, Administrators and OWNER RIGHTS rules.
 The supervisor checks current path identities, type and security before and
 after each aggregate measurement under the retained isolated token.
@@ -88,7 +92,7 @@ not establish the filesystem, ACL, quarantine or three-platform guarantees.
 
 Retained profile and application handles request directory-list access in addition
 to metadata reads. Metadata-only handles do not activate Windows delete-sharing
-checks, even when FILE_SHARE_DELETE is omitted. The native fixture compares both
+checks, even when `FILE_SHARE_DELETE` is omitted. The native fixture compares both
 access modes and requires a sharing violation from the retained-profile opener;
 its existing profile/application replacement checks remain mandatory. See the
 [Microsoft sharing algorithm](https://learn.microsoft.com/en-us/openspecs/windows_protocols/ms-fsa/82b364ce-6d7b-422f-8d88-4db32eea809a).

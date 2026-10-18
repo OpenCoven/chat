@@ -318,7 +318,7 @@ Only the Coven archive differs from candidate `77d825d`: it is 45,724 bytes
 with SHA-256 `bc24d3c1542ba7c970b8e5eb1e54d3d9e7acc3e07028466906947773a4b5ef65`.
 The other three archives are byte-identical. Earlier SDK77 evidence remains
 historical and does not qualify the changed runtime. The primary assertion
-inventories remain 197 Darwin / 197 Linux / 196 Windows.
+inventories remain 197 macOS / 197 Linux / 196 Windows.
 
 Cave authority is the reviewed OpenCoven/coven-cave#5409 merge
 `5ee8545f5c2fe4c6121dfdfe842395a354bb3d7d` (tree
@@ -361,11 +361,14 @@ failures; this adoption makes no certified Windows repair claim.
 Its actual source commit is frozen separately in
 `harnessAuthority`, with matching Windows/Unix module tables.
 
-The production source ancestry and the subsequent source-bound harness commit
-must be preserved by a true merge, not squash or rebase. Historical evidence
-and the historical SDK fixture below are not rewritten as current acceptance.
-After reviewed Chat landing, SDK coordination must bind the actual merged
-producer and these actual consumer, candidate, and authority identities.
+> **Warning:** preserve the production source ancestry and the subsequent
+> source-bound harness commit with a true merge, not a squash or rebase. See
+> [Authority is pinned to merge commits on `main`](#authority-is-pinned-to-merge-commits-on-main).
+
+Historical evidence and the historical SDK fixture below are not rewritten as
+current acceptance. After reviewed Chat landing, SDK coordination must bind the
+actual merged producer and these actual consumer, candidate, and authority
+identities.
 No protected run, Windows diagnostic pair, SDK #38 acceptance, SHIP approval,
 scope rotation, or package publication is established by this prerequisite.
 
@@ -394,7 +397,7 @@ bytes and demonstrate rejection of this new Cave pin. Before protected
 execution, the subsequent SDK validator had to bind the actual integrated Chat
 producer, its separate harness authority, Cave `5ee8545`, the new engine and
 registry provenance, and release version `0.4.2`. The ordered 109 required Cave
-assertions (110 with coverage), 197 Darwin / 197 Linux / 196 Windows primary
+assertions (110 with coverage), 197 macOS / 197 Linux / 196 Windows primary
 totals, and exclusions remain unchanged.
 
 The private SDK968 candidate, its archives, and production consumer
@@ -441,7 +444,7 @@ residual-profile cleanup work is not part of this adoption.
 
 [Protected run 34782181876](https://github.com/OpenCoven/chat/actions/runs/34782181876)
 used Chat `5be5775e43cfdb3424e1a8361e11d5d59cbaaabb` and SDK validator
-`72a2c2467dbef2564ca4ddff2817914672f6580c`. Linux and Darwin passed, while
+`72a2c2467dbef2564ca4ddff2817914672f6580c`. Linux and macOS passed, while
 Windows failed at `phase1.native-scenarios.launch.discovery-not-found`.
 
 The protected supervisor intentionally creates the real Windows profile's
@@ -463,7 +466,7 @@ read validation, and readiness deadlines are unchanged.
 
 [Protected run 34789638633](https://github.com/OpenCoven/chat/actions/runs/34789638633)
 used merged Chat `68c49d8a1a1ebedc06bdc8793a64c972945a265c` and SDK validator
-`dee5563020d02559d53d61c2651f35c3e4fdfcc5`. Linux and Darwin passed. Windows
+`dee5563020d02559d53d61c2651f35c3e4fdfcc5`. Linux and macOS passed. Windows
 passed Cave launch and discovery, then failed at
 `phase1.native-scenarios.cleanup-grant.marker-identity-unavailable`.
 
@@ -591,7 +594,7 @@ it does not reinterpret the change as a root-cause repair.
 [Protected run 34763766701](https://github.com/OpenCoven/chat/actions/runs/34763766701)
 is pre-adoption evidence from merged Chat
 `311dda625b20aaa91c7bf2b19718387ec56acab0` with SDK validator
-`56fcf68e819c7f73201989e3c0f77fc2d17c0112`. Linux and Darwin passed. Windows
+`56fcf68e819c7f73201989e3c0f77fc2d17c0112`. Linux and macOS passed. Windows
 failed only at `phase1.native-scenarios.launch.discovery-not-found`; artifact
 validation, attestations, and aggregation were skipped, so no aggregate exists.
 That Cave-only adoption called for a diagnostic run with Cave
@@ -653,7 +656,7 @@ those gates and advisory reconciliation were complete. It closed on 2026-09-24.
 
 [Run 34603676876](https://github.com/OpenCoven/chat/actions/runs/34603676876)
 used merged Chat `3d5af5b3441991e0314c4f2dfa91bfe9b450e9a7` and SDK validator
-`2e14473b1c0ee888411f769484616332e68514ea`. Linux and Darwin passed, and
+`2e14473b1c0ee888411f769484616332e68514ea`. Linux and macOS passed, and
 both retained records passed the matching SDK parser/scanner, exact source
 identities, Cave timing and ordered assertion sets: 110 Cave, 46 SDK and 41 Chat.
 Windows failed with `resource quota monitor failed closed: access-denied`, then
@@ -672,7 +675,7 @@ before any ACL repair or aggregate acceptance can be established.
 
 [Run 34594407090](https://github.com/OpenCoven/chat/actions/runs/34594407090)
 used producer `4a5002011322de824f4d15676eab7769ce7975ba` and validator
-`c43b21cbeb5dfe218430345fc71eff2822810f33`. Linux and Darwin passed; each
+`c43b21cbeb5dfe218430345fc71eff2822810f33`. Linux and macOS passed; each
 retained record contains 110 Cave, 46 SDK and 41 Chat passing assertions with
 unique identities, consistent Cave timing and both scans passed. Windows
 failed at
@@ -690,7 +693,7 @@ boundary; it does not validate this integration or justify changing quotas.
 [Run 34435223248](https://github.com/OpenCoven/chat/actions/runs/34435223248),
 attempt 1, used Chat #199 at `724690e64c4be820bdf4e0e1f8c568db516ba490` and SDK
 #196 validator `a5c7e38ecc905a6fdb9c9a3e704c6395ec2df02a`. Linux artifact
-`10136315804` and Darwin artifact `10136396539` passed identity, digest, timing,
+`10136315804` and macOS artifact `10136396539` passed identity, digest, timing,
 scan, and all 197 assertion checks. Windows failed at
 `phase1.runtime-observations.coven-rust-tests.status-replacement.assertion.writer-error.access-denied`.
 This establishes OS code 5 from the writer, but does not identify the failing
@@ -750,11 +753,10 @@ The protected validator used by historical run 34647484742 is SDK #206 merge
 `e7dfc135bb7341d4cfc5b7f0fcf4004843868809` and the preceding Coven source.
 The SDK validator was later rebound to the current adoption, and protected run
 36222464391 passed on 2026-09-26 with the Chat, SDK, Cave and Coven pins listed
-above. The frozen
-Chat source preserves all ten native file differences required by
-`harnessAuthority.productionDeltas`. Pinning the
-producer-derived `8a63ff1` source would remove those differences and fail the
-existing authority check.
+above. The frozen Chat source preserves all ten native file differences
+required by `harnessAuthority.productionDeltas`. Pinning the producer-derived
+`8a63ff1` source would remove those differences and fail the existing authority
+check.
 
 Chat #191 merged the source-fetch repair at
 `3f2302da7dc2b39adb8042853b64aa58c406de08`. SDK #191 binds that producer at
@@ -764,11 +766,11 @@ Linux and macOS passed all 110 Cave, 46 SDK, and 41 Chat assertions. Windows
 completed the SDK, Chat, and Chat Rust observations, then failed at
 `phase1.runtime-observations.coven-rust-tests.failed`. The label does not
 identify which Coven test failed or distinguish compilation from execution.
-Final validation, attestation, and aggregation were skipped. Publishing remains
-disabled and no three-platform aggregate is accepted.
+The workflow skipped final validation, attestation, and aggregation. Publishing
+remains disabled and no three-platform aggregate is accepted.
 
 Protected run `34395004109` used the previous `6526b56b30c9a9c1c072caf2f0022d3427ae18db` SDK candidate: Linux
-and Darwin passed, while Windows failed at
+and macOS passed, while Windows failed at
 `phase1.runtime-observations.sdk-tests.failed`. The failing assertion is not
 identified by that stage label. The replacement candidate requires a fresh
 protected attempt with the complete observation suite and existing resource
@@ -786,8 +788,9 @@ The later #191 binding and run `34406621503` exercised this repair and reached
 Coven Rust observations. Local Git regression tests alone do not establish
 Windows platform conformance.
 Linux and macOS completed this run successfully with all 46 SDK and 41 Chat
-assertions. Windows failed before those observations, so final validation,
-attestation, and aggregation were skipped. No three-platform aggregate is accepted.
+assertions. Windows failed before those observations, so the workflow skipped
+final validation, attestation, and aggregation. No three-platform aggregate is
+accepted.
 
 The evidence record names the SDK evidence-authority commit because the SDK
 aggregator binds its committed registry to that commit. The package candidate
@@ -795,7 +798,8 @@ remains independently pinned by revision, manifest digest, and tarball bytes.
 The runner verifies both exact revisions and clean checkouts independently,
 checks the locked evidence registry, schema, and contract digests, and requires
 all four candidate source package identities to match the frozen manifest.
-The evidence authority and package candidate do not require shared ancestry. It never rebuilds replacement per-platform SDK tarballs.
+The evidence authority and package candidate do not require shared ancestry.
+The runner never rebuilds replacement per-platform SDK tarballs.
 
 After reading the lock and configuring the frozen Windows supervisor, the
 verified entrypoint authenticates its own Chat revision, tree, and every
@@ -907,7 +911,7 @@ Top-level `coverage` explicitly sets `cave`, `coven`, `sdk`, and `chat` to
 `cross-process-pairing`, `oauth-ui`, `remote-peer`, and `write-apis`.
 
 The retained record is validated by the exact locked SDK
-`scripts/conformance-contract.mjs`. Aggregation runs on Darwin or Linux but
+`scripts/conformance-contract.mjs`. Aggregation runs on macOS or Linux but
 requires one record for all three platforms, including Windows.
 
 ## Protected schema-v2 producer
@@ -1023,7 +1027,7 @@ POSIX supervisor/process group or Windows Job Object. The live supervisor owns
 the group identity until descendants are gone; Windows creates Cave suspended,
 assigns the kill-on-close job, then resumes it. Forced cleanup therefore removes
 Cave descendants without probing or signaling reused/unrelated process IDs.
-All Darwin/Linux build, install, checkout, compiler, and tool commands use the
+All macOS and Linux build, install, checkout, compiler, and tool commands use the
 same supervisor and bounded status channel. Windows uses the standalone,
 bin-only crate at `tools/phase1-process-supervisor`, whose Cargo graph excludes
 Chat and its `cdylib`. Its canonical build is:
@@ -1034,7 +1038,7 @@ cd tools/phase1-process-supervisor && SOURCE_DATE_EPOCH=0 cargo build --target x
 
 The frozen `phase1-process-supervisor.exe` is 333,824 bytes with SHA-256
 `372b3e8b5b860e0759da8fa10ddfb6ec338e26d83616254c816a456ae2e1b7c5`.
-Its Darwin arm64 cross-toolchain is pinned to Homebrew core revision
+Its macOS arm64 cross-toolchain is pinned to Homebrew core revision
 `cd168d1fdc26f12e4ad64f358ff2dbec61ab7a57`, `mingw-w64 14.0.0_3`,
 OCI bottle layer SHA-256
 `0d68ab737a8bbc8c63ac6ac7acc0695e2887c1169df9a4423f1180090079b1d5`,
@@ -1103,7 +1107,7 @@ and the native containment kind before its first subprocess. Linux
 additionally requires its own `/proc/self/cgroup` membership to equal the
 nonce-bound cgroup-v2 path.
 
-On Darwin and Linux, pinned official actions fetch the exact SDK candidate,
+On macOS and Linux, pinned official actions fetch the exact SDK candidate,
 SDK evidence authority, selected validator, Cave, and Coven revisions beneath
 the workflow checkout before restricted execution. The root supervisor copies
 that complete checkout into its immutable source tree, and the restricted
@@ -1291,11 +1295,13 @@ identity, which retains the original full-access handle. Set/assign/terminate
 reopens and silent-breakaway mutation are denied. The supervisor launches the
 bootstrap with `CreateProcessWithLogonW` using `LOGON_WITH_PROFILE` and
 `CREATE_SUSPENDED`, assigns it with `AssignProcessToJobObject`, confirms
-membership with `IsProcessInJob`, and only then calls `ResumeThread`. Breakaway remains disabled. The isolated-user object owns a separate profile
-reference until terminal quarantine and explicit unloading; bounded cleanup
-also requires the child-session hives to disappear. The outer process retains
-non-delete-sharing handles for
-the bootstrap, checkout, and artifact workspaces, captures stdout and stderr
+membership with `IsProcessInJob`, and only then calls `ResumeThread`. Breakaway
+remains disabled. The isolated-user object owns a separate profile reference
+until terminal quarantine and explicit unloading; bounded cleanup also requires
+the child-session hives to disappear.
+
+The outer process retains non-delete-sharing handles for the bootstrap,
+checkout, and artifact workspaces, captures stdout and stderr
 independently with 16 MiB bounds, applies a 55-minute timeout, terminates and
 reaps the complete Job on every exit path, and requires zero active Job
 processes before beginning artifact handoff.
@@ -1349,26 +1355,41 @@ mandatory. Cleanup attempts are aggregated so one failure cannot skip later
 cleanup, and any account/profile/root cleanup failure fails the workflow.
 
 The supervisor continuously measures reviewed roots and terminates the entire
-Job if any limit is exceeded. The bounds are 128 MiB for direct archives,
-400 MiB for extracted PortableGit, 192 MiB for Node, 96 MiB for pnpm, 1 GiB
-for rustup toolchains, 2 GiB/1 GiB for each Cargo registry/git cache, 3 GiB
-for each pnpm store, 256 MiB for the bootstrap npm cache, 512 MiB for the
-protected checkout's Git objects, 768 MiB for each SDK/Chat/Coven/
-validator/producer checkout, 4 GiB for the Cave working tree including its
-dependencies and Next output, 4 GiB for harness build roots, 2 GiB for the
-workspace, 10 GiB for the harness execution root, and 12 GiB for the complete
-bootstrap root. Quotas are rechecked after the root process exits and again
-after exact-SID quarantine so a last-moment or out-of-Job excess cannot escape
-the watchdog. After preserving the built Chat RPC executable, schema-v2 removes
-the no-longer-needed Chat Cargo target before building Coven so peak disk usage
-stays within those unchanged bounds. Each scan materializes only a bounded
-number of entries through
-bounded enumeration and ignores only file/directory disappearance races caused
-by concurrent producer cleanup; permission failures, malformed paths, bound
+Job if any limit is exceeded. The bounds are:
+
+| Root | Limit |
+| --- | --- |
+| Direct archives | 128 MiB |
+| Extracted PortableGit | 400 MiB |
+| Node | 192 MiB |
+| pnpm | 96 MiB |
+| rustup toolchains | 1 GiB |
+| Each Cargo registry/git cache | 2 GiB/1 GiB |
+| Each pnpm store | 3 GiB |
+| Bootstrap npm cache | 256 MiB |
+| Protected checkout's Git objects | 512 MiB |
+| Each SDK, Chat, Coven, validator, and producer checkout | 768 MiB |
+| Cave working tree, including its dependencies and Next output | 4 GiB |
+| Harness build roots | 4 GiB |
+| Workspace | 2 GiB |
+| Harness execution root | 10 GiB |
+| Complete bootstrap root | 12 GiB |
+
+Quotas are rechecked after the root process exits and again after exact-SID
+quarantine so a last-moment or out-of-Job excess cannot escape the watchdog.
+Each scan materializes only a bounded number of entries through bounded
+enumeration and ignores only file/directory disappearance races caused by
+concurrent producer cleanup; permission failures, malformed paths, bound
 exhaustion, overflow, and other monitor errors still terminate the Job fail
-closed. After preserving the built Coven executable, schema-v2 also removes the
-Coven Cargo target before starting the observation suite, so neither packaging
-target remains at the next peak. Observation failures expose only the fixed SDK
+closed.
+
+After preserving the built Chat RPC executable, schema-v2 removes the
+no-longer-needed Chat Cargo target before building Coven so peak disk usage
+stays within those unchanged bounds. After preserving the built Coven
+executable, schema-v2 also removes the Coven Cargo target before starting the
+observation suite, so neither packaging target remains at the next peak.
+
+Observation failures expose only the fixed SDK
 install, Chat install, SDK tests, Chat tests, Chat Rust tests, or Coven Rust
 tests substage, plus a distinct temporary-root cleanup substage on Unix;
 command output and private paths remain suppressed. Failures report either the
@@ -1446,8 +1467,7 @@ budget across all branches, including producer-plus-quarantine failures.
 user and scoped profile/temp/workspace ACLs, launches every supervised probe as
 that user, proves the supervisor process and authoritative Job handle cannot be
 opened or mutated through the former same-user path. It checks the official
-11-parameter
-`CreateProcessWithLogonW` declaration at runtime, protects each suspended root
+11-parameter `CreateProcessWithLogonW` declaration at runtime, protects each suspended root
 process before resume with a trusted owner and an exact protected DACL, and has
 a same-isolated-SID descendant attempt terminate, duplicate-handle, ACL/owner,
 thread, VM, quota, information, suspend, and delete access. The descendant also
@@ -1462,9 +1482,10 @@ wrong-Job membership, and native binding cases. The protected lane executes the
 same process/ACL/membership preflight directly from the exact inline production
 source before its first download. macOS development can parse and compile the
 source but cannot claim those native Windows runtime results; native Windows
-runtime evidence is CI-only. The native suite
-also provisions a same-volume `status-staging` directory with an exact
-protected DACL. The isolated user retains modify-only access to the directory
+runtime evidence is CI-only.
+
+The native suite also provisions a same-volume `status-staging` directory with
+an exact protected DACL. The isolated user retains modify-only access to the directory
 itself, while an object-inherit-only ACE grants created files the ACL-management
 rights needed to secure an empty Coven status temporary before moving it into
 the stricter `COVEN_HOME`; the protected child validates the directory and
@@ -1489,14 +1510,14 @@ descendants can therefore remove inherited supervisor access and enforce
 Cave's stricter discovery-directory ACL without weakening the rest of the
 producer sandbox.
 
-The native suite
-also has a background supervised process replace an already validated record
-with a file symlink to a supervisor-only canary before exiting, and proves the
-handoff fails without reading or publishing the canary. Separate cases reject
-a second hard link, a parent junction, wrong record ownership, a permissive
-DACL, and an active replacement race; the success case exercises stdin
-revalidation plus create-new, owner-private publication.
-The same job retains the frozen Rust supervisor artifact behavior tests.
+The native suite also has a background supervised process replace an already
+validated record with a file symlink to a supervisor-only canary before
+exiting, and proves the handoff fails without reading or publishing the canary.
+Separate cases reject a second hard link, a parent junction, wrong record
+ownership, a permissive DACL, and an active replacement race; the success case
+exercises stdin revalidation plus create-new, owner-private publication. The
+same job retains the frozen Rust supervisor artifact behavior tests.
+
 The suite also runs a service-broker quarantine case that creates a hidden
 interactive-token task inside a unique nested Task Scheduler folder and
 explicitly attempts `IRegisteredTask.Run`. A hosted ephemeral account does not
@@ -1630,11 +1651,14 @@ the second origin control. The exact `refs/heads/main` job conditions fail close
 independently of it. Keep branch protection enabled so the environment policy
 keeps providing that second control.
 
-Administrators cannot bypass the protection. Self-review is not prevented: as of
-2026-10-18 the live environment returns `prevent_self_review: false`, so the one
-required reviewer can approve a run they dispatched. This is an open gap. The
-maintainer should either enable the setting or change the requirement above. The
-exact SDK workflow contract requires no application credential secret because
+Administrators cannot bypass the protection.
+
+> **Warning:** self-review is not prevented. As of 2026-10-18 the live
+> environment returns `prevent_self_review: false`, so the one required
+> reviewer can approve a run they dispatched. This is an open gap. The
+> maintainer should either enable the setting or change the requirement above.
+
+The exact SDK workflow contract requires no application credential secret because
 all counterpart repositories are public. The manual dispatch requires one
 input, `validator_revision`, containing the same full lowercase 40-character
 SDK validator commit as the protected environment variable. Trusted workflow
@@ -1757,7 +1781,7 @@ upload, attest, or substitute records.
 
 `HOME`, XDG directories, temporary directories, pnpm store, Cargo home, Cave
 home, and Coven home are isolated for the ordinary harness, checkout,
-packaging, and non-native work. Darwin native-RPC subprocesses are the
+packaging, and non-native work. macOS native-RPC subprocesses are the
 intentional exception: both the main native scenario and emergency credential
 cleanup receive the caller/operator `HOME`, so that the production macOS native
 keychain adapter performs its native lookup in that context. The runner
@@ -1882,6 +1906,21 @@ Diagnostics are stable IDs only.
   SID-wide zero-process proof, and handle-verified ACL sealing; macOS/Linux
   publish only after native zero-process proof and a no-follow descriptor read
   whose identity and timestamps remain stable.
+- Windows account-disable ambiguity, scheduler or BITS enumeration/access
+  failure, WTS enumeration or SID-query failure, matching-process access or
+  termination failure, unstable drain, ACL-seal failure, or post-seal
+  reappearance produces no artifact.
+- Windows producer success, nonzero exit, timeout, quota/output failure, and
+  exception all enter the same terminal quarantine path before identity
+  deletion. Native stdout-overflow, stderr-overflow, directory-quota, and
+  launch-exception cases each prove account disablement, zero exact-SID
+  process/task/BITS state, capture rejection, repeat-quarantine idempotence,
+  and final identity cleanup. Cleanup failures are aggregated after every
+  cleanup action has been attempted.
+- Uploaded bytes that fail fresh SDK validation, differ from the validation
+  digest when downloaded for attestation, or use a validator input unequal to
+  the protected environment variable are never attested.
+- Partial subprocess output and skipped controls are never accepted as passes.
 
 Packaging failures publish only the bounded failing substage: frozen consumer
 verification, Cave install/build, Chat install/web/native build, Coven build,
@@ -2016,23 +2055,6 @@ every other failure category, aggregate-root absence, entry overflow, byte
 overflow, reparse point, or arithmetic overflow remains terminal. No quota,
 polling, traversal, identity, cleanup, or diagnostic bound is widened.
 
-
-- Windows account-disable ambiguity, scheduler or BITS enumeration/access
-  failure, WTS enumeration or SID-query failure, matching-process access or
-  termination failure, unstable drain, ACL-seal failure, or post-seal
-  reappearance produces no artifact.
-- Windows producer success, nonzero exit, timeout, quota/output failure, and
-  exception all enter the same terminal quarantine path before identity
-  deletion. Native stdout-overflow, stderr-overflow, directory-quota, and
-  launch-exception cases each prove account disablement, zero exact-SID
-  process/task/BITS state, capture rejection, repeat-quarantine idempotence,
-  and final identity cleanup. Cleanup failures are aggregated after every
-  cleanup action has been attempted.
-- Uploaded bytes that fail fresh SDK validation, differ from the validation
-  digest when downloaded for attestation, or use a validator input unequal to
-  the protected environment variable are never attested.
-- Partial subprocess output and skipped controls are never accepted as passes.
-
 No platform evidence is claimed until an SDK validator commit contains a
 compatible producer entry naming the reviewed Chat producer commit, harness
 bytes, workflow bytes, protected environment, and artifact conventions. A
@@ -2119,11 +2141,12 @@ revision authorities can therefore have different workflow hashes:
 | `scripts/windows-status-acl-probe.test.ps1` | 3,980 | `8ef6032dd38921238d2d860bfa76ba79a53ff549c1e6b1cb8901698e0ca08e3c` |
 | `scripts/windows-status-acl-probe.cs` | 10,118 | `93fe7fd44286f8cb9b3944a7e66257181d0153ed81eec94cd56b79662e620638` |
 
-The table above is the SDK-facing subset; `phase1-conformance.lock.json`'s
-`harnessAuthority.files` also tracks `.github/workflows/ci.yml`, which does
-not appear here. Editing ordinary CI config still dirties that entry and
-requires the same file-hash repin as touching the harness itself — this is
-not discoverable until a test fails on it.
+> **Note:** the table above is the SDK-facing subset.
+> `harnessAuthority.files` in `phase1-conformance.lock.json` also tracks
+> `.github/workflows/ci.yml`, which does not appear here. Editing ordinary CI
+> config still dirties that entry and requires the same file-hash repin as
+> touching the harness itself. You won't discover this until a test fails on
+> it.
 
 ### Authority is pinned to merge commits on `main`
 
@@ -2172,9 +2195,10 @@ once.
 `scripts/phase1-authority-freshness.mjs` closes that gap. It asserts the pin
 is on the first-parent history of the ref under test, that it is a merge
 commit rather than a branch tip, and that no governed file or production
-delta has moved since it was pinned. CI extracts and executes the guard and its imports from the
-pinned authority, so changing the working-tree guard cannot bypass the check. The guard also
-compares its own blob, even though it is outside the frozen harness file list.
+delta has moved since it was pinned. CI extracts and executes the guard and its
+imports from the pinned authority, so changing the working-tree guard cannot
+bypass the check. The guard also compares its own blob, even though it is
+outside the frozen harness file list.
 The first content merge has no pinned guard yet and fails closed until its
 repin lands. CI runs it on `main` pushes only, since a pull request is allowed
 to lag by construction. A forgotten repin now turns `main` red instead of
@@ -2209,11 +2233,11 @@ after this commit is created; no SDK validator SHA is committed into Chat.
 
 The governed loader behavior is committed first. A separate Chat authority
 commit then pins that prior behavior commit, its tree, and every changed
-governed blob and SHA-256. After a Chat fix merges, a later SDK validator must freeze the
-final reachable Chat authority commit/tree, package manifest, harness,
-workflow, environment ID, and source/signer digests in a later validator
-commit. Operators dispatch the already-committed Chat workflow with that full
-SDK commit as `validator_revision`.
+governed blob and SHA-256. After a Chat fix merges, a later SDK validator must
+freeze the final reachable Chat authority commit/tree, package manifest,
+harness, workflow, environment ID, and source/signer digests in a later
+validator commit. Then dispatch the already-committed Chat workflow with that
+full SDK commit as `validator_revision`.
 
 The workflow producer and executable harness are intentionally distinct
 authorities. The workflow checkout remains at the final producer commit that
@@ -2281,7 +2305,7 @@ only the child instance it reaped, so an overlapping registration cannot lose
 ownership. Cleanup retains the root and fails if children registered during
 cleanup remain; an explicit cleanup retry handles those children.
 
-Protected run `34413820955` passed Linux and Darwin, including all 110 Cave,
+Protected run `34413820955` passed Linux and macOS, including all 110 Cave,
 46 SDK, and 41 Chat assertions per platform. Windows stopped at
 `phase1.runtime-observations.coven-rust-tests.legacy-case.spawn`; that producer
 used the same category for launch and tracking failures. Local tests reproduce
@@ -2289,7 +2313,7 @@ stale PID registration and cover its repair, but do not prove it caused this
 Windows failure. Fresh bound protected evidence is still required.
 
 Protected run `34422000259`, attempt 1, used producer `6cf479d` and validator
-`7ed9b19`. Linux and Darwin records passed provenance, scan, and exact assertion
+`7ed9b19`. Linux and macOS records passed provenance, scan, and exact assertion
 checks: 110 Cave, 46 SDK, and 41 Chat assertions per platform. Windows passed the
 first four selected Coven Rust tests, then reported `status-replacement.test-failed`.
 Validation, attestation, and aggregation were skipped; no aggregate was accepted.
@@ -2326,7 +2350,7 @@ now included in the existing security initialization and validation loop, using
 the same trustees and access contract as its parent and children. Native reader
 success and refreshed protected acceptance remain required.
 
-Protected run `34580621067` passed Linux and Darwin, while Windows reported a
+Protected run `34580621067` passed Linux and macOS, while Windows reported a
 quota-monitor error followed by identity-cleanup failure. That does not prove
 a byte quota was exceeded. The supervisor now retains only fixed categories:
 `entry-bound`, `access-denied`, `arithmetic-overflow`, the bounded Win32 I/O
@@ -2393,7 +2417,6 @@ The cleanup diagnostic was introduced at `85bc89b1b6d8ef5c099566b827146e0e75608b
 `b4d0e7445cafbdc33ff329d2d03c321ce2a9c2d9`. It changes only the supervisor source from the
 status staging harness and is retained in the diagnostic branch ancestry.
 
-
 The combined quota-context harness was introduced at `e8fe64b4d2b9bd38a03d8c23a28432518b41c187`, tree
 `b8934b32dc6a1352df55bab36af6e261d0aa9e86`. It retains the merged staging and cleanup diagnostics.
 Only the supervisor and its embedded workflow authority bytes change from
@@ -2409,7 +2432,6 @@ a later cleanup failure. Final lock tests passed 92 cases with one platform
 skip; workflow/specification tests passed 128 cases with 19 platform skips.
 Independent specification, quality and final binding reviews passed. These
 local results do not replace native Windows CI or protected execution.
-
 
 ## Isolated-user quota accounting
 
@@ -2726,7 +2748,7 @@ budgets. Quarantine must complete before those handles are released and owned
 profile/account cleanup proceeds.
 
 Protected run `34726708513` used merged Chat #249 (`4682a4a`) and SDK #228
-(`c863b58`). Linux and Darwin passed. Windows failed at
+(`c863b58`). Linux and macOS passed. Windows failed at
 `access-denied; root=cave-checkout; scope=none;
 operation=directory-attributes; repeat=missing`. Validation, attestation and
 aggregation were skipped. The Unix records independently passed source and
@@ -2752,7 +2774,7 @@ launch codes and the retained-handle termination correction. Service unavailabil
 is an observed native result and does not by itself establish a timeout.
 
 Protected run `34773356378` used Chat `3a1f4e3` and SDK validator
-`372fa9d`. Linux and Darwin passed. Windows failed during active Cave packaging
+`372fa9d`. Linux and macOS passed. Windows failed during active Cave packaging
 with `access-denied; root=cave-checkout; scope=none;
 operation=directory-enumeration-depth-3-plus; repeat=readable`. No Windows
 record was produced, so validation, attestation, and aggregation were skipped.
@@ -2887,13 +2909,12 @@ proves a diagnostic-loss bug, not which stage failed in the protected run.
 Fresh reviewed source binding, SDK rebinding, and protected validation are
 required before attributing the Windows failure or claiming a repaired run.
 
-
 ### Dispatching a protected run against a specific merged revision
 
 `workflow_dispatch` previously validated whatever `main` pointed at when the
 run started. The cross-repository contract requires the evidence producer to be
 a merge whose tree equals its reviewed second parent's tree, so a binding names
-one exact merge; any later commit to `main` — conformance-related or not —
+one exact merge. Any later commit to `main`, conformance-related or not,
 leaves that binding unable to describe the tip. Protected runs were therefore
 only usable inside the window between a binding landing and the next merge.
 
@@ -2930,6 +2951,7 @@ classification. The frozen Rust consumer emits string codes, so this regression
 does not establish the protected Windows failure's cause. Neither correction
 changes request counts, timeouts, resource limits, or native-provider behavior.
 A verified source/SDK binding and fresh protected run remain required.
+
 ### Finalization operation diagnostics
 
 Protected run [34928011200](https://github.com/OpenCoven/chat/actions/runs/34928011200)
@@ -3046,7 +3068,6 @@ independent profile-probe job lifetimes described at the top of this document.
 Candidate, consumer, Cave, Coven, and supervisor executable authorities are unchanged.
 Native Windows checks and an SDK binding to the eventual delivery remain required
 before protected conformance can establish acceptance.
-
 
 ### Cancelling superseded pull-request Windows CI
 

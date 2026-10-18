@@ -1,6 +1,9 @@
 # Chat Phase 1-3 Execution Design
 
-**Status:** Approved
+> **Status (2026-10-18):** Abandoned. Approved 2026-08-17; its Beads claim-and-close workflow was
+> retired on 2026-09-14 (coven-cave#5399), and #277 replaced the Cave-client phases it sequences.
+> GitHub issues track current work. Historical record; do not execute.
+
 **Date:** 2026-08-17
 **Scope:** `OpenCoven/chat` desktop beads only
 

@@ -1,6 +1,8 @@
 # Chat Phase 1-3 Beads Execution Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **Status (2026-10-18):** Abandoned. Its Beads workflow was retired on 2026-09-14
+> (coven-cave#5399). Phase 1 shipped by another route (#31, #30), #333 deleted the Phase 2 reads UI,
+> and Phase 3 never landed. GitHub issues track current work. Historical record; do not execute.
 
 **Goal:** Deliver the Chat-owned Phase 1, Phase 2, and Phase 3 desktop beads in dependency order without bypassing the central cross-repository gates.
 

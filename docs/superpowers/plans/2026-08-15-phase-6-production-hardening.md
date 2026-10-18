@@ -1,6 +1,9 @@
 # Phase 6 Security, Accessibility, Performance, and Fault Hardening Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **Status (2026-10-18):** Abandoned before it started. None of its security matrix, hostile
+> fixtures or performance scripts exist, and the Cave-client program it hardens ended with #277 and
+> #333. `README.md` is the product contract; GitHub issues track current work. Historical record; do
+> not execute.
 
 **Goal:** Convert every approved security threat, accessibility rule, performance budget, and fault journey into an executable production gate across Cave, Chat, SDK/CLI, and Coven clients.
 

@@ -1,6 +1,8 @@
 # Chat Contextual Inspector Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **Status (2026-10-18):** Delivered in #26 (2026-08-22) for the `?demo=chat` surface. #333 removed
+> the demo, including `src/demo/chat-inspector.tsx`; the live familiar inspector is in
+> `src/coven/chat-layout.tsx`. Historical record.
 
 **Goal:** Replace the chat demo's redundant surface rail with independently collapsible conversations and a contextual right-side agent inspector styled as restrained dark-grey liquid glass.
 

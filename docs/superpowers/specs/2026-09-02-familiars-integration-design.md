@@ -1,6 +1,10 @@
 # OpenCoven Chat Familiars Surface Integration Design
 
-**Status:** Proposed design (for review)  
+> **Status (2026-10-18):** Superseded. Proposed for review 2026-09-02; Stage 1 reads partly landed
+> (#89), but #277 made the Familiars surface production on the Coven CLI instead of Cave, and #333
+> deleted `src/familiars` and `src/demo`. `README.md` is the product contract. Historical record; do
+> not execute.
+
 **Date:** 2026-09-02  
 **Repositories:** `OpenCoven/coven-cave`, `OpenCoven/sdk`, `OpenCoven/chat`, `OpenCoven/coven`  
 **Depends on:** Phase 2 gate `cave-8ywi2` (shipped reads); Phase 3 and Phase 4 plans of record  

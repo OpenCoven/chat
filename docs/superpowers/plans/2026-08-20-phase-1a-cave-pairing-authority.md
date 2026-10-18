@@ -1,6 +1,9 @@
 # Cave Pairing Authority Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **Status (2026-10-18):** Delivered in coven-cave, which owns this plan: its main branch has the
+> planned pairing store, credential store, auth, rate limit and discovery modules and the health,
+> pairing and admin routes under `client-v1`. The `bd` steps name the retired Beads tracker
+> (coven-cave#5399). Historical record.
 
 **Goal:** Ship Cave as the Phase 1 pairing authority with hashed pairing/credential storage, authenticated public `/api/client/v1` routes, validated discovery publication, and approval management in Settings.
 

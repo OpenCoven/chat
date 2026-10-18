@@ -1,6 +1,8 @@
 # Real Authority Conformance Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **Status (2026-10-18):** Delivered by #30 (2026-08-29) and #41 (2026-08-30); protected acceptance
+> closed with #219 on 2026-09-24 and sdk#38 on 2026-09-25. The `bd` steps name the retired Beads
+> tracker (coven-cave#5399). The live descendant is `docs/phase1-conformance.md`. Historical record.
 
 **Goal:** Prove the full Phase 1 discovery/pairing flow against packaged Chat and packed SDK artifacts talking to a real isolated Cave, then wire that proof into CI, documentation, and bead/gate closure.
 

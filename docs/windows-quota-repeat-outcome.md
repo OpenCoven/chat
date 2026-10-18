@@ -11,8 +11,9 @@ follow-up read:
 
 - `readable`: the follow-up callback returned successfully.
 - `missing`: it threw `FileNotFoundException` or `DirectoryNotFoundException`.
-- `persistent`: it threw another exception; this need not match the first error.
-  This label has since been split by the second exception's category; see below.
+- `persistent`: it threw another exception, which need not match the first
+  error. This label has since been split by the second exception's category
+  (see below).
 - `none`: no diagnostic follow-up was requested.
 
 Protected run
@@ -29,7 +30,7 @@ attempt's partial list is discarded; only a fresh traversal that completes
 under the existing bounds can become the measurement. There is no wait, third
 read, identity switch, permission change, or resource-ceiling change.
 
-`missing` and every `persistent` repeat remain terminal, as do every initial
+`missing` and every `persistent` repeat remain terminal, as does every initial
 failure other than `UnauthorizedAccessException`. Attribute and file-length reads keep
 their existing fail-closed diagnostic-only repeats. The terminal check performs
 the same bounded recovery and still rejects any path that cannot produce a
@@ -79,29 +80,33 @@ entry-bound repeat still reports `access-denied` with
 `repeat=persistent-entry-bound`. The change adds no read, wait, identity switch,
 permission change, or change to `MaximumQuotaEntries` or any other ceiling.
 
-Managed regression coverage exercises both missing exception types, a successful
-metadata follow-up, repeated access denial, and a different second error. Both
-production seams are then driven through one injected second failure at a time:
-every normalized repeat label: a second denial, an entry-bound exception,
-generic I/O and each classified I/O HRESULT, arithmetic overflow, both missing
-types, and an unexpected exception, each of which must keep its own label after
-exactly two calls. A real directory read over a spent entry
-budget must report `entry-bound` with `repeat=persistent-entry-bound` through
-the production enumeration path without any injection. A
-separate snapshot regression requires exactly two calls and verifies that the
-accepted result contains the complete fresh directory contents. Native Windows
-coverage first holds a real owner-only ACL denial across both reads and requires
-the bounded `persistent-access-denied` failure. The isolated-reader fixture then denies the
-validated isolated identity, temporarily reverts only for the fixture ACL
-restoration, verifies impersonation is restored before the second enumeration,
-and requires two identity-checked reads to return the complete fresh snapshot.
-A subsequent 512-byte limit check proves the production accounting path still
-enforces the byte quota.
+Regression coverage:
+
+- **Managed:** both missing exception types, a successful metadata follow-up,
+  repeated access denial, and a different second error.
+- **Per-seam matrix:** both production seams are driven through one injected
+  second failure at a time, covering every normalized repeat label: a second
+  denial, an entry-bound exception, generic I/O and each classified I/O
+  HRESULT, arithmetic overflow, both missing types, and an unexpected
+  exception. Each must keep its own label after exactly two calls.
+- **Spent entry budget:** a real directory read over a spent entry budget must
+  report `entry-bound` with `repeat=persistent-entry-bound` through the
+  production enumeration path without any injection.
+- **Snapshot:** a separate regression requires exactly two calls and verifies
+  that the accepted result contains the complete fresh directory contents.
+- **Native Windows:** coverage first holds a real owner-only ACL denial across
+  both reads and requires the bounded `persistent-access-denied` failure. The
+  isolated-reader fixture then denies the validated isolated identity,
+  temporarily reverts only for the fixture ACL restoration, verifies
+  impersonation is restored before the second enumeration, and requires two
+  identity-checked reads to return the complete fresh snapshot. A subsequent
+  512-byte limit check proves the production accounting path still enforces
+  the byte quota.
 
 Status (2026-10-18): the split labels ship in `scripts/windows-job-supervisor.cs`.
-The `readable`/`missing` split passed local diagnostic tests after a
-demonstrated failing regression. The managed diagnostic file, including the per-seam
-repeat-outcome matrix and the spent-budget check, passed on macOS under
+The split between `readable` and `missing` passed local diagnostic tests after
+a demonstrated failing regression. The managed diagnostic file, including the
+per-seam repeat-outcome matrix and the spent-budget check, passed on macOS under
 PowerShell 7.6.6 on .NET 10, and the `windows-supervisor-behavior` job passed on
 `windows-2025` for PR #338 in run
 [35561671518](https://github.com/OpenCoven/chat/actions/runs/35561671518).

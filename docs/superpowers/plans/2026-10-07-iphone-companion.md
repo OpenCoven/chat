@@ -1,6 +1,9 @@
 # iPhone Companion Implementation Plan
 
-> **For agentic workers:** Use subagent-driven-development task by task, with spec and quality reviews.
+> **Status (2026-10-18):** Delivered (#405, merged 2026-10-09). The app lives in
+> `apps/ios/ChatCompanion`. Follow-ups through 2026-10-18: #417, #419, #421, #423, #424, #425,
+> #451, #466 and #467, listed at the end of this file. For how the companion works today, read
+> [`docs/iphone-companion.md`](../../iphone-companion.md).
 
 **Goal:** Deliver the native paired Chat iPhone companion described in the October design.
 **Architecture:** SwiftUI over pinned local HTTPS to a Rust adapter sharing the existing Chat runtime.
@@ -58,7 +61,28 @@ plus the documented Xcode unit/UI tests and generic iOS Release build.
 - Temporary fixture firewall exception removed after tests; firewall remains on.
   The test listener and its Bonjour process stopped; disposable simulator removed.
 
-Physical iPhone/camera acceptance, hosted CI, signed distribution and TestFlight
-have not been performed. The installed desktop app was not replaced. Keep the
-feature worktree for integration; this receipt is implementation evidence, not a
-release claim.
+On 2026-10-07, physical iPhone and camera acceptance, hosted CI, signed
+distribution and TestFlight were still outstanding, and the installed desktop app
+was not replaced. This receipt is implementation evidence, not a release claim.
+
+## After the receipt (2026-10-18)
+
+#405 merged on 2026-10-09 with the `iPhone companion` workflow
+(`.github/workflows/ios.yml`). The outstanding items followed:
+
+- #417 (2026-10-09) made the companion check deterministic on pull requests.
+- #419 (2026-10-09) bound the companion's CI fixture to a loopback alias.
+- #421 (2026-10-11) added the Settings dialog. The companion now sits under
+  **Settings › Devices**.
+- #423 (2026-10-11) signs the app under the Soul Protocol LLC team.
+- #424 (2026-10-11) added `Scripts/testflight.sh`, which archives the app and
+  uploads it to TestFlight.
+- #425 (2026-10-12) restyled the iPhone pairing screen.
+- #451 (2026-10-13) added the Markdown reader and familiar cards.
+- #466 (2026-10-15) recorded acceptance on a physical iPhone with TestFlight
+  build 0.2.0 (1454).
+- #467 (2026-10-18) uploads a TestFlight build after the tests pass on every push
+  to `main` that changes `apps/ios`.
+
+The feature worktree is gone. For the current app, read
+[`docs/iphone-companion.md`](../../iphone-companion.md).

@@ -1,37 +1,41 @@
 # iPhone companion
 
-The SwiftUI companion in `apps/ios/ChatCompanion` connects to a running Mac Chat
-app on the same private IPv4 network. Coven runs on the Mac, with the same
-read-only permissions and single-run guard used by the desktop. Cave is not
-required. This replaces the August Cave-dependent iOS implementation plans.
+The iPhone companion, **Coven Chat** on your home screen (source in
+`apps/ios/ChatCompanion`), connects to a running Mac Chat app on the same
+private IPv4 network. Coven runs on the Mac, with the same read-only
+permissions and the same one-run-at-a-time limit as the desktop. You don't
+need Cave. This supersedes earlier plans that routed the phone
+through Cave.
 
 ## Connect
 
 1. In Chat on the Mac, open **Settings** (the gear icon, or **Cmd+,**), choose
    **Devices**, then **iPhone companion**.
 2. Choose **Turn on companion**. If macOS asks, allow Chat to accept incoming
-   connections. The listener binds only to the selected private LAN address.
-3. On iPhone, choose **Pair with your Mac** and scan the QR; the phone connects as
-   soon as it reads the code. To use the private pairing link instead, choose
+   connections. Chat listens only on the selected private LAN address.
+3. On iPhone, choose **Pair with your Mac** and scan the QR code; the phone
+   connects as soon as it reads the code. To use the private pairing link instead, choose
    **Enter pairing link**, paste it and choose **Connect**. A link opened from
    elsewhere fills the field but still waits for **Connect**.
 
 A link grants access to Chat conversations and read-only agent runs. It contains
-an HTTPS endpoint, a random bearer and the SHA-256 fingerprint of the Mac's
-certificate. The phone checks the pinned certificate before sending credentials;
-Bonjour advertisements supply candidate addresses only. Credentials live in the
-phone's non-synchronizing, device-only Keychain. Conversation data and drafts stay
-in memory on the phone; Chat continues to save history on the Mac.
+an HTTPS address, a random bearer token and the SHA-256 fingerprint of the Mac's
+certificate. Before sending credentials, the phone checks that the Mac presents
+that exact certificate. Bonjour (local network discovery) only supplies
+addresses to try. Credentials stay in the phone's Keychain on that device alone
+and never sync to your other devices. Conversation data and drafts stay in
+memory on the phone; Chat continues to save history on the Mac.
 
 **Turn off** closes the listener and its connections without revoking pairing.
-Turn it on again to permit saved phones. **Forget paired phones** rotates access
-for all phones. **Forget Mac** on iPhone deletes that phone's saved pairing.
+Turn it on again to let saved phones back in. **Forget paired phones** rotates
+access for all phones. **Forget Mac** on iPhone deletes that phone's saved
+pairing.
 
 Deleting the app removes the pairing from the phone too. iOS keeps an app's
 Keychain items after the app is deleted, so the app stamps the saved pairing
 with an install identifier that iOS removes along with the app. A reinstalled
-app deletes any pairing it did not save and asks you to pair again (#465).
-Updating the app keeps the pairing. Deleting the app does not change the Mac:
+app deletes any pairing it didn't save and asks you to pair again (#465).
+Updating the app keeps the pairing. Deleting the app doesn't change the Mac:
 the access it gave the phone stays valid until **Forget paired phones**
 rotates it for every phone.
 
@@ -39,8 +43,8 @@ iOS asks for Local Network access the first time the app reaches your Mac. If
 the access is off, the app says so instead of reporting an unreachable Mac, and
 **Open Settings** goes to Coven Chat's page in Settings, where the switch is.
 
-The listener starts off when the desktop app launches. Keep the Mac awake and
-Chat running. Public URLs, relays and cellular access are not supported.
+The listener is off each time the desktop app starts. Keep the Mac awake and
+Chat running. Public URLs, relays, and cellular access aren't supported.
 
 ## Chat
 
@@ -62,16 +66,18 @@ is empty, to edit it as a new message. Pull down to refresh.
 **⋯ › Connection Details** shows the Mac's address, the certificate fingerprint
 the phone checks, and the app version.
 
-A run started on either device occupies the same runtime; a second send cannot
-bypass it. Archived chats are readable; restore one on the Mac before sending.
-Attachments, write approvals, remote shell and push notifications are not part
-of this version.
+Both devices share one runtime. While a run is going, whichever device started
+it, a second send can't start another. Archived chats are readable; restore one
+on the Mac before sending. Attachments, write approvals, remote shell and push
+notifications aren't part of this version.
 
-A connection failure never automatically sends the message again. The phone
-checks the original request receipt after reconnecting. If its outcome remains
-uncertain, inspect the conversation on the Mac before dismissing the pending
-send. Request receipts persist across desktop restarts. They are bounded and
-fail closed when full rather than evicting IDs and allowing duplicate execution.
+A connection failure never automatically sends the message again. After
+reconnecting, the phone checks the Mac's receipt for the original request. If
+the outcome is still uncertain, check the conversation on the Mac before you
+dismiss the pending send. Receipts survive desktop restarts. The Mac keeps a
+limited number of them. When that limit is reached, it refuses new sends from
+the phone rather than dropping old receipts, because dropping one could let a
+message run twice.
 
 ## Build and verify
 
@@ -90,39 +96,65 @@ apps/ios/ChatCompanion/Scripts/test-e2e.sh
 ```
 
 The script creates and removes its own simulator and temporary pairing state.
-`CHAT_IOS_DESTINATION` can select an existing simulator; that simulator is retained.
-`CHAT_IOS_FIXTURE_IP=10.255.255.1` binds the fixture to that private-range alias of
-the loopback interface (added with `sudo ifconfig lo0 alias` if absent, removed on
-exit) instead of the Mac's LAN address; CI sets it because the simulator's
-connections to a hosted runner's NAT address drop now and then (#418).
-`CHAT_IOS_UI_FLOW=0` runs the native unit tests only; CI sets it on pull requests
-without the `ci:full` label, because the simulator UI flow is not deterministic on
-hosted runners (#414). Pushes to `main`, labelled pull requests and a manual run
-with `ui_flow` on still run the whole flow.
-`CHAT_IOS_DERIVED_DATA` selects a persistent directory for Xcode test results.
+These variables change what it does:
+
+- `CHAT_IOS_DESTINATION` selects an existing simulator, which the script keeps.
+- `CHAT_IOS_FIXTURE_IP=10.255.255.1` binds the fixture to that private-range
+  alias of the loopback interface (added with `sudo ifconfig lo0 alias` if
+  absent, removed on exit) instead of the Mac's LAN address. CI sets it because
+  the simulator's connections to a hosted runner's NAT address drop now and
+  then (#418).
+- `CHAT_IOS_UI_FLOW=0` runs the native unit tests only. CI sets it on pull
+  requests without the `ci:full` label, because the simulator UI flow isn't
+  deterministic on hosted runners (#414). Pushes to `main`, labelled pull
+  requests and a manual run with `ui_flow` on still run the whole flow.
+- `CHAT_IOS_DERIVED_DATA` selects a persistent directory for Xcode test results.
+
 The fixture uses synthetic chats, is gated behind `companion-fixture`, and is
-absent from production builds. macOS Firewall may require permission for this
-specific executable before same-LAN verification can run.
+absent from production builds. You may need to allow this specific executable in
+the macOS Firewall before same-LAN verification can run.
 
 Simulator apps use ad-hoc signing so tests exercise the real Keychain. Disabling
 signing produces a missing-entitlement error; no plaintext credential fallback
-exists. The test suite checks malformed links, incorrect certificates/tokens,
-Keychain replacement/deletion, forgotten-client races, uncertain sends, and
-pair/send/stream/stop/relaunch/forget through the native UI.
+exists. The test suite checks malformed links, incorrect certificates and
+tokens, Keychain replacement and deletion, forgotten-client races, uncertain
+sends, and pairing, sending, streaming, stopping, relaunching and forgetting
+through the native UI.
 
 The `iPhone companion` GitHub workflow runs this path. Simulator tests and
-unsigned device builds do not prove physical-device behaviour or TestFlight
-distribution; see [Device acceptance](#device-acceptance). `project.yml` signs under the Soul Protocol LLC team (`9LR8Z8UQ9X`), where
-the bundle ID `ai.opencoven.chat.companion` is registered. To install on a
-physical device, sign in to Xcode with an account on that team, open the
-generated project and run on the device. `test-e2e.sh` overrides the team and
-signing on the `xcodebuild` command line, so tests and CI need no team account.
+unsigned device builds don't prove physical-device behavior or TestFlight
+distribution; see [Device acceptance](#device-acceptance).
+
+`project.yml` signs under the Soul Protocol LLC team (`9LR8Z8UQ9X`), where the
+bundle ID `ai.opencoven.chat.companion` is registered. To install on a physical
+device, sign in to Xcode with an account on that team, open the generated
+project and run on the device. `test-e2e.sh` overrides the team and signing on
+the `xcodebuild` command line, so tests and CI need no team account.
 
 ## TestFlight
 
+CI sends the companion to TestFlight. Every push to `main` that changes
+`apps/ios` runs the `iPhone companion` workflow's **TestFlight** job after the
+tests pass. The job runs `Scripts/testflight.sh` and uploads a build numbered by
+the commit count, using the App Store Connect key in the `release-signing`
+environment. The archive is unsigned, and the export signs it with Apple's
+cloud-managed distribution certificate (`CHAT_IOS_UNSIGNED_ARCHIVE=1`), so the
+runner needs no certificate.
+
+To prove signing from a branch without uploading, run the workflow by hand with
+**testflight** set to `export`. `upload` is refused anywhere but `main`.
+
+The upload needs an App Store Connect app record for the bundle ID. The App
+Store Connect API can't create one, so create it once on the website under
+**Apps → New App**. A build appears in TestFlight after Apple finishes
+processing it. External testers need Beta App Review first.
+
+### Upload from your Mac
+
 `Scripts/testflight.sh` archives the app under the team and uploads it to App
 Store Connect. It uses the App Store Connect API key the desktop release
-notarizes with ([releasing](releasing.md)), so no Xcode sign-in is needed:
+notarizes with ([releasing](releasing.md)), so you don't need to sign in to
+Xcode:
 
 ```sh
 APPLE_API_KEY=<key id> APPLE_API_ISSUER=<issuer id> apps/ios/ChatCompanion/Scripts/testflight.sh
@@ -130,25 +162,11 @@ APPLE_API_KEY=<key id> APPLE_API_ISSUER=<issuer id> apps/ios/ChatCompanion/Scrip
 
 The `.p8` is read from `~/.appstoreconnect/private_keys/AuthKey_<key id>.p8`
 unless `APPLE_API_KEY_PATH` names another file. Xcode creates or refreshes the
-App Store provisioning profile through the key. The build number defaults to the
-commit count of `HEAD`, so upload from `main`; `CHAT_IOS_BUILD_NUMBER` overrides
-it. `CHAT_IOS_EXPORT=export` signs an `.ipa` and leaves it in a temporary folder
-without uploading.
+App Store provisioning profile through the key.
 
-**From CI.** Every push to `main` that changes `apps/ios` runs the
-`iPhone companion` workflow's **TestFlight** job after the tests pass. The job
-runs the same script and uploads a build numbered by the commit count, using
-the App Store Connect key in the `release-signing` environment. The archive is
-unsigned, and the export signs it with Apple's cloud-managed distribution
-certificate (`CHAT_IOS_UNSIGNED_ARCHIVE=1`), so the runner needs no
-certificate. To prove signing from a branch without uploading, run the workflow
-by hand with **testflight** set to `export`; `upload` is refused anywhere but
-`main`.
-
-The upload needs an App Store Connect app record for the bundle ID. The App
-Store Connect API cannot create one, so create it once on the website under
-**Apps → New App**. A build appears in TestFlight after Apple finishes
-processing it. External testers need Beta App Review first.
+The build number defaults to the commit count of `HEAD`, so upload from `main`;
+`CHAT_IOS_BUILD_NUMBER` overrides it. `CHAT_IOS_EXPORT=export` signs an `.ipa`
+and leaves it in a temporary folder without uploading.
 
 ### Install from TestFlight
 
@@ -161,13 +179,13 @@ processing it. External testers need Beta App Review first.
 3. Open Coven Chat and pair it with your Mac as described in
    [Connect](#connect).
 
-A successful upload does not prove the app works on a device; that is what the
+A successful upload doesn't prove the app works on a device; that's what the
 device acceptance run below is for.
 
-To tell which build a phone runs, use App Store Connect, not `devicectl`: a
-TestFlight install reports `builtByDeveloper: true` in `xcrun devicectl device
-info apps`, the same as an Xcode install. A TestFlight install raises the
-build's `installCount` in App Store Connect.
+To tell which build a phone runs, use App Store Connect, not `devicectl`. A
+TestFlight install reports `builtByDeveloper: true` in
+`xcrun devicectl device info apps`, the same as an Xcode install. A TestFlight
+install raises the build's `installCount` in App Store Connect.
 
 ## Device acceptance
 

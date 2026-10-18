@@ -1,12 +1,20 @@
 # OpenCoven Chat v1 Program Tracking
 
+> **Status (2026-10-18):** Superseded. The Cave-client program it tracks ended when #277
+> (2026-09-14) made Chat a Coven CLI front end and #333 (2026-09-20) removed the Cave-connected app;
+> Phases 0 and 1 were delivered, later phases were not. GitHub issues track current work;
+> `README.md` is the product contract. Historical record; do not execute.
+
 Use GitHub issues for current delivery tracking. The Beads IDs, counts, and
 phase register below preserve the original 2026-08-15 plan; they are not a
 current execution queue. Cave retired Beads in
 [#5399](https://github.com/OpenCoven/coven-cave/issues/5399). Do not run `bd`,
 claim Beads, or sync Dolt for this work.
 
-## Current delivery audit
+## Delivery audit as of 2026-09-15 (historical)
+
+Outcome after this audit: #219 closed 2026-09-24, sdk#38 closed 2026-09-25, and #86
+closed unmerged 2026-09-27.
 
 The [delivery roadmap](../../roadmap.md) records verified Chat #285 and SDK
 #274 landings and fresh protected run `34935323170`. Follow

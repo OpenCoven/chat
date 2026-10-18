@@ -1,6 +1,9 @@
 # OpenCoven Chat Rich Desktop Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **Status (2026-10-18):** Superseded by the 2026-08-15 phase plans and then by #277, which made
+> Chat a Coven CLI front end. Rich text and attachments shipped another way
+> (`src/coven/formatted-message.tsx`, `src-tauri/src/chat_attachments.rs`). `README.md` is the
+> product contract. Historical record; do not execute.
 
 **Goal:** Complete OpenCoven Chat with safe rich Cave messages, attachments and authorized actions, native shortcuts/notifications/settings, accessibility, visual polish, and cross-platform packaging.
 

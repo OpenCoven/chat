@@ -1,5 +1,9 @@
 # Developer toolchains
 
+This page lists the tool versions the repo pins, the local ports the dev servers bind,
+notes on the Phase 1 conformance boundary, and how the CI image workflow's credential and
+retries work.
+
 ## Web toolchain pins
 
 | Tool | Version |
@@ -32,11 +36,16 @@
 - Vite preview server: `127.0.0.1:4174`
 - Tauri dev URL: `http://127.0.0.1:4173`
 
-## Phase 1 boundary notes
+## Conformance boundary notes (Phase 1 harness)
 
-- The repository consumes exact vendored packed `@opencoven/*` artifacts from
-  `vendor/opencoven-sdk`; production imports never resolve to SDK workspace
-  source.
+Most of these notes describe the Phase 1 conformance harness and the unmounted SDK
+boundary, not the path the live chat UI uses. The harness is the protected release gate
+that runs Chat's native code against pinned SDK, Cave, and Coven revisions on macOS,
+Linux, and Windows (see [`phase1-conformance.md`](phase1-conformance.md)).
+
+- The repository consumes exact vendored, packed `@opencoven/*` artifacts (npm
+  package tarballs) from `vendor/opencoven-sdk`; production imports never resolve
+  to SDK workspace source.
 - The chat UI reaches the Coven CLI through `src/lib/coven-runtime.ts`.
   `src/lib/setup.ts`, `companion.ts`, `companion-runs.ts`, and `screen-relay.ts`
   wrap the first-run setup, iPhone companion, and screen relay commands. The
@@ -49,26 +58,30 @@
 - `src/lib/sdk/native-boundary.ts` is the narrow SDK-managed Cave bridge. Only
   other `src/lib/sdk/` modules and tests import it, so it is not reachable from
   `src/main.tsx`. The protected conformance producer runs its tests by file
-  name, so do not delete or rename it. It
-  accepts only opaque authority handles, bounded page options, canonical
-  conversation IDs, and SDK-safe result snapshots. SDK operation contexts are
-  reduced to an unpredictable, epoch/counter-bound single-use attempt ID plus
-  a timeout of at most five seconds; aborts use the dedicated
-  `cave_cancel_operation` command with only the attempt ID and the canonical
-  `aborted` or `timeout` reason.
-- The same bounded operation and cancellation controls expose only the exact
-  raw ordinary `{ status: "ok" }` Coven health result. A dedicated native
-  single-worker executor rejects overlapping health work with a retryable
-  bounded diagnostic and releases capacity only after the synchronous producer
-  call actually returns. Caller timeout or cancellation does not stop the OS
-  call. Native production code consumes the producer-owned Rust `coven-client`
-  at exact Coven revision
-  `721437b84026c042e431b0882dcd14fdb29ac07d`; it resolves explicit
-  `COVEN_HOME` or the current account's real platform home plus `.coven`, then
-  relies on that crate for live Unix connected-peer credentials or Windows
-  named-pipe ownership and connected identity. Native trust unavailability
-  fails closed, with no pathname-only, constructed-pipe, shell, PowerShell,
-  `lsof`, or Node-private fallback.
+  name, so do not delete or rename it.
+  - It accepts only opaque authority handles, bounded page options, canonical
+    conversation IDs, and SDK-safe result snapshots.
+  - SDK operation contexts are reduced to an unpredictable, epoch/counter-bound
+    single-use attempt ID plus a timeout of at most five seconds.
+  - Aborts use the dedicated `cave_cancel_operation` command with only the
+    attempt ID and the canonical `aborted` or `timeout` reason.
+- The Coven health check uses the same bounded operation and cancellation
+  controls:
+  - It exposes only the exact, raw, ordinary `{ status: "ok" }` Coven health
+    result.
+  - A dedicated native single-worker executor rejects overlapping health work
+    with a retryable, bounded diagnostic. It releases capacity only after the
+    synchronous producer call actually returns. A caller's timeout or
+    cancellation does not stop the OS call.
+  - Native production code consumes the producer-owned Rust `coven-client`
+    (Coven's own client crate) at exact Coven revision
+    `721437b84026c042e431b0882dcd14fdb29ac07d`. It resolves an explicit
+    `COVEN_HOME`, or the current account's real platform home plus `.coven`,
+    then relies on that crate for live Unix connected-peer credentials or
+    Windows named-pipe ownership and connected identity.
+  - When native trust is unavailable, the check fails closed. There is no
+    pathname-only, constructed-pipe, shell, PowerShell, `lsof`, or Node-private
+    fallback.
 - Native credential mutations use one bounded worker reservation. Work
   cancelled while queued never acquires the keyring lock; once an irreversible
   mutation starts, concurrent retries fail with non-retryable
@@ -79,33 +92,36 @@
   uses a current-user-only `Global\` mutex with verified ownership/DACL and the
   shipped session-local mutex during the compatibility window. Unix lock
   acquisition is owner-private and bounded.
-- Packed tarballs are verified by the cross-repository canary against the
-  exact canonical release manifest, package paths, sizes, and digests in a
-  temporary install copy rather than by a source-relative or absolute path
+- The cross-repository contract canary (the Phase 0 check that
+  `contract-canary.lock.json` pins) verifies packed tarballs against the exact
+  canonical release manifest, package paths, sizes, and digests in a temporary
+  install copy, rather than through a source-relative or absolute path
   dependency.
 - Run the local canary with
-  `pnpm test:contract-canary -- --sdk-root <sdk-root> --cave-root <cave-root>`.
-- Run the packaged real-authority matrix through the trusted outer launcher:
-  `/bin/sh scripts/phase1-conformance-launcher.sh "$(command -v node)"`. Its independent
-  `phase1-conformance.lock.json` pins Chat, the SDK package candidate, Cave,
-  Coven, all four frozen SDK artifacts, and the SDK evidence authority; the
-  harness creates exact clean detached clones rather than trusting source
-  repositories' current branches.
+  `corepack pnpm test:contract-canary -- --sdk-root <sdk-root> --cave-root <cave-root>`.
+- Run the packaged real-authority matrix (the conformance scenarios run against
+  the real OS keyring, a real Cave server, and the real Coven daemon rather than
+  in-memory stand-ins) through the trusted outer launcher:
+  `/bin/sh scripts/phase1-conformance-launcher.sh "$(command -v node)"`. Its
+  independent `phase1-conformance.lock.json` pins Chat, the SDK package
+  candidate, Cave, Coven, all four frozen SDK artifacts, and the SDK evidence
+  authority. The harness creates exact, clean, detached clones rather than
+  trusting the source repositories' current branches.
 - CI reads `contract-canary.lock.json`, checks out those exact reviewed SDK and
   Cave revisions, rejects dirty SDK or Cave checkouts, and verifies the
   checked-out HEADs before the canary runs. The SDK lock targets canonical
   `main` commit `cd10a3fa1d9900e0dbcb04bbb2477140854fba1d` and manifest digest
   `72041bfe9a236d709ea3fe26d32b871f17c7c5183e2991cd0229063ade730cb4`.
-  The lock also pins the Cave
-  producer's Client v1 contract fixture and `hpke-bound-v1` vector digests;
-  the current canary and frozen-consumer verifier require packed fixture and
-  vector byte identity with the reviewed Cave checkout, in addition to proving
-  the ancestry and exact historical bytes of the SDK's fixture provenance.
-  Standalone historical-fixture validation retains support for authenticated
-  older, different fixture bytes; it is not the current-candidate canary policy.
+  The lock also pins the Cave producer's Client v1 contract fixture and
+  `hpke-bound-v1` vector digests. The current canary and frozen-consumer
+  verifier require packed fixture and vector byte identity with the reviewed
+  Cave checkout, in addition to proving the ancestry and exact historical bytes
+  of the SDK's fixture provenance. Standalone historical-fixture validation
+  retains support for authenticated older, different fixture bytes; it is not
+  the current-candidate canary policy.
 - This production-consumer preparation uses the replacement private SDK
   `0.0.1` candidate `cd10a3f`. SDK #40 blocked candidate `96804bc` because it
-  predates the High-severity Cave fixes SDK #277 and #285. The Cave, Coven and
+  predates the High-severity Cave fixes SDK #277 and #285. The Cave, Coven, and
   SDK archives change and the core archive is byte-identical; the Cave client
   now depends on `canonicalize` 5.1.0. Previous candidate evidence remains
   historical. The production consumer retains its reviewed native sources;
@@ -124,19 +140,21 @@
 - No shell, filesystem, opener, or network plugin permissions are configured.
 - The feature-gated `phase1-native-rpc` binary is a headless conformance-only
   NDJSON bridge. It is excluded from default Cargo and Tauri builds. Unit
-  scenarios default to in-memory custody, while the real-authority runner
-  explicitly selects the production `NativeKeyring`, restarts the RPC process,
-  and verifies credential reuse and deletion. Cave launch paths are accepted
-  only through its two explicit
+  scenarios default to in-memory custody (a stand-in credential store), while
+  the real-authority runner explicitly selects the production `NativeKeyring`,
+  restarts the RPC process, and verifies credential reuse and deletion. Cave
+  launch paths are accepted only through its two explicit
   `OPENCOVEN_PHASE1_CONFORMANCE_NODE_PATH` and
   `OPENCOVEN_PHASE1_CONFORMANCE_CAVE_SERVER_PATH` environment variables.
-- Run its subprocess integration gate with `pnpm test:native-e2e`; normal
-  `pnpm app:dev` selects the `opencoven-chat` desktop binary by default.
+- Run its subprocess integration gate with `corepack pnpm test:native-e2e`;
+  normal `corepack pnpm app:dev` selects the `opencoven-chat` desktop binary by
+  default.
 - Run the persisted Windows GNU cross-target compile gate with
-  `pnpm cargo:check:windows-gnu`.
+  `corepack pnpm cargo:check:windows-gnu`.
 - The legacy Phase 1 harness creates mode-`0700` process-owned roots under the
-  real OS temporary directory. Protected schema-v2 macOS/Linux lanes add a
-  distinct ephemeral non-admin UID, isolated home/workspace/tool caches,
+  real OS temporary directory. Protected schema-v2 macOS/Linux lanes (jobs of
+  the manually dispatched `client-v1-conformance.yml` workflow, which runs in a
+  protected GitHub environment) add a distinct ephemeral non-admin UID, isolated home/workspace/tool caches,
   cgroup-v2 teardown on Linux or exact-UID account/process teardown on macOS,
   and a no-follow descriptor handoff into one broker-owned mode-`0600`
   artifact. The completed record is rescanned after handoff. See
@@ -148,15 +166,15 @@
 ## CI image proposal credential and retries
 
 The weekly CI image workflow builds and verifies an image before proposing a
-new digest in `.github/workflows/ci.yml`. Configure repository Actions secret
+new digest in `.github/workflows/ci.yml`. Configure the repository Actions secret
 `CI_IMAGE_BUMP_TOKEN` with a fine-grained token restricted to `OpenCoven/chat`
 and **Contents: write**, **Workflows: write**, and **Pull requests: write**.
 The proposal job does not fall back to `GITHUB_TOKEN`: workflow-file updates
 require additional authorization, and the separate credential permits PR CI.
 See [GitHub's Contents API permissions](https://docs.github.com/en/rest/repos/contents#create-or-update-file-contents).
 
-The token is consumed only by `scripts/ci-image-proposal.mjs`; checkout does not
-persist credentials. Do not paste a token into issues, logs, or source files.
+Only `scripts/ci-image-proposal.mjs` uses the token; checkout does not persist
+credentials. Do not paste a token into issues, logs, or source files.
 An absent credential fails before any API call.
 
 Retries reconcile the digest branch, file update, and PR separately. A branch

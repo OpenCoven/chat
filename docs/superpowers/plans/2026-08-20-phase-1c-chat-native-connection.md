@@ -1,6 +1,9 @@
 # Chat Native Connection Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **Status (2026-10-18):** Superseded. #31 (2026-08-28) delivered the connection in a different
+> shape (`cave.rs`, `connection.rs`, `src/connection-gate.tsx`); #277 then made Chat a Coven CLI
+> front end and #333 removed the gate and `?demo=`. The Rust Cave stack remains only for
+> `docs/phase1-conformance.md`. Historical record; do not execute.
 
 **Goal:** Turn the production Chat route into a blocking native Cave connection gate that discovers or launches Cave, pairs through Rust-owned secure storage, reconnects after restart, and preserves the existing preview demos.
 

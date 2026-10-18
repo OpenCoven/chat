@@ -1,6 +1,9 @@
 # OpenCoven Chat Core Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **Status (2026-10-18):** Superseded, first by the 2026-08-15 phase plans and then by #277
+> (2026-09-14), which made Chat a front end for the Coven CLI. The planned `src/lib/connection/`,
+> `src/lib/chat/` and TanStack Query layers were never built. `README.md` is the product contract.
+> Historical record; do not execute.
 
 **Goal:** Build a usable Tauri desktop client that discovers and pairs with Cave, reads canonical familiar conversations, sends messages, and recovers resumable streams without duplicate execution.
 

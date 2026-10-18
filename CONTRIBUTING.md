@@ -2,16 +2,15 @@
 
 Thanks for wanting to help. OpenCoven Chat is a Tauri desktop client with a
 deliberately narrow native surface and a cryptographic conformance lock, so a
-few of the rules below are stricter than a typical web project. Read the
+few of the rules below are stricter than in a typical web project. Read the
 sections that apply to your change before you open a pull request.
 
 ## Before you start
 
 - For anything larger than a bug fix or a docs correction, open an issue first
   and describe the change. Large unsolicited pull requests are hard to land.
-- Check the open pull requests — a lane may already exist for what you want.
-- Security issues do **not** go through pull requests. See
-  [`SECURITY.md`](SECURITY.md).
+- Check the open pull requests first: someone may already be working on what you want.
+- Security issues do _not_ go through pull requests. See [`SECURITY.md`](SECURITY.md).
 
 ## Development setup
 
@@ -53,17 +52,17 @@ cd .worktrees/<short-name>
 Use a descriptive prefix such as `feat/`, `fix/`, `chore/`, `docs/`, `ci/`,
 `refactor/`, or `test/`.
 
-Release preparation is maintainer-owned. Version changes land through a pull
-request; maintainers then create a signed, annotated `v*` tag from the merged
-commit on `main`. Do not create or move release tags from a topic branch.
+Maintainers own release preparation. Version changes land through a pull request; maintainers
+then create a signed, annotated `v*` tag from the merged commit on `main`. Don't create or move
+release tags from a topic branch.
 
 Pull request expectations:
 
-- One logical change per pull request. Split unrelated work into lanes.
+- One logical change per pull request. Split unrelated work into separate pull requests.
 - Describe what changed, why, and how you verified it. Paste the commands you
   ran and their results.
 - Keep the diff free of unrelated formatting churn.
-- Update documentation in the same pull request as the behaviour it describes.
+- Update documentation in the same pull request as the behavior it describes.
 
 ## Commits must be signed
 
@@ -108,13 +107,12 @@ End-to-end tests use Playwright and bind a fixed preview port:
 corepack pnpm test:e2e
 ```
 
-New behaviour needs a test. Bug fixes need a regression test that fails before
-the fix.
+New behavior needs a test. Bug fixes need a regression test that fails before the fix.
 
-Documentation-only changes do not require the broad code, test, and build
-suite. Run `git diff --check`, keep prose wrapped at 100 columns, and verify
-new or changed links. The current Biome configuration does not process these
-governance documents, so do not report `pnpm lint` as validation for them.
+Documentation-only changes don't need the broad code, test, and build suite. Run
+`git diff --check`, keep prose wrapped at 100 columns, and verify new or changed links. The current
+Biome configuration doesn't process these governance documents, so don't report `pnpm lint` as
+validation for them.
 
 ```bash
 git diff --check
@@ -122,12 +120,11 @@ git diff --check
 
 ## Code style
 
-Source and configuration formatting and linting are enforced by
-[Biome](https://biomejs.dev) — two-space indentation, 100-column lines, single
-quotes in TypeScript, double quotes in JSX. Run `corepack pnpm format` rather
-than hand-formatting supported files. Do not disable lint rules with blanket
-suppressions; a `biome-ignore` must be a single line directly above the
-diagnostic and must carry a reason.
+[Biome](https://biomejs.dev) enforces formatting and linting for source and configuration files:
+two-space indentation, 100-column lines, single quotes in TypeScript, and double quotes in JSX. Run
+`corepack pnpm format` rather than hand-formatting supported files. Don't disable lint rules with
+blanket suppressions; a `biome-ignore` must be a single line directly above the diagnostic and must
+carry a reason.
 
 Comment only what needs clarification. Prefer explicit types at module
 boundaries and narrow, well-named modules over large ones.
@@ -151,21 +148,20 @@ Authority changes normally land in two stages:
    expectations. Documentation byte-count and digest rows change only when
    their governed producer bytes change.
 
-If you are not sure whether your change is pinned, say so in the pull request
-and a maintainer will help. Do not repin speculatively.
+If you're not sure whether your change is pinned, say so in the pull request and a maintainer will
+help. Don't repin speculatively.
 
 ## Security-sensitive areas
 
-Changes in these areas get extra scrutiny and should be proposed in an issue
-first:
+Changes in these areas get extra scrutiny, so propose them in an issue first:
 
 - The Tauri capability set and any new native command.
 - Keyring, pairing, or credential handling in `src-tauri/`.
 - Anything that widens what the webview can reach.
 - The release and packaging workflows.
 
-The native surface is intentionally minimal. "It would be convenient" is not
-sufficient justification for widening it.
+The native surface is intentionally minimal. "It would be convenient" isn't enough reason to widen
+it.
 
 ## Code of conduct
 

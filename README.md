@@ -1,10 +1,12 @@
-<p align="center"><img src="assets/brand/chat-app-icon-rounded.svg" width="96" height="96" alt="Coven Chat logo: the OpenCoven crown inside a speech bubble"></p>
+<p align="center"><img src="assets/brand/chat-app-icon-rounded.svg" width="96" height="96" alt="OpenCoven Chat logo: the OpenCoven crown inside a speech bubble"></p>
 
 # OpenCoven Chat
 
-OpenCoven Chat uses one desktop interface: the Familiars Redesign, connected
-to your installed Coven CLI. You don't need Cave, pairing, or a separate demo
-build.
+OpenCoven Chat is a desktop app for chatting with your familiars through the Coven CLI installed
+on your computer. Each familiar has one ongoing chat, and the window shows real runs as they
+happen. You don't need Cave, a Cave pairing, or a separate demo build.
+
+To build and run it from this repository:
 
 ```bash
 coven --version
@@ -12,129 +14,150 @@ corepack pnpm install:clean
 corepack pnpm app:dev
 ```
 
-Chat finds a Coven CLI installed with `npm install -g @opencoven/cli`, under
-npm's default folder on macOS, Linux and Windows, any nvm-managed Node, or an
-npm prefix on your PATH. It also looks in `~/.local/bin`, `~/.cargo/bin` and
-your PATH, so a launch from Finder or the Start menu doesn't depend on your
-shell setup.
+Chat finds a Coven CLI installed with `npm install -g @opencoven/cli` in npm's default folder (on
+macOS, Linux, and Windows), in any nvm-managed Node, or under an npm prefix on your `PATH`. It also
+looks in `~/.local/bin`, `~/.cargo/bin`, and your `PATH`, so a launch from Finder or the Start menu
+doesn't depend on your shell setup.
 
-The desktop window opens the familiar list, transcript, composer, and
-familiar inspector at `/`. Old `?demo=` links no longer select different
-applications. `VITE_DEFAULT_DEMO` and `app:build:demo` are removed.
+## The window
 
-The application frame stays within the window and does not scroll globally.
-Conversation history, rails, and long drafts scroll inside their own regions,
-so a long reply or a short window does not push the composer off the page.
-The conversation region can take keyboard focus, so it scrolls with the
-arrow and page keys without a control inside it being focused.
+The desktop window opens at `/` with the familiar list, the transcript, the composer, and the
+familiar inspector. Old `?demo=` links no longer select different applications, and
+`VITE_DEFAULT_DEMO` and `app:build:demo` have been removed.
 
-The interface follows your system's light or dark appearance. Both palettes
-hold every visible text to WCAG AA contrast, checked on the rendered app in
-each scheme.
+The app frame stays inside the window and doesn't scroll as a whole. Conversation history, the
+rails, and long drafts scroll inside their own regions, so a long reply or a short window doesn't
+push the composer off the page. The conversation region can take keyboard focus, so you can scroll
+it with the arrow and page keys without focusing a control inside it.
 
-The window is titled after the familiar you are viewing, such as
-"Astra — OpenCoven Chat", and leads with a count when runs have ended in
-other chats you have not opened yet, so a window in the background shows
-that a reply is waiting.
+The interface follows your system's light or dark appearance. Both palettes hold all visible text
+to WCAG AA contrast, checked on the rendered app in each scheme.
 
-Toggle the familiar list with **Cmd/Ctrl+\\** and the inspector with
-**Cmd/Ctrl+Shift+\\**, and reach the familiar search with **Cmd/Ctrl+K**
-(it opens the list if it is closed), and step to the previous or next
-familiar with **Cmd/Ctrl+[** and **Cmd/Ctrl+]**, in the list's own order and
-filter. **Cmd/Ctrl+F** opens a find bar over the conversation that counts
-the messages and tool calls containing your text; **Enter** and
-**Shift+Enter** step through them, scrolling each into view, and
-**Escape** closes it. These shortcuts work while composing
-without changing your text, stay quiet while a dialog or menu is open, and rail buttons display shortcut hints. Typing a letter while nothing editable has
-focus starts a message: the keystroke moves to the composer and lands there,
-unless the composer cannot send or a dialog or menu is open. Modal dialogs and input-method
-composition do not trigger the shortcuts.
+The window title names the familiar you're viewing, such as `Astra — OpenCoven Chat`. When runs
+have ended in other chats you haven't opened yet, the title leads with a count, so a window in the
+background shows that a reply is waiting.
 
-Closed rails remain as 28px full-height tabs: **Familiars** on the left and the
-selected familiar's name on the right. Click anywhere along a tab to reopen
-its rail. The tabs reserve their own space instead of covering chat content,
-with opaque smoky surfaces, subtle depth, and visible keyboard focus.
+Closed rails stay on screen as 28px full-height tabs: **Familiars** on the left and the selected
+familiar's name on the right. Click anywhere along a tab to reopen its rail. The tabs reserve their
+own space instead of covering chat content, with opaque smoky surfaces, subtle depth, and visible
+keyboard focus.
 
-Use **Add context** in the composer to clarify which familiar or project you
-mean. Search by name, identity, or full path (`@` filters familiars; `#` filters
-workspaces). Suggestions come from known familiars and the selected familiar's
-declared read/write project access,
-with full identities and paths to distinguish similar names. **Settings ›
-Access** lists that same declared access, write grants first, and says
-plainly that Chat neither enforces nor extends it. The **Access** row in the
-inspector's Overview opens it. When none is declared
-it says so, and when Chat could not read the registry or grants it says
-that instead, so an unreadable store is never shown as an empty one. Selection inserts
-visible reference text at your cursor; it does not switch the recipient,
-delegate work, or grant file access.
+Replies and the composer share a responsive reading column up to 1200px wide (36% wider than the
+previous 880px limit), while the app frame stays still. The window can shrink to 480×520:
 
-You can also type **`@name`** or **`#project`** directly in your message for
-inline suggestions. Use the arrow keys to choose and **Tab** to confirm, or
-**Escape** to dismiss. The optional `@{name` / `#{project` opening-brace syntax
-works too. Completed references use `@{Name}` or `#{project}` with the full
-identity or path alongside them, so similarly named choices remain unambiguous.
-Projects come from the local project registry and stored direct/group grants
-used by Cave, not inferred familiar directories or chat history. Read-only and
-write access are labeled separately; only the selected familiar's granted
-projects appear. This reads local metadata without requiring Cave to run,
-importing conversations, or modifying permissions. Without a configured
-registry/grants, no project access is assumed. Use **Refresh Coven** after
-changing grants. Email addresses and URL fragments remain ordinary text.
+- above 1100px, both rails stay in the grid;
+- below that, the inspector folds into a drawer;
+- at 760px or less, both rails become drawers that open one at a time.
 
-The composer shows the reported chat project, or the familiar workspace when
-no chat project has been reported. This is observed context, not a workspace
-switch or permission grant. The reference picker opens above the app on modern
-desktop webviews so long paths do not push the composer out of view.
+## Keyboard shortcuts
 
-Connection diagnostics are collapsed during normal use. Run status and Stop
-stay beside the composer, and the end of the thread shows the familiar's
-avatar with what the run is doing right now (waiting for the familiar, running
-a named tool, or stopping) until reply text starts to stream, and the status
-counts how long the run has been going. After thirty seconds without a sign
-of life the row says it is still waiting, or still running the tool. When a run ends, assistive
-technology hears how: the familiar's outcome and duration, or that a
-familiar replied or failed in another chat. A run belongs to
-the familiar it was sent to: if you switch to another familiar while it is
-live, that familiar's sidebar row reads **Responding…**, the status beside the
-composer names them and says the composer is free once their run finishes or
-is stopped, and the thread you are viewing does not claim the run. When that
-run ends, their row reads **New reply** (or **Run failed**) until you open
-them again; a run you stop yourself leaves no marker. While the familiar list
-is collapsed, its tab carries a count of such runs so they are not missed. Without a connected CLI
-the empty familiar list says to connect rather than to configure a familiar. **Jump to
-latest** returns to new output after you scroll back and counts the messages
-that arrived while you were reading. Error notices carry Copy and dismiss controls; a
-notice also clears on the next send, familiar switch, or refresh. When a
-chat's history could not be read, its notice offers **Reload chat**, which
-reads it again without refreshing everything. The collapsed connection
-details have a Copy control too, for a bug report. Replies and the composer share a responsive reading column up to
-1200px wide (36% wider than the previous 880px limit), while
-the application frame remains stationary.
-The window can shrink to 480×520: above 1100px every rail stays in the grid,
-below it the inspector folds into a drawer, and at 760px or less both rails
-become drawers that open one at a time.
+| Shortcut | What it does |
+| --- | --- |
+| **Cmd/Ctrl+\\** | Show or hide the familiar list |
+| **Cmd/Ctrl+Shift+\\** | Show or hide the inspector |
+| **Cmd/Ctrl+K** | Go to the familiar search, opening the list if it's closed |
+| **Cmd/Ctrl+[** and **Cmd/Ctrl+]** | Step to the previous or next familiar, in the list's own order and filter |
+| **Cmd/Ctrl+F** | Open a find bar over the conversation that counts the messages and tool calls containing your text |
 
-Unsent drafts are kept per familiar in memory only. They survive switching
-familiars but not closing the window: conversation content never reaches
-browser storage (see `SECURITY.md`), and only the selected familiar and your
-**Settings** choices are remembered across restarts.
+In the find bar, **Enter** and **Shift+Enter** step through the matches, scrolling each into view,
+and **Escape** closes it.
 
-With a connected CLI but no familiars configured, the empty thread and the
-composer say so, rather than asking you to select from an empty list, and
-the empty thread and the empty familiar list each offer **Check for
-familiars**, which refreshes Coven. Without a connected CLI they offer
-**Check again** instead. When the Coven CLI or its engine isn't installed,
-the empty thread also shows the one command that installs it
-(`npm install -g @opencoven/cli` or `coven engine install`) with a **Copy**
-control. Chat never runs it for you; run it in a terminal, then choose
-**Check again**.
+These shortcuts work while you're composing and leave your text unchanged. They stay quiet while a
+dialog or menu is open, and the rail buttons show shortcut hints. Modal dialogs and input-method
+composition don't trigger them.
+
+Typing a letter while nothing editable has focus starts a message: the keystroke moves to the
+composer and lands there, unless the composer can't send or a dialog or menu is open.
+
+## Referring to familiars and projects
+
+Use **Add context** in the composer to make clear which familiar or project you mean. Search by
+name, identity, or full path: `@` filters familiars and `#` filters workspaces. Suggestions come
+from known familiars and from the selected familiar's declared read and write project access. They
+show full identities and paths, so you can tell similar names apart. Picking a suggestion inserts
+visible reference text at your cursor. It doesn't switch the recipient, delegate work, or grant
+file access.
+
+**Settings › Access** lists that same declared access, write grants first, and says plainly that
+Chat neither enforces nor extends it. The **Access** row in the inspector's Overview opens it. When
+no access is declared, it says so. When Chat couldn't read the registry or grants, it says that
+instead, so an unreadable store never looks like an empty one.
+
+You can also type **`@name`** or **`#project`** directly in your message for inline suggestions.
+Use the arrow keys to choose and **Tab** to confirm, or **Escape** to dismiss. The optional
+`@{name` / `#{project` opening-brace syntax works too. Completed references use `@{Name}` or
+`#{project}` with the full identity or path alongside them, so similarly named choices stay
+unambiguous. Email addresses and URL fragments stay ordinary text.
+
+Projects come from the local project registry and the stored direct and group grants that Cave
+uses. Chat doesn't infer them from familiar directories or chat history. Read-only and write access
+are labeled separately, and only the selected familiar's granted projects appear. Chat reads this
+local metadata without needing Cave to run, and it doesn't import conversations or modify
+permissions. Without a configured registry and grants, Chat assumes no project access. Choose
+**Refresh Coven** after you change grants.
+
+The composer shows the reported chat project, or the familiar workspace when no chat project has
+been reported. This is observed context, not a workspace switch or a permission grant. On modern
+desktop webviews the reference picker opens above the app, so long paths don't push the composer
+out of view.
+
+## While a run is going
+
+Run status and **Stop** stay beside the composer. Until reply text starts to stream, the end of the
+thread shows the familiar's avatar with what the run is doing right now: waiting for the familiar,
+running a named tool, or stopping. The status counts how long the run has been going. After thirty
+seconds without a sign of life, the row says it's still waiting, or still running the tool.
+
+**Jump to latest** returns you to new output after you scroll back, and counts the messages that
+arrived while you were reading.
+
+When a run ends, assistive technology announces how: the familiar's outcome and duration, or that
+a familiar replied or failed in another chat.
+
+A run belongs to the familiar it was sent to. If you switch to another familiar while it's live:
+
+- that familiar's row in the familiar list reads **Responding…**;
+- the status beside the composer names them and says the composer is free once their run finishes
+  or is stopped;
+- the thread you're viewing doesn't claim the run.
+
+When that run ends, their row reads **New reply** (or **Run failed**) until you open them again. A
+run you stop yourself leaves no marker. While the familiar list is collapsed, its tab carries a
+count of these runs so you don't miss them.
+
+## Errors and connection details
+
+Connection diagnostics stay collapsed during normal use. The collapsed connection details have a
+**Copy** control, for a bug report.
+
+Error notices have **Copy** and dismiss controls. A notice also clears on your next send, when you
+switch familiars, or when you refresh. When a chat's history couldn't be read, its notice offers
+**Reload chat**, which reads that chat again without refreshing everything.
+
+## Drafts
+
+Unsent drafts are kept per familiar, in memory only. They survive switching familiars but not
+closing the window. Conversation content never reaches browser storage (see `SECURITY.md`), and
+only the selected familiar and your **Settings** choices are remembered across restarts.
+
+## When the list is empty
+
+With a connected CLI but no familiars configured, the empty thread and the composer say so instead
+of asking you to select from an empty list. The empty thread and the empty familiar list each
+offer **Check for familiars**, which refreshes Coven.
+
+Without a connected CLI, the empty familiar list says to connect rather than to configure a
+familiar, and the empty thread and list offer **Check again** instead. When the Coven CLI or its
+engine isn't installed, the empty thread also shows the one command that installs it
+(`npm install -g @opencoven/cli` or `coven engine install`) with a **Copy** control. Chat never
+runs it for you: run it in a terminal, then choose **Check again**.
 
 ## Settings
 
 Open **Settings** with the gear above the familiar list or in the thread header,
 or press **Cmd/Ctrl+,**. It has six sections:
 
-- **General:** text size, and **Group tool calls**.
+- **General:** text size and **Group tool calls**.
 - **Chats:** **Show archived chats**.
 - **Access:** the projects Coven declares for the selected familiar.
 - **Devices:** the **iPhone companion**.
@@ -145,212 +168,220 @@ or press **Cmd/Ctrl+,**. It has six sections:
 ## First-run setup
 
 Before the chat opens, Chat checks what it needs:
+
 - **Coven:** the Coven CLI is installed.
 - **Engine:** the Coven engine is installed.
-- **Sign-in:** a model provider is signed in, through the engine's own sign-in, a Claude subscription in Claude Code, or ChatGPT.
+- **Sign-in:** a model provider is signed in, through the engine's own sign-in, a Claude
+  subscription in Claude Code, or ChatGPT.
 - **Familiar:** at least one familiar exists.
 
-When everything is in place, nothing is shown and the chat opens as usual. Otherwise **Set up Coven Chat** lists each step, and Chat can complete the first two itself.
+When everything is in place, you see no setup screen and the chat opens as usual. Otherwise
+**Set up Coven Chat** lists each step, and Chat can complete the first two itself.
 
 **Install Coven:**
+
 1. Chat downloads Coven's pinned release for this computer from `github.com/OpenCoven/coven`.
 2. Before unpacking, it checks the download against a SHA-256 built into Chat.
-3. It installs only the release's own executables, into `~/.local/bin` on macOS and Linux, or `%LOCALAPPDATA%\Programs\OpenCoven\Coven` on Windows. Chat already looks for Coven in both.
+3. It installs only the release's own executables, into `~/.local/bin` on macOS and Linux, or
+   `%LOCALAPPDATA%\Programs\OpenCoven\Coven` on Windows. Chat already looks for Coven in both.
 4. It then goes straight on to install the engine.
 
-**Install the engine:** Chat runs `coven engine install`, which downloads and verifies the engine itself, and shows its output as it goes.
+**Install the engine:** Chat runs `coven engine install`, which downloads and verifies the engine
+itself, and shows its output as it goes.
 
 **Controls:**
-- Each install shows its progress and can be stopped with **Cancel**.
+
+- Each install shows its progress; choose **Cancel** to stop it.
 - A failed step says why and offers **Try again**.
-- **Install it in a terminal instead** shows the command for each step, for people who'd rather run it themselves.
+- **Install it in a terminal instead** shows the command for each step, if you'd rather run it
+  yourself.
 
 **Sign in:** sign-in uses accounts you already have.
-- **Sign in with Claude:** with Claude Code installed, this runs Claude Code's own browser sign-in for your Claude subscription. Without Claude Code, setup shows Anthropic's installer command instead.
+
+- **Sign in with Claude:** with Claude Code installed, this runs Claude Code's own browser sign-in
+  for your Claude subscription. Without Claude Code, setup shows Anthropic's installer command
+  instead.
 - **Sign in with ChatGPT:** once the engine is installed, this runs the engine's ChatGPT sign-in.
-- **Fallback link:** both tools open your browser themselves. If one prints a link instead, setup shows it with a **Copy** control.
-- **Finder launches:** Chat tells the engine where Claude Code is, so runs started from a Chat opened in Finder still reach it.
+- **Fallback link:** both tools open your browser themselves. If one prints a link instead, setup
+  shows it with a **Copy** control.
+- **Finder launches:** Chat tells the engine where Claude Code is, so runs started from a Chat
+  opened in Finder still reach it.
 
-**A familiar:** once Coven is installed, name your first familiar and choose **Create familiar**. Coven adds it to its familiar list and creates its workspace, and the chat opens when every step is done. A name that's already taken, or that has no letters or numbers, is explained in plain words, and nothing is changed. **Check again** re-runs every check, and the chat opens as soon as they pass.
+**A familiar:** once Coven is installed, name your first familiar and choose **Create familiar**.
+Coven adds it to its list of familiars and creates its workspace, and the chat opens when every
+step is done. If the name is already taken, or has no letters or numbers, setup explains why in
+plain words and changes nothing. **Check again** re-runs every check, and the chat opens as soon as
+they pass.
 
-Coven and its engine are required. When only sign-in or a familiar is missing, **Continue to Chat** opens the chat anyway, so a sign-in the check can't see, such as an API key in the environment, never blocks a working setup.
+Coven and its engine are required. When only sign-in or a familiar is missing, **Continue to Chat**
+opens the chat anyway. That way a sign-in the check can't see, such as an API key in the
+environment, never blocks a working setup.
 
-The checks start Coven, the engine and Claude Code only to ask their status. Chat installs something only when you choose **Install Coven** or **Install the engine**. Sign-in always happens in your browser, with the provider; Chat never sees your password or keys.
+The checks start Coven, the engine, and Claude Code only to ask their status. Chat installs
+something only when you choose **Install Coven** or **Install the engine**. Sign-in always happens
+in your browser, with the provider; Chat never sees your password or keys.
 
 ## Local runtime
 
-The desktop host owns access to Coven. The browser does not execute commands,
-receive credentials, or connect directly to a daemon. `pnpm dev` and `pnpm
-preview` render the same interface, but cannot access your installed CLI.
-Use the desktop app for runtime operations.
+The desktop host owns access to Coven. The browser doesn't execute commands, receive credentials,
+or connect directly to a daemon. `pnpm dev` and `pnpm preview` render the same interface but can't
+reach your installed CLI. Use the desktop app for runtime operations.
 
-The interface shows actual runtime results, not sample familiars, fabricated
-activity, or timed assistant replies. Unavailable capabilities are disclosed
-rather than simulated. Installing Coven does not configure a model provider:
-complete any provider setup required by your CLI before starting a run.
+The interface shows actual runtime results, not sample familiars, fabricated activity, or timed
+assistant replies. When a capability is unavailable, Chat says so instead of simulating it.
+Installing Coven doesn't configure a model provider, so complete any provider setup your CLI needs
+before you start a run.
 
-Runs use Coven's bundled `coven-code` engine with explicit read-only
-permissions. Chat does not grant write access or simulate approval controls.
-The native runtime supports macOS, Linux and Windows. Every run's process tree
-is contained, as a process group on macOS and Linux and as a kill-on-close job
-on Windows, so **Stop** ends the Coven CLI together with everything it started.
+Runs use Coven's bundled `coven-code` engine with explicit read-only permissions. Chat doesn't
+grant write access or simulate approval controls. The native runtime supports macOS, Linux, and
+Windows. Every run's process tree is contained (as a process group on macOS and Linux, and as a
+kill-on-close job on Windows), so **Stop** ends the Coven CLI together with everything it started.
 
-The frozen SDK artifacts remain pinned. Their existing health and conformance
-contracts are not expanded into undocumented chat methods, and the standalone
-runtime does not fall back to Cave.
+The frozen SDK artifacts stay pinned. Chat doesn't expand their existing health and conformance
+contracts into undocumented chat methods, and the standalone runtime doesn't fall back to Cave.
 
 ## Persistent familiar chats
 
-The sidebar is an agent list: each familiar has one canonical, persistent Chat
-conversation. Select a familiar to return to that thread. There is no separate
-familiar selector or new-conversation chooser. Rows are ordered by the most
-recent activity Coven reports, each captioned with how long ago that was
-(hover for the full timestamp, and the captions age on their own while the
-window stays open); familiars whose chats carry no readable
-timestamp keep the CLI's order after them; hovering a row shows the familiar's
-purpose. The search box matches a familiar's name, identity, or purpose. From the search box, **Enter**
-opens the first match, **Escape** clears the filter, and the arrow keys move
-into and along the list. A search that matches nothing offers **Clear search**.
-Choosing a familiar, by click or by Enter, puts the cursor in the composer as
-soon as their thread is ready. A row whose familiar has unsent text leads its
-preview with **Draft:** and that text. The thread header captions the
-familiar's name with when their chat last moved (hover for the full
-timestamp), and an empty thread shows the familiar's purpose under its
-heading.
+In the familiar list, each familiar has one persistent conversation. Select a familiar to return to
+that thread. There's no separate familiar selector or new-conversation chooser.
 
-The inspector's Overview shows the familiar's purpose, identity and workspace
-(each path with its own **Copy** control),
-whether their chat is active, archived or not yet started, and its last
-activity. Activity reports the run state, how the most recent run in this window
-ended and how long it took, and counts the messages you sent, the
-replies and the tool calls (with failures, and a breakdown by tool) in the
-loaded transcript; tokens,
-cost and timing are not reported by this CLI integration.
+Rows are ordered by the most recent activity Coven reports, and each row's caption says how long
+ago that was. Hover over a caption for the full timestamp; the captions age on their own while the
+window stays open. Familiars whose chats carry no readable timestamp come after the rest, in the
+CLI's order. Hovering a row shows the familiar's purpose.
 
-When Chat holds only the most recent part of a chat's history, a quiet line at
-the top of the thread says so; nothing has failed, so it is not an error
-notice. **Load earlier turns** reads the chat again with twice, three and then
-four times the usual budget of sessions and bytes, keeping the
-transcript on screen and your place in it while it loads. Past that the line
-points to the Coven CLI for the rest. Opening another chat starts from the
-usual budget.
+The search box matches a familiar's name, identity, or purpose. From the search box, **Enter**
+opens the first match, **Escape** clears the filter, and the arrow keys move into and along the
+list. A search that matches nothing offers **Clear search**. Choosing a familiar, by click or by
+**Enter**, puts the cursor in the composer as soon as their thread is ready. A row whose familiar
+has unsent text leads its preview with **Draft:** and that text.
 
-Chat and Cave are separate applications. There is no Cave import action or
-runtime import command, and Cave history does not appear in Chat. Previously
-saved import files are not automatically deleted or submitted to a model.
-Only app-owned history can become a familiar's canonical Chat thread.
+The thread header captions the familiar's name with when their chat last moved (hover for the full
+timestamp). An empty thread shows the familiar's purpose under its heading.
 
-Claude Code and Codex threads continue from the harness's own session store.
-The bundled Coven Code engine cannot reopen a thread's earlier turns that way,
-so when you continue a Coven Code chat, Chat replays the most recent turns from
-its saved transcript into the new run (the newest turns first, up to 24 KiB,
-each message capped at 4 KiB) and adds a notice to the thread saying how many
-turns were replayed and whether older ones were left out. That notice is a
-quiet line between messages, not a reply from anyone. The saved transcript
-keeps only your original message, not the replayed prompt.
+The inspector's Overview shows:
 
-The chat's actions live behind the **Chat actions** control (the ⋯ in the
-thread header; focus returns there after the delete dialog closes).
-**Archive chat** keeps the saved history and hides the
-familiar from the active list; an archived chat shows **Restore chat** in the
-header itself, since restoring is what lets you send again.
-The familiar list shows active chats. Turn on **Show archived chats** in
-**Settings › Chats** to list archived ones instead. Archived
-history is preserved, and archive state survives refreshes and app restarts.
+- the familiar's purpose, identity, and workspace, each path with its own **Copy** control;
+- whether their chat is active, archived, or not yet started;
+- the chat's last activity.
 
-**Delete chat** requires confirmation and is strictly app-local: it removes
-every saved transcript the chat is made of (Chat saves one per message you
-send) and that chat's local draft. Deleting does
-not delete original Coven CLI database records/files or change Cave history.
-A permanent tombstone prevents rediscovery or restoration of the deleted
-thread; deleted ancestors are not replayed through a remaining chat's captured
-history chain. This is not secure erasure of backups, provider history, or CLI
-attachment staging. Lifecycle storage is private, atomically replaced, and bounded
-to 10,000 entries / 2 MiB; corrupt or full storage reports an error rather than
-forgetting tombstones. Lifecycle actions wait until all active runs, including
-cancellation cleanup, have finished; deleting a chat never cancels an agent.
+Activity reports the run state, and how the most recent run in this window ended and how long it
+took. It also counts the messages you sent, the replies, and the tool calls (with failures and a
+breakdown by tool) in the loaded transcript. This CLI integration doesn't report tokens, cost, or
+timing.
+
+When Chat holds only the most recent part of a chat's history, a quiet line at the top of the
+thread says so. Nothing has failed, so it isn't an error notice. **Load earlier turns** reads the
+chat again with two, three, and then four times the usual budget of sessions and bytes, and keeps
+the transcript on screen, with your place in it, while it loads. Past that, the line points you to
+the Coven CLI for the rest. Opening another chat starts again from the usual budget.
+
+Chat and Cave are separate applications. There's no Cave import action or runtime import command,
+and Cave history doesn't appear in Chat. Chat doesn't automatically delete previously saved import
+files or submit them to a model. Only app-owned history can become a familiar's one Chat thread.
+
+Claude Code and Codex threads continue from the harness's own session store. The bundled Coven
+Code engine can't reopen a thread's earlier turns that way. So when you continue a Coven Code chat,
+Chat replays the most recent turns from its saved transcript into the new run: newest turns first,
+up to 24 KiB, with each message capped at 4 KiB. It also adds a notice to the thread saying how many
+turns were replayed and whether older ones were left out. That notice is a quiet line between
+messages, not a reply from anyone. The saved transcript keeps only your original message, not the
+replayed prompt.
+
+The chat's actions live behind the **Chat actions** control, the ⋯ in the thread header. Focus
+returns there after the delete dialog closes. **Archive chat** keeps the saved history and removes
+the familiar from the familiar list. An archived chat shows **Restore chat** in the header itself,
+since restoring is what lets you send again. The familiar list shows active chats; turn on **Show
+archived chats** in **Settings › Chats** to list archived ones instead. Archived history is
+preserved, and archive state survives refreshes and app restarts.
+
+**Delete chat** asks for confirmation and is strictly app-local. It removes every saved transcript
+the chat is made of (Chat saves one per message you send) and that chat's local draft.
+
+What deleting does and doesn't do:
+
+- It doesn't delete the original Coven CLI database records or files, or change Cave history.
+- A permanent tombstone prevents rediscovery or restoration of the deleted thread. Deleted
+  ancestors aren't replayed through a remaining chat's captured history chain.
+- It isn't secure erasure of backups, provider history, or CLI attachment staging.
+- Lifecycle storage is private, atomically replaced, and bounded to 10,000 entries / 2 MiB. Corrupt
+  or full storage reports an error rather than forgetting tombstones.
+- Lifecycle actions wait until every active run, including cancellation cleanup, has finished.
+  Deleting a chat never cancels an agent.
 
 ## Attachments and formatted replies
 
-Use the compact **+** attachment button beside the message field, or drag
-files onto the conversation. A drop goes through the same checks as the
-picker, and a file dropped anywhere else in the window is ignored rather
-than opened. Selected files
-appear as cards with their filename, size (in KiB above a kibibyte), and a
-remove control; sent messages retain file cards in the transcript.
+Use the compact **+** attachment button beside the message field, or drag files onto the
+conversation. A drop goes through the same checks as the picker, and a file dropped anywhere else
+in the window is ignored rather than opened. Selected files appear as cards with their filename,
+size (in KiB above a kibibyte), and a remove control. Sent messages keep their file cards in the
+transcript.
 
-A message itself may be up to 32,768 bytes; past that the composer warns
-before you send, naming the exact byte count, since Coven would refuse it. The composer accepts up to four UTF-8
-text/code files, each at most 64 KiB.
-Selected bytes are validated and passed to Coven as actual file contents, not
-just filenames. You can send files with or without an accompanying message.
-The `coven-code` engine doesn't accept image or PDF input through this
-transport, so Chat rejects binary files.
+A message can be up to 32,768 bytes. Past that, the composer warns you before you send, naming the
+exact byte count, since Coven would refuse it. The composer accepts up to four UTF-8 text or code
+files, each at most 64 KiB. Chat validates the selected bytes and passes them to Coven as actual
+file contents, not just filenames. You can send files with or without a message. The `coven-code`
+engine doesn't accept image or PDF input through this transport, so Chat rejects binary files.
 
-Unsent attachments stay in the current window. Failed or cancelled sends keep
-them available for retry or removal; successful sends retain filename/size
-metadata in history. Native staging is private and bounded to 64 MiB of
-retained files; originals are never modified.
+Unsent attachments stay in the current window. Failed or cancelled sends keep them available to
+retry or remove; successful sends keep filename and size metadata in history. Native staging is
+private and bounded to 64 MiB of retained files, and your originals are never modified.
 
-Sending clears the submitted text and attachment cards immediately. You can
-compose the next message while the familiar responds. A failed or cancelled
-send restores its attachments and restores its text only if you have not
-edited the new draft; later edits are never overwritten. While a failed run's
-error notice shows and the restored text or attachments are still in the
-composer, the notice offers **Try again**, which sends them once more. What
-Coven reported about the failure is kept as the last line of the chat, with its
-own **Copy** control, so it is still there after the notice is dismissed or the
-app is reopened; when Coven gave no reason, the line says so.
+Sending clears the submitted text and attachment cards immediately, so you can compose the next
+message while the familiar responds. A failed or cancelled send restores its attachments, and
+restores its text only if you haven't edited the new draft; later edits are never overwritten.
+While a failed run's error notice shows and the restored text or attachments are still in the
+composer, the notice offers **Try again**, which sends them once more. What Coven reported about
+the failure stays as the last line of the chat, with its own **Copy** control, so it's still there
+after you dismiss the notice or reopen the app. When Coven gave no reason, the line says so.
 
-Assistant replies render Markdown headings, lists, emphasis, quotes, code,
-tables, and task lists. Wide code and tables scroll inside the message.
-Raw HTML is disabled and remote Markdown images are not fetched automatically.
-Links open outside the window, so hovering one shows its address first.
-Each reply has a **Copy** control that copies its Markdown source, your own
-messages have one too, and each
-fenced code block names its language with its own **Copy** control for the
-code alone. The control reports "Copied" only after the clipboard accepted
-the text and "Copy failed" when it did not.
+Assistant replies render Markdown headings, lists, emphasis, quotes, code, tables, and task lists.
+Wide code and tables scroll inside the message. Raw HTML is disabled, and remote Markdown images
+aren't fetched automatically. Links open outside the window, so hovering one shows its address
+first. Each reply has a **Copy** control that copies its Markdown source, and so do your own
+messages. Each fenced code block names its language and has its own **Copy** control for the code
+alone. The control reports "Copied" only after the clipboard accepts the text, and "Copy failed"
+when it doesn't.
 
-Tool calls appear as activity rows between the prose, each expanding to the
-call's input and, once reported, its result, each block labeled and with its
-own **Copy** control. The turn's header counts the calls it holds and how
-many failed, whether or not the list is folded. When the runtime reports a call as data rather than as a
-`⚒ Name(args)` line — a `tool_start` frame from the bundled engine, a
-`tool_use` block in an assistant message, or a `tool_result` frame — the row
-also shows the input (cut at 16 KiB with a note saying so) and, once
-reported, the result (a collapsed row says how many lines it holds), and the run status
-names the tool that is executing while its row is marked as running. A run of
-more than ten consecutive calls folds to its newest six, behind a control that
-says how many earlier calls it hides and how many of those failed. By default,
-two or more calls in a row also fold into one summary line, such as "Ran 4
-commands and read 2 files". Click it to see each call, or turn off **Group tool
-calls** in **Settings › General**. The bundled engine's Claude CLI provider
-reports calls as text only, so those rows carry the one-line summary alone.
+Tool calls appear as activity rows between the prose. Each row expands to the call's input and,
+once reported, its result, with each block labeled and given its own **Copy** control. The turn's
+header counts the calls it holds and how many failed, whether or not the list is folded.
+
+The runtime can also report a call as data rather than as a `⚒ Name(args)` line: a `tool_start`
+frame from the bundled engine, a `tool_use` block in an assistant message, or a `tool_result`
+frame. In that case the row also shows the input (cut at 16 KiB, with a note saying so) and, once
+reported, the result (a collapsed row says how many lines it holds). The run status also names the
+tool that's executing while its row is marked as running.
+
+A run of more than ten consecutive calls folds to its newest six, behind a control that says how
+many earlier calls it hides and how many of those failed. By default, two or more calls in a row
+also fold into one summary line, such as "Ran 4 commands and read 2 files". Click it to see each
+call, or turn off **Group tool calls** in **Settings › General**. The bundled engine's Claude CLI
+provider reports calls as text only, so those rows carry the one-line summary alone.
 
 ## Remote screen (VNC)
 
-The **Show screen** button in the thread header opens a viewer pane above the
-transcript. Enter the WebSocket address of a VNC server that speaks the noVNC
-transport (for example the `websockify` endpoint of a Daytona sandbox, with its
-access token in the query string), an optional password, and choose
-**Connect**. The desktop appears scaled to fit and starts **view only**; clear
-that toggle to send mouse and keyboard input. The status line names the
-desktop reported by the server, and a failure names the reason the host saw:
-an HTTP status instead of a WebSocket upgrade, a refused or timed-out
-connection, a handshake that did not complete, or a server that rejected the
+The **Show screen** button in the thread header opens a viewer pane above the transcript. Enter the
+WebSocket address of a VNC server that speaks the noVNC transport (for example, the `websockify`
+endpoint of a Daytona sandbox, with its access token in the query string) and an optional password,
+then choose **Connect**. The desktop appears scaled to fit and starts in **view only** mode; clear
+that toggle to send mouse and keyboard input. The status line names the desktop the server
+reports. A failure names the reason the host saw: an HTTP status instead of a WebSocket upgrade, a
+refused or timed-out connection, a handshake that didn't complete, or a server that rejected the
 password.
 
-The window never opens the connection itself. The desktop host performs the
-WebSocket upgrade, forwards opaque frames both ways, and reports the close;
-it adds no credentials or headers, follows no redirects, refuses anything but
-`ws://` and `wss://`, caps a message at 64 KiB upstream and 16 MiB
-downstream, and holds at most two screens per window. Its error messages
-never repeat the address, because the address may carry a token. The address
-and password live only in the pane while it is open; closing the pane,
-switching away, or closing the window drops the connection, and nothing is
-written to browser storage. In the browser (`pnpm dev`) the pane says that
-screen viewing needs the desktop app.
+The window never opens the connection itself. The desktop host performs the WebSocket upgrade,
+forwards opaque frames both ways, and reports the close. The host:
+
+- adds no credentials or headers and follows no redirects;
+- refuses anything but `ws://` and `wss://`;
+- caps a message at 64 KiB upstream and 16 MiB downstream;
+- holds at most two screens per window.
+
+Its error messages never repeat the address, because the address may carry a token. The address
+and password live only in the pane while it's open. Closing the pane, switching away, or closing
+the window drops the connection, and nothing is written to browser storage. In the browser
+(`pnpm dev`), the pane says that screen viewing needs the desktop app.
 
 The VNC client is [noVNC](https://github.com/novnc/noVNC) 1.7.0, vendored
 under `src/vendor/novnc` (MPL-2.0); see its `README.md` for provenance.
@@ -359,30 +390,28 @@ under `src/vendor/novnc` (MPL-2.0); see its `README.md` for provenance.
 
 Your familiar's portrait lives at
 `~/.coven/workspaces/familiars/<familiarName>/avatars/<familiarName>.png`.
-The verified directory is `avatars`, not `assets`. Chat resolves it from the
-workspace reported by Coven rather than assuming your home directory or
-ignoring a custom Coven home.
+The verified directory is `avatars`, not `assets`. Chat resolves it from the workspace Coven
+reports, rather than assuming your home directory or ignoring a custom Coven home.
 
-The desktop host creates a small PNG thumbnail for the interface without
-changing your original file. It recognizes PNG or JPEG content, including
-JPEG portraits saved with a `.png` filename. A familiar without a portrait
-keeps its initial as a fallback; the webview never receives general
+The desktop host makes a small PNG thumbnail for the interface without changing your original
+file. It recognizes PNG or JPEG content, including JPEG portraits saved with a `.png` filename. A
+familiar without a portrait keeps its initial as a fallback, and the webview never receives general
 filesystem access.
 
-Click the familiar's avatar or name beside an assistant reply to open their
-overview card in the inspector without leaving the conversation.
+Click the familiar's avatar or name beside an assistant reply to open their overview card in the
+inspector without leaving the conversation.
 
 ## Existing local data
 
 Earlier development builds kept chats and notes in an IndexedDB database
 named `opencoven-chat`. This app doesn't read, convert, or delete that
 database, and never sends its contents to a model. The production application
-identifier remains `ai.opencoven.chat`; no demo identity replaces it.
+identifier is still `ai.opencoven.chat`; no demo identity replaces it.
 
 ## Developer setup
 
 You need Node.js `24.18.1`, `pnpm` `10.34.0` through Corepack, Rust `1.95.0`
-with `clippy` and `rustfmt`, and the platform's Tauri dependencies. See
+with `clippy` and `rustfmt`, and your platform's Tauri dependencies. See
 [`docs/developer-toolchains.md`](docs/developer-toolchains.md) for the full
 toolchain list.
 
@@ -413,11 +442,10 @@ production preview on `4174`.
 
 ## Native boundaries
 
-Runtime operations cross typed, narrowly scoped Tauri commands. There is no
-generic shell, filesystem, or HTTP command exposed to the webview, and no
-Tauri shell, filesystem, opener, or network plugin permission is granted.
-The main window's capability, `src-tauri/capabilities/default.json`, lets it
-invoke only:
+Runtime operations cross typed, narrowly scoped Tauri commands. Chat exposes no generic shell,
+filesystem, or HTTP command to the webview, and grants no Tauri shell, filesystem, opener, or
+network plugin permission. The main window's capability, `src-tauri/capabilities/default.json`,
+lets it invoke only:
 
 - the seven `coven_runtime_*` commands the chat interface uses,
 - the four `setup_*` commands of first-run setup,
@@ -427,13 +455,12 @@ invoke only:
   from the iPhone,
 - Tauri's permission to set its own window title.
 
-The Cave adapter and app-identity commands remain registered for native and
-conformance coverage but are not reachable from the webview.
+The Cave adapter and app-identity commands stay registered for native and conformance coverage,
+but the webview can't reach them.
 
-The reviewed Cave adapter remains in the repository for its independent
-native and conformance coverage. The single Chat entrypoint does not start
-it, pair with it, or require its credentials. Removing the old UI modes does
-not rewrite the protected release evidence or broaden existing trust
+The reviewed Cave adapter stays in the repository for its independent native and conformance
+coverage. The single Chat entrypoint doesn't start it, pair with it, or require its credentials.
+Removing the old UI modes doesn't rewrite the protected release evidence or broaden existing trust
 boundaries.
 
 ## Protected conformance
@@ -455,8 +482,9 @@ pnpm test:native-e2e
 ```
 
 Conformance requires the exact counterpart checkouts and platform authority
-described in its guide. A successful local UI build is not evidence of a
-successful protected conformance run.
+described in its guide.
+
+> **Note:** A successful local UI build is not evidence of a successful protected conformance run.
 
 ## Delivery and releases
 
@@ -465,11 +493,10 @@ For shipped changes, see [`docs/release-notes/`](docs/release-notes/).
 [`docs/roadmap.md`](docs/roadmap.md) is a dated log of September 2026
 conformance and consolidation checkpoints, not a current plan.
 
-CI runs frontend, browser, Rust, packed-artifact,
-and native lifecycle coverage. The heavy Phase 1 Vitest suites test the
-conformance scripts rather than the app, so a pull request runs them only
-when it changes something outside the chat UI, the browser suite, or prose;
-every push to `main` runs them regardless.
+CI runs frontend, browser, Rust, packed-artifact, and native lifecycle coverage. The heavy Phase 1
+Vitest suites test the conformance scripts rather than the app, so a pull request runs them only
+when it changes something outside the chat UI, the browser suite, or prose. Every push to `main`
+runs them regardless.
 
 Releases are cut from signed `v*` tags through
 [`.github/workflows/release.yml`](.github/workflows/release.yml). The
@@ -478,8 +505,7 @@ checksums, rehearsals, and recovery.
 
 ## iPhone companion
 
-Open **Settings › Devices**, choose **iPhone companion**, then **Turn on
-companion** to enable local pairing. The native iPhone app reads your Chat conversations,
-sends text, streams replies and stops runs through the same Coven runtime on
-your Mac. Keep both devices on the same local network with the Mac awake.
-See [pairing, builds and verification](docs/iphone-companion.md).
+Open **Settings › Devices**, choose **iPhone companion**, then **Turn on companion** to enable
+local pairing. The native iPhone app reads your Chat conversations, sends text, streams replies,
+and stops runs through the same Coven runtime on your Mac. Keep both devices on the same local
+network, with the Mac awake. See [pairing, builds, and verification](docs/iphone-companion.md).

@@ -1,6 +1,10 @@
 # OpenCoven Chat Phase 1 Discovery and Pairing Design
 
-**Status:** Approved design  
+> **Status (2026-10-18):** Delivered. Approved 2026-08-20; delivered through plans 1a-1d (in Chat:
+> #31, #30). #333 removed the blocking connection gate, so the Cave stack serves only the
+> conformance lane (`docs/phase1-conformance.md`); `README.md` is the product contract. Historical
+> record.
+
 **Date:** 2026-08-20  
 **Repositories:** `OpenCoven/coven-cave`, `OpenCoven/sdk`, `OpenCoven/chat`, `OpenCoven/coven`  
 **Depends on:** Phase 0 gate `cave-bt9wx`  

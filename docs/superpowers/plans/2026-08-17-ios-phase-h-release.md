@@ -1,6 +1,11 @@
 # iOS Phase H: Release Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **Status (2026-10-18):** Superseded 2026-10-07 and never implemented. The iPhone app that shipped
+> is the LAN companion in `apps/ios/ChatCompanion` (#405), and Chat no longer connects to
+> Cave (#333). TestFlight builds now come from that app's CI on `main` (#424, #467), with no App
+> Store release. For the live release path, read the
+> [TestFlight section](../../iphone-companion.md#testflight) of `docs/iphone-companion.md`.
+> Historical record; do not execute.
 
 **Goal:** Ship OpenCoven Chat for iOS to the App Store — reproducibly built, honestly disclosed, actually reviewable, released in stages that can be stopped.
 

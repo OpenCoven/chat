@@ -1,6 +1,12 @@
 # OpenCoven Chat for iOS Design
 
-**Status:** Approved design
+> **Status (2026-10-18):** Superseded 2026-10-07 and never implemented (approved 2026-08-16). None
+> of the ten phase plans was executed, and `OpenCoven/chat-ios` and `OpenCoven/chat-relay` were
+> never created. The iPhone app that shipped is the LAN companion in
+> `apps/ios/ChatCompanion` (#405), and Chat no longer connects to Cave (#333). Read
+> [`docs/iphone-companion.md`](../../iphone-companion.md) and the
+> [2026-10-07 companion design](2026-10-07-iphone-companion-design.md) instead. Historical record.
+
 **Date:** 2026-08-16
 **Repositories:** `OpenCoven/chat-ios` (new), `OpenCoven/sdk`, `OpenCoven/coven-cave`, `OpenCoven/coven-pocket`, `OpenCoven/chat-relay` (new)
 **Amends:** `2026-08-10-opencoven-chat-design.md`
@@ -517,7 +523,8 @@ and Coven Pocket all continue working throughout.
 
 ### Plan Index
 
-All ten plans exist. Each is the plan of record for its phase.
+As of 2026-08-17, all ten plans existed, and each was the plan of record for its
+phase. None was executed; see the status note at the top.
 
 | Phase | Plan |
 |---|---|

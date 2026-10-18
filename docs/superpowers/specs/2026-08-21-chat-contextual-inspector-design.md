@@ -1,6 +1,8 @@
 # Chat Contextual Inspector Design
 
-**Status:** Approved
+> **Status (2026-10-18):** Delivered. Approved 2026-08-21; delivered in #26 (2026-08-22) for the
+> `?demo=chat` surface, which #333 removed. The live familiar inspector is in
+> `src/coven/chat-layout.tsx`. Historical record.
 
 **Date:** 2026-08-21
 

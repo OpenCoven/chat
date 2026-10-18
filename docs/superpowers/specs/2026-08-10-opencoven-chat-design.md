@@ -1,6 +1,9 @@
 # OpenCoven Chat Design
 
-**Status:** Approved design  
+> **Status (2026-10-18):** Superseded. Approved 2026-08-10; superseded by #277 (2026-09-14), which
+> made Chat a front end for the installed Coven CLI, so Cave no longer owns Chat's history or
+> execution. `README.md` is the product contract. Historical record; do not execute.
+
 **Date:** 2026-08-10  
 **Repositories:** `OpenCoven/chat`, `OpenCoven/coven-cave`
 

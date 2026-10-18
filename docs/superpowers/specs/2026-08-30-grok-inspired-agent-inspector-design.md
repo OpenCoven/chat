@@ -1,6 +1,8 @@
 # Grok-Inspired Agent Inspector Design
 
-**Status:** Approved
+> **Status (2026-10-18):** Abandoned. Approved 2026-08-30 but never implemented: Familiars Redesign
+> v2 replaced the demo surface (#74), and #333 deleted `src/demo`. The live familiar inspector is in
+> `src/coven/chat-layout.tsx`. Historical record; do not execute.
 
 **Date:** 2026-08-30
 

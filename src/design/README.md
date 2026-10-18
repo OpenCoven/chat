@@ -1,33 +1,34 @@
-# `src/design` — the design system the app actually ships
+# `src/design`: the design system the app ships
 
 These files render the production UI. They are not a prototype, and nothing
 here is optional.
 
-They once lived in a directory named `demo`, which was untrue in a way that
-nearly cost someone real work: `src/coven/chat-layout.tsx` imports
-`familiars-shell.css`, and that stylesheet defines most of the app's design
-tokens (borders, accent colours, danger/warning/success, focus rings,
-durations, easing) plus the ~380 `.fr-*` classes the shipped layout is built
-from. `src/styles.css`, `src/coven/chat-app.css`, and `src/ui/ui.css` define a
-few more tokens. Deleting it would have removed most of the app's visual
-language while the type checker reported that everything was fine. The demo
-shell itself has since been deleted; these files stayed because the app is
-built from them.
+`src/coven/chat-layout.tsx` imports `familiars-shell.css`, and that stylesheet
+defines most of the app's design tokens (borders, accent colors,
+danger/warning/success, focus rings, durations, and easing) plus the ~380
+`.fr-*` classes the shipped layout is built from. `src/styles.css`,
+`src/coven/chat-app.css`, and `src/ui/ui.css` define a few more tokens.
+
+These files once lived in a directory named `demo`. That name was untrue in a
+way that nearly cost someone real work: deleting the directory would have
+removed most of the app's visual language while the type checker reported that
+everything was fine. The demo shell itself has since been deleted; these files
+stayed because the app is built from them.
 
 | File | What depends on it |
 | --- | --- |
-| `familiars-shell.css` | `src/coven/chat-layout.tsx` — tokens + `.fr-*` |
+| `familiars-shell.css` | `src/coven/chat-layout.tsx`: tokens, `.fr-*` classes |
 | `familiars-ui.tsx` | `src/coven/` (6 files), `src/onboarding/`: `cx`, primitives |
 | `minimal-icons.tsx` | `src/coven/` (5 files), `src/onboarding/`, `src/ui/` (3 files): `Icon` |
 
-## The rule
+## The dependency rule
 
 Dependencies point **into** this directory, never out of it. `src/design`
 imports nothing from `src/coven` or `src/ui`, and its vocabulary (`Presence`,
 the inspector tab names) is declared here rather than derived from fixtures or
 callers.
 
-## Verifying that claim
+## Verifying the rule
 
 The bundle is the authority, not the import graph as read by eye:
 
@@ -38,9 +39,9 @@ corepack pnpm build   # note the emitted index-*.js / index-*.css hashes
 Moving a file in or out of this directory must leave those content hashes
 unchanged. If a hash moves, the change was not a relocation.
 
-## Names
+## File names
 
 The filenames are the ones these files were born with, kept so this move stays
 a pure rename in `git log --follow`. `familiars-shell.css` is the design
-system, not a shell for a familiars page. Renaming them is worth doing — as its
-own commit, where the diff is legible.
+system, not a shell for a familiars page. Renaming them is worth doing, as its
+own commit where the diff is legible.

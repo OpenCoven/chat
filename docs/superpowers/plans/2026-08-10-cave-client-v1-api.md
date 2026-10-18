@@ -1,6 +1,9 @@
 # Cave Client v1 API Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **Status (2026-10-18):** Superseded. A coven-cave plan, replaced by the 2026-08-15 phase plans;
+> coven-cave later shipped the client-v1 pairing, auth and read routes but no send, stream or
+> idempotency store. Chat dropped this API when #277 made it a Coven CLI front end; see `README.md`.
+> Historical record; do not execute.
 
 **Goal:** Add a stable, loopback-only, paired and scoped `/api/client/v1` Cave API that exposes canonical familiar chat without duplicating Cave state or authority.
 

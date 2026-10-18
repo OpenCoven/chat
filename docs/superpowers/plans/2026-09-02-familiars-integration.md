@@ -1,5 +1,10 @@
 # Familiars Surface Integration Implementation Plan
 
+> **Status (2026-10-18):** Superseded. Stage 1 partly landed (coven-cave contract and analytics
+> routes; Chat reads shell #89) and Task 3 (#86) closed unmerged, but #277 made the Familiars
+> surface production on the Coven CLI and #333 deleted `src/familiars` and `src/demo`. `README.md`
+> is the product contract. Historical record; do not execute.
+
 **Design of record:** `docs/superpowers/specs/2026-09-02-familiars-integration-design.md`  
 **Goal:** Move the Familiars Redesign v2 surface from mock data to canonical Cave data in stages ordered by what Cave can serve — reads, then send, then holds — and make it the production chat shell.  
 **Architecture:** A typed `FamiliarsSource` seam behind `FamiliarsShell` with a Cave implementation over `QueryAdapter` and a mock implementation for the demo build and tests. Every new capability is one SDK transport method, one Tauri command, one capability permission, one guard entry, and re-cut lock files. Controls are gated on Cave-advertised capabilities.  

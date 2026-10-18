@@ -1,6 +1,10 @@
 # iOS Phase G2: Lifecycle and Hardening Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **Status (2026-10-18):** Superseded 2026-10-07 and never implemented. The iPhone app that shipped
+> is the LAN companion in `apps/ios/ChatCompanion` (#405), and Chat no longer connects to
+> Cave (#333). Read [`docs/iphone-companion.md`](../../iphone-companion.md) and the
+> [2026-10-07 companion design](../specs/2026-10-07-iphone-companion-design.md) instead. Historical
+> record; do not execute.
 
 **Goal:** Make the app correct when nobody is watching it — in the background, on a bad network, after a force-quit, with VoiceOver on, with a full disk — and prove the security posture the spec claimed rather than asserting it.
 

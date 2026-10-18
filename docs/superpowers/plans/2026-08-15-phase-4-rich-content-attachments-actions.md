@@ -1,6 +1,9 @@
 # Phase 4 Rich Content, Attachments, and Privileged Actions Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **Status (2026-10-18):** Superseded by #277: attachments go through the Coven CLI
+> (`src/coven/attachments.ts`, `src-tauri/src/chat_attachments.rs`), and the Cave attachment and
+> action services planned here were never built. `README.md` is the product contract. Historical
+> record; do not execute.
 
 **Goal:** Safely render Cave rich semantics and support bounded attachments, attention responses, task handoffs, and explicitly confirmed GitHub mutations through `/api/client/v1`.
 
