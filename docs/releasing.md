@@ -1,26 +1,30 @@
 # Releasing OpenCoven Chat
 
-This document is the runbook for cutting a public release of **OpenCoven Chat**
-(`ai.opencoven.chat`). Releases are driven entirely by pushing a **signed,
-annotated `v*` tag**. The `.github/workflows/release.yml` pipeline does the
-rest: it verifies the tag, builds installers for macOS, Windows and Linux
-(signed and notarized on macOS), checksums them, and
+You release the **OpenCoven Chat** desktop app (`ai.opencoven.chat`) by pushing
+a **signed, annotated `v*` tag**. The `.github/workflows/release.yml` pipeline
+does the rest: it verifies the tag, builds installers for macOS, Windows and
+Linux (signed and notarized on macOS), checksums them, and
 conditionally generates the updater manifest when auto-update is configured,
-then publishes a GitHub Release.
+then publishes a GitHub Release. This runbook covers the steps around that
+push. The iPhone companion ships through TestFlight instead
+([iPhone companion › TestFlight](iphone-companion.md#testflight)).
 
 **Windows ships unsigned for now** (decided 2026-10-14). Windows was left out of
 v0.0.2 on #356, and v0.0.5 is the first release with Windows installers.
+
 Certificate authorities have issued code-signing keys only on hardware tokens or
 cloud HSMs since June 2023, so the exportable `.pfx` that `WINDOWS_CERTIFICATE`
-expects is no longer obtainable, and choosing a hosted signing route is #411.
-Until it is chosen, the `.msi` and `.exe` carry no Authenticode signature:
+expects is no longer obtainable. Choosing a hosted signing route is #411.
+
+Until it is chosen, the `.msi` and `.exe` carry no Authenticode signature.
 Windows SmartScreen shows "Windows protected your PC" the first time one runs,
-and the person chooses **More info** then **Run anyway**. The generated release
-body and the release notes both say so. The build job refuses nothing on Windows
-except a half-set of the two `WINDOWS_*` secrets; when both are present it signs
-the installers and verifies the signature, with no other change. The app itself
-works on Windows: runs are contained in a kill-on-close Job Object, so Stop ends
-the whole process tree.
+and the person installing it chooses **More info**, then **Run anyway**. The
+generated release body and the release notes both say so.
+
+The build job refuses nothing on Windows except a half-set of the two
+`WINDOWS_*` secrets. When both are present, it signs the installers and verifies
+the signature, with no other change. The app itself works on Windows: runs are
+contained in a kill-on-close Job Object, so Stop ends the whole process tree.
 
 The first public release is **v0.0.2**.
 
@@ -82,8 +86,8 @@ VERSION=v0.0.6   # the tag you are releasing
    (`bundle.active: true` with the platform targets), otherwise `tauri build`
    produces no installers.
 
-3. **Land the bump through a pull request** (see branch protection in §7). Do
-   not tag off an unmerged branch.
+3. **Land the bump through a pull request** (see branch protection in § 7).
+   Don't tag off an unmerged branch.
 
 4. **Verify locally that the app builds and tests pass.**
 
@@ -102,7 +106,7 @@ VERSION=v0.0.6   # the tag you are releasing
    `tauri-plugin-updater`. Turning auto-update on is a code change, not a
    release step.
 
-6. **Create a signed, annotated tag** on the merge commit (see §2):
+6. **Create a signed, annotated tag** on the merge commit (see § 2):
 
    ```bash
    git checkout main && git pull --ff-only
@@ -110,7 +114,10 @@ VERSION=v0.0.6   # the tag you are releasing
    git verify-tag "$VERSION"
    ```
 
-7. **Push the tag.** This is the point of no return — it starts the release.
+7. **Push the tag.**
+
+   > **Warning:** this is the point of no return. Pushing the tag starts the
+   > release.
 
    ```bash
    git push origin "$VERSION"
@@ -170,7 +177,8 @@ Create a signed tag (`VERSION` is set at the top of § 1):
 git tag -s "$VERSION" -m "OpenCoven Chat $VERSION"
 ```
 
-`-s` signs with your configured signing key. This machine signs with SSH:
+`-s` signs with your configured signing key. To check which format and key Git
+uses (this example signs with SSH):
 
 ```bash
 git config --get gpg.format        # ssh
@@ -204,7 +212,7 @@ git tag -d "$VERSION"
 
 ## Dry-run rehearsal
 
-The workflow can be run manually against an existing signed tag. In
+You can run the workflow manually against an existing signed tag. In
 **Actions → Release → Run workflow**, select the branch containing the workflow
 change, enter the tag, and leave `dry_run` at its default value of `true`.
 
@@ -244,12 +252,11 @@ accepted, so nobody was blocked. `Notarize and staple the disk images` now
 submits each `.dmg` with the same credentials, staples the ticket and checks
 it, and the artifact check refuses an image without one.
 
-The distinction matters when rehearsing before the certificates exist. On such
-a run, each platform whose secrets are absent builds unsigned — no
-notarization, no Authenticode — so a green result says nothing about whether
-signing works. Those paths stay unexercised until a run has the material. Once
-the secrets are configured, rehearse once more *without* the switch before a
-real release.
+> **Note:** when you rehearse before the certificates exist, a green result
+> says nothing about whether signing works. Each platform whose secrets are
+> absent builds unsigned (no notarization, no Authenticode), and those paths
+> stay unexercised until a run has the material. Once the secrets are
+> configured, rehearse once more *without* the switch before a real release.
 
 > The pipeline was first proven end to end on 2026-09-17 (four platform builds,
 > six installers, checksums verified, `publish` executed). Getting there took
@@ -272,25 +279,31 @@ environment too. It reads `APPLE_API_ISSUER`, `APPLE_API_KEY` and
 
 **A missing Apple signing secret fails the release.** The `verify-tag` job
 refuses to continue when the Apple signing material is incomplete, before the
-tag is checked out and long before the platform builds start. Signing needs
-`APPLE_CERTIFICATE`, `APPLE_CERTIFICATE_PASSWORD`, `APPLE_SIGNING_IDENTITY` and
-`APPLE_TEAM_ID`; notarization needs one complete credential set, either the
-App Store Connect API key (`APPLE_API_ISSUER`, `APPLE_API_KEY`,
-`APPLE_API_KEY_BASE64`, preferred and used when present) or an Apple ID with an
-app-specific password (`APPLE_ID`, `APPLE_PASSWORD`). The API key is a team
-credential, which is why it is preferred: on 2026-10-06 four app-specific
-passwords in a row were rejected with `401 Invalid credentials` because the
-Apple ID was not on the team. The two Windows secrets are optional: Windows
-ships unsigned by decision (see the top of this document), and the build job
-signs the Windows installers only when both are set. For the Apple secrets
-this used to be a warning, and a warning is the wrong shape for it: the
-default outcome of a missing secret was a *published* unsigned release and a
-yellow annotation nobody reads. An unsigned `.app` will not open past
-Gatekeeper, and the tag cannot be reused to correct it — `verify-tag` refuses
-to replace an existing Release, so the version is spent.
+tag is checked out and long before the platform builds start. The secrets fall
+into three groups:
 
-To build deliberately unsigned artifacts — rehearsing the pipeline before the
-certificates exist, for instance — dispatch the workflow manually with
+- **Signing (required):** `APPLE_CERTIFICATE`, `APPLE_CERTIFICATE_PASSWORD`,
+  `APPLE_SIGNING_IDENTITY` and `APPLE_TEAM_ID`.
+- **Notarization (required, one complete set):** either the App Store Connect
+  API key (`APPLE_API_ISSUER`, `APPLE_API_KEY`, `APPLE_API_KEY_BASE64`), which
+  is preferred and used when present, or an Apple ID with an app-specific
+  password (`APPLE_ID`, `APPLE_PASSWORD`).
+- **Windows (optional):** the two `WINDOWS_*` secrets. Windows ships unsigned
+  by decision (see the top of this document), and the build job signs the
+  Windows installers only when both are set.
+
+The API key is preferred because it's a team credential. On 2026-10-06, four
+app-specific passwords in a row were rejected with `401 Invalid credentials`
+because the Apple ID was not on the team.
+
+For the Apple secrets this used to be a warning, and a warning is the wrong
+shape for it: the default outcome of a missing secret was a *published* unsigned
+release and a yellow annotation nobody reads. An unsigned `.app` won't open past
+Gatekeeper, and the tag can't be reused to correct it: `verify-tag` refuses to
+replace an existing Release, so the version is spent.
+
+To build deliberately unsigned artifacts (to rehearse the pipeline before the
+certificates exist, for instance), dispatch the workflow manually with
 `allow_unsigned=true` and `dry_run=true`. That switch is dispatch-only: the
 `inputs` context does not exist on a tag push, so the production path cannot
 reach it. It is also rehearsal-only: a run that sets it never publishes a
@@ -320,8 +333,8 @@ adds an independent local SSH check.
 | `TAG_ALLOWED_SIGNERS` | allowed-signers file contents for verifying SSH-signed tags | `release-signing` |
 | `GITHUB_TOKEN` | provided automatically by Actions; used to publish the release | n/a (built-in) |
 
-> The workflow references these **by name only**. Never commit any secret value
-> to the repository.
+> **Warning:** the workflow references these **by name only**. Never commit any
+> secret value to the repository.
 
 ---
 
@@ -448,9 +461,8 @@ Per release, the workflow publishes:
 
 ## 6. Rollback procedure
 
-A release cannot be un-shipped from users who already downloaded it, but its
-**discoverability and auto-update propagation can be stopped quickly**. Act in
-this order.
+You can't un-ship a release from people who already downloaded it, but you can
+quickly **hide it and stop auto-update from spreading it**. Act in this order.
 
 ### 6.1 Stop auto-update propagation first
 
@@ -464,7 +476,7 @@ pushes a bad build to users who did nothing.
    from fetching that manifest, although caches and clients that already read
    it may still retain it. Do not point the manifest at an older version:
    updater version checks do not provide a reliable downgrade path.
-2. Prepare a **superseding release** (see 6.3) with a higher version. That is
+2. Prepare a **superseding release** (see § 6.3) with a higher version. That is
    the only reliable way to move auto-updaters forward.
 
 ### 6.2 Mark the bad GitHub Release
@@ -482,8 +494,8 @@ gh release edit "$VERSION" --draft
 gh release delete "$VERSION" --yes
 ```
 
-If you delete the release but keep the tag, the tag can still be referenced;
-prefer marking it clearly:
+Deleting the release leaves the tag in place, where it can still be referenced.
+Keeping the release and marking it withdrawn is clearer:
 
 ```bash
 gh release edit "$VERSION" --prerelease --title "OpenCoven Chat $VERSION (WITHDRAWN: do not use)"
@@ -506,15 +518,16 @@ git push --delete origin "$VERSION"
 git tag -d "$VERSION"
 ```
 
-Deleting a tag that people may have already fetched is disruptive; only do it
-immediately after a mistaken push, before distribution.
+> **Warning:** deleting a tag that people may have already fetched is
+> disruptive. Only do it immediately after a mistaken push, before
+> distribution.
 
 ### 6.4 Communicate the rollback
 
 - Edit the (withdrawn) release notes to state plainly that the version is
   withdrawn, why, and which version to use instead.
 - Post to the OpenCoven announcement channels used for the original release.
-- If the issue is a security vulnerability, open/adjust a **private security
+- If the issue is a security vulnerability, open or update a **private security
   advisory** (see `SECURITY.md`) and publish it once the fix ships.
 
 ### 6.5 Users who already auto-updated
@@ -555,12 +568,12 @@ gh api repos/OpenCoven/chat/branches/main/protection \
   --jq '{checks: .required_status_checks.contexts, signed: .required_signatures.enabled}'
 ```
 
-> **Required signed commits are now enabled.** `required_signatures` is
-> `true`, so every `git commit` for this repository needs `-S`.
+> **Signed commits are required.** `required_signatures` is `true`, so every
+> `git commit` for this repository needs `-S`.
 >
 > This narrows the gap between "the tag is signed" and "the history it points
-> at is" — it does not close it. Protection governs commits pushed to `main`
-> from now on; it does not retroactively validate ancestors already in the
+> at is", but it doesn't close it. Protection governs commits pushed to `main`
+> from now on. It doesn't retroactively validate ancestors already in the
 > history, and the pipeline still verifies only the tag object. A signed tag
 > can therefore still point at a history containing older unsigned commits.
 

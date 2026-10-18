@@ -22,19 +22,21 @@ remote: Repository not found.
 fatal: repository 'https://github.com/OpenCoven/sdk/' not found
 ```
 
-GitHub answers 404 rather than 403 so it does not confirm a private
-repository's existence to an unauthorized caller, which is why the message is
-identical to the repository genuinely not existing — and why this failure has
-been misdiagnosed more than once.
+GitHub answers 404 rather than 403, so it doesn't confirm a private
+repository's existence to an unauthorized caller. That's why the message is
+identical to the one for a repository that genuinely doesn't exist, and why
+this failure has been misdiagnosed more than once.
 
-The result is that this repository's CI goes red for reasons that have nothing
-to do with its own code, whenever someone changes a setting elsewhere.
+So this repository's CI goes red for reasons that have nothing to do with its
+own code whenever someone changes a setting elsewhere.
 
 ## Setting it up
 
 **1. Create a fine-grained personal access token.**
 
-At <https://github.com/settings/personal-access-tokens/new>:
+On GitHub's
+[new fine-grained token page](https://github.com/settings/personal-access-tokens/new),
+set:
 
 | Field | Value |
 |---|---|
@@ -44,9 +46,10 @@ At <https://github.com/settings/personal-access-tokens/new>:
 | Expiration | As short as your rotation habit allows |
 
 Read-only Contents is the whole requirement. Both jobs clone and read; neither
-writes to a counterpart. Grant nothing else. A token that can write to
-`coven-cave` can rewrite Cave's authority fixtures from a CI job in another
-repository.
+writes to a counterpart.
+
+> **Warning:** grant nothing else. A token that can write to `coven-cave` can
+> rewrite Cave's authority fixtures from a CI job in another repository.
 
 **2. Store it as a repository secret.**
 
@@ -54,11 +57,13 @@ repository.
 gh secret set CANARY_TOKEN -R OpenCoven/chat
 ```
 
-Paste the token when prompted. It is never echoed and never committed.
+Paste the token when prompted. It's never echoed and never committed.
 
 **3. Confirm it took effect.**
 
-Re-run the `Contract canary` job with a counterpart private. It should pass.
+Re-run the `Contract canary` job while a counterpart is private. It should
+pass. While every counterpart is public, a pass shows only that GitHub accepts
+the token.
 
 ## How the workflow uses it
 
@@ -78,10 +83,15 @@ the dependency on their visibility without any further change.
 
 ## Rotation
 
-A fine-grained token expires. Rotate it before the expiry date: re-run
+A fine-grained token expires. Rotate it before the expiry date by re-running
 `gh secret set CANARY_TOKEN -R OpenCoven/chat` with a fresh token. Nothing in
-the workflow changes. To fall back to the default token on purpose, delete the
-secret with `gh secret delete CANARY_TOKEN -R OpenCoven/chat`.
+the workflow changes.
+
+To fall back to the default token on purpose, delete the secret:
+
+```bash
+gh secret delete CANARY_TOKEN -R OpenCoven/chat
+```
 
 `src/specification-guards.test.ts` asserts that all six cross-repository
 checkouts in `ci.yml` carry the token expression, so removing it fails the test
