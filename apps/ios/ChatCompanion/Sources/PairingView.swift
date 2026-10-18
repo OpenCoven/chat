@@ -272,6 +272,9 @@ struct PairingView: View {
           .font(.subheadline.weight(.semibold))
           .tint(Palette.accent)
       }
+      if model.localNetworkDenied {
+        OpenSettingsButton().font(.subheadline.weight(.semibold)).tint(Palette.accent)
+      }
     }
     .padding(14)
     .glass(.raised, cornerRadius: 16)

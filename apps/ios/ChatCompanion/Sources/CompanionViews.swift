@@ -56,12 +56,15 @@ struct CompanionRoot: View {
       guard phase == .active, let pairing = model.pairing else { return }
       candidates = []
       candidateIndex = 0
-      discovery.start(fingerprint: pairing.fingerprint) { endpoint in
-        if !candidates.contains(endpoint) {
-          candidates.append(endpoint)
-          if candidates.count > 4 { candidates.removeFirst() }
-        }
-      }
+      discovery.start(
+        fingerprint: pairing.fingerprint,
+        found: { endpoint in
+          if !candidates.contains(endpoint) {
+            candidates.append(endpoint)
+            if candidates.count > 4 { candidates.removeFirst() }
+          }
+        },
+        access: { allowed in model.localNetworkAccess(allowed: allowed) })
       while !Task.isCancelled {
         await model.refresh()
         if !model.connected, !candidates.isEmpty {
@@ -426,6 +429,7 @@ private struct Workspace: View {
           Button("Review uncertain send") { dismissSend = true }
             .font(.footnote.weight(.semibold))
         }
+        if model.localNetworkDenied { OpenSettingsButton().font(.footnote.weight(.semibold)) }
       }
       Spacer(minLength: 0)
     }
@@ -446,5 +450,16 @@ private struct RunHaptics: ViewModifier {
       .sensoryFeedback(.success, trigger: running) { (old: Bool?, new: Bool?) in
         old == true && new == false
       }
+  }
+}
+
+/// Opens Coven Chat's page in Settings, where iOS shows its Local Network switch.
+struct OpenSettingsButton: View {
+  @Environment(\.openURL) private var openURL
+  var body: some View {
+    Button("Open Settings") {
+      if let url = URL(string: UIApplication.openSettingsURLString) { openURL(url) }
+    }
+    .accessibilityIdentifier("open-settings")
   }
 }
