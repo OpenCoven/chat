@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 // @ts-expect-error Executable scripts intentionally have no declaration files.
-import { readPackage, verifyPackage } from '../scripts/verify-package.mjs';
+import { isMinisignPublicKey, readPackage, verifyPackage } from '../scripts/verify-package.mjs';
 
 // biome-ignore lint/suspicious/noExplicitAny: the fixture mutates arbitrary parts of real config JSON.
 type Json = any;
@@ -151,36 +151,96 @@ describe('verify-package', () => {
     expect(failures.join('\n')).toMatch(message);
   });
 
+  // A well-formed minisign public key that signs nothing: the shape the
+  // verifier accepts, without being anyone's real key.
+  const SHAPED_KEY = Buffer.from(
+    `untrusted comment: minisign public key: 0123456789ABCDEF\nRW${'A'.repeat(54)}\n`,
+  ).toString('base64');
+
+  it('recognises a minisign public key and nothing else', () => {
+    expect(isMinisignPublicKey(SHAPED_KEY)).toBe(true);
+    expect(isMinisignPublicKey('key')).toBe(false);
+    expect(
+      isMinisignPublicKey(Buffer.from('untrusted comment: x\nRWshort').toString('base64')),
+    ).toBe(false);
+  });
+
   it.each([
     [
-      'updater artifacts turned on',
+      'updater artifacts turned on in the base config',
       (i: Input) => {
         i.conf.bundle.createUpdaterArtifacts = true;
       },
+      /createUpdaterArtifacts must stay false/,
     ],
     [
-      'an updater plugin config',
+      'no updater config',
       (i: Input) => {
-        i.conf.plugins = { updater: { pubkey: 'key', endpoints: [] } };
+        delete i.conf.plugins.updater;
       },
+      /plugins.updater is missing/,
     ],
     [
-      'the updater crate',
+      'a key that is not a minisign key',
       (i: Input) => {
-        i.cargo += '\ntauri-plugin-updater = "2"\n';
+        i.conf.plugins.updater.pubkey = 'key';
       },
+      /not a minisign public key/,
     ],
-  ])('holds the v0.0.1 decision of no updater against %s', (_name, change) => {
-    expect(verifyPackage(mutated(change)).failures.join('\n')).toMatch(
-      /without the updater|no updater/,
+    [
+      'another feed',
+      (i: Input) => {
+        i.conf.plugins.updater.endpoints = [
+          'https://github.com/OpenCoven/chat/releases/latest/download/latest.json',
+        ];
+      },
+      /endpoints must be exactly/,
+    ],
+    [
+      'insecure transport',
+      (i: Input) => {
+        i.conf.plugins.updater.dangerousInsecureTransportProtocol = true;
+      },
+      /insecure transport/,
+    ],
+    [
+      'an interactive Windows install',
+      (i: Input) => {
+        i.conf.plugins.updater.windows = { installMode: 'basicUi' };
+      },
+      /installMode must be passive/,
+    ],
+    [
+      'a loose crate version',
+      (i: Input) => {
+        i.cargo = i.cargo.replace(/^tauri-plugin-updater = .*$/m, 'tauri-plugin-updater = "2"');
+      },
+      /pin tauri-plugin-updater/,
+    ],
+  ])('holds the amended updater decision against %s', (_name, change, message) => {
+    const { failures } = verifyPackage(
+      mutated((i) => {
+        i.conf.plugins.updater.pubkey = SHAPED_KEY;
+        change(i);
+      }),
     );
+    expect(failures.join('\n')).toMatch(message);
+  });
+
+  it('accepts the updater as configured once its key is a minisign key', () => {
+    const { failures } = verifyPackage(
+      mutated((i) => {
+        i.conf.plugins.updater.pubkey = SHAPED_KEY;
+      }),
+    );
+    expect(failures).toEqual([]);
   });
 
   it.each([
     [
       'a deep-link scheme',
       (i: Input) => {
-        i.conf.plugins = { 'deep-link': { desktop: { schemes: ['opencoven-chat'] } } };
+        i.conf.plugins['deep-link'] = { desktop: { schemes: ['opencoven-chat'] } };
       },
     ],
     [

@@ -33,6 +33,8 @@
     "allow-setup-run",
     "allow-setup-cancel",
     "allow-setup-create-familiar",
+    "allow-updater-check",
+    "allow-updater-install",
     "core:window:allow-set-title"
   ]
 }

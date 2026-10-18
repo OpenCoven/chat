@@ -56,6 +56,9 @@ serde_jcs = "=0.2.0"
 serde_json = "=1.0.145"
 sha2 = "=0.10.9"
 tauri = { version = "=2.11.2", features = [] }
+# Not the default features: `zip` only serves Tauri's v1-compatible archives,
+# and `system-proxy` would change how Chat's own reqwest client connects.
+tauri-plugin-updater = { version = "=2.12.0", default-features = false, features = ["rustls-tls"] }
 tokio = { version = "=1.53.1", features = ["macros", "sync", "time", "net", "io-util", "rt-multi-thread", "signal"] }
 url = "=2.5.8"
 uuid = { version = "=1.24.1", features = ["v4"] }

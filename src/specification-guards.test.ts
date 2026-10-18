@@ -93,6 +93,10 @@ const screenRelayCommands = [
 // install steps. The webview chooses a step by name; the only text it sends
 // to a process is a familiar's name, validated in Rust and passed after `--`.
 const setupCommands = ['setup_check', 'setup_run', 'setup_cancel', 'setup_create_familiar'];
+// App updates (#356): whether a newer release exists, and "install it and
+// restart". The plugin's own commands are not granted; the feed and the
+// signing key are fixed in tauri.conf.json, and no argument names either.
+const updaterCommands = ['updater_check', 'updater_install'];
 
 function readText(relativePath: string) {
   return readFileSync(resolve(projectRoot, relativePath), 'utf8');
@@ -273,6 +277,7 @@ describe('Phase 1 specification guards', () => {
         ...missionCommands,
         ...screenRelayCommands,
         ...setupCommands,
+        ...updaterCommands,
       ].map((command) => `allow-${command.replaceAll('_', '-')}`),
       'core:window:allow-set-title',
     ]);
@@ -751,6 +756,7 @@ describe('Phase 1 specification guards', () => {
       ...missionCommands,
       ...screenRelayCommands,
       ...setupCommands,
+      ...updaterCommands,
       'app_identity',
       'app_installation_id',
       'cave_read_discovery',
@@ -819,6 +825,7 @@ describe('Phase 1 specification guards', () => {
       ...missionCommands.map((command) => `coven_runtime::missions::${command}`),
       ...screenRelayCommands.map((command) => `screen_relay::${command}`),
       ...setupCommands.map((command) => `setup::${command}`),
+      ...updaterCommands.map((command) => `updater::${command}`),
       ...expected,
     ]);
     const setup = readText('src-tauri/src/setup.rs');

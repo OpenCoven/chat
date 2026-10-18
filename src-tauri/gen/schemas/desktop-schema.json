@@ -459,6 +459,18 @@
           "markdownDescription": "Enables the setup_run command without any pre-configured scope."
         },
         {
+          "description": "Enables the updater_check command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-updater-check",
+          "markdownDescription": "Enables the updater_check command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the updater_install command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-updater-install",
+          "markdownDescription": "Enables the updater_install command without any pre-configured scope."
+        },
+        {
           "description": "Denies the app_identity command without any pre-configured scope.",
           "type": "string",
           "const": "deny-app-identity",
@@ -739,6 +751,18 @@
           "type": "string",
           "const": "deny-setup-run",
           "markdownDescription": "Denies the setup_run command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the updater_check command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-updater-check",
+          "markdownDescription": "Denies the updater_check command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the updater_install command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-updater-install",
+          "markdownDescription": "Denies the updater_install command without any pre-configured scope."
         },
         {
           "description": "Default core plugins set.\n#### This default permission set includes:\n\n- `core:path:default`\n- `core:event:default`\n- `core:window:default`\n- `core:webview:default`\n- `core:app:default`\n- `core:image:default`\n- `core:resources:default`\n- `core:menu:default`\n- `core:tray:default`",
@@ -2755,6 +2779,60 @@
           "type": "string",
           "const": "core:window:deny-unminimize",
           "markdownDescription": "Denies the unminimize command without any pre-configured scope."
+        },
+        {
+          "description": "This permission set configures which kind of\nupdater functions are exposed to the frontend.\n\n#### Granted Permissions\n\nThe full workflow from checking for updates to installing them\nis enabled.\n\n\n#### This default permission set includes:\n\n- `allow-check`\n- `allow-download`\n- `allow-install`\n- `allow-download-and-install`",
+          "type": "string",
+          "const": "updater:default",
+          "markdownDescription": "This permission set configures which kind of\nupdater functions are exposed to the frontend.\n\n#### Granted Permissions\n\nThe full workflow from checking for updates to installing them\nis enabled.\n\n\n#### This default permission set includes:\n\n- `allow-check`\n- `allow-download`\n- `allow-install`\n- `allow-download-and-install`"
+        },
+        {
+          "description": "Enables the check command without any pre-configured scope.",
+          "type": "string",
+          "const": "updater:allow-check",
+          "markdownDescription": "Enables the check command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the download command without any pre-configured scope.",
+          "type": "string",
+          "const": "updater:allow-download",
+          "markdownDescription": "Enables the download command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the download_and_install command without any pre-configured scope.",
+          "type": "string",
+          "const": "updater:allow-download-and-install",
+          "markdownDescription": "Enables the download_and_install command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the install command without any pre-configured scope.",
+          "type": "string",
+          "const": "updater:allow-install",
+          "markdownDescription": "Enables the install command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the check command without any pre-configured scope.",
+          "type": "string",
+          "const": "updater:deny-check",
+          "markdownDescription": "Denies the check command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the download command without any pre-configured scope.",
+          "type": "string",
+          "const": "updater:deny-download",
+          "markdownDescription": "Denies the download command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the download_and_install command without any pre-configured scope.",
+          "type": "string",
+          "const": "updater:deny-download-and-install",
+          "markdownDescription": "Denies the download_and_install command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the install command without any pre-configured scope.",
+          "type": "string",
+          "const": "updater:deny-install",
+          "markdownDescription": "Denies the install command without any pre-configured scope."
         }
       ]
     },

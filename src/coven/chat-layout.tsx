@@ -23,6 +23,7 @@ import {
 import { Icon } from '../design/minimal-icons';
 import type { ChatLifecycle, CovenProjectAccess, CovenSetupStep } from '../lib/coven-runtime';
 import type { ScreenRelay } from '../lib/screen-relay';
+import { defaultUpdateStore } from '../lib/updater';
 import { type SetWindowTitle, windowTitle } from '../lib/window-title';
 import { Composer } from '../ui/composer';
 import { MenuPortalContainer } from '../ui/dropdown-menu';
@@ -73,6 +74,7 @@ import {
 import { type LoadRfb, ScreenViewer } from './screen-viewer';
 import { SettingsDialog, type SettingsSection } from './settings-dialog';
 import { SetupStep } from './setup-step';
+import { UpdatesPanel, useUpdateState } from './updates-panel';
 import { useNow } from './use-now';
 import { useViewportTier } from './viewport';
 import '../design/familiars-shell.css';
@@ -619,6 +621,12 @@ export function ChatLayout(props: ChatLayoutProps) {
   // The open Settings section, or null while Settings is closed.
   const [settings, setSettings] = useState<SettingsSection | null>(null);
   const settingsOpener = useRef<HTMLElement | null>(null);
+  const update = useUpdateState();
+  // One quiet check shortly after launch; About › Updates checks on demand (#356).
+  useEffect(() => {
+    const timer = setTimeout(() => void defaultUpdateStore.check({ quiet: true }), 10_000);
+    return () => clearTimeout(timer);
+  }, []);
   const searchRef = useRef<HTMLInputElement>(null);
   // Cmd/Ctrl+K: the sidebar must be open (and no longer inert) before the
   // search box can take focus, so the request is settled after that render.
@@ -1175,12 +1183,16 @@ export function ChatLayout(props: ChatLayoutProps) {
               <FamIconButton
                 icon="gear-six"
                 size="sm"
-                label="Settings"
+                label={update.kind === 'available' ? 'Settings, update available' : 'Settings'}
                 title={SETTINGS_HINT}
                 aria-keyshortcuts={SETTINGS_SHORTCUT}
                 aria-haspopup="dialog"
-                className="coven-sidebar-settings"
-                onClick={() => openSettings()}
+                className={
+                  update.kind === 'available'
+                    ? 'coven-sidebar-settings coven-sidebar-settings--update'
+                    : 'coven-sidebar-settings'
+                }
+                onClick={() => openSettings(update.kind === 'available' ? 'about' : 'general')}
               />
             </div>
             <label className="coven-agent-search">
@@ -1935,6 +1947,7 @@ export function ChatLayout(props: ChatLayoutProps) {
             onRefresh={props.onRefresh}
             refreshDisabled={Boolean(props.busy || props.loading || props.lifecycleBusy)}
             companion={<CompanionPanel />}
+            updates={<UpdatesPanel runActive={Boolean(props.busy)} />}
           />
         ) : null}
       </div>

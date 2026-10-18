@@ -277,6 +277,24 @@
   display: none;
 }
 
+/* About › Updates (#356): the copy wraps; the actions stay on one line. */
+.coven-updates-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.coven-updates-notes {
+  margin-top: 6px;
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+.coven-updates-notes p {
+  margin: 6px 0 0;
+  white-space: pre-wrap;
+  max-height: 160px;
+  overflow: auto;
+}
+
 /* A checkbox drawn as a switch. */
 .coven-switch {
   appearance: none;

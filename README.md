@@ -188,8 +188,24 @@ or press **Cmd/Ctrl+,**. It has six sections:
 - **Access:** the projects Coven declares for the selected familiar.
 - **Devices:** the **iPhone companion**.
 - **Shortcuts:** every keyboard shortcut.
-- **About:** the app version, whether Chat reached the Coven CLI, and what the
-  window stores.
+- **About:** the app version, **Updates**, whether Chat reached the Coven CLI,
+  and what the window stores.
+
+### Updates
+
+Chat checks for a newer release a few seconds after it opens, and again
+whenever you choose **Check for updates** under **About**. When one is
+available, a dot appears on the gear, and **About** shows the new version and
+its notes. Nothing installs until you choose **Restart to update**. Chat then
+downloads the update, checks its signature against the key built into the app,
+installs it, and restarts. **Restart to update** waits while a reply is running,
+because restarting would end it. If a check or an install fails, **About** says
+so in plain words, and **Copy update details** copies the full error.
+
+Chat looks for updates in one place: the `updater` release on
+[GitHub](https://github.com/OpenCoven/chat/releases). Versions before the first
+release with the updater can't update themselves, so install that release by
+hand.
 
 ## First-run setup
 

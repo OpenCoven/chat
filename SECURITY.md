@@ -109,8 +109,11 @@ On Windows and Linux, the matching `SHA256SUMS` line is your integrity check.
 > **Warning:** Treat a macOS build that isn't signed and notarized, or any download whose hash
 > doesn't match its `SHA256SUMS` line, as untrusted.
 
-The app doesn't update itself. It ships without an updater, so you upgrade by installing a new
-release.
+The app updates itself only when you choose **Restart to update** under **Settings › About**. It
+reads one feed, the `latest.json` on the `updater` release of this repository, over HTTPS. It
+installs only an update whose signature verifies against the public key built into the app, and it
+waits while a reply is running. Versions without the updater (0.0.5 and earlier) don't update
+themselves; install a newer release by hand.
 
 ## iPhone companion boundary
 

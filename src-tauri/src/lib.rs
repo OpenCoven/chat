@@ -20,6 +20,7 @@ mod operation;
 mod screen_relay;
 mod setup;
 mod transport;
+mod updater;
 #[cfg(windows)]
 mod windows_job;
 
@@ -268,6 +269,7 @@ fn builder() -> tauri::Builder<tauri::Wry> {
         .manage(coven_runtime::missions::MissionState::default())
         .manage(screen_relay::ScreenRelayState::default())
         .manage(companion::CompanionState::default())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .invoke_handler(tauri::generate_handler![
             companion::companion_status,
             companion::companion_enable,
@@ -296,6 +298,8 @@ fn builder() -> tauri::Builder<tauri::Wry> {
             setup::setup_run,
             setup::setup_cancel,
             setup::setup_create_familiar,
+            updater::updater_check,
+            updater::updater_install,
             app_identity,
             app_installation_id,
             cave_read_discovery,
