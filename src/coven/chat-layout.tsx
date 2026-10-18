@@ -33,6 +33,7 @@ import { CompanionPanel } from './companion-panel';
 import { ContextPicker } from './context-picker';
 import { CopyButton } from './copy-button';
 import type { ChatMessage } from './events';
+import { LinkReviewContext } from './external-link-review';
 import { FamiliarAvatar } from './familiar-avatar';
 import { FormattedMessage, REVEAL_EVENT, ToolActivity, type ToolRow } from './formatted-message';
 import { useMentionCompletion } from './mention-completion';
@@ -780,6 +781,15 @@ export function ChatLayout(props: ChatLayoutProps) {
   // The same gate as the header's refresh control.
   const refreshBlocked = Boolean(props.busy || props.loading || props.lifecycleBusy);
   const transcriptRef = useRef<HTMLDivElement>(null);
+  // Message ids repeat across chats, so a link review is bound to this chat
+  // explicitly; when its link is gone, focus returns to the conversation.
+  const linkReview = useMemo(
+    () => ({
+      key: `${props.familiarId}:${props.sessionId}`,
+      fallback: () => transcriptRef.current,
+    }),
+    [props.familiarId, props.sessionId],
+  );
   const fileInput = useRef<HTMLInputElement>(null);
   // Files dragged onto the thread attach as if picked. The native host hands
   // drops to the webview (dragDropEnabled is off), so they arrive as File
@@ -1474,14 +1484,16 @@ export function ChatLayout(props: ChatLayoutProps) {
                 </div>
               ) : null}
               {props.loading ? <ThinkingIndicator label="Loading conversation" /> : null}
-              <TranscriptBlocks
-                blocks={blocks}
-                name={name}
-                avatarUrl={familiar?.avatarUrl}
-                withCard={Boolean(familiar)}
-                cardOpen={inspector && tab === 'overview'}
-                onShowCard={onShowCard}
-              />
+              <LinkReviewContext.Provider value={linkReview}>
+                <TranscriptBlocks
+                  blocks={blocks}
+                  name={name}
+                  avatarUrl={familiar?.avatarUrl}
+                  withCard={Boolean(familiar)}
+                  cardOpen={inspector && tab === 'overview'}
+                  onShowCard={onShowCard}
+                />
+              </LinkReviewContext.Provider>
               {liveRow ? (
                 <div className="fr-thinking-row coven-live-row">
                   <FamiliarAvatar name={name} avatarUrl={familiar?.avatarUrl} size={22} />

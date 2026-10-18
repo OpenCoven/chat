@@ -17,6 +17,7 @@ import {
   sameBlock,
   toolTurnSummary,
 } from './chat-layout';
+import type { ChatMessage } from './events';
 import type { RfbClass } from './screen-viewer';
 
 /** Opens Settings from the thread header and moves to a section. */
@@ -2614,5 +2615,79 @@ describe('settings', () => {
   it('leaves storage untouched until a preference changes', () => {
     render(<ChatLayout {...layoutProps()} />);
     expect(localStorage.getItem('opencoven.chat.preferences.v1')).toBeNull();
+  });
+});
+
+describe('external link review in the transcript', () => {
+  const props = () => ({
+    ...layoutProps(),
+    connected: true,
+    ready: true,
+    familiars: [
+      { id: 'a', name: 'Astra' },
+      { id: 'b', name: 'Bram' },
+    ],
+  });
+  // Message ids are event positions, so two chats both have a message "1".
+  const reply = (text: string): ChatMessage[] => [{ id: '1', role: 'assistant', text }];
+  const review = () => screen.queryByRole('dialog', { name: 'Open this link?' });
+
+  it('closes when another familiar is shown, even where message ids repeat', () => {
+    const { rerender } = render(
+      <ChatLayout
+        {...props()}
+        familiarId="a"
+        sessionId="s-a"
+        messages={reply('[docs](https://a.example/)')}
+      />,
+    );
+    fireEvent.click(screen.getByRole('link', { name: 'docs' }));
+    expect(review()).toHaveTextContent('a.example');
+    rerender(
+      <ChatLayout
+        {...props()}
+        familiarId="b"
+        sessionId="s-b"
+        messages={reply('[docs](https://b.example/)')}
+      />,
+    );
+    expect(review()).toBeNull();
+    expect(screen.getByRole('log', { name: 'Messages' })).toHaveFocus();
+  });
+
+  it('closes when the chat changes for the same familiar', () => {
+    const { rerender } = render(
+      <ChatLayout
+        {...props()}
+        familiarId="a"
+        sessionId="s-1"
+        messages={reply('[docs](https://a.example/)')}
+      />,
+    );
+    fireEvent.click(screen.getByRole('link', { name: 'docs' }));
+    rerender(
+      <ChatLayout
+        {...props()}
+        familiarId="a"
+        sessionId="s-2"
+        messages={reply('[docs](https://a.example/)')}
+      />,
+    );
+    expect(review()).toBeNull();
+  });
+
+  it('closes when its message leaves the transcript and keeps focus in the conversation', () => {
+    const { rerender } = render(
+      <ChatLayout
+        {...props()}
+        familiarId="a"
+        sessionId="s-a"
+        messages={reply('[docs](https://a.example/)')}
+      />,
+    );
+    fireEvent.click(screen.getByRole('link', { name: 'docs' }));
+    rerender(<ChatLayout {...props()} familiarId="a" sessionId="s-a" messages={[]} />);
+    expect(review()).toBeNull();
+    expect(screen.getByRole('log', { name: 'Messages' })).toHaveFocus();
   });
 });

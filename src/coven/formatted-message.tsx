@@ -2,6 +2,7 @@ import { memo, type ReactNode, useEffect, useId, useRef, useState } from 'react'
 import Markdown, { type Components, defaultUrlTransform } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { CopyButton } from './copy-button';
+import { LinkReviewScope, ReviewLink } from './external-link-review';
 import './formatted-message.css';
 import { usePreferences } from './preferences';
 import { segmentToolCalls, toolGroupSummary, toolKind } from './tool-activity';
@@ -39,10 +40,8 @@ const components: Components = {
         {children}
       </a>
     ) : (
-      // Links open outside the window, so the address shows before the click.
-      <a href={href} title={title ?? href} target="_blank" rel="noopener noreferrer">
-        {children}
-      </a>
+      // An external address opens only from its review, never straight from the message.
+      <ReviewLink destination={href}>{children}</ReviewLink>
     );
   },
   img({ alt }) {
@@ -302,5 +301,9 @@ export const FormattedMessage = memo(function FormattedMessage({ text }: { text:
     blocks.push(<Prose text={segment.text} key={`prose-${blocks.length}`} />);
   }
   flushTools();
-  return <div className="coven-formatted">{blocks}</div>;
+  return (
+    <LinkReviewScope>
+      <div className="coven-formatted">{blocks}</div>
+    </LinkReviewScope>
+  );
 });
