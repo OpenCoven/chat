@@ -258,11 +258,9 @@ The familiar list shows active chats. Turn on **Show archived chats** in
 **Settings › Chats** to list archived ones instead. Archived
 history is preserved, and archive state survives refreshes and app restarts.
 
-**Delete chat** requires confirmation and is strictly app-local: it removes the
-chat's newest saved transcript and that chat's local draft. Chat saves one
-transcript file per message you send, and the files from the chat's earlier
-messages stay in Chat's app data folder, though Chat never opens or replays
-them again. Deleting does
+**Delete chat** requires confirmation and is strictly app-local: it removes
+every saved transcript the chat is made of (Chat saves one per message you
+send) and that chat's local draft. Deleting does
 not delete original Coven CLI database records/files or change Cave history.
 A permanent tombstone prevents rediscovery or restoration of the deleted
 thread; deleted ancestors are not replayed through a remaining chat's captured

@@ -33,12 +33,12 @@ folder (on macOS, `~/Library/Application Support/ai.opencoven.chat`):
 - **Transcripts.** Chat saves one transcript per message you send, as
   `coven-transcripts/<session-id>.jsonl`, so your history survives restarts.
   On macOS and Linux each file is readable and writable only by your user
-  account. **Delete chat** removes the chat's newest transcript file; files
-  from its earlier messages stay in the folder, though Chat never opens them
-  again.
+  account. **Delete chat** removes every transcript the chat is made of.
+  Chats deleted in v0.0.5 or earlier left the transcripts of their earlier
+  messages in this folder, and Chat does not remove those files later.
 - **Attachments.** Files you attach, and the message sent with them, are kept
   in `coven-attachments/`, up to 64 MiB in total. On macOS and Linux only your
-  user account can read them.
+  user account can read them. **Delete chat** does not remove them.
 - **Companion credentials.** The iPhone companion's certificate and key, its
   bearer token, and its send receipts live in a private `iphone-companion/`
   folder.
