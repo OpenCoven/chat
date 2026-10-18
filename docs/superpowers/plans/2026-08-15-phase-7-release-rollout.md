@@ -1,8 +1,10 @@
 # Phase 7 Packaging, Compatibility, Publishing, and Production Rollout Implementation Plan
 
-> **Status (2026-10-18):** Superseded. `docs/releasing.md` is the release process of record. v0.0.2
-> through v0.0.5 shipped by 2026-10-14 with macOS signed and notarized, Windows unsigned from
-> v0.0.5, no updater artifacts and no Cave compatibility ranges. Historical record; do not execute.
+> **Status (2026-10-18):** Partially delivered, and amended on #356. v0.0.2 through v0.0.5
+> shipped by 2026-10-14 with macOS signed and notarized, Windows unsigned from v0.0.5, no
+> updater artifacts and no Cave compatibility ranges. The release owner's amendments below this
+> header win where they conflict with the plan, and `docs/releasing.md` is how a release is cut
+> today. Don't execute the plan's Cave-only steps; they don't apply to this app.
 
 **Goal:** Publish signed OpenCoven Chat installers and public SDK/CLI packages with proven Cave/Coven compatibility ranges, staged rollout, diagnostics, and rollback.
 

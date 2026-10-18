@@ -54,7 +54,7 @@ status changes, update both.
 | [iOS phase C: enrollment authority](plans/2026-08-16-ios-phase-c-enrollment-authority.md) | Superseded, never implemented |
 | [iOS phase B: cave-core foundation](plans/2026-08-16-ios-phase-b-cave-core-foundation.md) | Superseded, never implemented |
 | [iOS phase A: transport extraction](plans/2026-08-16-ios-phase-a-transport-extraction.md) | Superseded, never implemented |
-| [Phase 7 release rollout](plans/2026-08-15-phase-7-release-rollout.md) | Superseded by `docs/releasing.md` |
+| [Phase 7 release rollout](plans/2026-08-15-phase-7-release-rollout.md) | Partially delivered, amended on #356 |
 | [Phase 6 production hardening](plans/2026-08-15-phase-6-production-hardening.md) | Abandoned |
 | [Phase 5 lifecycle, offline, tooling](plans/2026-08-15-phase-5-native-lifecycle-offline-sdk-tooling.md) | Abandoned |
 | [Phase 4 rich content and attachments](plans/2026-08-15-phase-4-rich-content-attachments-actions.md) | Superseded |
