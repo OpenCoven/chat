@@ -110,21 +110,35 @@ pub(crate) fn change(data: &Path, id: &str, next: Lifecycle) -> Result<(), Strin
     Ok(())
 }
 
-/// Removes a deleted chat's saved transcripts. Chat saves one transcript per
-/// message, so the chat is its own session plus every earlier session it
-/// continues. Sessions another current chat continues are kept. Ancestors go
-/// oldest first and the chat's own transcript last: if a removal fails, what
-/// remains is still reachable from the chat, so retrying Delete finishes it.
+/// Removes a deleted chat's saved transcripts and the attachments staged for
+/// them. Chat saves one transcript per message, so the chat is its own session
+/// plus every earlier session it continues. Sessions another current chat
+/// continues are kept. Ancestors go oldest first and the chat's own transcript
+/// last, each after its attachments: if a removal fails, what remains is still
+/// reachable from the chat, so retrying Delete finishes it.
 fn remove_transcripts(data: &Path, id: &str) -> Result<(), String> {
+    const RETRY: &str = "Chat is hidden permanently, but its local copy could not be removed. Retry Delete to finish cleanup.";
     let directory = crate::coven_runtime::transcripts_dir(data, false)?;
     for session in removal_order(data, id)? {
+        if let Some(run) = attachment_run(data, &session) {
+            crate::coven_runtime::attachments::remove(data, &run).map_err(|_| RETRY)?;
+        }
         match fs::remove_file(directory.join(format!("{session}.jsonl"))) {
             Ok(()) => {}
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-            Err(_) => return Err("Chat is hidden permanently, but its local copy could not be removed. Retry Delete to finish cleanup.".into()),
+            Err(_) => return Err(RETRY.into()),
         }
     }
     Ok(())
+}
+
+/// The folder session `id`'s attachments were staged in, as its saved input
+/// names it. Inputs saved before Chat recorded the folder name none.
+fn attachment_run(data: &Path, id: &str) -> Option<String> {
+    let input = crate::chat_origin::captured_input(data, id).ok()??;
+    let run = input.get("attachment_run_id")?.as_str()?;
+    crate::coven_runtime::validate_id(run).ok()?;
+    Some(run.to_owned())
 }
 
 fn removal_order(data: &Path, id: &str) -> Result<Vec<String>, String> {
@@ -210,6 +224,7 @@ pub(crate) fn persist(data: &Path, name: &str, bytes: &[u8]) -> Result<(), Strin
 mod tests {
     use super::*;
     use serde_json::json;
+    use std::path::PathBuf;
 
     #[test]
     fn archive_restore_delete_are_durable_and_deleted_ids_never_restore() {
@@ -266,6 +281,72 @@ mod tests {
                 "{id} must not outlive its deleted chat"
             );
         }
+        fs::remove_dir_all(data).unwrap();
+    }
+
+    /// A turn sent with attachments: its saved input names the folder the
+    /// files were staged in, and that folder holds a copy of them.
+    fn write_attached_turn(data: &Path, id: &str, parent: Option<&str>, run: &str) -> PathBuf {
+        let input = json!({"type":"user","source":"chat-input","session_id":id,
+            "parent_session_id":parent,"attachments":[{"name":"notes.txt","size":6}],
+            "attachment_run_id":run});
+        let init = json!({"type":"system","subtype":"init","session_id":id});
+        fs::write(
+            data.join("coven-transcripts").join(format!("{id}.jsonl")),
+            format!("{init}\n{input}"),
+        )
+        .unwrap();
+        let folder = data.join("coven-attachments").join(run);
+        if crate::coven_runtime::validate_id(run).is_ok() {
+            fs::create_dir_all(&folder).unwrap();
+            fs::write(folder.join("0-notes.txt"), "secret").unwrap();
+        }
+        folder
+    }
+
+    #[test]
+    fn delete_removes_the_attachments_of_every_turn_in_the_chat() {
+        let data = std::env::temp_dir().join(uuid::Uuid::new_v4().to_string());
+        let transcripts = data.join("coven-transcripts");
+        let attachments = data.join("coven-attachments");
+        fs::create_dir_all(&transcripts).unwrap();
+        fs::create_dir_all(&attachments).unwrap();
+        let first = write_attached_turn(&data, "first", None, "run-1");
+        write_turn(&transcripts, "second", Some("first"));
+        let third = write_attached_turn(&data, "third", Some("second"), "run-3");
+        // A folder no saved input names is not this chat's to remove.
+        let unattributed = attachments.join("run-unknown");
+        fs::create_dir_all(&unattributed).unwrap();
+        // A folder name that would leave attachment storage is not followed.
+        write_attached_turn(&data, "escape", None, "../outside");
+        let outside = data.join("outside");
+        fs::create_dir_all(&outside).unwrap();
+        fs::write(outside.join("keep"), "keep").unwrap();
+
+        change(&data, "third", Lifecycle::Deleted).unwrap();
+        assert!(!first.exists(), "the first turn's attachments must go");
+        assert!(!third.exists(), "the newest turn's attachments must go");
+        assert!(unattributed.exists());
+        change(&data, "escape", Lifecycle::Deleted).unwrap();
+        assert!(outside.join("keep").exists());
+        fs::remove_dir_all(data).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn delete_never_follows_a_symlinked_attachment_folder() {
+        let data = std::env::temp_dir().join(uuid::Uuid::new_v4().to_string());
+        fs::create_dir_all(data.join("coven-transcripts")).unwrap();
+        fs::create_dir_all(data.join("coven-attachments")).unwrap();
+        let outside = data.join("outside");
+        fs::create_dir_all(&outside).unwrap();
+        fs::write(outside.join("keep"), "keep").unwrap();
+        write_attached_turn(&data, "linked", None, "run-link");
+        let link = data.join("coven-attachments").join("run-link");
+        fs::remove_dir_all(&link).unwrap();
+        std::os::unix::fs::symlink(&outside, &link).unwrap();
+        change(&data, "linked", Lifecycle::Deleted).unwrap();
+        assert!(outside.join("keep").exists());
         fs::remove_dir_all(data).unwrap();
     }
 

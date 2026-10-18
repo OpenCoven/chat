@@ -37,7 +37,9 @@ local app data folder (on macOS, `~/Library/Application Support/ai.opencoven.cha
   messages in this folder, and Chat does not remove those files later.
 - **Attachments.** Files you attach, and the message sent with them, are kept
   in `coven-attachments/`, up to 64 MiB in total. On macOS and Linux only your
-  user account can read them. **Delete chat** does not remove them.
+  user account can read them. **Delete chat** removes the attachments of the
+  chat's messages. Attachments sent with v0.0.5 or earlier stay in the folder,
+  because Chat didn't record which chat they belong to.
 - **Companion credentials.** The iPhone companion's certificate and key, its
   bearer token, and its send receipts live in a private `iphone-companion/`
   folder.
