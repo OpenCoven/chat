@@ -296,14 +296,15 @@ archived chats** in **Settings › Chats** to list archived ones instead. Archiv
 preserved, and archive state survives refreshes and app restarts.
 
 **Delete chat** asks for confirmation and is strictly app-local. It removes every saved transcript
-the chat is made of (Chat saves one per message you send) and that chat's local draft.
+the chat is made of (Chat saves one per message you send), the attachments sent in the chat, and
+that chat's local draft. Attachments sent with v0.0.5 or earlier stay in Chat's app data folder.
 
 What deleting does and doesn't do:
 
 - It doesn't delete the original Coven CLI database records or files, or change Cave history.
 - A permanent tombstone prevents rediscovery or restoration of the deleted thread. Deleted
   ancestors aren't replayed through a remaining chat's captured history chain.
-- It isn't secure erasure of backups, provider history, or CLI attachment staging.
+- It isn't secure erasure of backups or provider history.
 - Lifecycle storage is private, atomically replaced, and bounded to 10,000 entries / 2 MiB. Corrupt
   or full storage reports an error rather than forgetting tombstones.
 - Lifecycle actions wait until every active run, including cancellation cleanup, has finished.

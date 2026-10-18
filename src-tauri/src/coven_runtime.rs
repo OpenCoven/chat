@@ -19,7 +19,7 @@ use tauri::{ipc::Channel, AppHandle, Manager, State};
 use crate::coven::{CovenHealth, NativeCovenHealth};
 
 #[path = "chat_attachments.rs"]
-mod attachments;
+pub(crate) mod attachments;
 
 #[path = "familiar_projects.rs"]
 mod familiar_projects;
@@ -1806,6 +1806,22 @@ pub(crate) async fn coven_runtime_send(
     .await
 }
 
+/// Chat's record of what you sent, saved straight after the engine's init
+/// event. It also names the session this one continues and, when files were
+/// attached, the folder they were staged in, so Delete chat can remove it.
+fn input_record(id: &str, input: &SendInput) -> Value {
+    let mut record = json!({
+        "type": "user", "source": "chat-input", "session_id": id,
+        "parent_session_id": input.session_id,
+        "attachments": attachments::metadata(&input.attachments),
+        "message": {"role": "user", "content": [{"type": "text", "text": input.prompt}]},
+    });
+    if !input.attachments.is_empty() {
+        record["attachment_run_id"] = json!(input.run_id);
+    }
+    record
+}
+
 fn send_local(
     data: &Path,
     input: SendInput,
@@ -1969,12 +1985,7 @@ fn send_local(
             );
             // Preserve the exact submitted input even when the engine does not
             // echo it. Matching CLI user echoes are suppressed above.
-            captured_input = Some(json!({
-                "type": "user", "source": "chat-input", "session_id": id,
-                "parent_session_id": input.session_id,
-                "attachments": attachments::metadata(&input.attachments),
-                "message": {"role": "user", "content": [{"type": "text", "text": input.prompt}]},
-            }));
+            captured_input = Some(input_record(id, &input));
             replay_notice_event = replay.as_ref().map(|replay| {
                 json!({
                     "type": "system", "subtype": "notice", "source": "chat-replay", "session_id": id,
@@ -2314,6 +2325,32 @@ mod tests {
         fs::remove_file(data.join("chat-canonical-v1.json")).unwrap();
         fs::remove_dir(transcripts).unwrap();
         fs::remove_dir(data).unwrap();
+    }
+
+    #[test]
+    fn the_saved_input_names_the_folder_its_attachments_were_staged_in() {
+        let attached = SendInput {
+            run_id: "run-7".into(),
+            prompt: "Read this".into(),
+            session_id: Some("parent".into()),
+            familiar_id: Some("f".into()),
+            harness: None,
+            attachments: vec![attachments::Attachment {
+                name: "notes.txt".into(),
+                bytes: b"secret".to_vec(),
+            }],
+        };
+        let record = input_record("child", &attached);
+        assert_eq!(record["attachment_run_id"], "run-7");
+        assert_eq!(record["parent_session_id"], "parent");
+        assert_eq!(record["attachments"][0]["name"], "notes.txt");
+        let plain = SendInput {
+            attachments: vec![],
+            ..attached
+        };
+        assert!(input_record("child", &plain)
+            .get("attachment_run_id")
+            .is_none());
     }
 
     #[test]

@@ -157,6 +157,23 @@ pub(crate) fn stage(
     Ok((directory, stdin, echo))
 }
 
+/// Removes the folder a run staged its attachments in. Only a real folder
+/// inside real attachment storage is removed. A missing folder, or a symbolic
+/// link at either level, is left alone: Chat never stages through a link.
+pub(crate) fn remove(data: &Path, run_id: &str) -> Result<(), String> {
+    super::validate_id(run_id)?;
+    let root = data.join("coven-attachments");
+    for path in [&root, &root.join(run_id)] {
+        match fs::symlink_metadata(path) {
+            Ok(metadata) if metadata.file_type().is_dir() => {}
+            Ok(_) => return Ok(()),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+            Err(_) => return Err("Cannot inspect attachment storage.".into()),
+        }
+    }
+    fs::remove_dir_all(root.join(run_id)).map_err(|_| "Cannot remove staged attachments.".into())
+}
+
 fn write_private(path: &Path, bytes: &[u8]) -> Result<(), String> {
     let mut options = OpenOptions::new();
     options.write(true).create_new(true);
