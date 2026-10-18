@@ -21,7 +21,7 @@ final class CompanionFlowTests: XCTestCase {
       app.textFields["pairing-link"].exists
       ? app.textFields["pairing-link"] : app.textViews["pairing-link"]
     XCTAssertTrue(pairing.waitForExistence(timeout: 10))
-    pairing.tap()
+    focus(pairing, in: app)
     pairing.typeText(fixture["pairingLink"]!)
     app.buttons["connect"].tap()
     XCTAssertTrue(
@@ -32,7 +32,7 @@ final class CompanionFlowTests: XCTestCase {
       ).firstMatch.waitForExistence(timeout: 15))
     let composer =
       app.textFields["composer"].exists ? app.textFields["composer"] : app.textViews["composer"]
-    composer.tap()
+    focus(composer, in: app)
     composer.typeText("Hello from the iPhone")
     let send = app.buttons["send"]
     // A transient polling failure disables Send until the next authenticated
@@ -61,5 +61,23 @@ final class CompanionFlowTests: XCTestCase {
     XCTAssertTrue(
       app.buttons["Pair with your Mac"].waitForExistence(timeout: 10),
       "Forgotten pairing reappeared")
+  }
+
+  /// Taps `field` until it holds keyboard focus, so `typeText` has somewhere to
+  /// go. Right after pairing the screen is still settling, and XCTest can drop
+  /// a tap there without an error. `typeText` then fails with "Neither element
+  /// nor any descendant has keyboard focus", as it did on CI three times on
+  /// 2026-10-18.
+  private func focus(_ field: XCUIElement, in app: XCUIApplication) {
+    let ready = XCTNSPredicateExpectation(
+      predicate: NSPredicate(format: "enabled == true AND hittable == true"), object: field)
+    XCTAssertEqual(XCTWaiter.wait(for: [ready], timeout: 20), .completed, app.debugDescription)
+    let focused = NSPredicate(format: "hasKeyboardFocus == true")
+    for _ in 0..<5 {
+      field.tap()
+      let tookFocus = XCTNSPredicateExpectation(predicate: focused, object: field)
+      if XCTWaiter.wait(for: [tookFocus], timeout: 2) == .completed { return }
+    }
+    XCTFail("\(field.identifier) never took keyboard focus\n\(app.debugDescription)")
   }
 }
