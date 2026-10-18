@@ -10,6 +10,39 @@
 
 **Depends on:** Phase 6 full hardening and artifact privacy gates.
 
+> **Amendments to the Chat parts of this plan (recorded 2026-10-18, OpenCoven/chat#356).**
+> The release owner decided these after the plan was written. Where they conflict
+> with the plan, they win. The superseded lines below are struck through, not
+> deleted, so the original plan stays readable.
+>
+> 1. **Window minimum 480×520** (decided 2026-09-26). That is the contract
+>    `README.md` documents, with three responsive tiers, and the e2e suite
+>    drives it. The 820×600 minimum is superseded. #387 enforces 480×520.
+> 2. **Deep-link protocol `opencoven-chat`: deferred** (2026-09-26). Nothing
+>    handles incoming links yet, so `scripts/verify-package.mjs` rejects any
+>    deep-link config or crate.
+> 3. **Updater: off** (2026-09-26, still off through v0.0.5).
+>    `scripts/verify-package.mjs` rejects updater artifacts, config and crate,
+>    and `docs/releasing.md` §4 documents the off state. Turning it on needs
+>    a separate recorded decision on #356, changing the verifier in the same PR.
+> 4. **Scope: the CLI-backed public pre-release** (2026-10-05). Chat talks to
+>    the locally installed Coven CLI. The Cave-connected journey in Task 12 is
+>    tracked on OpenCoven/coven-cave#4781, and its Cave-only steps do not apply
+>    to this app.
+> 5. **Windows installers ship unsigned** (2026-10-14, #456, from v0.0.5). The
+>    release body explains the SmartScreen prompt. The signing route is
+>    OpenCoven/chat#411.
+> 6. **macOS notarization uses an App Store Connect API key** (2026-10-07,
+>    #404). Every published release from v0.0.2 on is Developer ID signed and
+>    notarized, and from v0.0.5 the `.dmg` containers are too (#407).
+>
+> **Delivered under other names:**
+> - Task 3: `scripts/verify-package.mjs` with `src/verify-package.test.ts` (#387).
+> - Task 5: `scripts/release-smoke.mjs` with `src/release-smoke.test.ts` (#391).
+>   The release-context logic stays inline in `.github/workflows/release.yml`,
+>   covered by `src/release-workflow.test.ts`.
+> - Rollback lives in `docs/releasing.md` §6, not in a separate `docs/rollback.md`.
+
 **Repositories:**
 - Cave: `/Users/buns/Documents/GitHub/OpenCoven/coven-cave`
 - Chat: `/Users/buns/Documents/GitHub/OpenCoven/chat`
@@ -172,10 +205,10 @@ Assert:
 
 - product name `OpenCoven Chat`;
 - identifier `ai.opencoven.chat`;
-- minimum 820×600 and default 1180×780 window;
+- ~~minimum 820×600~~ minimum 480×520 (amendment 1) and default 1180×780 window;
 - strict CSP;
-- `opencoven-chat` protocol;
-- required icons and updater public key;
+- ~~`opencoven-chat` protocol~~ no deep-link protocol (amendment 2);
+- required icons ~~and updater public key~~, and no updater config (amendment 3);
 - installer targets;
 - only required Tauri capabilities;
 - absence of shell and arbitrary filesystem permissions.
@@ -189,7 +222,7 @@ node scripts/verify-package.mjs
 
 - [ ] **Step 3: Implement package configuration**
 
-Configure updater endpoints and signatures but do not publish. Keep the webview token-free and opener URL allowlist narrow.
+~~Configure updater endpoints and signatures but do not publish.~~ Leave the updater unconfigured (amendment 3). Keep the webview token-free and opener URL allowlist narrow.
 
 - [ ] **Step 4: Run local package gates**
 
@@ -267,10 +300,10 @@ pnpm test:e2e -- tests/release-smoke.spec.ts
 Produce:
 
 - signed and notarized macOS application/DMG;
-- signed Windows MSI;
+- ~~signed Windows MSI~~ Windows MSI and NSIS installers, unsigned until #411 (amendment 5);
 - Linux AppImage;
 - SHA-256 checksums;
-- updater signatures and update metadata.
+- ~~updater signatures and update metadata~~ no updater artifacts while the updater is off (amendment 3).
 
 The workflow must fail closed when signing material is absent for a stable release. Diagnostic-only workflow dispatches may build without publishing.
 
@@ -626,7 +659,7 @@ Pause updates and restore prior metadata using the documented bounded procedure.
 ## Exit Gates
 
 - All platform installers install, launch, update, and uninstall cleanly.
-- macOS artifacts are signed/notarized, Windows MSI is signed, Linux AppImage is checksummed, and updater metadata is signed.
+- macOS artifacts are signed/notarized, ~~Windows MSI is signed~~ Windows installers are signed once #411 lands (amendment 5), Linux AppImage is checksummed, and ~~updater metadata is signed~~ updater metadata is signed once the updater is turned on (amendment 3).
 - The complete acceptance journey passes on macOS, Windows, and Linux.
 - Minimum/latest authority compatibility jobs pass; scheduled authority-main canaries are active.
 - npm tarballs carry provenance and exact binary ownership.
@@ -651,9 +684,9 @@ Pause updates and restore prior metadata using the documented bounded procedure.
 
 These are release blockers rather than code tasks:
 
-- Windows code-signing certificate and repository secrets must exist before stable MSI publication.
+- Windows code-signing certificate and repository secrets must exist before stable MSI publication. (Pre-releases ship unsigned until then: amendment 5 and #411.)
 - npm trusted publishers must be configured for all five `@opencoven/*` packages.
 - crates.io ownership/publishing authority must be configured for both owner-adjacent crates.
-- macOS signing/notarization and updater signing secrets must be provisioned.
+- macOS signing/notarization and updater signing secrets must be provisioned. (The macOS secrets are in `release-signing` and in use since v0.0.2. The updater secrets wait on amendment 3.)
 - The minimum supported Cave and Coven releases must be selected before compatibility metadata is finalized.
 
