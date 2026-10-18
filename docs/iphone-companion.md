@@ -118,7 +118,16 @@ APPLE_API_KEY=<key id> APPLE_API_ISSUER=<issuer id> apps/ios/ChatCompanion/Scrip
 ```
 
 The `.p8` is read from `~/.appstoreconnect/private_keys/AuthKey_<key id>.p8`
-unless `APPLE_API_KEY_PATH` names another file. Xcode creates or refreshes the
+unless `APPLE_API_KEY_PATH` names another file.
+
+**From CI.** Every push to `main` that changes `apps/ios` runs the
+`iPhone companion` workflow's **TestFlight** job after the tests pass. The job
+uploads a build numbered by the commit count, using the App Store Connect key
+in the `release-signing` environment. The archive is unsigned, and the export
+signs it with Apple's cloud-managed distribution certificate
+(`CHAT_IOS_UNSIGNED_ARCHIVE=1`), so the runner needs no certificate. To prove
+signing from a branch without uploading, run the workflow by hand with
+**testflight** set to `export`; `upload` is refused anywhere but `main`. Xcode creates or refreshes the
 App Store provisioning profile through the key. The build number defaults to the
 commit count of `HEAD`, so upload from `main`; `CHAT_IOS_BUILD_NUMBER` overrides
 it. `CHAT_IOS_EXPORT=export` signs an `.ipa` and leaves it in a temporary folder
