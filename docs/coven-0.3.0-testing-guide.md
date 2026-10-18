@@ -1,5 +1,11 @@
 # Coven 0.3.0 Testing Guide
 
+> **Historical (2026-08-14):** This guide describes the repository as of 2026-08-14. It was
+> written for Coven 0.3.0, before the Chat app existed. Its notes about the repository,
+> such as untracked planning files and a tree of mostly documentation and HTML, no longer
+> apply. Chat now installs Coven `0.4.10` (`COVEN_VERSION` in
+> `src-tauri/src/coven_install.rs`). For current behaviour, read [README.md](../README.md).
+
 The best way to test Coven 0.3.0 is with small, observable experiments where each capability has a clear success condition.
 
 ## Recommended test drive

@@ -1,6 +1,31 @@
 # Delivery roadmap and consolidation audit
 
-## Current protected-validation checkpoint, 2026-09-16 (Chat #311)
+> **Status (2026-10-18):** This file is a dated log of protected-conformance and
+> consolidation checkpoints from 2026-09-07 to 2026-09-16. It is not a current plan.
+> Every section below is historical, including the 2026-09-16 checkpoint that used to be
+> labelled "Current". Track open work in GitHub issues. On this date the open issues are
+> #154, #155, #356, #411 and #465.
+>
+> After the last checkpoint, the protected lane went green. Run
+> [36033589858](https://github.com/OpenCoven/chat/actions/runs/36033589858) passed all jobs
+> on 2026-09-24 at `359933db`, and run
+> [36222464391](https://github.com/OpenCoven/chat/actions/runs/36222464391) passed on
+> 2026-09-26 at Chat `399e1f19`. No protected run has happened since. The harness has been
+> repinned since then (now `b293d5f6`, 2026-10-14), so the current harness is not yet
+> re-validated. See the status block in [phase1-conformance.md](phase1-conformance.md).
+>
+> Gates this log calls open have closed: Chat #188 and #219 (2026-09-24), #246
+> (2026-09-21), #206 (2026-10-13), #307 (2026-09-18), #86 (2026-09-27), and SDK #38
+> (2026-09-25). #313 and #303 merged on 2026-09-18. SDK candidate `96804bc4`, which these
+> checkpoints call frozen, was replaced by `cd10a3fa` in Chat #383 (2026-09-25). SDK
+> publishing is still disabled (`publishingEnabled: false` in the SDK's
+> `release.config.json`).
+>
+> Beads was retired on 2026-09-14
+> ([coven-cave#5399](https://github.com/OpenCoven/coven-cave/issues/5399)). Every Bead ID
+> and `bd` command below is historical. Do not run `bd`.
+
+## Historical protected-validation checkpoint, 2026-09-16 (Chat #311)
 
 Chat [#311](https://github.com/OpenCoven/chat/pull/311) landed at
 `157fb3206b9b90f24049aa2043bae534d2b9a709`. SDK
@@ -13,7 +38,7 @@ The earlier quota failure leaves the Cave build home isolation repair unproven.
 
 The next diagnostic distinguishes a repeated access denial from a changed I/O
 failure while preserving first-failure reporting and fail-closed behavior. See
-[bounded quota retry categories](phase1-conformance.md#bounded-quota-retry-categories).
+[Windows quota repeat outcomes](windows-quota-repeat-outcome.md).
 Native Windows verification, reviewed producer delivery, SDK rebinding, both
 scope rotations, and a fresh protected run remain open.
 
@@ -274,8 +299,10 @@ Chat and active/dirty/uncertain worktrees remain preserved. Issue #246's
 prospective diagnostics landed in [Chat #268](https://github.com/OpenCoven/chat/pull/268),
 but its historical criterion remains
 open. Issues #188, #206 and #219 also remain open; ordinary CI does not close
-protected or historical-cause requirements. Beads `cave-k0aqq` and its Teamwork
-mirror hold the current delivery record. The minimum working set and the full
+protected or historical-cause requirements. This checkpoint named Beads
+`cave-k0aqq` and its Teamwork mirror as the delivery record, but Beads had been
+retired on 2026-09-14 (coven-cave#5399); GitHub issues are the tracker. The
+minimum working set and the full
 cross-repository consolidation remain unproven.
 
 ## Historical consolidation checkpoint, 2026-09-12 04:36 UTC
@@ -501,7 +528,7 @@ exhaustion nor the identity of the denied descendant.
 
 | Work | Delivered evidence | Remaining work |
 | --- | --- | --- |
-| Frozen Linux backport adoption | Chat #210 and the prepared #207–#209 follow-ups landed. The production backport remains frozen at `0da8c4749f57e63601b29d66032f80c9bbac1cb5`; subsequent harness bindings retain the reviewed source ancestry. | [#188](https://github.com/OpenCoven/chat/issues/188) remains open for complete protected acceptance; the advisory reconciliation is recorded in [the backport provenance](../vendor/glib-0.18.5.PROVENANCE.md), and protected Windows acceptance is tracked in [#219](https://github.com/OpenCoven/chat/issues/219). |
+| Frozen Linux backport adoption | Chat #210 and the prepared #207–#209 follow-ups landed. The production backport remains frozen at `0da8c4749f57e63601b29d66032f80c9bbac1cb5`; subsequent harness bindings retain the reviewed source ancestry. | [#188](https://github.com/OpenCoven/chat/issues/188) stayed open for complete protected acceptance and closed on 2026-09-24; the advisory reconciliation is recorded in [the backport provenance](../vendor/glib-0.18.5.PROVENANCE.md), and protected Windows acceptance was tracked in [#219](https://github.com/OpenCoven/chat/issues/219), which closed the same day. |
 | Windows staging and diagnostics | Coven #988 and Chat #211 landed. Chat #216 adds bounded cleanup categories; #218 adds quota-root/operation context. All ten final #218 CI jobs passed, including native Windows tests. | Protected status-staging success remains unproven. [#219](https://github.com/OpenCoven/chat/issues/219) owns the quota enumeration repair and separate cleanup investigation. #211 review-thread disposition remains unverified. |
 | Native quota reproduction | [#220](https://github.com/OpenCoven/chat/pull/220) landed as `e0d543217b50d47d1c2b3d552adf9bb3df068dd0`. All ten CI checks passed; the native fixture reproduced terminal/background denial, passed readable/overflow controls and restored/removed its fixture. See [the reproduction contract](windows-quota-reproduction.md). | #219’s isolated-token accounting repair requires its own native execution, frozen-source/SDK rebinding and fresh protected acceptance. The exact protected descendant and separate cleanup failure remain unresolved. |
 | SDK binding | [SDK #204](https://github.com/OpenCoven/sdk/pull/204) landed at `7f53b74c1c2be2719c87a1c0592d1c13a6a641cf`, binding the exact #218 producer/workflow/bootstrap bytes. Both scopes were rotated and read back before the protected attempt. | Rebind any subsequent governed source change. [SDK #38](https://github.com/OpenCoven/sdk/issues/38) and the final release gate remain open. |
@@ -542,7 +569,7 @@ establish acceptance for subsequent source changes.
 | Work | Delivered evidence | Remaining work |
 | --- | --- | --- |
 | Packaged authority | [Chat #203](https://github.com/OpenCoven/chat/pull/203) merged as `cfe8137c07307dfa19f926152a74da83afec49e5`; packaged CI passed after replacing invalid ancestry assumptions with exact independent authority verification and binding harness `c5445941750f5ac232a78f3d7c7dcecf91bd52bc`. | Retain these checks when adopting new frozen sources; ordinary packaged CI does not replace protected acceptance. |
-| Linux GLib | [Chat #204](https://github.com/OpenCoven/chat/pull/204) delivered the maintained backport. [#209](https://github.com/OpenCoven/chat/pull/209) validated both frozen sources at `f21b27f`: native run `34498480972` passed 128 production and 158 harness tests, optimized builds, 11 iterator tests per entry, and source consistency. Published production `0da8c4749f57e63601b29d66032f80c9bbac1cb5` and harness `0207b93f4238017764e59eca4916e4c790561f77` contain the backport. [#210](https://github.com/OpenCoven/chat/pull/210) binds both sources; all ten jobs in [run 34504274365](https://github.com/OpenCoven/chat/actions/runs/34504274365) passed at `970fc31`, including packaged conformance and Windows native E2E. Eight vendor tampering cases were rejected. | [#188](https://github.com/OpenCoven/chat/issues/188) remains open. #210 merged on 2026-09-11 as `9f073f05241c2d3241b23ed9d73b26c6cd55ce7e`. Dependabot alert #1 reached `fixed` at `2026-09-10T08:59:12Z` without dismissal; the 2026-09-20 `cargo audit` readback, which still names `glib 0.18.5` by version, is recorded in [the backport provenance](../vendor/glib-0.18.5.PROVENANCE.md). Protected Windows acceptance remains outstanding: [run 35146928092](https://github.com/OpenCoven/chat/actions/runs/35146928092) failed on Windows during quota enumeration, tracked in [#219](https://github.com/OpenCoven/chat/issues/219). Ordinary PR CI does not establish protected acceptance. |
+| Linux GLib | [Chat #204](https://github.com/OpenCoven/chat/pull/204) delivered the maintained backport. [#209](https://github.com/OpenCoven/chat/pull/209) validated both frozen sources at `f21b27f`: native run `34498480972` passed 128 production and 158 harness tests, optimized builds, 11 iterator tests per entry, and source consistency. Published production `0da8c4749f57e63601b29d66032f80c9bbac1cb5` and harness `0207b93f4238017764e59eca4916e4c790561f77` contain the backport. [#210](https://github.com/OpenCoven/chat/pull/210) binds both sources; all ten jobs in [run 34504274365](https://github.com/OpenCoven/chat/actions/runs/34504274365) passed at `970fc31`, including packaged conformance and Windows native E2E. Eight vendor tampering cases were rejected. | [#188](https://github.com/OpenCoven/chat/issues/188) closed on 2026-09-24. #210 merged on 2026-09-11 as `9f073f05241c2d3241b23ed9d73b26c6cd55ce7e`. Dependabot alert #1 reached `fixed` at `2026-09-10T08:59:12Z` without dismissal; the 2026-09-20 `cargo audit` readback, which still names `glib 0.18.5` by version, is recorded in [the backport provenance](../vendor/glib-0.18.5.PROVENANCE.md). On 2026-09-20, protected Windows acceptance was outstanding: [run 35146928092](https://github.com/OpenCoven/chat/actions/runs/35146928092) failed on Windows during quota enumeration, tracked in [#219](https://github.com/OpenCoven/chat/issues/219). Protected run 36033589858 passed on 2026-09-24, and #219 closed that day. Ordinary PR CI does not establish protected acceptance. |
 | Windows status writer | [Chat #201](https://github.com/OpenCoven/chat/pull/201) merged as `7ca56c5c8c95fc1be4efecf22554cb4f3cc08e22`. Coven diagnostics distinguish requested from granted handle rights under the restricted directory. | [Coven #988](https://github.com/OpenCoven/coven/pull/988) remains draft at `093f278a9c868b78ed50591a83e1167f9f6250cd`: its 72 Windows tests pass, but the replacement fixture uses explicit alternate staging and does not prove the default path, trusted staging directory, safe replacement, or ownership-scoped cleanup. [#984](https://github.com/OpenCoven/coven/issues/984) remains open. |
 | Windows process identity | [Chat #207](https://github.com/OpenCoven/chat/pull/207) adds bounded test-only observations for null WTS SIDs; it does not change supervisor acceptance. All ten jobs in [run 34462291567](https://github.com/OpenCoven/chat/actions/runs/34462291567) passed at `fe41e3f07cfe2e95908622d520c8533e2fb30597`, including native Windows diagnostic fixtures. | Complete review-thread resolution and landing. [#206](https://github.com/OpenCoven/chat/issues/206) still needs evidence explaining the original failure; a passing retry alone does not classify it. |
 | Current validator configuration | [SDK #200](https://github.com/OpenCoven/sdk/pull/200) merged as `f431cf6a4a61183d95e40adf4b50d36d12f3292e`, binding Chat `7ca56c5`. Both repository and protected-environment scopes were rotated and read back to that SDK merge. This configuration postdates run `34441519622`, which used SDK #197 at `d1c9ddf`; the newer binding has no fresh protected acceptance. | Rebind any subsequent producer changes before a fresh protected run. [SDK #38](https://github.com/OpenCoven/sdk/issues/38) and the final release gate remain open; publishing remains disabled. |
@@ -758,8 +785,10 @@ inventory and local operation receipts.
 retirement and read-back verification. The minimum working set is not yet proven.
 
 The [program register](superpowers/plans/2026-08-15-opencoven-chat-program-tracking.md)
-and existing [Teamwork mirrors](https://github.com/orgs/OpenCoven/projects/9)
-remain the tracking entry points. The canonical program Bead `cave-k0aqq` now includes this checkpoint; read-back
+and the [Teamwork mirrors](https://github.com/orgs/OpenCoven/projects/9)
+were the tracking entry points at this checkpoint. Beads was retired on 2026-09-14
+(coven-cave#5399), so track current work in GitHub issues.
+The canonical program Bead `cave-k0aqq` now includes this checkpoint; read-back
 verified the appended note and unchanged blocked status. REST inspection of the
 three existing Teamwork mirrors confirmed that `cave-23nmv` and `cave-0prpu`
 already show their historical closed acceptance. The `cave-k0aqq` draft card
@@ -934,7 +963,8 @@ tracking today's Linux/Windows failures against the release requirements.
 
 The installed Beads executable understands schema v53 while the database is
 v66. Inspection used `bd --readonly --ignore-schema-skew show`; no database
-write or migration was attempted. Use a compatible executable for updates.
+write or migration was attempted. The audit planned to use a compatible executable
+for updates. Beads has since been retired (coven-cave#5399), so do not run `bd`.
 The repository Projects REST endpoint returned 404, but the organization
 Projects V2 REST endpoint successfully located Teamwork. The 404 is not a
 tracking blocker or evidence that no project exists.
@@ -990,9 +1020,10 @@ unreconciled work must be resolved first.
   workflow authority and lockfile changes. Preserve unique work before cleanup.
 - Revalidate clean status, branch identity, reachability, and process ownership
   immediately before each additional worktree removal.
-- Refresh the canonical Beads program graph with a compatible executable,
+- (Superseded.) Refresh the canonical Beads program graph with a compatible executable,
   reconcile obsolete next-action notes, and synchronize the existing Teamwork
-  draft cards from their source records.
+  draft cards from their source records. Beads was retired on 2026-09-14
+  (coven-cave#5399); do not run `bd`.
 - Keep roadmap links, phase plans, PR descriptions, and workflow evidence
   consistent as each item lands. Do not close a gate from unit tests alone.
 
@@ -1036,14 +1067,17 @@ they were not force-deleted to satisfy a branch-count target.
 
 Delivery remains incomplete: draft PR readiness, Teamwork mirror synchronization,
 a compatible Beads write path, protected release conformance, and the SDK release
-must still be resolved. Local cleanup is not proof of program completion.
+must still be resolved. Local cleanup is not proof of program completion. (Beads
+was retired on 2026-09-14, so the Beads write path is no longer needed.)
 
 ## Protected workflow file-size guard
 
 GitHub rejected the initial #231 workflow at 512,502 bytes because its limit is
 500 KiB (512,000 bytes). Serializing existing validation scripts as quoted YAML
-scalars keeps the workflow at 511,593 bytes. Their parsed commands are
+scalars brought the workflow to 511,593 bytes at #231. Their parsed commands are
 unchanged, while isolated quota repeats now issue fresh filesystem metadata
-reads without repeating supervisor-identity validation. A regression check
-enforces the GitHub limit; the final workflow size and hash are recorded in the
-conformance guide and must be used by the next SDK binding.
+reads without repeating supervisor-identity validation. The workflow is now
+183,220 bytes (measured 2026-10-18), after the supervisor C# moved into a
+compressed block ([Bounded Windows supervisor source](windows-supervisor-source.md)).
+`src/client-v1-conformance-workflow.test.ts` enforces the GitHub limit, and the
+conformance guide records the current size and hash.

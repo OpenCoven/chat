@@ -30,13 +30,14 @@ The complete pin list is in
 ```bash
 corepack enable
 pnpm install:clean
-pnpm dev          # browser fallback and explicit mock routes
+pnpm dev          # renders the app's UI in a browser; cannot reach the Coven CLI
 pnpm app:dev      # production Tauri desktop path
 ```
 
-The browser build cannot connect to Cave. The production desktop path
-initializes native identity and manages the Cave connection used for canonical
-chat reads.
+The browser build renders the interface but cannot run commands or reach a
+daemon. Only the desktop app spawns your installed Coven CLI (see
+`src-tauri/src/coven_runtime.rs`), so verify anything about runs, sessions, or
+attachments in `pnpm app:dev`.
 
 ## Branching and pull requests
 

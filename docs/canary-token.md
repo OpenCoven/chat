@@ -1,10 +1,15 @@
 # The contract canary's counterpart token
 
-The `Contract canary` CI job checks out two counterpart repositories at the
-revisions pinned in `contract-canary.lock.json`:
+`CANARY_TOKEN` is read by every cross-repository checkout in
+`.github/workflows/ci.yml`: six checkouts in two jobs, each at the revision its
+lock file pins.
 
-- `OpenCoven/sdk`
-- `OpenCoven/coven-cave`
+- `Contract canary` (`contract-canary.lock.json`): `OpenCoven/sdk` and
+  `OpenCoven/coven-cave`.
+- `Phase 1 real-authority conformance` (`phase1-conformance.lock.json`):
+  `OpenCoven/sdk` twice (the SDK and its evidence revision),
+  `OpenCoven/coven-cave` and `OpenCoven/coven`. This job runs on pushes to
+  `main` and on pull requests labelled `ci:full`.
 
 ## Why a token is needed
 
@@ -34,14 +39,14 @@ At <https://github.com/settings/personal-access-tokens/new>:
 | Field | Value |
 |---|---|
 | Resource owner | `OpenCoven` |
-| Repository access | Only select repositories: `sdk`, `coven-cave` |
+| Repository access | Only select repositories: `sdk`, `coven-cave`, `coven` |
 | Repository permissions | Contents: **Read-only** |
 | Expiration | As short as your rotation habit allows |
 
-Read-only Contents is the whole requirement. The canary clones and reads; it
-never writes to a counterpart. Grant nothing else — a token that can write to
-`coven-cave` is a token that can rewrite Cave's authority fixtures from a CI
-job in another repository.
+Read-only Contents is the whole requirement. Both jobs clone and read; neither
+writes to a counterpart. Grant nothing else. A token that can write to
+`coven-cave` can rewrite Cave's authority fixtures from a CI job in another
+repository.
 
 **2. Store it as a repository secret.**
 
@@ -61,21 +66,23 @@ Re-run the `Contract canary` job with a counterpart private. It should pass.
 token: ${{ secrets.CANARY_TOKEN || github.token }}
 ```
 
-The fallback is deliberate. With no secret set, the job behaves exactly as it
-did before — working while the counterparts are public. Adding the secret
-removes the dependency on their visibility without any further change.
+The fallback is deliberate. With no secret set, both jobs use the default
+token, which works while the counterparts are public. Adding the secret removes
+the dependency on their visibility without any further change.
 
-That also means an expired token degrades rather than breaks: the job falls
-back to the default token and keeps working for as long as the counterparts are
-public.
+> **Warning:** an expired token breaks the jobs. `||` falls back only when the
+> secret is unset or empty. An expired token is still a value, so checkout sends
+> it and GitHub refuses it, even for a public counterpart. `Contract canary` is
+> a required check, so this blocks every merge until you rotate or delete the
+> token.
 
 ## Rotation
 
-A fine-grained token expires. When it does, the canary quietly returns to
-depending on counterpart visibility, and will fail the next time one goes
-private. Re-running `gh secret set CANARY_TOKEN` with a fresh token is the only
-step; nothing in the workflow changes.
+A fine-grained token expires. Rotate it before the expiry date: re-run
+`gh secret set CANARY_TOKEN -R OpenCoven/chat` with a fresh token. Nothing in
+the workflow changes. To fall back to the default token on purpose, delete the
+secret with `gh secret delete CANARY_TOKEN -R OpenCoven/chat`.
 
-`src/specification-guards.test.ts` asserts both cross-repository checkouts carry
-the token expression, so removing it fails the test suite rather than silently
-restoring the coupling.
+`src/specification-guards.test.ts` asserts that all six cross-repository
+checkouts in `ci.yml` carry the token expression, so removing it fails the test
+suite rather than silently restoring the coupling.

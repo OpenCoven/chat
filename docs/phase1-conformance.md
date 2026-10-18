@@ -1,5 +1,24 @@
 # Phase 1 real-authority conformance
 
+> **Status (2026-10-18):** The protected lane is green as of run
+> [36222464391](https://github.com/OpenCoven/chat/actions/runs/36222464391) on 2026-09-26
+> (Chat `399e1f19`). All eight jobs passed, including `platform-conformance (win32-x64)`
+> and `aggregate-conformance`. The first fully green run was
+> [36033589858](https://github.com/OpenCoven/chat/actions/runs/36033589858) on 2026-09-24
+> (`359933db`). One run between them, 36213255383 (`f6e99b49`), failed on Windows.
+> Issues #219 and #188 closed on 2026-09-24. The repository and environment scopes of
+> `CLIENT_V1_CONFORMANCE_VALIDATOR_REVISION` have both selected SDK
+> `67fd5d8af73283348782de185efe77f24af6e391` since 2026-09-26.
+>
+> The current harness is not yet re-validated. The lock has been repinned since that run,
+> most recently to harness authority `b293d5f6` on 2026-10-14, and the Windows supervisor
+> source changed on 2026-10-13 and 2026-10-14. No protected run has happened since
+> 2026-09-26.
+>
+> The sections from "Exact inputs" through "Non-cyclic SDK handoff" are the reference for
+> the current harness. The sections before and after them are a dated historical log.
+> "Remains required" and "remains open" there describe that section's date, not today.
+
 ## Cave build home isolation checkpoint
 
 Protected run `35138402347` failed on Windows with
@@ -220,7 +239,7 @@ and ten production deltas. The checkout regression exercises all five labels
 from that immutable revision. SDK rebinding, both scope rotations and fresh
 protected validation remain required; this binding alone is not acceptance.
 
-## Cave rc.7 adoption in progress
+## Cave rc.7 adoption (landed)
 
 The current Cave pin is `ecdcdcf8a75b62bb912ec48215ae20ab0809a181`,
 tree `1634a8eb0a391419bf28af4be0020cfd8c4df472`, the reviewed
@@ -238,9 +257,10 @@ Protected Chat run `34916510997` used the preceding Cave `5ee8545`.
 Linux and macOS passed authenticated records; Windows reported
 `startup.discovery.missing.read.not-found.publication.root-owner-unverified`
 and a separate residual child-open access denial. It produced no Windows
-record. The upstream repair is not yet proof that this protected failure is
+record. The upstream repair was not yet proof that this protected failure was
 resolved. A new source-bound harness, actual Chat landing, SDK validator
-binding, both scope readbacks and fresh protected acceptance remain required.
+binding, both scope readbacks and fresh protected acceptance were required.
+Those landed: protected run 36033589858 passed on 2026-09-24 with Cave `ecdcdcf8`.
 
 The source snapshot is `a443b625e94bf059a50c3f47f16fa44171334ea1`,
 tree `6375117ef56a85e09c21941ecd257c88c92c2398`. The harness binding
@@ -349,7 +369,7 @@ producer and these actual consumer, candidate, and authority identities.
 No protected run, Windows diagnostic pair, SDK #38 acceptance, SHIP approval,
 scope rotation, or package publication is established by this prerequisite.
 
-### Cave5409 source-version binding
+### Cave5409 source-version binding (historical)
 
 At pinned Cave `5ee8545`, `package.json` declares `0.4.2`. The health route
 uses that version through `APP_VERSION`, and the conformance engine emits it
@@ -371,14 +391,15 @@ private. The historical schema-1 registry stays unchanged.
 
 The complete SDK `88332efc` lock and registry fixtures retain their original
 bytes and demonstrate rejection of this new Cave pin. Before protected
-execution, the subsequent SDK validator must bind the actual integrated Chat
+execution, the subsequent SDK validator had to bind the actual integrated Chat
 producer, its separate harness authority, Cave `5ee8545`, the new engine and
 registry provenance, and release version `0.4.2`. The ordered 109 required Cave
 assertions (110 with coverage), 197 Darwin / 197 Linux / 196 Windows primary
 totals, and exclusions remain unchanged.
 
 The private SDK968 candidate, its archives, and production consumer
-`ef8c747f1dbae0fd2bc9fcb24d3a0914f9f1cc49` remain frozen. The harness source
+`ef8c747f1dbae0fd2bc9fcb24d3a0914f9f1cc49` were frozen at that checkpoint. The lock
+has since moved to Chat `dabcdd47`, SDK `cd10a3fa` and Cave `ecdcdcf8`. The harness source
 branches from `9c4aa1f2` before Chat #277, so the newer UI's native changes do
 not enter the frozen production deltas. A true merge preserves both histories.
 This source preparation is not SDK #38 acceptance, a validator-scope rotation,
@@ -625,8 +646,8 @@ must land with an actual merge commit to preserve their ancestry.
 
 Native candidate validation does not establish protected acceptance. Full
 packaged CI, an updated SDK validator binding, both protected scopes and fresh
-platform/aggregate validation remain required. Issue #188 remains open until
-those gates and advisory reconciliation are complete.
+platform/aggregate validation remained required. Issue #188 stayed open until
+those gates and advisory reconciliation were complete. It closed on 2026-09-24.
 
 ## Fresh protected status-staging result
 
@@ -710,8 +731,8 @@ diagnostic-only change.
   `48e9387d2f3727e944a82376652fdc0c1dd02732`, the replacement SDK 0.0.1
   consumer retaining the prior reviewed native production source;
 - SDK package candidate `cd10a3fa1d9900e0dbcb04bbb2477140854fba1d`;
-- Cave authority `5ee8545f5c2fe4c6121dfdfe842395a354bb3d7d`, tree
-  `23cd75ef310e1f293a40e3eee183ea8df6180544`, release `0.4.2`;
+- Cave authority `ecdcdcf8a75b62bb912ec48215ae20ab0809a181`, tree
+  `1634a8eb0a391419bf28af4be0020cfd8c4df472` (Cave #5410), release `0.4.2`;
 - Coven daemon and observation-test source `8c3735f374d6bc95e5b6fd107f7e7308fa26a2f8`;
 - Chat native client remains at `721437b84026c042e431b0882dcd14fdb29ac07d`
   in its frozen Cargo manifest and lock;
@@ -727,8 +748,9 @@ SDK PR #189 froze the preceding candidate and Chat source contract.
 The protected validator used by historical run 34647484742 is SDK #206 merge
 `c774ba4ba473dae99ea8fe712989ae33ef5d5184`, which binds Chat producer
 `e7dfc135bb7341d4cfc5b7f0fcf4004843868809` and the preceding Coven source.
-The current SDK/Cave adoption requires a new SDK source/producer binding after
-reviewed Chat landing and before another protected dispatch. The frozen
+The SDK validator was later rebound to the current adoption, and protected run
+36222464391 passed on 2026-09-26 with the Chat, SDK, Cave and Coven pins listed
+above. The frozen
 Chat source preserves all ten native file differences required by
 `harnessAuthority.productionDeltas`. Pinning the
 producer-derived `8a63ff1` source would remove those differences and fail the
@@ -1204,11 +1226,14 @@ The compiler and linker are pinned respectively to that toolset's
 `bin\Hostx64\x64\cl.exe` and `bin\Hostx64\x64\link.exe`. Windows SDK
 `10.0.26100.0` provides `rc.exe` at
 `C:\Program Files (x86)\Windows Kits\10\bin\10.0.26100.0\x64\rc.exe`.
-These values come from the authoritative `actions/runner-images` inventory for
-release tags `win25-vs2026/20260824.214` at commit
+These values were first taken from the authoritative `actions/runner-images`
+inventory for release tags `win25-vs2026/20260824.214` at commit
 `8c3c8c0bf0068534d87e970a58b590522f1dc1a5` and
 `win25-vs2026/20260907.229` at commit
-`c240f76fa0dd523af7376dbe8480964a3cb0af47`.
+`c240f76fa0dd523af7376dbe8480964a3cb0af47`. The workflow no longer accepts the
+`20260824.214` image. The `20260922.246.2` profile was measured on the hosted
+runners when it was added on 2026-09-24 (`26210afb`). Its inventory tag is
+`win25-vs2026/20260922.246` at commit `cef906d758539699fc023763c824417fa380c21c`.
 The workflow also requires valid Microsoft Authenticode signatures for the
 trusted PowerShell, kernel, command processor, Visual Studio executable,
 compiler, linker, and resource compiler, plus non-reparse runner temporary and
@@ -1325,7 +1350,7 @@ cleanup, and any account/profile/root cleanup failure fails the workflow.
 
 The supervisor continuously measures reviewed roots and terminates the entire
 Job if any limit is exceeded. The bounds are 128 MiB for direct archives,
-384 MiB for extracted PortableGit, 192 MiB for Node, 96 MiB for pnpm, 1 GiB
+400 MiB for extracted PortableGit, 192 MiB for Node, 96 MiB for pnpm, 1 GiB
 for rustup toolchains, 2 GiB/1 GiB for each Cargo registry/git cache, 3 GiB
 for each pnpm store, 256 MiB for the bootstrap npm cache, 512 MiB for the
 protected checkout's Git objects, 768 MiB for each SDK/Chat/Coven/
@@ -1576,7 +1601,8 @@ That environment must have:
 
 - required reviewer user ID `68980965`;
 - wait timer `0`;
-- `prevent_self_review` enabled;
+- `prevent_self_review` enabled (the live environment has it disabled; see
+  "Protected workflow graph");
 - administrator bypass disabled;
 - deployment branch rules restricted to protected branches only; and
 - nonsecret environment variable
@@ -1596,14 +1622,18 @@ environment. It requires the reviewed deployment protection and the nonsecret
 `CLIENT_V1_CONFORMANCE_VALIDATOR_REVISION` variable set to the exact reviewed
 lowercase 40-hex SDK validator commit.
 
-Repository `main` currently has no external branch-protection rule, so the
-environment's `protected_branches` deployment policy alone does not constrain
-workflow origin. That external policy gap no longer weakens the workflow's
-origin guarantee because the exact `refs/heads/main` job conditions fail closed
-independently. Branch protection must still be enabled and maintained so the
-environment policy provides its required second control.
+Repository `main` has branch protection: 8 required status checks (including
+`Windows supervisor behavior`), required signed commits, and `enforce_admins`.
+Pull requests are required, with 0 required approving reviews. With that
+protection in place, the environment's `protected_branches` deployment policy is
+the second origin control. The exact `refs/heads/main` job conditions fail closed
+independently of it. Keep branch protection enabled so the environment policy
+keeps providing that second control.
 
-Self-review is prevented and administrators cannot bypass the protection. The
+Administrators cannot bypass the protection. Self-review is not prevented: as of
+2026-10-18 the live environment returns `prevent_self_review: false`, so the one
+required reviewer can approve a run they dispatched. This is an open gap. The
+maintainer should either enable the setting or change the requirement above. The
 exact SDK workflow contract requires no application credential secret because
 all counterpart repositories are public. The manual dispatch requires one
 input, `validator_revision`, containing the same full lowercase 40-character
@@ -2158,7 +2188,12 @@ complete executable `.mjs` snapshot, evidence schema, assertion registry, and
 frozen lock. Any mismatch fails with a fixed diagnostic before substituted
 bytes are parsed or executed.
 
-The workflow embeds `windows-job-supervisor.cs` byte-for-byte. Before any local
+The workflow does not carry `scripts/windows-job-supervisor.cs` verbatim. It
+carries a gzip-compressed, base64-encoded block rendered by
+`scripts/windows-supervisor-source.mjs` (see
+[Bounded Windows supervisor source](windows-supervisor-source.md)). Before the C#
+is compiled, the block checks the compressed size and SHA-256, then the decoded
+size and SHA-256. Before any local
 harness module executes, Windows verifies the complete 16-module static and
 runtime `.mjs` graph with trusted inline PowerShell, including
 `phase1-process-supervisor.mjs` and `contract-canary.mjs`. Unix verifies the
@@ -2328,8 +2363,9 @@ accepts error 5 followed by signaled confirmation and successful reap; that
 behavior remains unchanged. All other failure kinds and native errors remain
 failures, including later reap failures after confirmation. SID validation,
 handle cleanup, final zero-process verification, and existing waits and limits
-are unchanged. The original #246 historical cause remains unproven, and this
-change does not close or silently supersede its unconditional failure criterion.
+are unchanged. The original #246 historical cause remained unproven, and this
+change did not close or silently supersede its unconditional failure criterion.
+#246 closed on 2026-09-21.
 
 The same run `34580621067` reported `Trusted Windows identity cleanup failed`
 wrapping `Ephemeral Windows identity cleanup failed.` with no visible cause.
@@ -2385,9 +2421,10 @@ across identity disposal; surviving monitors retain their state until the task
 finishes. See [the native regression contract](windows-quota-reproduction.md).
 
 The earlier owner-directory reproduction landed in #220 with full native CI.
-This accounting implementation requires its own native Windows run, reviewed
-SDK rebinding and fresh protected validation. The denied protected descendant
-and separate cleanup `win32-3` remain open under #219.
+This accounting implementation required its own native Windows run, reviewed
+SDK rebinding and fresh protected validation. #219 tracked the denied protected
+descendant and the separate `win32-3` cleanup failure until it closed on
+2026-09-24, the day protected run 36033589858 passed on all three platforms.
 
 ## Windows cleanup delete diagnostics
 
@@ -3018,12 +3055,13 @@ with its existing Rust-success, docs-only, main-push and `ci:full` gates. This
 lets a superseded pull-request run stop instead of retaining a Windows runner
 through `always()`. Main concurrency still completes each merge, and independent
 conformance scan, keychain cleanup and artifact-retention steps keep their
-existing conditions. The job name, 20-minute limit, and supervisor containment
-are unchanged.
+existing conditions. The job name and supervisor containment are unchanged. The
+job's limit was 20 minutes at this change; it rose to 30 minutes on 2026-09-18
+(`a3dc4d91`, `timeout-minutes: 30` in `.github/workflows/ci.yml`).
 
 A cancelled run is not cleanup or conformance acceptance evidence. Its replacement
-must pass all required checks. Issue #306 tracks this change and the remaining
-hosted supersession/replacement validation. The motivating old-head run
+must pass all required checks. Issue #306 tracked this change and the remaining
+hosted supersession/replacement validation; it closed on 2026-09-16. The motivating old-head run
 `35117564510` was cancelled while its Windows job continued to completion; the
 replacement run `35118809575` subsequently passed all eleven jobs. That history
 does not validate the new cancellation guard.

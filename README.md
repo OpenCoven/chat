@@ -59,9 +59,10 @@ Use **Add context** in the composer to clarify which familiar or project you
 mean. Search by name, identity, or full path (`@` filters familiars; `#` filters
 workspaces). Suggestions come from known familiars and the selected familiar's
 declared read/write project access,
-with full identities and paths to distinguish similar names. The inspector's
-Access tab lists that same declared access, write grants first, and says
-plainly that Chat neither enforces nor extends it. When none is declared
+with full identities and paths to distinguish similar names. **Settings ›
+Access** lists that same declared access, write grants first, and says
+plainly that Chat neither enforces nor extends it. The **Access** row in the
+inspector's Overview opens it. When none is declared
 it says so, and when Chat could not read the registry or grants it says
 that instead, so an unreadable store is never shown as an empty one. Selection inserts
 visible reference text at your cursor; it does not switch the recipient,
@@ -115,8 +116,8 @@ become drawers that open one at a time.
 
 Unsent drafts are kept per familiar in memory only. They survive switching
 familiars but not closing the window: conversation content never reaches
-browser storage (see `SECURITY.md`), and only the selected familiar is
-remembered across restarts.
+browser storage (see `SECURITY.md`), and only the selected familiar and your
+**Settings** choices are remembered across restarts.
 
 With a connected CLI but no familiars configured, the empty thread and the
 composer say so, rather than asking you to select from an empty list, and
@@ -127,6 +128,19 @@ the empty thread also shows the one command that installs it
 (`npm install -g @opencoven/cli` or `coven engine install`) with a **Copy**
 control. Chat never runs it for you; run it in a terminal, then choose
 **Check again**.
+
+## Settings
+
+Open **Settings** with the gear above the familiar list or in the thread header,
+or press **Cmd/Ctrl+,**. It has six sections:
+
+- **General:** text size, and **Group tool calls**.
+- **Chats:** **Show archived chats**.
+- **Access:** the projects Coven declares for the selected familiar.
+- **Devices:** the **iPhone companion**.
+- **Shortcuts:** every keyboard shortcut.
+- **About:** the app version, whether Chat reached the Coven CLI, and what the
+  window stores.
 
 ## First-run setup
 
@@ -240,11 +254,15 @@ thread header; focus returns there after the delete dialog closes).
 **Archive chat** keeps the saved history and hides the
 familiar from the active list; an archived chat shows **Restore chat** in the
 header itself, since restoring is what lets you send again.
-The familiar list shows active chats; **Show archived chats**, in **Sidebar options** (⋯) at the top of the list, switches it to archived ones. Archived
+The familiar list shows active chats. Turn on **Show archived chats** in
+**Settings › Chats** to list archived ones instead. Archived
 history is preserved, and archive state survives refreshes and app restarts.
 
 **Delete chat** requires confirmation and is strictly app-local: it removes the
-saved Chat transcript and that chat's local draft. It does
+chat's newest saved transcript and that chat's local draft. Chat saves one
+transcript file per message you send, and the files from the chat's earlier
+messages stay in Chat's app data folder, though Chat never opens or replays
+them again. Deleting does
 not delete original Coven CLI database records/files or change Cave history.
 A permanent tombstone prevents rediscovery or restoration of the deleted
 thread; deleted ancestors are not replayed through a remaining chat's captured
@@ -268,8 +286,8 @@ before you send, naming the exact byte count, since Coven would refuse it. The c
 text/code files, each at most 64 KiB.
 Selected bytes are validated and passed to Coven as actual file contents, not
 just filenames. You can send files with or without an accompanying message.
-The installed `coven-code` 0.7.0 engine does not support genuine image/PDF input
-through this transport, so binary files are explicitly rejected.
+The `coven-code` engine doesn't accept image or PDF input through this
+transport, so Chat rejects binary files.
 
 Unsent attachments stay in the current window. Failed or cancelled sends keep
 them available for retry or removal; successful sends retain filename/size
@@ -306,7 +324,10 @@ also shows the input (cut at 16 KiB with a note saying so) and, once
 reported, the result (a collapsed row says how many lines it holds), and the run status
 names the tool that is executing while its row is marked as running. A run of
 more than ten consecutive calls folds to its newest six, behind a control that
-says how many earlier calls it hides and how many of those failed. The bundled engine's Claude CLI provider
+says how many earlier calls it hides and how many of those failed. By default,
+two or more calls in a row also fold into one summary line, such as "Ran 4
+commands and read 2 files". Click it to see each call, or turn off **Group tool
+calls** in **Settings › General**. The bundled engine's Claude CLI provider
 reports calls as text only, so those rows carry the one-line summary alone.
 
 ## Remote screen (VNC)
@@ -355,11 +376,10 @@ overview card in the inspector without leaving the conversation.
 
 ## Existing local data
 
-The previous app's IndexedDB database, `opencoven-chat`, is not deleted or
-converted into Coven sessions. Local notes and retained side-note receipts
-remain separate from CLI-owned history. They are not submitted to a model
-automatically. The production application identifier remains
-`ai.opencoven.chat`; no demo identity replaces it.
+Earlier development builds kept chats and notes in an IndexedDB database
+named `opencoven-chat`. This app doesn't read, convert, or delete that
+database, and never sends its contents to a model. The production application
+identifier remains `ai.opencoven.chat`; no demo identity replaces it.
 
 ## Developer setup
 
@@ -398,10 +418,18 @@ production preview on `4174`.
 Runtime operations cross typed, narrowly scoped Tauri commands. There is no
 generic shell, filesystem, or HTTP command exposed to the webview, and no
 Tauri shell, filesystem, opener, or network plugin permission is granted.
-The main window is allowed to invoke only the seven `coven_runtime_*`
-commands the chat interface uses, the three `coven_screen_*` commands of the
-screen relay, and Tauri's permission to set its own window title; the Cave
-adapter and app-identity commands remain registered for native and
+The main window's capability, `src-tauri/capabilities/default.json`, lets it
+invoke only:
+
+- the seven `coven_runtime_*` commands the chat interface uses,
+- the four `setup_*` commands of first-run setup,
+- the five `companion_*` commands of the opt-in iPhone companion,
+- the three `coven_screen_*` commands of the screen relay,
+- Tauri's event listen and unlisten, so the window can follow runs started
+  from the iPhone,
+- Tauri's permission to set its own window title.
+
+The Cave adapter and app-identity commands remain registered for native and
 conformance coverage but are not reachable from the webview.
 
 The reviewed Cave adapter remains in the repository for its independent
@@ -419,7 +447,8 @@ immutable native gate and real-authority three-platform matrix.
 `contract-canary.lock.json` pins reviewed SDK and Cave commits, packed
 tarball digests, and the Client v1 authority fixture.
 `phase1-conformance.lock.json` independently pins the real-authority release
-candidate. Neither lock is changed by the UI migration.
+candidate. Neither lock pins the chat interface in `src/coven/`, so changes
+there need no repin.
 
 ```bash
 pnpm test:contract-canary -- --sdk-root <sdk-root> --cave-root <cave-root>
@@ -433,8 +462,12 @@ successful protected conformance run.
 
 ## Delivery and releases
 
-See the [delivery roadmap](docs/roadmap.md) for PR dependencies and
-consolidation history. CI runs frontend, browser, Rust, packed-artifact,
+For open work, see [GitHub issues](https://github.com/OpenCoven/chat/issues).
+For shipped changes, see [`docs/release-notes/`](docs/release-notes/).
+[`docs/roadmap.md`](docs/roadmap.md) is a dated log of September 2026
+conformance and consolidation checkpoints, not a current plan.
+
+CI runs frontend, browser, Rust, packed-artifact,
 and native lifecycle coverage. The heavy Phase 1 Vitest suites test the
 conformance scripts rather than the app, so a pull request runs them only
 when it changes something outside the chat UI, the browser suite, or prose;
@@ -447,8 +480,8 @@ checksums, rehearsals, and recovery.
 
 ## iPhone companion
 
-Open **Sidebar options** (⋯) above the familiar list, then **iPhone companion**
-to enable local pairing. The native iPhone app reads your Chat conversations,
+Open **Settings › Devices**, choose **iPhone companion**, then **Turn on
+companion** to enable local pairing. The native iPhone app reads your Chat conversations,
 sends text, streams replies and stops runs through the same Coven runtime on
 your Mac. Keep both devices on the same local network with the Mac awake.
 See [pairing, builds and verification](docs/iphone-companion.md).

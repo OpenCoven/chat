@@ -28,11 +28,18 @@ a sibling checkout — confirm before assuming, and do not assume the reverse
 ```
 src/coven/          The live chat UI. chat-app.tsx (state) + chat-layout.tsx (render).
 src/design/         familiars-ui + familiars-shell.css — the .fr-* design system.
+src/onboarding/     First-run setup, shown until Coven is ready (see below).
 src/ui/             Composer, attachment chips (vendored OpenCoven/ui).
-src/lib/            coven-runtime.ts is the only bridge the UI uses. lib/sdk/ is the
-                    Cave SDK boundary: unmounted, but run by the protected
-                    conformance producer by file name — do not delete or rename.
-src-tauri/src/      Rust backend. Every user-facing error string starts here.
+src/vendor/         Vendored noVNC for the remote screen viewer.
+src/lib/            coven-runtime.ts is the chat's bridge to the CLI. setup.ts,
+                    companion.ts, companion-runs.ts and screen-relay.ts wrap the
+                    other host commands. lib/sdk/ is the Cave SDK boundary:
+                    unmounted, but run by the protected conformance producer by
+                    file name. Do not delete or rename it.
+src-tauri/src/      Rust backend. Most user-facing error strings start here; some
+                    start in TypeScript, such as src/coven/attachments.ts.
+src-tauri/src/companion/   Opt-in, LAN-only listener for the iPhone companion.
+apps/ios/ChatCompanion/    The native iPhone companion app. See docs/iphone-companion.md.
 docs/               Conformance, release, platform notes.
 ```
 
@@ -74,16 +81,18 @@ sessions, or attachments must be verified in `app:dev`.
   window. A message the reader cannot act on is a bug — say what changed and
   name the control that fixes it.
 - **Empty states must agree with the heading.** Copy is chosen by
-  `emptyThreadText(ready, familiarName)` in `chat-layout.tsx`, and the empty
-  state does not render while `busy` — it used to stack "Select a familiar"
-  under "Chat with Astra" on top of a live run indicator.
+  `emptyThreadText(connected, familiarName, anyFamiliars)` in `chat-layout.tsx`,
+  and the empty state does not render while this familiar has a run (`runHere`).
+  It used to stack "Select a familiar" under "Chat with Astra" on top of a live
+  run indicator.
 - **Rust error strings are asserted in tests** (`coven_runtime.rs` tests match
   on substrings). Change the message and the assertion together.
 - **No simulation.** The UI shows real runtime results; unavailable
   capabilities are disclosed, never faked with sample data or timed replies.
 - **Conversation content never touches browser storage** (see `SECURITY.md`).
   Drafts are per-familiar and in-memory only.
-- **Worktrees:** `git worktree add -b <type>/<name> .worktrees/<short-name>`.
+- **Worktrees:** `git fetch origin`, then
+  `git worktree add -b <type>/<name> .worktrees/<short-name> origin/main`.
   Several are live and some are `locked` — run `git worktree list` before any
   branch surgery, and see the global concurrent-sessions rule.
 - **Commits must be signed** (`git commit -S`). See `~/.claude/CLAUDE.md`.

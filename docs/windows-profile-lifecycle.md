@@ -1,5 +1,12 @@
 # Windows profile lifecycle prerequisite
 
+> **Historical (2026-09-12):** This page records the profile lifecycle investigation as of
+> 2026-09-12. The fixture now runs at the end of `scripts/windows-job-supervisor.test.ps1`,
+> which the required `Windows supervisor behavior` check on `main` runs. The protected
+> lane first passed on Windows in run 36033589858 on 2026-09-24. Where the text below says
+> native CI "must prove" or "must validate" something, it describes 2026-09-12. Beads,
+> which held `cave-k0aqq.3`, was retired on 2026-09-14.
+
 The native discovery reader uses the current token profile, while the scenario
 fixture currently publishes under the artifact root. The root-alignment repair
 must resolve actual profile identity, account for new application state under

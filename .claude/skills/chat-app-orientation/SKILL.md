@@ -6,8 +6,9 @@ description: Orientation for agents working in the OpenCoven `chat` desktop app.
 # Chat App Orientation
 
 You are in `OpenCoven/chat`, the **desktop Coven Chat app** (Tauri: TS/React front end +
-Rust bridge) that talks to the **live `coven-code` engine** (v0.8.0; not retired — see
-`AGENTS.md`). Use this skill to orient instead of rediscovering the app by grep.
+Rust bridge). It drives the Coven CLI, whose harnesses include the **live `coven-code`
+engine** (v0.8.0, not retired; see `AGENTS.md`). Use this skill to orient instead of
+rediscovering the app by grep.
 
 ## First moves (in order)
 
@@ -20,21 +21,24 @@ Rust bridge) that talks to the **live `coven-code` engine** (v0.8.0; not retired
 
 - `src/ui/composer.tsx` — composer/input. Accepts an `attachments` prop + an attach hook,
   with the file picker and thread dropzone wired in `src/coven/chat-layout.tsx`.
-- `src/ui/attachment-chip.tsx` — chip UI for a selected attachment (render layer ready).
+- `src/coven/attachment-card.tsx`: the attachment card in the composer and transcript. The
+  vendored `src/ui/attachment-chip.tsx` is only the composer's fallback.
 - `src/coven/attachments.ts` — attachment read/model helper.
 - `src/coven/formatted-message.tsx` — assistant message rendering (markdown → DOM); the
   place to tune how responses read.
 - `src/coven/chat-app.tsx`, `src/coven/chat-layout.tsx` — app shell / composition.
-- `src/lib/coven-runtime.ts` — TS→engine send path (check whether attachment *bytes* are
-  carried to the engine before promising attachment support; that one fact decides whether
-  attachments is an afternoon or a week).
+- `src/lib/coven-runtime.ts`: the TS send path to the CLI. Attachments have shipped: the
+  host stages text files (`src-tauri/src/chat_attachments.rs`) and sends them with
+  `--stream-json-input`, for Coven Code familiars only.
 - `src/coven/events.ts` — event/message types.
 - `src/coven/chat-app.css`, `src/design/familiars-shell.css` — typography + layout CSS;
   readability (font-size, line-height, readable column width) is tuned here.
 
 ## The one habit that keeps you alive on this transport
 
-The engine cold-starts each message and replays a **truncated** view of recent turns. So:
+With the `coven-code` harness, each message starts a fresh engine process. The engine
+can't reopen a Chat thread, so Chat replays a **truncated** view of recent turns from its
+own transcript (`REPLAY_LIMIT` in `src-tauri/src/coven_runtime.rs`). So:
 
 - **Work in short turns.** Don't fan out ten tool calls before answering — long tool-heavy
   turns drop mid-flight on this transport.
@@ -45,7 +49,7 @@ The engine cold-starts each message and replays a **truncated** view of recent t
 
 ## What NOT to do here
 
-- Don't change the engine from this repo. Engine (`coven-code` / `claurst-*`) lives at the
-  sibling checkout `/Users/buns/Documents/GitHub/OpenCoven/coven-code`.
+- Don't change the engine from this repo. The engine (`coven-code` / `claurst-*`) lives in
+  the `OpenCoven/coven-code` repo, usually a sibling checkout at `../coven-code`.
 - Don't edit without a verified write root (see `AGENTS.md` → Write-root guardrail).
 - Don't commit unsigned — always `git commit -S`.
