@@ -3,7 +3,7 @@ export const IDENTIFIER: 'ai.opencoven.chat';
 
 export function assetName(name: string): string;
 export function expectedInstallers(version: string, product?: string): string[];
-export function expectedUpdaterArchives(version: string, product?: string): Map<string, string>;
+export function expectedUpdaterArtifacts(version: string, product?: string): Map<string, string[]>;
 export function parseChecksums(text: string): { entries: Map<string, string>; problems: string[] };
 
 export type ReleaseSmokeReport = {
@@ -12,7 +12,7 @@ export type ReleaseSmokeReport = {
   version: string;
   installers: string[];
   updater:
-    | { state: 'enabled'; archives: string[]; manifest: boolean }
+    | { state: 'enabled'; artifacts: string[]; manifest: boolean; platforms: string[] }
     | { state: 'disabled'; reason: string };
   signing: {
     state: 'unsigned' | 'required';
@@ -28,4 +28,5 @@ export function smokeTestRelease(options: {
   tag?: string;
   allowUnsigned?: boolean;
   windowsSigning?: 'signed' | 'unsigned';
+  updater?: 'on' | 'off';
 }): ReleaseSmokeReport;

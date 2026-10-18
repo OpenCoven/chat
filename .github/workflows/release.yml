@@ -166,10 +166,10 @@ jobs:
       # -- so the cost of a missing secret is seconds, not ninety minutes a
       # runner and a burnt version number.
       #
-      # TAURI_SIGNING_PRIVATE_KEY is deliberately absent from this list. Auto-
-      # update is opt-in and currently disabled (docs/releasing.md § 4), so its
-      # absence is the expected state rather than an omission, and the build job
-      # still reports it as a notice.
+      # TAURI_SIGNING_PRIVATE_KEY is not in this list because it is required
+      # only for a tree that configures the updater, which this step cannot
+      # see yet: the tag is not checked out. `Require updater signing` below
+      # reads the verified commit's config and refuses there instead.
       #
       # WINDOWS_CERTIFICATE and its password are absent too, by decision rather
       # than omission: Windows ships unsigned (decided 2026-10-14; #411 tracks
@@ -351,6 +351,48 @@ jobs:
             echo "prerelease=${PRERELEASE}"
           } >> "$GITHUB_OUTPUT"
 
+      # A tree that configures the updater (`plugins.updater`, decided on #356
+      # on 2026-10-18) publishes signed updater artifacts and moves the
+      # auto-update feed, so its release needs the updater signing key and its
+      # password: a release without them would strand every installed copy on
+      # the old version. The config is read from the verified commit, so a
+      # dispatch from main against an older tag (v0.0.5 and before, which have
+      # no updater) behaves exactly as it always did.
+      - name: Require updater signing when the tree configures the updater
+        env:
+          EXPECTED_SHA: ${{ steps.resolve.outputs.sha }}
+          ALLOW_UNSIGNED: ${{ inputs.allow_unsigned }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          configured=$(git show "${EXPECTED_SHA}:src-tauri/tauri.conf.json" | node -e '
+            let text = "";
+            process.stdin.on("data", (chunk) => (text += chunk));
+            process.stdin.on("end", () => {
+              process.stdout.write(JSON.parse(text).plugins?.updater ? "true" : "false");
+            });')
+          if [ "${configured}" != "true" ]; then
+            echo "This tree configures no updater (no plugins.updater); the release carries no updater artifacts."
+            exit 0
+          fi
+          missing=()
+          for name in TAURI_SIGNING_PRIVATE_KEY TAURI_SIGNING_PRIVATE_KEY_PASSWORD; do
+            if [ -z "${!name:-}" ]; then
+              missing+=("${name}")
+            fi
+          done
+          if [ "${#missing[@]}" -eq 0 ]; then
+            echo "The tree configures the updater and its signing key is present."
+            exit 0
+          fi
+          if [ "${ALLOW_UNSIGNED:-}" = "true" ]; then
+            echo "::warning::allow_unsigned was requested. Missing: ${missing[*]}. This rehearsal builds no updater artifacts."
+            exit 0
+          fi
+          echo "::error::This tree configures the updater, but release-signing is missing ${missing[*]}. Add them (docs/releasing.md § 4), or dispatch a rehearsal with allow_unsigned=true and dry_run=true."
+          exit 1
+
       # The pull-request run tested a temporary merge commit. Re-run the
       # release-relevant checks against the exact, API-verified tagged tree.
       - run: corepack pnpm install --frozen-lockfile
@@ -380,6 +422,10 @@ jobs:
       # writes the same value here. The publish job reads it to describe the
       # Windows installers' signing state in the smoke report and the notes.
       windows_signed: ${{ steps.signing.outputs.windows_signed }}
+      # `on` when the tagged tree configures the updater and its signing key
+      # is present, so this run's installers carry updater signatures; the
+      # publish job writes latest.json and moves the feed only then.
+      updater: ${{ steps.signing.outputs.updater }}
     env:
       # Installers are staged here, NOT in `dist/`. `dist/` is Vite's build
       # output (tauri.conf.json: beforeBuildCommand `pnpm build`, frontendDist
@@ -396,10 +442,10 @@ jobs:
       matrix:
         include:
           # `bundles` lists installer targets only. Tauri v2 has no `updater`
-          # bundle target: the updater archives (.app.tar.gz / .nsis.zip /
-          # .AppImage.tar.gz) and their .sig files are generated automatically
-          # alongside these installers when bundle.createUpdaterArtifacts is
-          # enabled in tauri.conf.json and TAURI_SIGNING_PRIVATE_KEY is set.
+          # bundle target. With createUpdaterArtifacts turned on by the
+          # release-only overlay (`Configure updater artifacts`), Tauri signs
+          # the .msi, -setup.exe, .AppImage and .deb themselves and archives
+          # only the macOS app (.app.tar.gz), each with a .sig beside it.
           - platform: macos-aarch64
             runner: macos-14
             target: aarch64-apple-darwin
@@ -501,12 +547,13 @@ jobs:
           ES_CREDENTIAL_ID: ${{ secrets.ES_CREDENTIAL_ID }}
           ES_TOTP_SECRET: ${{ secrets.ES_TOTP_SECRET }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: |
           set -euo pipefail
           macos_signed=false
           windows_signed=false
           windows_route=none
-          updater_signed=false
+          updater=off
           # "Signed" must mean every credential the signing path consumes, not
           # just the certificate. The verify-tag gate demands all eight on the
           # production path, but allow_unsigned bypasses that gate -- and a
@@ -549,11 +596,25 @@ jobs:
             windows_route=esigner
           fi
           [ "${windows_route}" != "none" ] && windows_signed=true
-          [ -n "${TAURI_SIGNING_PRIVATE_KEY:-}" ] && updater_signed=true
+          # The updater is on when the tagged tree configures it
+          # (plugins.updater) and both updater secrets are present. A tree that
+          # configures it without them is refused on the production path, as
+          # verify-tag does, because re-runs skip that gate.
+          updater_configured=$(node -p "Boolean(require('./src-tauri/tauri.conf.json').plugins?.updater)")
+          if [ "${updater_configured}" = "true" ]; then
+            if [ -n "${TAURI_SIGNING_PRIVATE_KEY:-}" ] && [ -n "${TAURI_SIGNING_PRIVATE_KEY_PASSWORD:-}" ]; then
+              updater=on
+            elif [ "${ALLOW_UNSIGNED:-false}" != "true" ]; then
+              echo "::error::This tree configures the updater, but TAURI_SIGNING_PRIVATE_KEY or TAURI_SIGNING_PRIVATE_KEY_PASSWORD is empty in release-signing; refusing to build a release that cannot update anyone."
+              exit 1
+            else
+              echo "::warning::The updater signing key is absent; this allow_unsigned rehearsal builds no updater artifacts."
+            fi
+          fi
           echo "macos_signed=${macos_signed}"     >> "$GITHUB_OUTPUT"
           echo "windows_signed=${windows_signed}" >> "$GITHUB_OUTPUT"
           echo "windows_route=${windows_route}"   >> "$GITHUB_OUTPUT"
-          echo "updater_signed=${updater_signed}" >> "$GITHUB_OUTPUT"
+          echo "updater=${updater}"               >> "$GITHUB_OUTPUT"
           if [ "${{ runner.os }}" = "macOS" ] && [ "${macos_signed}" = "false" ]; then
             if [ "${ALLOW_UNSIGNED:-false}" != "true" ]; then
               echo "::error::Apple signing material is absent or incomplete on the production path; refusing to build unsigned. Check every APPLE_* secret in release-signing for an empty value, then re-run."
@@ -578,8 +639,8 @@ jobs:
             fi
             echo "::warning::Neither the eSigner secrets nor WINDOWS_CERTIFICATE are configured; the Windows installers in this release are UNSIGNED and Windows SmartScreen will warn before they run. #411 tracks a signing route."
           fi
-          if [ "${updater_signed}" = "false" ]; then
-            echo "::notice::TAURI_SIGNING_PRIVATE_KEY is not set; updater artifacts and latest.json are not produced. Auto-update is opt-in and currently disabled (no plugins.updater / createUpdaterArtifacts:false). See docs/releasing.md."
+          if [ "${updater_configured}" != "true" ]; then
+            echo "::notice::This tree configures no updater (no plugins.updater); no updater artifacts or latest.json are produced. See docs/releasing.md § 4."
           fi
 
       # Import Windows signing material before bundling so Tauri signs the
@@ -701,9 +762,22 @@ jobs:
           EOF
           echo "TAURI_CONFIG_OVERLAY=src-tauri/release-signing.conf.json" >> "$GITHUB_ENV"
 
-      # Apple signing variables are consumed directly by Tauri. Updater
-      # artifacts appear only when the updater plugin and private key are both
-      # configured; their absence is expected while auto-update is disabled.
+      # The base config keeps createUpdaterArtifacts false, because Tauri then
+      # requires TAURI_SIGNING_PRIVATE_KEY for every build (CI's desktop build
+      # and local `app:build` have none). A release with the updater on turns
+      # it on here, in an overlay merged after the base and any signing
+      # overlay (tauri-cli merges repeated --config values in order).
+      - name: Configure updater artifacts
+        if: steps.signing.outputs.updater == 'on'
+        shell: bash
+        run: |
+          set -euo pipefail
+          printf '%s\n' '{ "bundle": { "createUpdaterArtifacts": true } }' > src-tauri/release-updater.conf.json
+          echo "TAURI_UPDATER_OVERLAY=src-tauri/release-updater.conf.json" >> "$GITHUB_ENV"
+
+      # Apple signing variables are consumed directly by Tauri, and so are the
+      # updater signing key and password: with the updater overlay applied,
+      # Tauri signs each updater artifact as it bundles.
       - name: Build installers
         shell: bash
         env:
@@ -761,9 +835,11 @@ jobs:
             --bundles "${{ matrix.bundles }}"
             --verbose
           )
-          if [ -n "${TAURI_CONFIG_OVERLAY:-}" ]; then
-            args+=(--config "${TAURI_CONFIG_OVERLAY}")
-          fi
+          for overlay in "${TAURI_CONFIG_OVERLAY:-}" "${TAURI_UPDATER_OVERLAY:-}"; do
+            if [ -n "${overlay}" ]; then
+              args+=(--config "${overlay}")
+            fi
+          done
           corepack pnpm exec tauri build "${args[@]}"
 
       # Tauri notarizes and staples the .app, then builds the .dmg around it
@@ -847,6 +923,11 @@ jobs:
         shell: bash
         run: rm -rf src-tauri/release-signing.conf.json "${RUNNER_TEMP}/CodeSignTool" "${RUNNER_TEMP}/esigner-sign.ps1"
 
+      - name: Remove updater overlay
+        if: always()
+        shell: bash
+        run: rm -f src-tauri/release-updater.conf.json
+
       # Collect the produced installers into a flat, predictably named staging
       # directory and fail loudly if a platform produced nothing.
       - name: Stage artifacts
@@ -865,15 +946,13 @@ jobs:
             "${bundle_root}"/macos/*.app.tar.gz \
             "${bundle_root}"/macos/*.app.tar.gz.sig \
             "${bundle_root}"/msi/*.msi \
-            "${bundle_root}"/msi/*.msi.zip \
-            "${bundle_root}"/msi/*.msi.zip.sig \
+            "${bundle_root}"/msi/*.msi.sig \
             "${bundle_root}"/nsis/*.exe \
-            "${bundle_root}"/nsis/*.nsis.zip \
-            "${bundle_root}"/nsis/*.nsis.zip.sig \
+            "${bundle_root}"/nsis/*.exe.sig \
             "${bundle_root}"/appimage/*.AppImage \
-            "${bundle_root}"/appimage/*.AppImage.tar.gz \
-            "${bundle_root}"/appimage/*.AppImage.tar.gz.sig \
-            "${bundle_root}"/deb/*.deb ; do
+            "${bundle_root}"/appimage/*.AppImage.sig \
+            "${bundle_root}"/deb/*.deb \
+            "${bundle_root}"/deb/*.deb.sig ; do
             [ -e "${f}" ] || continue
             cp -v "${f}" "${STAGE_DIR}/"
             copied=$((copied + 1))
@@ -1218,88 +1297,30 @@ jobs:
           echo "Release assets:"
           ls -la release
 
-      # Emit the Tauri updater manifest (latest.json) ONLY when signed updater
-      # artifacts actually exist. As of v0.0.2 the repo has no `plugins.updater`
-      # section and ships `bundle.createUpdaterArtifacts: false`, so `tauri
-      # build` produces no `.sig` files and this step deliberately produces no
-      # latest.json (auto-update is opt-in; see docs/releasing.md). It becomes
-      # active automatically once the updater plugin is configured and
-      # TAURI_SIGNING_PRIVATE_KEY is set. It never hard-fails on absence.
-      - name: Generate latest.json updater manifest (opt-in)
+      # Write the updater feed (latest.json) only when the build jobs reported
+      # the updater on. Every signed artifact must be present: a feed missing a
+      # platform would leave that platform's installs behind without a word.
+      # Older tagged trees configure no updater, so this never runs against
+      # them, and the script it calls exists in every tree that does.
+      - name: Generate latest.json updater manifest
         shell: bash
         env:
           REPO: ${{ github.repository }}
-          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          UPDATER: ${{ needs.build.outputs.updater }}
         run: |
           set -euo pipefail
-          cd release
           shopt -s nullglob
-          sigs=( *.sig )
-          if [ "${#sigs[@]}" -eq 0 ]; then
-            echo "::notice::No updater .sig artifacts present; skipping latest.json. Auto-update is not enabled for this release (see docs/releasing.md § Enabling auto-update)."
+          sigs=( release/*.sig )
+          if [ "${UPDATER}" != "on" ]; then
+            if [ "${#sigs[@]}" -ne 0 ]; then
+              echo "::error::Updater signatures are present, but the build jobs reported the updater off."
+              exit 1
+            fi
+            echo "::notice::The updater is off for this run; no latest.json is written (docs/releasing.md § 4)."
             exit 0
           fi
-          if [ -z "${TAURI_SIGNING_PRIVATE_KEY:-}" ]; then
-            echo "::error::Updater .sig files are present but TAURI_SIGNING_PRIVATE_KEY is unavailable in the release environment."
-            exit 1
-          fi
-          VERSION="${VERSION}" TAG="${TAG}" REPO="${REPO}" node <<'EOF'
-          const fs = require('node:fs');
-          const version = process.env.VERSION;
-          const tag = process.env.TAG;
-          const repo = process.env.REPO;
-          const base = `https://github.com/${repo}/releases/download/${tag}`;
-
-          // Map an updater artifact filename to a Tauri updater platform key.
-          function platformFor(name) {
-            if (name.endsWith('.app.tar.gz')) {
-              return name.includes('aarch64') ? 'darwin-aarch64' : 'darwin-x86_64';
-            }
-            if (name.endsWith('.msi.zip') || name.endsWith('.nsis.zip') || name.endsWith('.exe.zip')) {
-              return 'windows-x86_64';
-            }
-            if (name.endsWith('.AppImage.tar.gz')) {
-              return 'linux-x86_64';
-            }
-            return null;
-          }
-
-          const files = fs.readdirSync('.');
-          const platforms = {};
-          for (const sig of files.filter((f) => f.endsWith('.sig'))) {
-            const artifact = sig.slice(0, -'.sig'.length);
-            if (!files.includes(artifact)) continue;
-            const key = platformFor(artifact);
-            if (!key) continue;
-            const signature = fs.readFileSync(sig, 'utf8').trim();
-            if (!signature) {
-              throw new Error(`Updater signature is empty: ${sig}`);
-            }
-            if (platforms[key]) {
-              throw new Error(`Multiple updater artifacts map to ${key}`);
-            }
-            platforms[key] = {
-              signature,
-              url: `${base}/${encodeURIComponent(artifact)}`,
-            };
-          }
-
-          if (Object.keys(platforms).length === 0) {
-            // .sig files existed but none matched a known updater archive; do
-            // not write a hollow manifest.
-            console.log('::warning::Found .sig files but none matched a recognized updater archive; not writing latest.json.');
-            process.exit(0);
-          }
-
-          const manifest = {
-            version,
-            notes: `OpenCoven Chat ${version}`,
-            pub_date: new Date().toISOString(),
-            platforms,
-          };
-          fs.writeFileSync('latest.json', JSON.stringify(manifest, null, 2) + '\n');
-          console.log(fs.readFileSync('latest.json', 'utf8'));
-          EOF
+          node scripts/updater-manifest.mjs --dir release --version "${VERSION}" \
+            --tag "${TAG}" --repo "${REPO}" --out release/latest.json
 
       # Generate this after latest.json so every asset that can be published is
       # covered by the checksum manifest, then verify those exact bytes in place.
@@ -1332,11 +1353,17 @@ jobs:
         env:
           ALLOW_UNSIGNED: ${{ inputs.allow_unsigned }}
           WINDOWS_SIGNED: ${{ needs.build.outputs.windows_signed }}
+          UPDATER: ${{ needs.build.outputs.updater }}
         run: |
           set -euo pipefail
           args=(--dir release --version "${VERSION}" --tag "${TAG}")
           if [ "${ALLOW_UNSIGNED:-false}" = "true" ]; then
             args+=(--allow-unsigned)
+          fi
+          # Only a tree that configures the updater can report it on, and the
+          # smoke script in such a tree knows the flag; older trees never get it.
+          if [ "${UPDATER}" = "on" ]; then
+            args+=(--updater on)
           fi
           if [ "${WINDOWS_SIGNED}" = "true" ]; then
             args+=(--windows-signing signed)
@@ -1395,7 +1422,7 @@ jobs:
           fi
 
           if [ -f release/latest.json ]; then
-            updater_note='Auto-update clients consume `latest.json`.'
+            updater_note='Installed copies with auto-update find this version through the `updater` feed once this release is published.'
           else
             updater_note='This release has no `latest.json`; auto-update is not enabled.'
           fi
@@ -1420,6 +1447,55 @@ jobs:
           args+=(--notes "${notes}")
           gh release create "${args[@]}" release/*
           gh release edit "${TAG}" --repo "${{ github.repository }}" --draft=false
+
+      # Installed apps read one fixed URL,
+      #   https://github.com/<repo>/releases/download/updater/latest.json
+      # because every Chat release is a pre-release and GitHub's
+      # releases/latest skips those (decided on #356, 2026-10-18). That feed
+      # is the only thing that changes after a release: the per-version assets
+      # above stay immutable. It moves only after the version release is
+      # published and its own latest.json passed the smoke test, never on a
+      # dry run or an allow_unsigned rehearsal. Rollback is docs/releasing.md
+      # § 6.1: remove or supersede the feed, never point it at an older
+      # version.
+      - name: Point the auto-update feed at this release
+        if: needs.verify-tag.outputs.dry_run != 'true' && needs.build.outputs.updater == 'on'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ALLOW_UNSIGNED: ${{ inputs.allow_unsigned }}
+          REPO: ${{ github.repository }}
+          SHA: ${{ needs.verify-tag.outputs.sha }}
+        run: |
+          set -euo pipefail
+          if [ "${ALLOW_UNSIGNED:-false}" = "true" ]; then
+            echo "::error::Refusing to move the auto-update feed from an allow_unsigned run."
+            exit 1
+          fi
+          if [ ! -s release/latest.json ]; then
+            echo "::error::The updater is on but release/latest.json is missing; the feed is unchanged."
+            exit 1
+          fi
+          if ! gh release view updater --repo "${REPO}" >/dev/null 2>&1; then
+            gh release create updater --repo "${REPO}" --target "${SHA}" \
+              --title "Auto-update feed" --prerelease --latest=false \
+              --notes "Installed copies of OpenCoven Chat read latest.json from this release to find updates. The release workflow replaces it after each published release. Do not delete this release or its asset: installed apps would stop finding updates. See docs/releasing.md § 4 and § 6.1."
+          fi
+          gh release upload updater release/latest.json --repo "${REPO}" --clobber
+          # Read back what installed apps will fetch, by the URL they use. The
+          # replaced asset can take a moment to be served, so compare a few
+          # times before calling it a failure.
+          for attempt in 1 2 3 4 5 6; do
+            if curl -fsSL "https://github.com/${REPO}/releases/download/updater/latest.json" \
+                 -o served-latest.json && cmp -s served-latest.json release/latest.json; then
+              echo "The auto-update feed now offers ${VERSION}."
+              exit 0
+            fi
+            echo "The served feed does not match yet (attempt ${attempt} of 6); checking again in 10s..."
+            sleep 10
+          done
+          echo "::error::The feed served at releases/download/updater/latest.json differs from this release's latest.json."
+          exit 1
 
       - name: Summarize dry run
         if: needs.verify-tag.outputs.dry_run == 'true'

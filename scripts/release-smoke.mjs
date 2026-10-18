@@ -47,20 +47,29 @@ export function expectedInstallers(version, product = PRODUCT_NAME) {
 const WINDOWS_SIGNING_STATES = ['signed', 'unsigned'];
 
 /**
- * Updater archives mapped to their Tauri updater platform key. The macOS
- * archive carries no arch, so the build job prefixes it with its target.
+ * The files the updater downloads, mapped to the latest.json platform keys
+ * that point at them. With `bundle.createUpdaterArtifacts: true`, Tauri v2
+ * signs the Windows and Linux installers themselves (tauri-cli 2.11.4
+ * `sign_updaters`) and archives only the macOS app, which carries no arch, so
+ * the build job prefixes it with its target. tauri-plugin-updater 2.12 looks
+ * up `{os}-{arch}-{installer}` first and then `{os}-{arch}`, so every
+ * installer type has its own key and each platform also has a default: the
+ * per-user NSIS installer on Windows and the AppImage on Linux.
  */
-export function expectedUpdaterArchives(version, product = PRODUCT_NAME) {
+export function expectedUpdaterArtifacts(version, product = PRODUCT_NAME) {
   const stem = assetName(product);
   const prefix = `${stem}_${version}`;
   return new Map([
-    [`${MAC_TARGETS[0]}-${stem}.app.tar.gz`, 'darwin-aarch64'],
-    [`${MAC_TARGETS[1]}-${stem}.app.tar.gz`, 'darwin-x86_64'],
-    [`${prefix}_x64_en-US.msi.zip`, 'windows-x86_64'],
-    [`${prefix}_x64-setup.nsis.zip`, 'windows-x86_64'],
-    [`${prefix}_amd64.AppImage.tar.gz`, 'linux-x86_64'],
+    [`${MAC_TARGETS[0]}-${stem}.app.tar.gz`, ['darwin-aarch64-app', 'darwin-aarch64']],
+    [`${MAC_TARGETS[1]}-${stem}.app.tar.gz`, ['darwin-x86_64-app', 'darwin-x86_64']],
+    [`${prefix}_x64_en-US.msi`, ['windows-x86_64-msi']],
+    [`${prefix}_x64-setup.exe`, ['windows-x86_64-nsis', 'windows-x86_64']],
+    [`${prefix}_amd64.AppImage`, ['linux-x86_64-appimage', 'linux-x86_64']],
+    [`${prefix}_amd64.deb`, ['linux-x86_64-deb']],
   ]);
 }
+
+const UPDATER_STATES = ['on', 'off'];
 
 function sha256(path) {
   return createHash('sha256').update(readFileSync(path)).digest('hex');
@@ -107,10 +116,16 @@ export function smokeTestRelease({
   tag,
   allowUnsigned = false,
   windowsSigning = 'unsigned',
+  updater = 'off',
 }) {
   if (!WINDOWS_SIGNING_STATES.includes(windowsSigning)) {
     throw new Error(
       `windowsSigning must be one of ${WINDOWS_SIGNING_STATES.join(', ')}, not ${JSON.stringify(windowsSigning)}.`,
+    );
+  }
+  if (!UPDATER_STATES.includes(updater)) {
+    throw new Error(
+      `updater must be one of ${UPDATER_STATES.join(', ')}, not ${JSON.stringify(updater)}.`,
     );
   }
   const failures = [];
@@ -154,59 +169,88 @@ export function smokeTestRelease({
     else if (files.get(name) === 0) fail(`Installer is empty: ${name}.`);
   }
 
-  // Updater state follows the configuration, and the assets must agree with it.
-  const updaterConfigured = tauriConf.bundle?.createUpdaterArtifacts === true;
-  const archives = expectedUpdaterArchives(version);
-  const presentArchives = [...archives.keys()].filter((name) => files.has(name));
+  // Updater state. The tree configures the updater with `plugins.updater`;
+  // the base config keeps `createUpdaterArtifacts` false so plain builds need
+  // no key, and the release build turns it on through an overlay when the
+  // signing key is present. The build job reports which happened (`updater`).
+  const updaterConfigured = Boolean(tauriConf.plugins?.updater);
+  const artifacts = expectedUpdaterArtifacts(version);
   const signatures = [...files.keys()].filter((name) => name.endsWith('.sig'));
+  const macArchives = [...artifacts.keys()].filter(
+    (name) => name.endsWith('.app.tar.gz') && files.has(name),
+  );
   const hasManifest = files.has(UPDATER_MANIFEST);
-  if (!updaterConfigured) {
-    for (const name of [...presentArchives, ...signatures])
-      fail(`Updater asset ${name} is present but createUpdaterArtifacts is off.`);
-    if (hasManifest) fail(`${UPDATER_MANIFEST} is present but createUpdaterArtifacts is off.`);
-  } else {
-    if (presentArchives.length === 0)
-      fail('createUpdaterArtifacts is on but no updater archive was produced.');
-    // latest.json carries one entry per platform, and the manifest step
-    // refuses two archives for one platform, so neither may this check.
-    const byPlatform = new Map();
-    for (const name of presentArchives) {
-      const key = archives.get(name);
-      if (byPlatform.has(key)) {
-        fail(`Updater archives ${byPlatform.get(key)} and ${name} both map to ${key}.`);
-      }
-      byPlatform.set(key, name);
-    }
-    for (const name of presentArchives) {
-      if (!files.has(`${name}.sig`)) fail(`Updater archive ${name} has no signature.`);
+  let updaterReport;
+  if (updater === 'on' && updaterConfigured) {
+    for (const [name] of artifacts) {
+      if (!files.has(name)) fail(`Updater artifact ${name} is missing.`);
+      if (!files.has(`${name}.sig`)) fail(`Updater artifact ${name} has no signature.`);
       else if (files.get(`${name}.sig`) === 0) fail(`Updater signature ${name}.sig is empty.`);
     }
     for (const sig of signatures) {
-      if (!archives.has(sig.slice(0, -'.sig'.length)))
-        fail(`Signature ${sig} matches no updater archive.`);
+      if (!artifacts.has(sig.slice(0, -'.sig'.length)))
+        fail(`Signature ${sig} matches no updater artifact.`);
     }
+    const platforms = [...artifacts.values()].flat();
     if (!hasManifest) {
-      fail(`Updater archives are present but ${UPDATER_MANIFEST} is missing.`);
+      fail(`The updater is on but ${UPDATER_MANIFEST} is missing.`);
     } else {
       const manifest = JSON.parse(readFileSync(join(releaseDir, UPDATER_MANIFEST), 'utf8'));
       if (manifest.version !== version)
         fail(
           `${UPDATER_MANIFEST} version ${JSON.stringify(manifest.version)} does not match ${version}.`,
         );
-      const expectedPlatforms = new Set(presentArchives.map((name) => archives.get(name)));
-      const platforms = Object.keys(manifest.platforms ?? {});
-      for (const key of expectedPlatforms)
-        if (!platforms.includes(key)) fail(`${UPDATER_MANIFEST} has no ${key} entry.`);
-      for (const key of platforms)
-        if (!expectedPlatforms.has(key))
-          fail(`${UPDATER_MANIFEST} names ${key} without a matching archive.`);
+      const entries = manifest.platforms ?? {};
+      for (const key of Object.keys(entries))
+        if (!platforms.includes(key)) fail(`${UPDATER_MANIFEST} names unexpected platform ${key}.`);
+      for (const [name, keys] of artifacts) {
+        const signature = files.has(`${name}.sig`)
+          ? readFileSync(join(releaseDir, `${name}.sig`), 'utf8').trim()
+          : undefined;
+        for (const key of keys) {
+          const entry = entries[key];
+          if (entry === undefined) {
+            fail(`${UPDATER_MANIFEST} has no ${key} entry.`);
+            continue;
+          }
+          const path = `/${tag ?? `v${version}`}/${encodeURIComponent(name)}`;
+          if (typeof entry.url !== 'string' || !entry.url.endsWith(`/releases/download${path}`))
+            fail(`${UPDATER_MANIFEST} ${key} does not point at ${name} in this release.`);
+          if (signature !== undefined && entry.signature !== signature)
+            fail(`${UPDATER_MANIFEST} ${key} signature differs from ${name}.sig.`);
+        }
+      }
     }
+    updaterReport = {
+      state: 'enabled',
+      artifacts: [...artifacts.keys()].filter((name) => files.has(name)),
+      manifest: hasManifest,
+      platforms,
+    };
+  } else {
+    if (updater === 'on')
+      fail(
+        'The build reported the updater on, but src-tauri/tauri.conf.json has no plugins.updater.',
+      );
+    else if (updaterConfigured && !allowUnsigned)
+      fail(
+        'src-tauri/tauri.conf.json configures the updater, but this run produced no updater artifacts. TAURI_SIGNING_PRIVATE_KEY and its password are required on the production path.',
+      );
+    for (const name of [...macArchives, ...signatures])
+      fail(`Updater asset ${name} is present but the updater is off for this run.`);
+    if (hasManifest) fail(`${UPDATER_MANIFEST} is present but the updater is off for this run.`);
+    updaterReport = {
+      state: 'disabled',
+      reason: updaterConfigured
+        ? 'allow_unsigned rehearsal without the updater signing key; no updater artifacts or latest.json'
+        : 'src-tauri/tauri.conf.json configures no updater (plugins.updater); no updater artifacts or latest.json',
+    };
   }
 
   const known = new Set([
     ...installers,
-    ...archives.keys(),
-    ...[...archives.keys()].map((name) => `${name}.sig`),
+    ...artifacts.keys(),
+    ...[...artifacts.keys()].map((name) => `${name}.sig`),
     CHECKSUMS,
     UPDATER_MANIFEST,
   ]);
@@ -233,12 +277,7 @@ export function smokeTestRelease({
     failures,
     version,
     installers: installers.filter((name) => files.has(name)),
-    updater: updaterConfigured
-      ? { state: 'enabled', archives: presentArchives, manifest: hasManifest }
-      : {
-          state: 'disabled',
-          reason: 'bundle.createUpdaterArtifacts is false; no updater archives or latest.json',
-        },
+    updater: updaterReport,
     // Code signatures are verified in the build jobs; this records what the
     // run declared so the summary cannot read as signed when it was not.
     // `state` covers the platforms whose signing is required (macOS);
@@ -284,11 +323,12 @@ function parseArguments(argv) {
       '--tag': 'tag',
       '--root': 'root',
       '--windows-signing': 'windowsSigning',
+      '--updater': 'updater',
     }[flag];
     const value = argv[index + 1];
     if (key === undefined || value === undefined || value.startsWith('--')) {
       throw new Error(
-        `Usage: release-smoke.mjs --dir <release> --version <x.y.z> [--tag <vX.Y.Z>] [--root <repo>] [--allow-unsigned] [--windows-signing signed|unsigned] (bad argument ${flag})`,
+        `Usage: release-smoke.mjs --dir <release> --version <x.y.z> [--tag <vX.Y.Z>] [--root <repo>] [--allow-unsigned] [--windows-signing signed|unsigned] [--updater on|off] (bad argument ${flag})`,
       );
     }
     options[key] = value;

@@ -4,8 +4,8 @@ You release the **OpenCoven Chat** desktop app (`ai.opencoven.chat`) by pushing
 a **signed, annotated `v*` tag**. The `.github/workflows/release.yml` pipeline
 does the rest: it verifies the tag, builds installers for macOS, Windows and
 Linux (signed and notarized on macOS), checksums them, and
-conditionally generates the updater manifest when auto-update is configured,
-then publishes a GitHub Release. This runbook covers the steps around that
+generates the updater feed when the tagged tree configures auto-update,
+then publishes a GitHub Release and moves the feed to it. This runbook covers the steps around that
 push. The iPhone companion ships through TestFlight instead
 ([iPhone companion › TestFlight](iphone-companion.md#testflight)).
 
@@ -99,12 +99,11 @@ VERSION=v0.0.6   # the tag you are releasing
    corepack pnpm app:build   # local sanity build
    ```
 
-5. **Leave auto-update off.** Chat ships without an updater (§ 4).
-   `scripts/verify-package.mjs` fails the release if `src-tauri/tauri.conf.json`
-   has a `plugins.updater` section or sets `bundle.createUpdaterArtifacts` to
-   anything but `false`, or if `src-tauri/Cargo.toml` depends on
-   `tauri-plugin-updater`. Turning auto-update on is a code change, not a
-   release step.
+5. **Check the updater key.** If `src-tauri/tauri.conf.json` has a
+   `plugins.updater` section, `release-signing` must hold
+   `TAURI_SIGNING_PRIVATE_KEY` and `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`
+   (§ 3, § 4). `verify-tag` refuses the release otherwise. A tree without
+   `plugins.updater` needs neither.
 
 6. **Create a signed, annotated tag** on the merge commit (see § 2):
 
@@ -128,17 +127,21 @@ VERSION=v0.0.6   # the tag you are releasing
    - rerun lint, typechecking, unit tests, and the web build against the tagged
      tree,
    - build installers on each platform and smoke-test them,
-   - generate `SHA256SUMS` and, only when signed updater artifacts exist,
-     `latest.json`,
+   - when the updater is on, write `latest.json` from the signed updater
+     artifacts (`scripts/updater-manifest.mjs`), then generate `SHA256SUMS`,
    - smoke-test the assembled release with `scripts/release-smoke.mjs`: all six
      installers present once and non-empty, `SHA256SUMS` covering every asset
      and matching its bytes, the tag, `package.json`, `tauri.conf.json` and
      `Cargo.toml` versions agreeing, the product name and identifier
-     unchanged, and no updater asset unless `createUpdaterArtifacts` is on. The
-     job summary states the updater and signing state, including an
+     unchanged, and either no updater asset at all (updater off) or every
+     updater artifact signed with `latest.json` pointing at each one (updater
+     on). The job summary states the updater and signing state, including an
      `allow_unsigned` rehearsal and whether the Windows installers were signed,
    - publish the GitHub Release (a **pre-release** if the tag has a suffix such
-     as `-rc.1` or `-beta`, or if its major version is `0`).
+     as `-rc.1` or `-beta`, or if its major version is `0`),
+   - when the updater is on, move the auto-update feed (the `updater`
+     release, § 4) to this version and read it back by the URL installed apps
+     use.
 
 9. **Verify the published release**: download an installer and `SHA256SUMS`,
    then check the installer against it. Run this in the folder that holds both.
@@ -305,6 +308,12 @@ into three groups:
 - **Windows (optional):** the two `WINDOWS_*` secrets. Windows ships unsigned
   by decision (see the top of this document), and the build job signs the
   Windows installers only when both are set.
+- **Updater (required once the tree configures it):**
+  `TAURI_SIGNING_PRIVATE_KEY` and `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`. Once
+  `src-tauri/tauri.conf.json` has `plugins.updater`, `verify-tag` reads that
+  from the verified commit and refuses a release without both, and the build
+  job refuses again on a re-run. A tag whose tree has no `plugins.updater`
+  needs neither.
 
 The API key is preferred because it's a team credential. On 2026-10-06, four
 app-specific passwords in a row were rejected with `401 Invalid credentials`
@@ -323,11 +332,12 @@ certificates exist, for instance), dispatch the workflow manually with
 reach it. It is also rehearsal-only: a run that sets it never publishes a
 release (see the dry-run rehearsal above).
 
-Two secrets are exempt, for different reasons. `TAURI_SIGNING_PRIVATE_KEY` is
-not required because Chat ships without an updater (§ 4), so its absence is
-the expected state rather than an omission. `TAG_ALLOWED_SIGNERS` is
-optional because GitHub API verification is always required; when present, it
-adds an independent local SSH check.
+`TAG_ALLOWED_SIGNERS` is optional because GitHub API verification is always
+required; when present, it adds an independent local SSH check.
+
+The environment accepts only the `main` branch and `v*` tags (deployment
+policy set 2026-10-18), so a workflow on any other branch can't read these
+secrets.
 
 | Secret | Purpose | Environment |
 | ------ | ------- | ----------- |
@@ -347,8 +357,8 @@ adds an independent local SSH check.
 | `ES_CREDENTIAL_ID` | the eSigner credential ID of the OV code-signing certificate | `release-signing` |
 | `ES_TOTP_SECRET` | the base32 secret from eSigner's automated-signing enrollment, from which CodeSignTool makes each one-time code | `release-signing` |
 | `WINDOWS_PUBLISHER` (variable) | the publisher name the Windows certificate carries; required whenever the Windows installers are signed | `release-signing` |
-| `TAURI_SIGNING_PRIVATE_KEY` | Tauri updater private key (signs updater artifacts; unused while Chat has no updater, § 4) | `release-signing` |
-| `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` | password for the updater private key | `release-signing` |
+| `TAURI_SIGNING_PRIVATE_KEY` | Tauri updater private key; signs every updater artifact (required once the tree configures the updater, § 4) | `release-signing` |
+| `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` | password for the updater private key (required with it) | `release-signing` |
 | `TAG_ALLOWED_SIGNERS` | allowed-signers file contents for verifying SSH-signed tags | `release-signing` |
 | `GITHUB_TOKEN` | provided automatically by Actions; used to publish the release | n/a (built-in) |
 
@@ -404,90 +414,81 @@ a renewal, but check it.
 
 ## 4. Auto-update
 
-> **Chat ships without auto-update.** No release so far (v0.0.2 through
-> v0.0.5) has a `latest.json`. `src-tauri/tauri.conf.json` has **no
-> `plugins.updater`** section and no updater public key, and it sets
-> `bundle.createUpdaterArtifacts: false`. `tauri-plugin-updater` is not a
-> dependency, so nothing in the app checks for updates. People update by
-> downloading and installing a newer release.
+Decided on #356 on 2026-10-18: Chat turns auto-update on from the next
+release. No release up to v0.0.5 has an updater, so their users update by
+downloading a newer release, once, to a version that has one.
 
-`scripts/verify-package.mjs` holds this as a release decision (issue #356). It
-fails the release, before any build, if `plugins.updater` exists, if
-`createUpdaterArtifacts` is anything but `false`, or if `src-tauri/Cargo.toml`
-depends on `tauri-plugin-updater`. Setting `createUpdaterArtifacts` to `true`
-without the plugin configured also makes `tauri build` fail with:
+### How it works
 
-```
-failed to build bundler settings: failed to get updater configuration:
-plugins > updater doesn't exist
-```
+- **The app** carries `tauri-plugin-updater` and, in
+  `src-tauri/tauri.conf.json`, a `plugins.updater` section with the public key
+  and one endpoint:
+  `https://github.com/OpenCoven/chat/releases/download/updater/latest.json`.
+  `scripts/verify-package.mjs` holds that configuration. Until the change that
+  adds the plugin lands, it still refuses an updater, and every release behaves
+  as before.
+- **The base config keeps `bundle.createUpdaterArtifacts: false`.** With it on,
+  every `tauri build` needs the private key, including CI's desktop build and
+  your local `app:build`. A release whose tree configures the updater, and
+  whose `release-signing` holds the key, turns it on with an overlay
+  (`Configure updater artifacts`) passed as a second `--config`.
+- **What the build signs.** With the overlay, Tauri signs the `.msi`,
+  `-setup.exe`, `.AppImage` and `.deb` themselves and writes a `.sig` beside
+  each. It archives only the macOS app, as `.app.tar.gz` plus `.sig`, which the
+  build job prefixes with its target. These are Tauri v2's names; the
+  `.msi.zip`, `.nsis.zip` and `.AppImage.tar.gz` forms are its deprecated
+  `"v1Compatible"` mode, which this pipeline does not use.
+- **The feed.** `scripts/updater-manifest.mjs` writes `latest.json`, with a
+  `{os}-{arch}-{installer}` entry for every artifact (`darwin-aarch64-app`,
+  `windows-x86_64-msi`, `windows-x86_64-nsis`, `linux-x86_64-appimage`,
+  `linux-x86_64-deb`, and so on). It also writes one `{os}-{arch}` default per
+  platform: the app on macOS, NSIS on Windows, the AppImage on Linux.
+  `tauri-plugin-updater` 2.12 looks for the installer-specific entry first, so
+  each install updates with the installer type it was installed with. Every
+  entry's `signature` is the `.sig` file's contents and its `url` is the
+  artifact in that version's release. `scripts/release-smoke.mjs` checks the
+  feed against the same table before anything is published.
+- **The pointer release.** Every Chat release is a pre-release, and GitHub's
+  `releases/latest` skips pre-releases, so apps don't read a version's own
+  `latest.json`. They read the one asset of a fixed release tagged `updater`
+  (a pre-release, never marked latest). After a release publishes, the
+  workflow replaces that asset (`--clobber`) and reads it back by the URL apps
+  use. A dry run or an `allow_unsigned` rehearsal never touches it. The
+  version's own `latest.json` stays as a release asset, covered by
+  `SHA256SUMS`, as a record of what the feed served.
 
-Because of this, the release workflow produces **no `.sig` files and no
-`latest.json`**, and it does **not** fail on their absence: the updater
-manifest step skips with a `::notice::` when no updater artifacts exist.
+### The signing key
 
-### Enabling auto-update
-
-There is no updater to switch on. Adding one is a code change, reviewed in one
-pull request, not a configuration flip:
-
-1. **Change the no-updater decision.** Update the updater checks and the
-   capability allowlist in `scripts/verify-package.mjs`, and their tests in
-   `src/verify-package.test.ts`.
-
-2. **Add the plugin.** Add `tauri-plugin-updater` to `src-tauri/Cargo.toml`,
-   register it in the app, grant its permission in the main window's
-   capability, and call its update check from the app.
-
-3. **Generate the updater keypair:**
+1. **Generate it offline:**
 
    ```bash
    corepack pnpm tauri signer generate -w ~/.tauri/opencoven-chat-updater.key
    ```
 
-   This prints a **public key** and writes the **private key** to the path
-   given (with a passphrase you choose).
+   It prints the **public key** and writes the **private key**, encrypted with
+   a password you choose, to the given path. Use a password: the workflow
+   requires `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`.
+2. **The public key** goes into `plugins.updater.pubkey`, in the same change
+   that adds the plugin.
+3. **The private key and its password** go into `release-signing` as
+   `TAURI_SIGNING_PRIVATE_KEY` and `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`, and
+   nowhere else in GitHub.
+4. **Back them up outside GitHub** (a password manager). Installed copies accept
+   only updates signed by this key: **if it is lost, every installed copy is
+   stranded** until it is reinstalled by hand from a release built with a new
+   key.
+5. **To rotate it,** ship a release that carries the new public key, signed
+   with the old key, then switch the secrets to the new key for the releases
+   after it.
 
-4. **Configure the updater in `src-tauri/tauri.conf.json`.** Add the plugin
-   section with the public key and the release feed endpoint, and set
-   `bundle.createUpdaterArtifacts` to `true`:
+### The first updater release
 
-   ```jsonc
-   {
-     "plugins": {
-       "updater": {
-         "pubkey": "<PUBLIC KEY FROM STEP 3>",
-         "endpoints": [
-           "https://github.com/OpenCoven/chat/releases/latest/download/latest.json"
-         ]
-       }
-     }
-   }
-   ```
-
-   > **Note:** GitHub's `releases/latest` skips pre-releases, and every `0.*`
-   > release is published as one (§ 1, step 8). Until a release is not a
-   > pre-release, this endpoint returns 404.
-
-5. **Store the private key** as the `TAURI_SIGNING_PRIVATE_KEY` secret and its
-   passphrase as `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`, both in the
-   `release-signing` environment.
-
-6. **Rehearse with a [dry run](#dry-run-rehearsal)** before you tag.
-
-> **Warning:** the workflow's updater steps have never run on a real release.
-> The build's staging step and the `latest.json` step look for zipped archives
-> (`.app.tar.gz`, `.msi.zip`, `.nsis.zip`, `.AppImage.tar.gz`) and their `.sig`
-> files. Tauri v2 zips the Windows and Linux updaters only when
-> `createUpdaterArtifacts` is `"v1Compatible"`. With `true`, it signs the
-> installers themselves. `scripts/release-smoke.mjs` treats the updater as on
-> only when the value is `true`. Expect to change `release.yml` and the smoke
-> test in the same pull request, and check what the dry run built before you
-> tag.
-
-Keep the private key offline and backed up. If it is lost, existing installs
-can no longer verify updates and must be reinstalled from a fresh release built
-with a new key.
+A release can only be updated *into* by a copy that already has the updater.
+The first release with the updater is therefore installed by hand, and
+proving the update journey takes two updater releases: install the first,
+publish the second, and watch the first find, verify and install it. Rehearse
+the pipeline before that with a [dry run](#dry-run-rehearsal) against a tag
+whose tree configures the updater, and check what the dry run built.
 
 ---
 
@@ -518,8 +519,12 @@ Per release, the workflow publishes:
 - **Linux**: `.AppImage` and `.deb` for `x86_64`.
 - **`SHA256SUMS`**: checksums for every asset. Verify with
   `shasum -a 256 -c --ignore-missing SHA256SUMS` (§ 1, step 9).
-- **`latest.json`**: the Tauri updater manifest, **only when auto-update is
-  enabled** (see § 4). Absent from every release so far.
+- **Updater signatures** (when the updater is on, § 4): a `.sig` beside the
+  `.msi`, `-setup.exe`, `.AppImage` and `.deb`, and each Mac's
+  `<target>-OpenCoven.Chat.app.tar.gz` with its `.sig`.
+- **`latest.json`**: the updater feed for this version, **only when the updater
+  is on** (§ 4). Apps read the copy on the `updater` release, not this one.
+  Absent from every release up to v0.0.5.
 
 ---
 
@@ -533,15 +538,26 @@ quickly **hide it and stop auto-update from spreading it**. Act in this order.
 This is the most urgent step, because the updater is the only channel that
 pushes a bad build to users who did nothing.
 
-> **Note:** no release so far has auto-update or a `latest.json` (see § 4).
-> While Chat has no updater, skip to § 6.2.
+> **Note:** releases up to v0.0.5 have no updater. If the bad release has no
+> `latest.json`, skip to § 6.2.
 
-1. **Delete the bad release's `latest.json` asset.** This stops new clients
-   from fetching that manifest, although caches and clients that already read
-   it may still retain it. Do not point the manifest at an older version:
-   updater version checks do not provide a reliable downgrade path.
-2. Prepare a **superseding release** (see § 6.3) with a higher version. That is
-   the only reliable way to move auto-updaters forward.
+Installed apps read only the feed on the `updater` release (§ 4), so that is
+the one asset to act on:
+
+1. **Remove the feed:**
+
+   ```bash
+   gh release delete-asset updater latest.json --repo OpenCoven/chat --yes
+   ```
+
+   Apps then find no update and stay where they are. Copies that already
+   downloaded the bad version keep it. The updater does not downgrade.
+2. **Never upload an older version's `latest.json` to the feed.** The updater
+   offers only versions newer than the installed one, so an older feed offers
+   nothing to copies on the bad version, and it hides the problem.
+3. **Ship a superseding release** (§ 6.3) with a higher version. Publishing it
+   puts a new `latest.json` on the feed, which moves every copy forward, the
+   bad version included. That is the only reliable way out.
 
 ### 6.2 Mark the bad GitHub Release
 
