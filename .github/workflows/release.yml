@@ -494,11 +494,13 @@ jobs:
           APPLE_API_KEY_BASE64: ${{ secrets.APPLE_API_KEY_BASE64 }}
           WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}
           WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
+          WINDOWS_SIGN_COMMAND: ${{ vars.WINDOWS_SIGN_COMMAND }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
         run: |
           set -euo pipefail
           macos_signed=false
           windows_signed=false
+          windows_route=none
           updater_signed=false
           # "Signed" must mean every credential the signing path consumes, not
           # just the certificate. The verify-tag gate demands all eight on the
@@ -519,12 +521,40 @@ jobs:
           fi
           echo "notary=${notary}" >> "$GITHUB_OUTPUT"
           echo "macOS notarization credentials: ${notary}"
+          # Windows signs one of two ways (#411). Either a .pfx in
+          # WINDOWS_CERTIFICATE with its password, imported into the runner's
+          # store, or a sign command. Certificate authorities now keep
+          # code-signing keys in a hardware or cloud HSM and issue no .pfx, so
+          # every route #411 weighs signs through a service: Tauri runs
+          # bundle.windows.signCommand on each file it signs, with %1 standing
+          # for the file. The command is the release-signing environment's
+          # WINDOWS_SIGN_COMMAND variable. The credentials it reads are secrets
+          # that the route adds to `Build installers`. Missing ones fail the
+          # bundle, and `Verify Windows installer metadata and signatures`
+          # requires a valid signature from WINDOWS_PUBLISHER.
           if [ -n "${WINDOWS_CERTIFICATE:-}" ] && [ -n "${WINDOWS_CERTIFICATE_PASSWORD:-}" ]; then
-            windows_signed=true
+            windows_route=pfx
           fi
+          if [ -n "${WINDOWS_SIGN_COMMAND:-}" ]; then
+            if [ "${windows_route}" = "pfx" ] && [ "${{ runner.os }}" = "Windows" ]; then
+              echo "::error::Both a .pfx (WINDOWS_CERTIFICATE) and WINDOWS_SIGN_COMMAND are configured. Keep the one for the signing route in use and remove the other."
+              exit 1
+            fi
+            case "${WINDOWS_SIGN_COMMAND}" in
+              *%1*) windows_route="command" ;;
+              *)
+                if [ "${{ runner.os }}" = "Windows" ]; then
+                  echo "::error::WINDOWS_SIGN_COMMAND has no %1. Tauri replaces %1 with the file to sign, so a command without it signs nothing."
+                  exit 1
+                fi
+                ;;
+            esac
+          fi
+          [ "${windows_route}" != "none" ] && windows_signed=true
           [ -n "${TAURI_SIGNING_PRIVATE_KEY:-}" ] && updater_signed=true
           echo "macos_signed=${macos_signed}"     >> "$GITHUB_OUTPUT"
           echo "windows_signed=${windows_signed}" >> "$GITHUB_OUTPUT"
+          echo "windows_route=${windows_route}"   >> "$GITHUB_OUTPUT"
           echo "updater_signed=${updater_signed}" >> "$GITHUB_OUTPUT"
           if [ "${{ runner.os }}" = "macOS" ] && [ "${macos_signed}" = "false" ]; then
             if [ "${ALLOW_UNSIGNED:-false}" != "true" ]; then
@@ -543,7 +573,7 @@ jobs:
               echo "::error::Only one of WINDOWS_CERTIFICATE and WINDOWS_CERTIFICATE_PASSWORD is set. Set both to sign the Windows installers, or neither to build them unsigned."
               exit 1
             fi
-            echo "::warning::WINDOWS_CERTIFICATE is not configured; the Windows installers in this release are UNSIGNED and Windows SmartScreen will warn before they run. #411 tracks a signing route."
+            echo "::warning::Neither WINDOWS_CERTIFICATE nor WINDOWS_SIGN_COMMAND is configured; the Windows installers in this release are UNSIGNED and Windows SmartScreen will warn before they run. #411 tracks a signing route."
           fi
           if [ "${updater_signed}" = "false" ]; then
             echo "::notice::TAURI_SIGNING_PRIVATE_KEY is not set; updater artifacts and latest.json are not produced. Auto-update is opt-in and currently disabled (no plugins.updater / createUpdaterArtifacts:false). See docs/releasing.md."
@@ -552,7 +582,7 @@ jobs:
       # Import Windows signing material before bundling so Tauri signs the
       # installers that are placed inside any future updater archive.
       - name: Import Windows signing certificate
-        if: runner.os == 'Windows' && steps.signing.outputs.windows_signed == 'true'
+        if: runner.os == 'Windows' && steps.signing.outputs.windows_route == 'pfx'
         shell: pwsh
         env:
           WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}
@@ -583,19 +613,24 @@ jobs:
       - name: Configure Tauri Windows signing
         if: runner.os == 'Windows' && steps.signing.outputs.windows_signed == 'true'
         shell: bash
+        env:
+          WINDOWS_ROUTE: ${{ steps.signing.outputs.windows_route }}
+          WINDOWS_SIGN_COMMAND: ${{ vars.WINDOWS_SIGN_COMMAND }}
         run: |
           set -euo pipefail
           node <<'EOF'
           const fs = require('node:fs');
-          const overlay = {
-            bundle: {
-              windows: {
-                certificateThumbprint: process.env.WINDOWS_CERTIFICATE_THUMBPRINT,
-                digestAlgorithm: 'sha256',
-                timestampUrl: 'https://timestamp.digicert.com',
-              },
-            },
-          };
+          // A sign command does its own digest and timestamp; the .pfx path
+          // tells signtool which certificate in the store to use.
+          const windows =
+            process.env.WINDOWS_ROUTE === 'command'
+              ? { signCommand: process.env.WINDOWS_SIGN_COMMAND }
+              : {
+                  certificateThumbprint: process.env.WINDOWS_CERTIFICATE_THUMBPRINT,
+                  digestAlgorithm: 'sha256',
+                  timestampUrl: 'https://timestamp.digicert.com',
+                };
+          const overlay = { bundle: { windows } };
           fs.writeFileSync(
             'src-tauri/release-signing.conf.json',
             `${JSON.stringify(overlay, null, 2)}\n`,
@@ -622,6 +657,8 @@ jobs:
           NOTARY: ${{ steps.signing.outputs.notary }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          # WINDOWS_SIGN_COMMAND runs inside `tauri build`, so the credentials
+          # of the chosen signing route (#411) are passed here, by name.
         run: |
           set -euo pipefail
 
@@ -980,9 +1017,15 @@ jobs:
         env:
           EXPECTED_VERSION: ${{ needs.verify-tag.outputs.version }}
           WINDOWS_SIGNED: ${{ steps.signing.outputs.windows_signed }}
+          WINDOWS_PUBLISHER: ${{ vars.WINDOWS_PUBLISHER }}
         run: |
           Set-StrictMode -Version Latest
           $ErrorActionPreference = 'Stop'
+          # A signed release says who signed it: the certificate's common name,
+          # which is what the installer shows as its publisher.
+          if ($env:WINDOWS_SIGNED -eq 'true' -and -not $env:WINDOWS_PUBLISHER) {
+            throw 'The Windows installers are signed, but WINDOWS_PUBLISHER is not set. Set it in release-signing to the publisher name the certificate carries.'
+          }
           $installers = @(Get-ChildItem -Path "$env:STAGE_DIR/*" -File -Include *.msi,*.exe)
           if ($installers.Count -ne 2) {
             throw "Expected one .msi and one .exe in $env:STAGE_DIR, found $($installers.Count): $($installers.Name -join ', ')"
@@ -1024,6 +1067,10 @@ jobs:
             if ($env:WINDOWS_SIGNED -eq 'true') {
               if ($signature.Status -ne 'Valid') {
                 throw "$($installer.Name) has invalid Authenticode status: $($signature.Status)"
+              }
+              $publisher = $signature.SignerCertificate.GetNameInfo('SimpleName', $false)
+              if ($publisher -ne $env:WINDOWS_PUBLISHER) {
+                throw "$($installer.Name) is signed by '$publisher', expected '$env:WINDOWS_PUBLISHER'."
               }
               Write-Host "  ok: $($installer.Name) is signed by $($signature.SignerCertificate.Subject)"
             } else {

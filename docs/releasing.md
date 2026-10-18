@@ -328,6 +328,11 @@ adds an independent local SSH check.
 | `APPLE_TEAM_ID` | Apple Developer Team ID | `release-signing` |
 | `WINDOWS_CERTIFICATE` | base64 of an Authenticode code-signing `.pfx` (optional: with its password set, the Windows installers are signed; otherwise they ship unsigned, see #411) | `release-signing` |
 | `WINDOWS_CERTIFICATE_PASSWORD` | password for the `.pfx` (optional; set both or neither) | `release-signing` |
+| `ES_USERNAME` | SSL.com account username for eSigner (optional: with all four `ES_*` set, the Windows installers are signed through eSigner; see below) | `release-signing` |
+| `ES_PASSWORD` | SSL.com account password | `release-signing` |
+| `ES_CREDENTIAL_ID` | the eSigner credential ID of the OV code-signing certificate | `release-signing` |
+| `ES_TOTP_SECRET` | the base32 secret from eSigner's automated-signing enrollment, from which CodeSignTool makes each one-time code | `release-signing` |
+| `WINDOWS_PUBLISHER` (variable) | the publisher name the Windows certificate carries; required whenever the Windows installers are signed | `release-signing` |
 | `TAURI_SIGNING_PRIVATE_KEY` | Tauri updater private key (signs updater artifacts; unused while Chat has no updater, § 4) | `release-signing` |
 | `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` | password for the updater private key | `release-signing` |
 | `TAG_ALLOWED_SIGNERS` | allowed-signers file contents for verifying SSH-signed tags | `release-signing` |
@@ -335,6 +340,33 @@ adds an independent local SSH check.
 
 > **Warning:** the workflow references these **by name only**. Never commit any
 > secret value to the repository.
+
+### Signing the Windows installers
+
+Certificate authorities stopped issuing code-signing certificates as exportable
+`.pfx` files in June 2023. The private key now stays in a hardware token or a
+cloud HSM, so in practice Windows signing goes through a service (#411). The
+build job supports two ways, and refuses a configuration that sets both:
+
+1. **A `.pfx`**: `WINDOWS_CERTIFICATE` and `WINDOWS_CERTIFICATE_PASSWORD`. The
+   certificate is imported into the runner's store, and Tauri signs with it
+   through `signtool`.
+2. **A sign command**: the `WINDOWS_SIGN_COMMAND` *variable*, not a secret,
+   because it names a tool and an account rather than a credential. Tauri runs
+   it as `bundle.windows.signCommand` on every file it signs, replacing `%1`
+   with the file's path. A command without `%1` is refused. The route's
+   credentials are secrets, added by name to the `Build installers` step's
+   `env`, because `tauri build` runs the command. If one is missing, the
+   bundle fails rather than producing an unsigned installer.
+
+Either way, set `WINDOWS_PUBLISHER` to the name on the certificate. The build
+then checks that every installer has a `Valid` Authenticode signature from that
+publisher. With neither way configured, the installers ship unsigned and the
+release notes say so.
+
+Before the first signed release, rehearse: dispatch the workflow from `main`
+against an existing tag with `dry_run=true`, and check the Windows job's log
+for `ok: … is signed by …` on both installers.
 
 ---
 

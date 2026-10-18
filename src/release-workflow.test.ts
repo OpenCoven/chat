@@ -1,5 +1,7 @@
-import { readFileSync } from 'node:fs';
-import { dirname, resolve } from 'node:path';
+import { spawnSync } from 'node:child_process';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { describe, expect, test } from 'vitest';
@@ -16,6 +18,43 @@ function job(name: string, nextName?: string): string {
     throw new Error(`Unable to isolate release workflow job ${name}`);
   }
   return workflow.slice(start, end);
+}
+
+/** The shell of the build job's `Determine signing availability` step, as `os` runs it. */
+function signingScript(os: string): string {
+  const build = job('build', 'publish');
+  const step = build.slice(
+    build.indexOf('- id: signing'),
+    build.indexOf('- name: Import Windows signing certificate'),
+  );
+  const body: string[] = [];
+  for (const line of step.slice(step.indexOf('run: |')).split('\n').slice(1)) {
+    if (line.trim() !== '' && !line.startsWith(' '.repeat(10))) break;
+    body.push(line.slice(10));
+  }
+  return body.join('\n').replaceAll(`\${{ runner.os }}`, os);
+}
+
+/** Runs that step with only `env` set, and returns its exit status, log and outputs. */
+function decideSigning(env: Record<string, string>, os = 'Windows') {
+  const dir = mkdtempSync(join(tmpdir(), 'release-signing-'));
+  const output = join(dir, 'output');
+  writeFileSync(output, '');
+  try {
+    const run = spawnSync('bash', ['-c', signingScript(os)], {
+      env: { PATH: process.env.PATH ?? '', GITHUB_OUTPUT: output, ...env },
+      encoding: 'utf8',
+    });
+    const outputs = Object.fromEntries(
+      readFileSync(output, 'utf8')
+        .split('\n')
+        .filter(Boolean)
+        .map((line) => [line.slice(0, line.indexOf('=')), line.slice(line.indexOf('=') + 1)]),
+    );
+    return { status: run.status, log: `${run.stdout}${run.stderr}`, outputs };
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 }
 
 describe('release workflow specification', () => {
@@ -402,6 +441,80 @@ describe('release workflow specification', () => {
     expect(publish).toContain('**Run anyway**');
     expect(releasingGuide).toContain('SmartScreen');
     expect(releasingGuide).not.toContain('Windows is deferred');
+  });
+
+  test('signs Windows through a .pfx or a sign command, never both, never half', () => {
+    const pfx = { WINDOWS_CERTIFICATE: 'cGZ4', WINDOWS_CERTIFICATE_PASSWORD: 'secret' };
+    const command = { WINDOWS_SIGN_COMMAND: 'signing-tool sign --file %1' };
+
+    const unsigned = decideSigning({});
+    expect(unsigned.status).toBe(0);
+    expect(unsigned.outputs).toMatchObject({ windows_signed: 'false', windows_route: 'none' });
+    expect(unsigned.log).toContain('the Windows installers in this release are UNSIGNED');
+
+    const half = decideSigning({ WINDOWS_CERTIFICATE: 'cGZ4' });
+    expect(half.status).toBe(1);
+    expect(half.log).toContain('Only one of WINDOWS_CERTIFICATE and WINDOWS_CERTIFICATE_PASSWORD');
+    const halfRehearsal = decideSigning({ WINDOWS_CERTIFICATE: 'cGZ4', ALLOW_UNSIGNED: 'true' });
+    expect(halfRehearsal.status).toBe(0);
+    expect(halfRehearsal.outputs.windows_signed).toBe('false');
+
+    expect(decideSigning(pfx).outputs).toMatchObject({
+      windows_signed: 'true',
+      windows_route: 'pfx',
+    });
+    expect(decideSigning(command).outputs).toMatchObject({
+      windows_signed: 'true',
+      windows_route: 'command',
+    });
+
+    const noFile = decideSigning({ WINDOWS_SIGN_COMMAND: 'signing-tool sign' });
+    expect(noFile.status).toBe(1);
+    expect(noFile.log).toContain('WINDOWS_SIGN_COMMAND has no %1');
+
+    const both = decideSigning({ ...pfx, ...command });
+    expect(both.status).toBe(1);
+    expect(both.log).toContain('Both a .pfx (WINDOWS_CERTIFICATE) and WINDOWS_SIGN_COMMAND');
+
+    // The other platforms build whatever Windows is configured with.
+    expect(decideSigning({ ...pfx, ...command }, 'Linux').status).toBe(0);
+  });
+
+  test('hands Tauri the sign command and holds the signature to the named publisher', () => {
+    const build = job('build', 'publish');
+    const importStep = build.slice(
+      build.indexOf('- name: Import Windows signing certificate'),
+      build.indexOf('- name: Configure Tauri Windows signing'),
+    );
+    const configure = build.slice(
+      build.indexOf('- name: Configure Tauri Windows signing'),
+      build.indexOf('- name: Build installers'),
+    );
+    const windowsCheck = build.slice(
+      build.indexOf('- name: Verify Windows installer metadata and signatures'),
+      build.indexOf('uses: actions/upload-artifact@'),
+    );
+
+    // Only the .pfx route imports a certificate; the command route overlays
+    // bundle.windows.signCommand from the release-signing variable.
+    expect(importStep).toContain("steps.signing.outputs.windows_route == 'pfx'");
+    expect(configure).toContain(`WINDOWS_SIGN_COMMAND: \${{ vars.WINDOWS_SIGN_COMMAND }}`);
+    expect(configure).toContain("process.env.WINDOWS_ROUTE === 'command'");
+    expect(configure).toContain('{ signCommand: process.env.WINDOWS_SIGN_COMMAND }');
+    expect(configure).toContain(
+      'certificateThumbprint: process.env.WINDOWS_CERTIFICATE_THUMBPRINT',
+    );
+    expect(build).toContain(`windows_signed: \${{ steps.signing.outputs.windows_signed }}`);
+
+    // A signed installer must be Valid and signed by WINDOWS_PUBLISHER.
+    expect(windowsCheck).toContain(`WINDOWS_PUBLISHER: \${{ vars.WINDOWS_PUBLISHER }}`);
+    expect(windowsCheck).toContain('WINDOWS_PUBLISHER is not set');
+    expect(windowsCheck).toContain("GetNameInfo('SimpleName', $false)");
+    expect(windowsCheck.indexOf("if ($signature.Status -ne 'Valid')")).toBeLessThan(
+      windowsCheck.indexOf("expected '$env:WINDOWS_PUBLISHER'"),
+    );
+    expect(releasingGuide).toContain('### Signing the Windows installers');
+    expect(releasingGuide).toContain('`WINDOWS_SIGN_COMMAND` (variable)');
   });
 
   test('documents conditional updates and the current storage boundary', () => {
