@@ -213,8 +213,8 @@ git tag -d "$VERSION"
 ## Dry-run rehearsal
 
 You can run the workflow manually against an existing signed tag. In
-**Actions → Release → Run workflow**, select the branch containing the workflow
-change, enter the tag, and leave `dry_run` at its default value of `true`.
+**Actions → Release → Run workflow**, select `main`, enter the tag, and
+leave `dry_run` at its default value of `true`.
 
 A dry run verifies the remote tag, checks out its exact commit, reruns the
 release-relevant tests, builds and smoke-tests all three native targets,
@@ -222,10 +222,14 @@ generates and verifies checksums, and then stops without creating or modifying
 a GitHub Release. Use this path to validate workflow changes and signing-secret
 wiring before the next real tag push.
 
+> **Note:** a dry run from a feature branch can't reach the signing secrets.
+> The `release-signing` environment admits only `main` and `v*` tags (§ 3), so
+> land a workflow change on `main` first, then rehearse it.
+
 **Dispatch runs the workflow from the branch you select, not from the tag.**
 The build still checks out the tag's commit, so a workflow fix on `main` can be
-rehearsed against a tag that predates it. Select `main` unless you are
-deliberately testing an older pipeline.
+rehearsed against a tag that predates it. Select `main`, or select the tag
+itself to test the older pipeline it carries.
 
 `allow_unsigned=true` does not itself skip signing: it only lets the run
 continue past the gate when platform secrets are *missing*. With the four Apple
@@ -271,6 +275,16 @@ it, and the artifact check refuses an image without one.
 All signing secrets live in the GitHub deployment **environment**
 `release-signing`. Configure them under **Settings → Environments →
 release-signing**.
+
+The environment's deployment policy admits only the `main` branch and tags
+matching `v*`. A workflow run from any other branch stops before its first job
+that needs the environment, so it never sees a signing secret. Check the policy
+with:
+
+```bash
+gh api repos/OpenCoven/chat/environments/release-signing/deployment-branch-policies \
+  --jq '.branch_policies[] | "\(.type) \(.name)"'
+```
 
 The iPhone companion's TestFlight job (`.github/workflows/ios.yml`) uses this
 environment too. It reads `APPLE_API_ISSUER`, `APPLE_API_KEY` and
