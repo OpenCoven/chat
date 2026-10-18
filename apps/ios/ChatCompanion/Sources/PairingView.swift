@@ -156,7 +156,7 @@ struct PairingView: View {
       .foregroundStyle(Palette.bgBase)
       .disabled(model.busy)
       .accessibilityHint("Opens the camera to scan the pairing code in Chat on your Mac")
-      Text("In Chat on your Mac, open Sidebar options (⋯), choose iPhone companion, then Turn on companion.")
+      Text("In Chat on your Mac, open Settings, then Devices, choose iPhone companion, then Turn on companion.")
         .font(.footnote)
         .foregroundStyle(Palette.textSecondary)
         .multilineTextAlignment(.center)
