@@ -6,7 +6,7 @@ failed Windows before native launch with access denial at `bootstrap-npm-cache`,
 label combines a successful follow-up read with a missing file or directory.
 Neither outcome identifies the cause of the original denial.
 
-The proposed diagnostic separates the result of the existing single immediate
+The supervisor separates the result of the existing single immediate
 follow-up read:
 
 - `readable`: the follow-up callback returned successfully.
@@ -98,17 +98,18 @@ and requires two identity-checked reads to return the complete fresh snapshot.
 A subsequent 512-byte limit check proves the production accounting path still
 enforces the byte quota.
 
-Status: the `readable`/`missing` split passed local diagnostic tests after a
-demonstrated failing regression. The `persistent-<category>` split is in the
-frozen supervisor source. The managed diagnostic file, including the per-seam
+Status (2026-10-18): the split labels ship in `scripts/windows-job-supervisor.cs`.
+The `readable`/`missing` split passed local diagnostic tests after a
+demonstrated failing regression. The managed diagnostic file, including the per-seam
 repeat-outcome matrix and the spent-budget check, passed on macOS under
 PowerShell 7.6.6 on .NET 10, and the `windows-supervisor-behavior` job passed on
 `windows-2025` for PR #338 in run
 [35561671518](https://github.com/OpenCoven/chat/actions/runs/35561671518).
-Which cause fired in protected run 35146928092 remains unproven: that record
-says only `persistent`, and this change does not repair the underlying denial.
-A fresh protected run will instead report `persistent-entry-bound`,
-`persistent-access-denied`, or a `persistent-io-*` label, which is the evidence
-still required. Reviewed frozen-source binding and SDK rebinding are unchanged
-by this diagnostic. Tracks Chat #219 and `cave-k0aqq.2`. Preserve chat and
-active worktrees.
+Which cause fired in protected run 35146928092 was never proven: that record
+says only `persistent`, and this change did not repair the underlying denial.
+The protected lane first passed on Windows in run 36033589858 on 2026-09-24, and
+the latest protected run, 36222464391 on 2026-09-26, also passed. A later protected
+failure here would report `persistent-entry-bound`, `persistent-access-denied`, or
+a `persistent-io-*` label. This diagnostic did not change the reviewed frozen-source
+binding or SDK rebinding. It tracked Chat #219, which closed on 2026-09-24, and
+Beads `cave-k0aqq.2` (Beads was retired on 2026-09-14).

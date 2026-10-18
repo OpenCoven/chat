@@ -15,20 +15,39 @@ upgrade to the latest release before reporting an issue.
 
 Report vulnerabilities in the OpenCoven Chat desktop client, its packaged
 release artifacts, or this repository's build and release automation here.
-Vulnerabilities in the Coven Cave service, daemon, or server-side data handling
-belong in
-[`OpenCoven/coven-cave`](https://github.com/OpenCoven/coven-cave/security);
-use that repository's private vulnerability reporting channel rather than a
-public issue.
+Chat runs your installed Coven CLI, and first-run setup installs it from
+`OpenCoven/coven`. Vulnerabilities in the Coven CLI, its daemon, or the engine
+it installs belong in
+[`OpenCoven/coven`](https://github.com/OpenCoven/coven/security). Cave is a
+separate app: report its vulnerabilities in
+[`OpenCoven/coven-cave`](https://github.com/OpenCoven/coven-cave/security). In
+either repository, use its private vulnerability reporting rather than a public
+issue.
 
 OpenCoven Chat does not persist authenticated conversation bodies in
-IndexedDB, `localStorage`, or `sessionStorage`. Canonical reads are held only in
-bounded memory caches, while installation identity and credentials stay in the
-operating system keyring. The explicit browser demos use canned data and do not
-persist it. Reports showing that sensitive conversation data reaches browser
-storage are in scope because that would violate the current security boundary.
-Any future local read cache must document its encryption and storage guarantees
-before shipping.
+IndexedDB, `localStorage`, or `sessionStorage`. The window keeps only your
+selected familiar and display preferences in `localStorage`, and unsent drafts
+stay in memory. Chat's desktop host keeps the following in Chat's local app data
+folder (on macOS, `~/Library/Application Support/ai.opencoven.chat`):
+
+- **Transcripts.** Chat saves one transcript per message you send, as
+  `coven-transcripts/<session-id>.jsonl`, so your history survives restarts.
+  On macOS and Linux each file is readable and writable only by your user
+  account. **Delete chat** removes every transcript the chat is made of.
+  Chats deleted in v0.0.5 or earlier left the transcripts of their earlier
+  messages in this folder, and Chat does not remove those files later.
+- **Attachments.** Files you attach, and the message sent with them, are kept
+  in `coven-attachments/`, up to 64 MiB in total. On macOS and Linux only your
+  user account can read them. **Delete chat** does not remove them.
+- **Companion credentials.** The iPhone companion's certificate and key, its
+  bearer token, and its send receipts live in a private `iphone-companion/`
+  folder.
+
+The window cannot reach the operating system keyring. Only the Cave adapter and
+the installation-identity commands use it, and the window can call neither
+(`src-tauri/capabilities/default.json`). Reports
+showing that conversation data reaches browser storage, or that these files
+are readable by other user accounts, are in scope.
 
 ## Reporting a vulnerability
 
@@ -56,21 +75,36 @@ Please include:
 - We aim to acknowledge a report within **3 business days**.
 - We will confirm the issue, assess severity, and keep you updated as we work
   on a fix.
-- Fixes ship in a new signed release; the advisory is published (crediting the
+- Fixes ship in a new release; the advisory is published (crediting the
   reporter unless anonymity is requested) once a fix is available.
 
 ## Verifying releases
 
 Every release is built and published by the tag-triggered release workflow.
-Release assets are covered by a `SHA256SUMS` file — verify downloads before
-running them:
+Download installers only from the
+[Releases page](https://github.com/OpenCoven/chat/releases). Each release
+includes a `SHA256SUMS` file that lists every asset by the exact name GitHub
+serves it under, such as `OpenCoven.Chat_0.0.5_x64-setup.exe`. If your browser
+renamed a download, rename it back first. Then, in the folder that holds the
+installer and `SHA256SUMS`, run:
 
-    shasum -a 256 -c SHA256SUMS
+    shasum -a 256 -c --ignore-missing SHA256SUMS
 
-Installers are code-signed where platform signing secrets are configured, and
-auto-updates are verified against the Tauri updater signing key. Treat any
-unsigned build, or any download whose checksum does not match `SHA256SUMS`, as
-untrusted.
+On Windows, run `Get-FileHash -Algorithm SHA256 <installer>` in PowerShell and
+compare the hash with that file's line in `SHA256SUMS`.
+
+- **macOS:** the app and disk images are signed and notarized.
+- **Windows:** the `.msi` and `.exe` installers are not code-signed yet, so
+  Windows SmartScreen shows **Windows protected your PC** the first time one
+  runs. Check the hash first, then choose **More info** and **Run anyway**.
+- **Linux:** the `.AppImage` and `.deb` are not signed.
+
+On Windows and Linux, the matching `SHA256SUMS` line is your integrity check.
+Treat a macOS build that is not signed and notarized, or any download whose
+hash does not match its `SHA256SUMS` line, as untrusted.
+
+The app does not update itself. It ships without an updater, so you upgrade by
+installing a new release.
 
 ## iPhone companion boundary
 

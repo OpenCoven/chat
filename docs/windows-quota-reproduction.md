@@ -1,6 +1,11 @@
 # Windows quota directory reproduction
 
-[Issue #219](https://github.com/OpenCoven/chat/issues/219) tracks the protected
+> **Historical (2026-09-11 to 2026-09-14):** This page records the quota reproduction work
+> from that period. #219 closed on 2026-09-24, the day protected run 36033589858 passed on
+> all three platforms. Where the text below says native results or a fresh protected run
+> are "required", it describes that period.
+
+[Issue #219](https://github.com/OpenCoven/chat/issues/219) tracked the protected
 Windows failure from run
 [34611963297](https://github.com/OpenCoven/chat/actions/runs/34611963297):
 
@@ -140,7 +145,8 @@ diagnostic-only repeat behavior at the individual-read boundary.
 
 The native fixtures supply deterministic controls without changing production
 ACLs. The owner-directory fixture keeps a real owner-only denial in place for
-both enumerations and requires `repeat=persistent`. The isolated-reader fixture
+both enumerations and requires `repeat=persistent-access-denied` (bare `persistent`
+until `2cb98c07` split the label on 2026-09-16). The isolated-reader fixture
 then applies a real enumeration denial to the validated isolated identity,
 checks both recovery callbacks run under that identity, temporarily reverts
 only to restore the fixture ACL, verifies the retry is back under the isolated

@@ -8,19 +8,19 @@ rest: it verifies the tag, builds installers for macOS, Windows and Linux
 conditionally generates the updater manifest when auto-update is configured,
 then publishes a GitHub Release.
 
-**Windows ships unsigned for now** (decided 2026-10-14; Windows was deferred
-from v0.0.2 to v0.0.4 on #356). Certificate authorities have issued
-code-signing keys only on hardware tokens or cloud HSMs since June 2023, so
-the exportable `.pfx` that `WINDOWS_CERTIFICATE` expects is no longer
-obtainable, and choosing a hosted signing route is #411. Until it is chosen,
-the `.msi` and `.exe` carry no Authenticode signature: Windows SmartScreen
-shows "Windows protected your PC" the first time one runs, and the person
-chooses **More info** then **Run anyway**. The generated release body and the
-release notes both say so. The build job refuses nothing on Windows except a
-half-set of the two `WINDOWS_*` secrets; when both are present it signs the
-installers and verifies the signature, with no other change. The app itself
-works on Windows: runs are contained in a kill-on-close Job Object, so Stop
-ends the whole process tree.
+**Windows ships unsigned for now** (decided 2026-10-14). Windows was left out of
+v0.0.2 on #356, and v0.0.5 is the first release with Windows installers.
+Certificate authorities have issued code-signing keys only on hardware tokens or
+cloud HSMs since June 2023, so the exportable `.pfx` that `WINDOWS_CERTIFICATE`
+expects is no longer obtainable, and choosing a hosted signing route is #411.
+Until it is chosen, the `.msi` and `.exe` carry no Authenticode signature:
+Windows SmartScreen shows "Windows protected your PC" the first time one runs,
+and the person chooses **More info** then **Run anyway**. The generated release
+body and the release notes both say so. The build job refuses nothing on Windows
+except a half-set of the two `WINDOWS_*` secrets; when both are present it signs
+the installers and verifies the signature, with no other change. The app itself
+works on Windows: runs are contained in a kill-on-close Job Object, so Stop ends
+the whole process tree.
 
 The first public release is **v0.0.2**.
 
@@ -33,7 +33,12 @@ remote as history, and the version is not reused (§ 6.3).
 
 ## 1. Release checklist
 
-Run through this in order. Every step is runnable as written.
+Run through this in order. First set `VERSION` to the tag you are releasing.
+The commands in this document use it, so run them in the same shell:
+
+```bash
+VERSION=v0.0.6   # the tag you are releasing
+```
 
 1. **Start from a clean, up-to-date `main`.**
 
@@ -51,7 +56,7 @@ Run through this in order. Every step is runnable as written.
    - `src-tauri/Cargo.toml` → `[package] version`
 
    ```bash
-   # confirm they match, e.g. for 0.0.2
+   # each must show $VERSION without the leading v
    node -p "require('./package.json').version"
    node -p "require('./src-tauri/tauri.conf.json').version"
    grep -m1 '^version' src-tauri/Cargo.toml
@@ -90,22 +95,25 @@ Run through this in order. Every step is runnable as written.
    corepack pnpm app:build   # local sanity build
    ```
 
-5. **Make sure the updater signing keypair exists** and its public key is in
-   `src-tauri/tauri.conf.json` (see §4). Without it, auto-update cannot be
-   verified by clients.
+5. **Leave auto-update off.** Chat ships without an updater (§ 4).
+   `scripts/verify-package.mjs` fails the release if `src-tauri/tauri.conf.json`
+   has a `plugins.updater` section or sets `bundle.createUpdaterArtifacts` to
+   anything but `false`, or if `src-tauri/Cargo.toml` depends on
+   `tauri-plugin-updater`. Turning auto-update on is a code change, not a
+   release step.
 
 6. **Create a signed, annotated tag** on the merge commit (see §2):
 
    ```bash
    git checkout main && git pull --ff-only
-   git tag -s v0.0.2 -m "OpenCoven Chat v0.0.2"
-   git verify-tag v0.0.2
+   git tag -s "$VERSION" -m "OpenCoven Chat $VERSION"
+   git verify-tag "$VERSION"
    ```
 
 7. **Push the tag.** This is the point of no return — it starts the release.
 
    ```bash
-   git push origin v0.0.2
+   git push origin "$VERSION"
    ```
 
 8. **Watch the `Release` workflow.** It will:
@@ -125,20 +133,23 @@ Run through this in order. Every step is runnable as written.
    - publish the GitHub Release (a **pre-release** if the tag has a suffix such
      as `-rc.1` or `-beta`, or if its major version is `0`).
 
-9. **Verify the published release**: download an installer and check it against
-   the published checksums.
+9. **Verify the published release**: download an installer and `SHA256SUMS`,
+   then check the installer against it. Run this in the folder that holds both.
+   `--ignore-missing` skips the installers you did not download; without it,
+   `shasum` reports them as missing and fails.
 
    ```bash
-   shasum -a 256 -c SHA256SUMS
+   shasum -a 256 -c --ignore-missing SHA256SUMS
    ```
 
-10. **Publish the release notes.** The workflow writes a fixed body — a line
-    naming the version and the `shasum` command — and reads nothing from this
-    repository. The human-written notes live in `docs/release-notes/` and have
-    to be applied deliberately:
+10. **Publish the release notes.** The workflow writes a fixed body: a line
+    naming the version, the `shasum` command, whether the Windows installers
+    are signed, and whether the release has a `latest.json`. It reads nothing
+    from `docs/release-notes/`. The human-written notes live there, and you
+    apply them yourself:
 
     ```bash
-    gh release edit v0.0.2 --notes-file docs/release-notes/v0.0.2.md
+    gh release edit "$VERSION" --notes-file "docs/release-notes/$VERSION.md"
     ```
 
     Do this even for a pre-release. The generated body does not say what
@@ -153,10 +164,10 @@ Run through this in order. Every step is runnable as written.
 Releases require an **annotated** tag (`-a` / `-s`, not a lightweight tag) that
 carries a **GPG or SSH signature**. The workflow rejects anything else.
 
-Create a signed tag:
+Create a signed tag (`VERSION` is set at the top of § 1):
 
 ```bash
-git tag -s v0.0.2 -m "OpenCoven Chat v0.0.2"
+git tag -s "$VERSION" -m "OpenCoven Chat $VERSION"
 ```
 
 `-s` signs with your configured signing key. This machine signs with SSH:
@@ -169,7 +180,7 @@ git config --get user.signingkey   # your signing key
 Verify before pushing:
 
 ```bash
-git verify-tag v0.0.2
+git verify-tag "$VERSION"
 ```
 
 For **SSH-signed** tags, `git verify-tag` needs an allowed-signers file:
@@ -188,7 +199,7 @@ the authority; the workflow never treats an unverifiable tag as releasable.
 Delete a bad *local* tag before it is pushed:
 
 ```bash
-git tag -d v0.0.2
+git tag -d "$VERSION"
 ```
 
 ## Dry-run rehearsal
@@ -209,9 +220,9 @@ rehearsed against a tag that predates it. Select `main` unless you are
 deliberately testing an older pipeline.
 
 `allow_unsigned=true` does not itself skip signing: it only lets the run
-continue past the gate when platform secrets are *missing*. With all six
-Apple secrets present the switch is a no-op and the Apple signing and
-notarization paths run normally.
+continue past the gate when platform secrets are *missing*. With the four Apple
+signing secrets and one complete notarization set present (§ 3), the switch is
+a no-op and the Apple signing and notarization paths run normally.
 
 An `allow_unsigned` run never publishes. `verify-tag` refuses one dispatched
 with `dry_run=false`, before anything is built, and the publish step refuses it
@@ -254,7 +265,12 @@ All signing secrets live in the GitHub deployment **environment**
 `release-signing`. Configure them under **Settings → Environments →
 release-signing**.
 
-**A missing platform signing secret fails the release.** The `verify-tag` job
+The iPhone companion's TestFlight job (`.github/workflows/ios.yml`) uses this
+environment too. It reads `APPLE_API_ISSUER`, `APPLE_API_KEY` and
+`APPLE_API_KEY_BASE64`, so rotating that key affects both pipelines. See
+[iPhone companion › TestFlight](iphone-companion.md#testflight).
+
+**A missing Apple signing secret fails the release.** The `verify-tag` job
 refuses to continue when the Apple signing material is incomplete, before the
 tag is checked out and long before the platform builds start. Signing needs
 `APPLE_CERTIFICATE`, `APPLE_CERTIFICATE_PASSWORD`, `APPLE_SIGNING_IDENTITY` and
@@ -281,8 +297,8 @@ reach it. It is also rehearsal-only: a run that sets it never publishes a
 release (see the dry-run rehearsal above).
 
 Two secrets are exempt, for different reasons. `TAURI_SIGNING_PRIVATE_KEY` is
-not required because auto-update is opt-in and currently disabled (§ 4), so its
-absence is the expected state rather than an omission. `TAG_ALLOWED_SIGNERS` is
+not required because Chat ships without an updater (§ 4), so its absence is
+the expected state rather than an omission. `TAG_ALLOWED_SIGNERS` is
 optional because GitHub API verification is always required; when present, it
 adds an independent local SSH check.
 
@@ -291,15 +307,15 @@ adds an independent local SSH check.
 | `APPLE_CERTIFICATE` | base64 of the Apple Developer ID `.p12` (macOS code signing) | `release-signing` |
 | `APPLE_CERTIFICATE_PASSWORD` | password for the `.p12` | `release-signing` |
 | `APPLE_SIGNING_IDENTITY` | e.g. `Developer ID Application: OpenCoven (TEAMID)` | `release-signing` |
-| `APPLE_API_ISSUER` | App Store Connect API issuer ID (notarization, preferred) | `release-signing` |
-| `APPLE_API_KEY` | App Store Connect API key ID, e.g. `BR9FQPGJ5N` | `release-signing` |
-| `APPLE_API_KEY_BASE64` | base64 of the `AuthKey_<id>.p8` private key | `release-signing` |
+| `APPLE_API_ISSUER` | App Store Connect API issuer ID (notarization, preferred; also TestFlight uploads) | `release-signing` |
+| `APPLE_API_KEY` | App Store Connect API key ID, e.g. `BR9FQPGJ5N` (notarization and TestFlight) | `release-signing` |
+| `APPLE_API_KEY_BASE64` | base64 of the `AuthKey_<id>.p8` private key (notarization and TestFlight) | `release-signing` |
 | `APPLE_ID` | Apple ID used for notarization (alternative to the API key) | `release-signing` |
 | `APPLE_PASSWORD` | app-specific password for that Apple ID (alternative to the API key) | `release-signing` |
 | `APPLE_TEAM_ID` | Apple Developer Team ID | `release-signing` |
 | `WINDOWS_CERTIFICATE` | base64 of an Authenticode code-signing `.pfx` (optional: with its password set, the Windows installers are signed; otherwise they ship unsigned, see #411) | `release-signing` |
 | `WINDOWS_CERTIFICATE_PASSWORD` | password for the `.pfx` (optional; set both or neither) | `release-signing` |
-| `TAURI_SIGNING_PRIVATE_KEY` | Tauri updater private key (signs updater artifacts) | `release-signing` |
+| `TAURI_SIGNING_PRIVATE_KEY` | Tauri updater private key (signs updater artifacts; unused while Chat has no updater, § 4) | `release-signing` |
 | `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` | password for the updater private key | `release-signing` |
 | `TAG_ALLOWED_SIGNERS` | allowed-signers file contents for verifying SSH-signed tags | `release-signing` |
 | `GITHUB_TOKEN` | provided automatically by Actions; used to publish the release | n/a (built-in) |
@@ -309,31 +325,44 @@ adds an independent local SSH check.
 
 ---
 
-## 4. Auto-update status and how to enable it
+## 4. Auto-update
 
-> **v0.0.2 ships WITHOUT auto-update.** This repository currently has **no
-> `plugins.updater`** section and no updater public key, and
-> `src-tauri/tauri.conf.json` sets `bundle.createUpdaterArtifacts: false`.
-> Setting it to `true` without the plugin configured makes `tauri build` fail
-> with:
->
-> ```
-> failed to build bundler settings: failed to get updater configuration:
-> plugins > updater doesn't exist
-> ```
->
-> Because of this, the release workflow produces **no `.sig` files and no
-> `latest.json`** today, and it does **not** fail on their absence — the
-> updater manifest step is opt-in and simply skips (`::notice::`) when no
-> updater artifacts exist. Users of v0.0.2 update by downloading a newer
-> release manually.
+> **Chat ships without auto-update.** No release so far (v0.0.2 through
+> v0.0.5) has a `latest.json`. `src-tauri/tauri.conf.json` has **no
+> `plugins.updater`** section and no updater public key, and it sets
+> `bundle.createUpdaterArtifacts: false`. `tauri-plugin-updater` is not a
+> dependency, so nothing in the app checks for updates. People update by
+> downloading and installing a newer release.
 
-### Enabling auto-update (later release)
+`scripts/verify-package.mjs` holds this as a release decision (issue #356). It
+fails the release, before any build, if `plugins.updater` exists, if
+`createUpdaterArtifacts` is anything but `false`, or if `src-tauri/Cargo.toml`
+depends on `tauri-plugin-updater`. Setting `createUpdaterArtifacts` to `true`
+without the plugin configured also makes `tauri build` fail with:
 
-When you are ready to ship auto-update, do this once and the release workflow
-picks it up automatically:
+```
+failed to build bundler settings: failed to get updater configuration:
+plugins > updater doesn't exist
+```
 
-1. **Generate the updater keypair:**
+Because of this, the release workflow produces **no `.sig` files and no
+`latest.json`**, and it does **not** fail on their absence: the updater
+manifest step skips with a `::notice::` when no updater artifacts exist.
+
+### Enabling auto-update
+
+There is no updater to switch on. Adding one is a code change, reviewed in one
+pull request, not a configuration flip:
+
+1. **Change the no-updater decision.** Update the updater checks and the
+   capability allowlist in `scripts/verify-package.mjs`, and their tests in
+   `src/verify-package.test.ts`.
+
+2. **Add the plugin.** Add `tauri-plugin-updater` to `src-tauri/Cargo.toml`,
+   register it in the app, grant its permission in the main window's
+   capability, and call its update check from the app.
+
+3. **Generate the updater keypair:**
 
    ```bash
    corepack pnpm tauri signer generate -w ~/.tauri/opencoven-chat-updater.key
@@ -342,15 +371,15 @@ picks it up automatically:
    This prints a **public key** and writes the **private key** to the path
    given (with a passphrase you choose).
 
-2. **Add the updater plugin to `src-tauri/tauri.conf.json`** with the public
-   key and the release feed endpoint (this is what makes the config exist so
-   the bundler stops failing):
+4. **Configure the updater in `src-tauri/tauri.conf.json`.** Add the plugin
+   section with the public key and the release feed endpoint, and set
+   `bundle.createUpdaterArtifacts` to `true`:
 
    ```jsonc
    {
      "plugins": {
        "updater": {
-         "pubkey": "<PUBLIC KEY FROM STEP 1>",
+         "pubkey": "<PUBLIC KEY FROM STEP 3>",
          "endpoints": [
            "https://github.com/OpenCoven/chat/releases/latest/download/latest.json"
          ]
@@ -359,16 +388,25 @@ picks it up automatically:
    }
    ```
 
-3. **Flip `bundle.createUpdaterArtifacts` to `true`** in
-   `src-tauri/tauri.conf.json`.
+   > **Note:** GitHub's `releases/latest` skips pre-releases, and every `0.*`
+   > release is published as one (§ 1, step 8). Until a release is not a
+   > pre-release, this endpoint returns 404.
 
-4. **Store the private key** as the `TAURI_SIGNING_PRIVATE_KEY` secret and its
+5. **Store the private key** as the `TAURI_SIGNING_PRIVATE_KEY` secret and its
    passphrase as `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`, both in the
    `release-signing` environment.
 
-After that, `tauri build` emits `.app.tar.gz` / `.nsis.zip` / `.AppImage.tar.gz`
-archives plus `.sig` files, the release workflow assembles `latest.json` from
-them, and clients begin auto-updating.
+6. **Rehearse with a [dry run](#dry-run-rehearsal)** before you tag.
+
+> **Warning:** the workflow's updater steps have never run on a real release.
+> The build's staging step and the `latest.json` step look for zipped archives
+> (`.app.tar.gz`, `.msi.zip`, `.nsis.zip`, `.AppImage.tar.gz`) and their `.sig`
+> files. Tauri v2 zips the Windows and Linux updaters only when
+> `createUpdaterArtifacts` is `"v1Compatible"`. With `true`, it signs the
+> installers themselves. `scripts/release-smoke.mjs` treats the updater as on
+> only when the value is `true`. Expect to change `release.yml` and the smoke
+> test in the same pull request, and check what the dry run built before you
+> tag.
 
 Keep the private key offline and backed up. If it is lost, existing installs
 can no longer verify updates and must be reinstalled from a fresh release built
@@ -390,10 +428,11 @@ has the space.
 
 Per release, the workflow publishes:
 
-- **macOS**: `OpenCoven Chat.app` (packaged) + `.dmg` for `aarch64` and
-  `x86_64`. The app and the image are each signed, notarized and stapled. The Intel
-  target runs natively on GitHub's `macos-15-intel` runner rather than
-  cross-compiling on Apple silicon.
+- **macOS**: a `.dmg` for `aarch64` (`_aarch64.dmg`) and one for `x86_64`
+  (`_x64.dmg`). The image and the app inside it are each signed, notarized and
+  stapled. The `.app` is not a separate asset. The Intel target runs natively
+  on GitHub's `macos-15-intel` runner rather than cross-compiling on Apple
+  silicon.
 - **Windows**: `.msi` (WiX, `_x64_en-US`) and NSIS `.exe` (`_x64-setup`) for
   `x86_64`, built on `windows-2025`. Unsigned until #411 is settled; the build
   job reads the product name and version back from both installers and
@@ -401,9 +440,9 @@ Per release, the workflow publishes:
   is configured).
 - **Linux**: `.AppImage` and `.deb` for `x86_64`.
 - **`SHA256SUMS`**: checksums for every asset. Verify with
-  `shasum -a 256 -c SHA256SUMS`.
-- **`latest.json`**: the Tauri updater manifest — **only when auto-update is
-  enabled** (see §4). Absent for v0.0.2.
+  `shasum -a 256 -c --ignore-missing SHA256SUMS` (§ 1, step 9).
+- **`latest.json`**: the Tauri updater manifest, **only when auto-update is
+  enabled** (see § 4). Absent from every release so far.
 
 ---
 
@@ -418,8 +457,8 @@ this order.
 This is the most urgent step, because the updater is the only channel that
 pushes a bad build to users who did nothing.
 
-> **Not applicable to v0.0.2**, which ships without auto-update (no
-> `latest.json`; see §4). If auto-update is still disabled, skip to §6.2.
+> **Note:** no release so far has auto-update or a `latest.json` (see § 4).
+> While Chat has no updater, skip to § 6.2.
 
 1. **Delete the bad release's `latest.json` asset.** This stops new clients
    from fetching that manifest, although caches and clients that already read
@@ -430,25 +469,30 @@ pushes a bad build to users who did nothing.
 
 ### 6.2 Mark the bad GitHub Release
 
+> **Warning:** the commands in § 6.2 and § 6.3 act on `$VERSION`. Set it to the
+> bad release's tag first (`VERSION=v<bad version>`), and check it with
+> `echo "$VERSION"` before you run anything here. A value left over from an
+> earlier release withdraws or deletes the wrong one.
+
 ```bash
 # Convert the release to a draft so it disappears from the Releases page:
-gh release edit v0.0.2 --draft
+gh release edit "$VERSION" --draft
 
 # or delete the release (keeps the tag unless you also delete it):
-gh release delete v0.0.2 --yes
+gh release delete "$VERSION" --yes
 ```
 
 If you delete the release but keep the tag, the tag can still be referenced;
 prefer marking it clearly:
 
 ```bash
-gh release edit v0.0.2 --prerelease --title "OpenCoven Chat v0.0.2 (WITHDRAWN — do not use)"
+gh release edit "$VERSION" --prerelease --title "OpenCoven Chat $VERSION (WITHDRAWN: do not use)"
 ```
 
 ### 6.3 Delete or supersede the tag
 
 **Preferred: supersede.** Do not reuse a version number. Fix the defect, bump
-to the next patch (e.g. `v0.0.3`), and cut a fresh signed release. Re-releasing
+to the next patch version, and cut a fresh signed release. Re-releasing
 under the same tag breaks anyone who already has the old artifacts and
 checksums.
 
@@ -457,9 +501,9 @@ were distributed):
 
 ```bash
 # delete the remote tag
-git push --delete origin v0.0.2
+git push --delete origin "$VERSION"
 # delete it locally
-git tag -d v0.0.2
+git tag -d "$VERSION"
 ```
 
 Deleting a tag that people may have already fetched is disruptive; only do it

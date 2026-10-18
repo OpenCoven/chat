@@ -1,11 +1,18 @@
 # Standalone QueryAdapter design
 
-Status: **implemented in PR #61; the code it describes (`src/app.tsx`, `src/chat-shell.tsx`, `src/lib/local/`) was retired once the Coven CLI chat became the only mounted surface.** Kept as design history only.
+Status (2026-10-18): **historical.** Implemented in PR #61 (2026-09-04). The code it
+describes (`src/app.tsx`, `src/chat-shell.tsx`, `src/lib/local/`) was removed in
+`036f1905` (2026-09-20), once the Coven CLI chat became the only mounted surface. Kept
+as design history only.
 Target: `v0.0.1`, release blocker "standalone chat, Cave optional"
 Author lane: Kitty (coordination)
 
-This document preserves the pre-implementation design rationale. The shipped
-code is authoritative where implementation details evolved:
+> **Superseded:** §8's IndexedDB store conflicts with `SECURITY.md`, which says Chat does
+> not persist conversation bodies in IndexedDB, `localStorage`, or `sessionStorage`. Do
+> not revive it.
+
+This document preserves the pre-implementation design rationale. Before its
+removal, the shipped code differed from this design in these ways:
 
 - the local adapter reads directly from the store's hydrated in-memory index
   rather than adding the remote adapter's TTL/cache layer;

@@ -1,8 +1,14 @@
 # Bounded Windows supervisor source
 
-The workflow uses the bounded source block. SDK producer rebinding and fresh
-protected validation remain deployment gates. Native Windows verification of profile-root alignment and protected
-three-platform acceptance remain open.
+> **Status (2026-10-18):** The deployment gates this page lists were met. Protected runs
+> 36033589858 (2026-09-24) and 36222464391 (2026-09-26) passed native Windows and
+> three-platform acceptance with the bounded block. The supervisor C# has changed since
+> then (`24eed8f3` on 2026-10-13, `01332b0c` on 2026-10-14), and no protected run has used
+> the current source. Today the C# is 402,329 bytes and the workflow is 183,220 bytes.
+> Where the text below says a gate "remains" or verification is "required", it describes
+> the page's last edit on 2026-09-12.
+
+The workflow uses the bounded source block.
 
 At the compression checkpoint, the inline form occupied 511,778 bytes of GitHub's 512,000-byte workflow
 allowance. The initial bounded form occupied 161,836 bytes and retained the same 329,668
@@ -13,8 +19,9 @@ recovers space for the profile lifecycle and shared quota repair. The canonical 
 The renderer uses level-9 gzip with a zero timestamp and a platform-neutral OS
 header byte. Generate and verify with the reviewed Node 24.18.1 toolchain and its
 matching zlib implementation. Exact canonical verification intentionally rejects
-alternate compressor output. Cross-platform CI must verify this property before
-protected deployment; normalizing the header alone is not that proof.
+alternate compressor output. Windows CI verifies this property by running
+`src/windows-supervisor-source.test.ts` in the `Windows supervisor behavior` job;
+normalizing the header alone is not that proof.
 
 The PowerShell block checks compressed length and SHA-256 before decompression,
 then reads into an allocation bounded by the reviewed source size. It rejects a
@@ -28,7 +35,7 @@ re-rendering of the entire block. That comparison rejects changed decoder code,
 extra statements, alternate gzip encodings, trailing padding and concatenated
 streams. Runtime hash literals are not an independent source of authority.
 
-## Verification and remaining deployment gates
+## Verification and deployment gates
 
 - Chat workflow tests extract exactly one block and bind its source identity to
   the unchanged canonical C# blob; existing frozen source checks remain in place.
@@ -47,7 +54,7 @@ streams. Runtime hash literals are not an independent source of authority.
 
 Chat #249 moved fixtures beneath a predicted profile path without adding that
 subtree to the shared aggregates. The lifecycle and accounting repairs below
-require native verification before this producer is dispatched.
+required native verification before this producer was dispatched.
 
 ## Owned profile lifecycle repair
 
@@ -74,8 +81,9 @@ The producer no longer recursively removes the pinned application directory.
 The prior 30-second native readiness and 40-second RPC deadlines are restored.
 The previous unknown failure did not establish a need to increase them.
 
-These changes require native Windows verification, actual-merge SDK rebinding,
-and fresh protected validation. Local compilation and arithmetic tests alone do
+These changes required native Windows verification, actual-merge SDK rebinding,
+and fresh protected validation. All three were done before protected run
+36033589858 passed on 2026-09-24. Local compilation and arithmetic tests alone do
 not establish the filesystem, ACL, quarantine or three-platform guarantees.
 
 Retained profile and application handles request directory-list access in addition
@@ -83,4 +91,6 @@ to metadata reads. Metadata-only handles do not activate Windows delete-sharing
 checks, even when FILE_SHARE_DELETE is omitted. The native fixture compares both
 access modes and requires a sharing violation from the retained-profile opener;
 its existing profile/application replacement checks remain mandatory. See the
-[Microsoft sharing algorithm](https://learn.microsoft.com/en-us/openspecs/windows_protocols/ms-fsa/82b364ce-6d7b-422f-8d88-4db32eea809a). Native acceptance of this correction remains pending.
+[Microsoft sharing algorithm](https://learn.microsoft.com/en-us/openspecs/windows_protocols/ms-fsa/82b364ce-6d7b-422f-8d88-4db32eea809a).
+Native acceptance of this correction was pending at the time. The protected lane
+has since passed on Windows, first in run 36033589858 on 2026-09-24.

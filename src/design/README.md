@@ -5,10 +5,11 @@ here is optional.
 
 They once lived in a directory named `demo`, which was untrue in a way that
 nearly cost someone real work: `src/coven/chat-layout.tsx` imports
-`familiars-shell.css`, and that stylesheet is the **only** definition site for
-the app's design tokens — borders, accent colours, danger/warning/success,
-focus rings, durations, easing — plus the ~525 `.fr-*` classes the shipped
-layout is built from. Deleting it would have removed the app's entire visual
+`familiars-shell.css`, and that stylesheet defines most of the app's design
+tokens (borders, accent colours, danger/warning/success, focus rings,
+durations, easing) plus the ~380 `.fr-*` classes the shipped layout is built
+from. `src/styles.css`, `src/coven/chat-app.css`, and `src/ui/ui.css` define a
+few more tokens. Deleting it would have removed most of the app's visual
 language while the type checker reported that everything was fine. The demo
 shell itself has since been deleted; these files stayed because the app is
 built from them.
@@ -16,8 +17,8 @@ built from them.
 | File | What depends on it |
 | --- | --- |
 | `familiars-shell.css` | `src/coven/chat-layout.tsx` — tokens + `.fr-*` |
-| `familiars-ui.tsx` | `chat-layout.tsx`, `familiar-avatar.tsx` — `cx`, primitives |
-| `minimal-icons.tsx` | `chat-layout.tsx` and all of `src/ui/` — `Icon` |
+| `familiars-ui.tsx` | `src/coven/` (6 files), `src/onboarding/`: `cx`, primitives |
+| `minimal-icons.tsx` | `src/coven/` (5 files), `src/onboarding/`, `src/ui/` (3 files): `Icon` |
 
 ## The rule
 
