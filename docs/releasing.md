@@ -345,28 +345,46 @@ adds an independent local SSH check.
 
 Certificate authorities stopped issuing code-signing certificates as exportable
 `.pfx` files in June 2023. The private key now stays in a hardware token or a
-cloud HSM, so in practice Windows signing goes through a service (#411). The
-build job supports two ways, and refuses a configuration that sets both:
+cloud HSM, so Windows signing goes through a service (#411). Val chose **SSL.com
+eSigner** on 2026-10-18. The account is not set up yet, so the installers still
+ship unsigned. The build job supports two ways, and refuses a configuration that
+sets both:
 
-1. **A `.pfx`**: `WINDOWS_CERTIFICATE` and `WINDOWS_CERTIFICATE_PASSWORD`. The
+1. **eSigner**: all four `ES_*` secrets. The build downloads SSL.com's
+   CodeSignTool, pinned by version and SHA-256, and runs it on the runner's Java
+   21. It also writes a small wrapper that Tauri runs, as
+   `bundle.windows.signCommand`, on every file it signs: the app executable as
+   well as both installers. The wrapper fails if CodeSignTool's output reports
+   an error, even when its exit code is 0.
+2. **A `.pfx`**: `WINDOWS_CERTIFICATE` and `WINDOWS_CERTIFICATE_PASSWORD`. The
    certificate is imported into the runner's store, and Tauri signs with it
    through `signtool`.
-2. **A sign command**: the `WINDOWS_SIGN_COMMAND` *variable*, not a secret,
-   because it names a tool and an account rather than a credential. Tauri runs
-   it as `bundle.windows.signCommand` on every file it signs, replacing `%1`
-   with the file's path. A command without `%1` is refused. The route's
-   credentials are secrets, added by name to the `Build installers` step's
-   `env`, because `tauri build` runs the command. If one is missing, the
-   bundle fails rather than producing an unsigned installer.
 
-Either way, set `WINDOWS_PUBLISHER` to the name on the certificate. The build
-then checks that every installer has a `Valid` Authenticode signature from that
-publisher. With neither way configured, the installers ship unsigned and the
-release notes say so.
+A partial set of either way's secrets fails the build rather than shipping
+unsigned. Either way, set `WINDOWS_PUBLISHER` to the name on the certificate,
+`Soul Protocol LLC` for eSigner. The build then checks that every installer has
+a `Valid` Authenticode signature from that publisher. With neither way
+configured, the installers ship unsigned and the release notes say so.
 
-Before the first signed release, rehearse: dispatch the workflow from `main`
-against an existing tag with `dry_run=true`, and check the Windows job's log
-for `ok: … is signed by …` on both installers.
+**Setting up eSigner (once the OV certificate is issued):**
+
+1. In the SSL.com account, enroll the certificate in eSigner for **automated
+   signing**. The enrollment shows a QR code and its base32 secret. Store that
+   secret as `ES_TOTP_SECRET`, not in an authenticator app.
+2. Find the credential ID, under the certificate's eSigner details or with
+   CodeSignTool's `get_credential_ids`, and store it as `ES_CREDENTIAL_ID`.
+3. Store the account's username and password as `ES_USERNAME` and
+   `ES_PASSWORD`, and set the `WINDOWS_PUBLISHER` variable.
+4. Rehearse: dispatch the workflow from `main` against an existing tag with
+   `dry_run=true`, and check the Windows job's log for `ok: … is signed by …`
+   on both installers.
+5. Then add the four `ES_*` names to `verify-tag`'s required list, so a missing
+   one refuses a release instead of shipping unsigned.
+
+Each signing uses one of the account's eSigner signings: three or more per
+release (the app executable and both installers). Certificates now last at most
+460 days, so expect to renew yearly. eSigner keeps the same credential ID across
+a renewal, but check it.
 
 ---
 

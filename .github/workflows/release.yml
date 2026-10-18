@@ -176,7 +176,9 @@ jobs:
       # a signing route, since certificate authorities no longer issue the
       # exportable .pfx this path expects). The build job signs the Windows
       # installers whenever both secrets are present and says plainly when
-      # they are not. Add them to this list once a route is chosen.
+      # they are not. The eSigner route was chosen on 2026-10-18; add its four
+      # ES_* secrets to this list once the account exists, so a missing one
+      # refuses the release instead of shipping unsigned.
       - name: Require signing material
         shell: bash
         env:
@@ -494,7 +496,10 @@ jobs:
           APPLE_API_KEY_BASE64: ${{ secrets.APPLE_API_KEY_BASE64 }}
           WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}
           WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
-          WINDOWS_SIGN_COMMAND: ${{ vars.WINDOWS_SIGN_COMMAND }}
+          ES_USERNAME: ${{ secrets.ES_USERNAME }}
+          ES_PASSWORD: ${{ secrets.ES_PASSWORD }}
+          ES_CREDENTIAL_ID: ${{ secrets.ES_CREDENTIAL_ID }}
+          ES_TOTP_SECRET: ${{ secrets.ES_TOTP_SECRET }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
         run: |
           set -euo pipefail
@@ -521,34 +526,27 @@ jobs:
           fi
           echo "notary=${notary}" >> "$GITHUB_OUTPUT"
           echo "macOS notarization credentials: ${notary}"
-          # Windows signs one of two ways (#411). Either a .pfx in
-          # WINDOWS_CERTIFICATE with its password, imported into the runner's
-          # store, or a sign command. Certificate authorities now keep
-          # code-signing keys in a hardware or cloud HSM and issue no .pfx, so
-          # every route #411 weighs signs through a service: Tauri runs
-          # bundle.windows.signCommand on each file it signs, with %1 standing
-          # for the file. The command is the release-signing environment's
-          # WINDOWS_SIGN_COMMAND variable. The credentials it reads are secrets
-          # that the route adds to `Build installers`. Missing ones fail the
-          # bundle, and `Verify Windows installer metadata and signatures`
+          # Windows signs one of two ways (#411). Val chose SSL.com eSigner on
+          # 2026-10-18: the certificate's key stays in SSL.com's cloud HSM, and
+          # Tauri runs a CodeSignTool wrapper on every file it signs (see
+          # `Install SSL.com CodeSignTool`). The four ES_* secrets choose it.
+          # A .pfx in WINDOWS_CERTIFICATE with its password, imported into the
+          # runner's store, stays for a certificate that can be exported.
+          # Either way `Verify Windows installer metadata and signatures`
           # requires a valid signature from WINDOWS_PUBLISHER.
+          es_set=0
+          for name in ES_USERNAME ES_PASSWORD ES_CREDENTIAL_ID ES_TOTP_SECRET; do
+            if [ -n "${!name:-}" ]; then es_set=$((es_set + 1)); fi
+          done
           if [ -n "${WINDOWS_CERTIFICATE:-}" ] && [ -n "${WINDOWS_CERTIFICATE_PASSWORD:-}" ]; then
             windows_route=pfx
           fi
-          if [ -n "${WINDOWS_SIGN_COMMAND:-}" ]; then
+          if [ "${es_set}" -eq 4 ]; then
             if [ "${windows_route}" = "pfx" ] && [ "${{ runner.os }}" = "Windows" ]; then
-              echo "::error::Both a .pfx (WINDOWS_CERTIFICATE) and WINDOWS_SIGN_COMMAND are configured. Keep the one for the signing route in use and remove the other."
+              echo "::error::Both a .pfx (WINDOWS_CERTIFICATE) and the eSigner secrets (ES_*) are configured. Keep the ones for the signing route in use and remove the others."
               exit 1
             fi
-            case "${WINDOWS_SIGN_COMMAND}" in
-              *%1*) windows_route="command" ;;
-              *)
-                if [ "${{ runner.os }}" = "Windows" ]; then
-                  echo "::error::WINDOWS_SIGN_COMMAND has no %1. Tauri replaces %1 with the file to sign, so a command without it signs nothing."
-                  exit 1
-                fi
-                ;;
-            esac
+            windows_route=esigner
           fi
           [ "${windows_route}" != "none" ] && windows_signed=true
           [ -n "${TAURI_SIGNING_PRIVATE_KEY:-}" ] && updater_signed=true
@@ -565,15 +563,20 @@ jobs:
           fi
           # Windows is the one platform that may build unsigned on the
           # production path (decided 2026-10-14; see the matrix comment and
-          # #411). A half-set of the two secrets is still refused there: that
-          # is not a decision, it is a typo.
+          # #411). A half-set of either route's secrets is still refused there:
+          # that is not a decision, it is a typo.
+          if [ "${{ runner.os }}" = "Windows" ] && [ "${es_set}" -gt 0 ] && [ "${es_set}" -lt 4 ] &&
+             [ "${ALLOW_UNSIGNED:-false}" != "true" ]; then
+            echo "::error::Only ${es_set} of the four eSigner secrets (ES_USERNAME, ES_PASSWORD, ES_CREDENTIAL_ID, ES_TOTP_SECRET) are set. Set all four to sign through eSigner, or none to build unsigned."
+            exit 1
+          fi
           if [ "${{ runner.os }}" = "Windows" ] && [ "${windows_signed}" = "false" ]; then
             if { [ -n "${WINDOWS_CERTIFICATE:-}" ] || [ -n "${WINDOWS_CERTIFICATE_PASSWORD:-}" ]; } &&
                [ "${ALLOW_UNSIGNED:-false}" != "true" ]; then
               echo "::error::Only one of WINDOWS_CERTIFICATE and WINDOWS_CERTIFICATE_PASSWORD is set. Set both to sign the Windows installers, or neither to build them unsigned."
               exit 1
             fi
-            echo "::warning::Neither WINDOWS_CERTIFICATE nor WINDOWS_SIGN_COMMAND is configured; the Windows installers in this release are UNSIGNED and Windows SmartScreen will warn before they run. #411 tracks a signing route."
+            echo "::warning::Neither the eSigner secrets nor WINDOWS_CERTIFICATE are configured; the Windows installers in this release are UNSIGNED and Windows SmartScreen will warn before they run. #411 tracks a signing route."
           fi
           if [ "${updater_signed}" = "false" ]; then
             echo "::notice::TAURI_SIGNING_PRIVATE_KEY is not set; updater artifacts and latest.json are not produced. Auto-update is opt-in and currently disabled (no plugins.updater / createUpdaterArtifacts:false). See docs/releasing.md."
@@ -610,21 +613,81 @@ jobs:
           "WINDOWS_CERTIFICATE_THUMBPRINT=$($cert.Thumbprint)" |
             Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
 
+      # eSigner (#411): CodeSignTool is SSL.com's signing client. Its generic
+      # build is pinned by version and SHA-256 and runs on the runner's Java
+      # 21; SSL.com's Windows build only adds a bundled JDK. The wrapper Tauri
+      # calls is written here, not kept in the repository, so a dispatch
+      # against an older tag signs the same way.
+      - name: Install SSL.com CodeSignTool
+        if: runner.os == 'Windows' && steps.signing.outputs.windows_route == 'esigner'
+        shell: pwsh
+        env:
+          CODESIGNTOOL_URL: https://github.com/SSLcom/CodeSignTool/releases/download/v1.3.2/CodeSignTool-v1.3.2.zip
+          CODESIGNTOOL_SHA256: f14b1e1ef14bfa1fd00279c363aab0debbf5dcfba0e4bcdce5d22bb771de0e3a
+        run: |
+          Set-StrictMode -Version Latest
+          $ErrorActionPreference = 'Stop'
+          if (-not $env:JAVA_HOME_21_X64) {
+            throw 'This runner image has no Java 21 (JAVA_HOME_21_X64), which CodeSignTool needs.'
+          }
+          $zip = Join-Path $env:RUNNER_TEMP 'CodeSignTool.zip'
+          Invoke-WebRequest -Uri $env:CODESIGNTOOL_URL -OutFile $zip
+          $hash = (Get-FileHash -Algorithm SHA256 -Path $zip).Hash.ToLowerInvariant()
+          if ($hash -ne $env:CODESIGNTOOL_SHA256) {
+            throw "The CodeSignTool download has SHA-256 $hash, expected $env:CODESIGNTOOL_SHA256."
+          }
+          $tool = Join-Path $env:RUNNER_TEMP 'CodeSignTool'
+          Expand-Archive -Path $zip -DestinationPath $tool -Force
+          Remove-Item $zip -Force
+          if (-not (Test-Path (Join-Path $tool 'jar\code_sign_tool-1.3.2.jar'))) {
+            throw 'The CodeSignTool archive has no jar\code_sign_tool-1.3.2.jar.'
+          }
+          $wrapper = Join-Path $env:RUNNER_TEMP 'esigner-sign.ps1'
+          @'
+          param([Parameter(Mandatory = $true)][string] $File)
+          $ErrorActionPreference = 'Stop'
+          $java = Join-Path $env:JAVA_HOME_21_X64 'bin\java.exe'
+          $jar = Join-Path $env:CODE_SIGN_TOOL_PATH 'jar\code_sign_tool-1.3.2.jar'
+          # CodeSignTool reads conf\code_sign_tool.properties from its own folder.
+          Push-Location $env:CODE_SIGN_TOOL_PATH
+          try {
+            $output = & $java -jar $jar sign "-username=$env:ES_USERNAME" "-password=$env:ES_PASSWORD" `
+              "-credential_id=$env:ES_CREDENTIAL_ID" "-totp_secret=$env:ES_TOTP_SECRET" `
+              "-input_file_path=$File" '-override=true' 2>&1 | Out-String
+            $code = $LASTEXITCODE
+          } finally {
+            Pop-Location
+          }
+          Write-Host $output
+          # CodeSignTool can exit 0 after a failure, so its output is checked
+          # too, the way SSL.com's own esigner-codesign action does.
+          if ($code -ne 0 -or $output -match 'Error|Exception|Missing required option|Unmatched argument') {
+            throw "CodeSignTool could not sign $File."
+          }
+          '@ | Set-Content -Path $wrapper -Encoding utf8
+          "CODE_SIGN_TOOL_PATH=$tool" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          "ESIGNER_WRAPPER=$wrapper" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
       - name: Configure Tauri Windows signing
         if: runner.os == 'Windows' && steps.signing.outputs.windows_signed == 'true'
         shell: bash
         env:
           WINDOWS_ROUTE: ${{ steps.signing.outputs.windows_route }}
-          WINDOWS_SIGN_COMMAND: ${{ vars.WINDOWS_SIGN_COMMAND }}
         run: |
           set -euo pipefail
           node <<'EOF'
           const fs = require('node:fs');
-          // A sign command does its own digest and timestamp; the .pfx path
-          // tells signtool which certificate in the store to use.
+          // eSigner signs, digests and timestamps through the wrapper; the
+          // object form keeps a path with spaces in one argument. The .pfx
+          // path tells signtool which certificate in the store to use.
           const windows =
-            process.env.WINDOWS_ROUTE === 'command'
-              ? { signCommand: process.env.WINDOWS_SIGN_COMMAND }
+            process.env.WINDOWS_ROUTE === 'esigner'
+              ? {
+                  signCommand: {
+                    cmd: 'pwsh',
+                    args: ['-NoProfile', '-NonInteractive', '-File', process.env.ESIGNER_WRAPPER, '%1'],
+                  },
+                }
               : {
                   certificateThumbprint: process.env.WINDOWS_CERTIFICATE_THUMBPRINT,
                   digestAlgorithm: 'sha256',
@@ -657,8 +720,13 @@ jobs:
           NOTARY: ${{ steps.signing.outputs.notary }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
-          # WINDOWS_SIGN_COMMAND runs inside `tauri build`, so the credentials
-          # of the chosen signing route (#411) are passed here, by name.
+          # Tauri runs the eSigner wrapper inside `tauri build`, so its
+          # credentials are passed here (#411). They are empty, and unused, on
+          # the .pfx route and on unsigned builds.
+          ES_USERNAME: ${{ secrets.ES_USERNAME }}
+          ES_PASSWORD: ${{ secrets.ES_PASSWORD }}
+          ES_CREDENTIAL_ID: ${{ secrets.ES_CREDENTIAL_ID }}
+          ES_TOTP_SECRET: ${{ secrets.ES_TOTP_SECRET }}
         run: |
           set -euo pipefail
 
@@ -777,7 +845,7 @@ jobs:
       - name: Remove Windows signing overlay
         if: always() && runner.os == 'Windows'
         shell: bash
-        run: rm -f src-tauri/release-signing.conf.json
+        run: rm -rf src-tauri/release-signing.conf.json "${RUNNER_TEMP}/CodeSignTool" "${RUNNER_TEMP}/esigner-sign.ps1"
 
       # Collect the produced installers into a flat, predictably named staging
       # directory and fail loudly if a platform produced nothing.
