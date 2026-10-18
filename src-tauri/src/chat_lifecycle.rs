@@ -1,5 +1,5 @@
 use std::{
-    collections::BTreeMap,
+    collections::{BTreeMap, HashSet},
     fs::{self, File, OpenOptions},
     io::{Read, Write},
     path::Path,
@@ -105,14 +105,66 @@ pub(crate) fn change(data: &Path, id: &str, next: Lifecycle) -> Result<(), Strin
     persist(data, "chat-lifecycle-v1.json", &bytes)?;
     if next == Lifecycle::Deleted {
         // Commit the tombstone before cleanup; imported files are never touched.
-        let path = crate::coven_runtime::transcripts_dir(data, false)?.join(format!("{id}.jsonl"));
-        match fs::remove_file(path) {
+        remove_transcripts(data, id)?;
+    }
+    Ok(())
+}
+
+/// Removes a deleted chat's saved transcripts. Chat saves one transcript per
+/// message, so the chat is its own session plus every earlier session it
+/// continues. Sessions another current chat continues are kept. Ancestors go
+/// oldest first and the chat's own transcript last: if a removal fails, what
+/// remains is still reachable from the chat, so retrying Delete finishes it.
+fn remove_transcripts(data: &Path, id: &str) -> Result<(), String> {
+    let directory = crate::coven_runtime::transcripts_dir(data, false)?;
+    for session in removal_order(data, id)? {
+        match fs::remove_file(directory.join(format!("{session}.jsonl"))) {
             Ok(()) => {}
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
             Err(_) => return Err("Chat is hidden permanently, but its local copy could not be removed. Retry Delete to finish cleanup.".into()),
         }
     }
     Ok(())
+}
+
+fn removal_order(data: &Path, id: &str) -> Result<Vec<String>, String> {
+    let mut kept = HashSet::new();
+    for head in crate::chat_canonical::load(data)?.into_values().flatten() {
+        if head != id {
+            kept.extend(lineage(data, &head));
+        }
+    }
+    let mut order: Vec<String> = lineage(data, id)
+        .into_iter()
+        .rev()
+        .filter(|session| session != id && !kept.contains(session))
+        .collect();
+    order.push(id.to_owned());
+    Ok(order)
+}
+
+/// Session `id` followed by each session it continues, newest first, through
+/// the parent Chat records in each transcript. The walk ends at a session Chat
+/// did not create, a transcript it cannot read, an invalid parent, or a cycle.
+fn lineage(data: &Path, id: &str) -> Vec<String> {
+    let mut chain = Vec::new();
+    let mut seen = HashSet::new();
+    let mut next = Some(id.to_owned());
+    while let Some(session) = next.take() {
+        if !seen.insert(session.clone()) {
+            break;
+        }
+        let Ok(Some(input)) = crate::chat_origin::captured_input(data, &session) else {
+            break;
+        };
+        chain.push(session);
+        next = input
+            .get("parent_session_id")
+            .and_then(serde_json::Value::as_str)
+            .filter(|parent| crate::coven_runtime::validate_id(parent).is_ok())
+            .map(str::to_owned);
+    }
+    chain
 }
 
 pub(crate) fn persist(data: &Path, name: &str, bytes: &[u8]) -> Result<(), String> {
@@ -186,6 +238,107 @@ mod tests {
         fs::remove_file(data.join("chat-lifecycle-v1.json")).unwrap();
         fs::remove_dir(transcripts).unwrap();
         fs::remove_dir(data).unwrap();
+    }
+
+    /// Writes a transcript the way a Chat run does: the engine's init event,
+    /// then Chat's captured input naming the turn it continues.
+    fn write_turn(transcripts: &Path, id: &str, parent: Option<&str>) {
+        let lines = [
+            json!({"type":"system","subtype":"init","session_id":id}),
+            json!({"type":"user","source":"chat-input","session_id":id,"parent_session_id":parent}),
+        ];
+        let text = lines.map(|line| line.to_string()).join("\n");
+        fs::write(transcripts.join(format!("{id}.jsonl")), text).unwrap();
+    }
+
+    #[test]
+    fn delete_removes_every_transcript_the_chat_continues() {
+        let data = std::env::temp_dir().join(uuid::Uuid::new_v4().to_string());
+        let transcripts = data.join("coven-transcripts");
+        fs::create_dir_all(&transcripts).unwrap();
+        write_turn(&transcripts, "first", None);
+        write_turn(&transcripts, "second", Some("first"));
+        write_turn(&transcripts, "third", Some("second"));
+        change(&data, "third", Lifecycle::Deleted).unwrap();
+        for id in ["first", "second", "third"] {
+            assert!(
+                !transcripts.join(format!("{id}.jsonl")).exists(),
+                "{id} must not outlive its deleted chat"
+            );
+        }
+        fs::remove_dir_all(data).unwrap();
+    }
+
+    #[test]
+    fn delete_removes_the_oldest_transcripts_first_so_a_retry_can_finish() {
+        let data = std::env::temp_dir().join(uuid::Uuid::new_v4().to_string());
+        let transcripts = data.join("coven-transcripts");
+        fs::create_dir_all(&transcripts).unwrap();
+        write_turn(&transcripts, "first", None);
+        write_turn(&transcripts, "second", Some("first"));
+        write_turn(&transcripts, "third", Some("second"));
+        assert_eq!(
+            removal_order(&data, "third").unwrap(),
+            ["first", "second", "third"]
+        );
+        // After a removal fails part way, the rest is still reachable.
+        fs::remove_file(transcripts.join("first.jsonl")).unwrap();
+        assert_eq!(removal_order(&data, "third").unwrap(), ["second", "third"]);
+        fs::remove_dir_all(data).unwrap();
+    }
+
+    #[test]
+    fn delete_keeps_transcripts_the_chat_does_not_own() {
+        let data = std::env::temp_dir().join(uuid::Uuid::new_v4().to_string());
+        let transcripts = data.join("coven-transcripts");
+        fs::create_dir_all(&transcripts).unwrap();
+        // A session Chat did not create is never touched, even as an ancestor.
+        let external = transcripts.join("external.jsonl");
+        fs::write(
+            &external,
+            json!({"type":"user","source":"cli","session_id":"external"}).to_string(),
+        )
+        .unwrap();
+        write_turn(&transcripts, "continued", Some("external"));
+        write_turn(&transcripts, "mine", Some("continued"));
+        // A turn another familiar's current chat continues stays with that chat.
+        write_turn(&transcripts, "shared", None);
+        write_turn(&transcripts, "ours", Some("shared"));
+        write_turn(&transcripts, "theirs", Some("shared"));
+        fs::write(
+            data.join("chat-canonical-v1.json"),
+            json!({"f1":"ours","f2":"theirs"}).to_string(),
+        )
+        .unwrap();
+        // A parent identifier that would leave the directory is not followed.
+        write_turn(&transcripts, "escape", Some("../outside"));
+        let outside = data.join("outside.jsonl");
+        fs::write(&outside, "keep").unwrap();
+        // A lineage cycle ends the walk instead of looping.
+        write_turn(&transcripts, "loop-a", Some("loop-b"));
+        write_turn(&transcripts, "loop-b", Some("loop-a"));
+
+        change(&data, "mine", Lifecycle::Deleted).unwrap();
+        assert!(!transcripts.join("mine.jsonl").exists());
+        assert!(!transcripts.join("continued.jsonl").exists());
+        assert!(
+            external.exists(),
+            "Chat never deletes history it did not create"
+        );
+
+        change(&data, "ours", Lifecycle::Deleted).unwrap();
+        assert!(!transcripts.join("ours.jsonl").exists());
+        assert!(transcripts.join("shared.jsonl").exists());
+        assert!(transcripts.join("theirs.jsonl").exists());
+
+        change(&data, "escape", Lifecycle::Deleted).unwrap();
+        assert!(!transcripts.join("escape.jsonl").exists());
+        assert_eq!(fs::read_to_string(&outside).unwrap(), "keep");
+
+        change(&data, "loop-a", Lifecycle::Deleted).unwrap();
+        assert!(!transcripts.join("loop-a.jsonl").exists());
+        assert!(!transcripts.join("loop-b.jsonl").exists());
+        fs::remove_dir_all(data).unwrap();
     }
 
     #[cfg(unix)]
