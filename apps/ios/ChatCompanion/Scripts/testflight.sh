@@ -9,6 +9,13 @@
 # before the App Store Connect app record exists. CHAT_IOS_BUILD_NUMBER
 # overrides the build number, which defaults to the commit count of HEAD so
 # uploads from main always increase.
+#
+# CHAT_IOS_UNSIGNED_ARCHIVE=1 archives without signing and leaves all signing
+# to the export, which uses Apple's cloud-managed distribution certificate
+# through the API key. CI sets it: a fresh runner has no certificate, and an
+# automatically signed archive would mint a new development certificate on
+# every run. The app declares no entitlements of its own; the App Store
+# profile supplies the defaults at export.
 set -euo pipefail
 : "${APPLE_API_KEY:?Set APPLE_API_KEY to the App Store Connect API key ID.}"
 : "${APPLE_API_ISSUER:?Set APPLE_API_ISSUER to the App Store Connect API issuer ID.}"
@@ -18,6 +25,12 @@ destination="${CHAT_IOS_EXPORT:-upload}"
 if [[ "$destination" != upload && "$destination" != export ]]; then
   echo 'CHAT_IOS_EXPORT must be upload or export.' >&2; exit 1
 fi
+archive_signing=()
+case "${CHAT_IOS_UNSIGNED_ARCHIVE:-0}" in
+  0) ;;
+  1) archive_signing=(CODE_SIGNING_ALLOWED=NO) ;;
+  *) echo 'CHAT_IOS_UNSIGNED_ARCHIVE must be 0 or 1.' >&2; exit 1 ;;
+esac
 app_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 build_number="${CHAT_IOS_BUILD_NUMBER:-$(git -C "$app_dir" rev-list --count HEAD)}"
 work_dir="$(mktemp -d "${TMPDIR:-/tmp}/chat-companion-testflight.XXXXXX")"
@@ -37,7 +50,7 @@ if [[ ! -d TestSupport ]]; then mkdir TestSupport; created_test_support=1; fi
 xcodegen generate
 xcodebuild archive -project ChatCompanion.xcodeproj -scheme ChatCompanion -configuration Release \
   -destination 'generic/platform=iOS' -archivePath "$work_dir/ChatCompanion.xcarchive" \
-  "${auth[@]}" CURRENT_PROJECT_VERSION="$build_number"
+  "${auth[@]}" CURRENT_PROJECT_VERSION="$build_number" ${archive_signing[@]+"${archive_signing[@]}"}
 cat > "$work_dir/ExportOptions.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">

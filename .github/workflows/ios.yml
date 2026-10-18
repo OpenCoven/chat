@@ -17,11 +17,18 @@ on:
         description: Also run the pinned-HTTPS UI flow in the simulator
         type: boolean
         default: false
+      testflight:
+        description: After the tests, sign an .ipa only (export) or also send it to TestFlight (upload, main only)
+        type: choice
+        options: [none, export, upload]
+        default: none
 permissions:
   contents: read
 concurrency:
   group: iphone-${{ github.head_ref || github.ref_name }}
-  cancel-in-progress: true
+  # A run on main may be uploading to TestFlight; let it finish rather than
+  # cancel it for the next merge. Branch runs still cancel each other.
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 jobs:
   companion:
     runs-on: macos-latest
@@ -52,3 +59,84 @@ jobs:
           name: iphone-test-results
           path: ${{ runner.temp }}/chat-ios-derived/Logs/Test/*.xcresult
           if-no-files-found: error
+  testflight:
+    name: TestFlight
+    needs: companion
+    # Pushes to main upload when the app changed; a manual run can export or,
+    # from main only, upload. Pull requests never reach the signing secrets.
+    if: >-
+      (github.event_name == 'push' && github.ref == 'refs/heads/main')
+      || (github.event_name == 'workflow_dispatch' && inputs.testflight != 'none')
+    runs-on: macos-latest
+    timeout-minutes: 45
+    environment: release-signing
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+          # The build number is the commit count of HEAD, so it needs the whole history.
+          fetch-depth: 0
+      - name: Decide whether to send a build
+        id: decide
+        env:
+          EVENT: ${{ github.event_name }}
+          REF: ${{ github.ref }}
+          BEFORE: ${{ github.event.before }}
+          SHA: ${{ github.sha }}
+          REQUESTED: ${{ inputs.testflight }}
+        run: |
+          set -euo pipefail
+          mode=none
+          if [ "$EVENT" = push ]; then
+            # ios.yml also runs for src-tauri changes, which do not change the app.
+            if [ -z "$BEFORE" ] || [ "$BEFORE" = 0000000000000000000000000000000000000000 ] ||
+              ! git cat-file -e "$BEFORE^{commit}" 2>/dev/null ||
+              ! git diff --quiet "$BEFORE" "$SHA" -- apps/ios; then
+              mode=upload
+            fi
+          else
+            mode="$REQUESTED"
+            if [ "$mode" = upload ] && [ "$REF" != refs/heads/main ]; then
+              echo "::error::TestFlight uploads run only from main; use export to prove signing on a branch."
+              exit 1
+            fi
+          fi
+          echo "mode=$mode" >> "$GITHUB_OUTPUT"
+          echo "TestFlight mode: $mode (build $(git rev-list --count HEAD))"
+      - name: Install XcodeGen
+        if: steps.decide.outputs.mode != 'none'
+        run: brew install xcodegen
+      - name: Archive and sign for App Store Connect
+        if: steps.decide.outputs.mode != 'none'
+        env:
+          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+          APPLE_API_KEY_BASE64: ${{ secrets.APPLE_API_KEY_BASE64 }}
+          CHAT_IOS_EXPORT: ${{ steps.decide.outputs.mode }}
+          CHAT_IOS_UNSIGNED_ARCHIVE: '1'
+        run: |
+          set -euo pipefail
+          if [ -z "${APPLE_API_KEY:-}" ] || [ -z "${APPLE_API_ISSUER:-}" ] || [ -z "${APPLE_API_KEY_BASE64:-}" ]; then
+            echo "::error::Missing APPLE_API_KEY, APPLE_API_ISSUER or APPLE_API_KEY_BASE64 in the release-signing environment."
+            exit 1
+          fi
+          key_dir="$RUNNER_TEMP/asc-key"
+          mkdir -m 700 "$key_dir"
+          export APPLE_API_KEY_PATH="$key_dir/AuthKey_${APPLE_API_KEY}.p8"
+          (umask 077 && printf '%s' "$APPLE_API_KEY_BASE64" | base64 --decode > "$APPLE_API_KEY_PATH")
+          export TMPDIR="$RUNNER_TEMP"
+          apps/ios/ChatCompanion/Scripts/testflight.sh
+          if [ "$CHAT_IOS_EXPORT" = export ]; then
+            ipa=$(find "$RUNNER_TEMP" -path '*chat-companion-testflight.*/export/*.ipa' -print -quit)
+            if [ -z "$ipa" ]; then echo "::error::No exported .ipa was found."; exit 1; fi
+            unpacked="$RUNNER_TEMP/ipa"
+            mkdir "$unpacked" && ditto -x -k "$ipa" "$unpacked"
+            app=$(find "$unpacked/Payload" -maxdepth 1 -name '*.app' -print -quit)
+            codesign -dvv "$app" 2>&1 | grep -E '^(Authority|TeamIdentifier|Identifier)='
+            codesign -d --entitlements - --xml "$app" 2>/dev/null | plutil -p -
+          fi
+      - name: Remove the App Store Connect key
+        if: always()
+        run: rm -rf "$RUNNER_TEMP/asc-key"
