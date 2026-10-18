@@ -14,6 +14,8 @@ import Observation
   private(set) var pendingRunId: String?
   private(set) var error = ""
   private(set) var needsPairingCleanup = false
+  /// Set while iOS denies Local Network access, so the error can name the setting.
+  private(set) var localNetworkDenied = false
   private(set) var historyRunId: String?
   private var retainedRun: Run?
   private var terminalError = ""
@@ -27,14 +29,17 @@ import Observation
   private var submittedDraft: (familiar: String, text: String)?
   @ObservationIgnored private let store: PairingStore
   @ObservationIgnored private let makeClient: @MainActor (Pairing) -> CompanionClient
+  @ObservationIgnored private let localNetworkBlocks: @MainActor (URL) async -> Bool
   @ObservationIgnored private var client: CompanionClient?
 
   init(
     store: PairingStore,
-    makeClient: @escaping @MainActor (Pairing) -> CompanionClient = { PinnedAPI(pairing: $0) }
+    makeClient: @escaping @MainActor (Pairing) -> CompanionClient = { PinnedAPI(pairing: $0) },
+    localNetworkBlocks: @escaping @MainActor (URL) async -> Bool = { await LocalNetwork.blocks($0) }
   ) {
     self.store = store
     self.makeClient = makeClient
+    self.localNetworkBlocks = localNetworkBlocks
     do {
       pairing = try store.load()
       if let pairing {
@@ -61,10 +66,13 @@ import Observation
     guard !busy else { return }
     busy = true
     error = ""
+    localNetworkDenied = false
     let expected = generation
     var candidate: CompanionClient?
+    var attempted: URL?
     do {
       let next = try Pairing.parse(link)
+      attempted = next.endpoint
       let api = makeClient(next)
       candidate = api
       let snapshot = try await api.snapshot()
@@ -89,6 +97,12 @@ import Observation
     } catch {
       candidate?.invalidate()
       if generation == expected { self.error = Self.explain(error) }
+      if !(error is CompanionError), let attempted, await localNetworkBlocks(attempted),
+        generation == expected
+      {
+        localNetworkDenied = true
+        self.error = Self.localNetworkOff
+      }
     }
     busy = false
     if connected { await readSelection() }
@@ -211,12 +225,26 @@ import Observation
     client?.invalidate()
     client = nil
     pairing = nil
+    localNetworkDenied = false
     busy = false
     refreshing = false
     connected = false
     clearConversation()
     status = "Connect to your Mac"
     error = cleanupError
+  }
+  /// Discovery reports whether iOS allows Local Network access while the phone is paired.
+  func localNetworkAccess(allowed: Bool) {
+    guard pairing != nil, localNetworkDenied == allowed else { return }
+    localNetworkDenied = !allowed
+    guard !connected else { return }
+    if allowed {
+      status = "Reconnecting to your Mac…"
+      if error == Self.localNetworkOff { error = "" }
+    } else {
+      status = Self.localNetworkOffStatus
+      error = Self.localNetworkOff
+    }
   }
   /// Discovery supplies a candidate only; authenticate it before changing the saved address.
   func tryEndpoint(_ endpoint: URL) async {
@@ -279,6 +307,10 @@ import Observation
     if case CompanionError.revoked = failure {
       forget()
       error = CompanionError.revoked.localizedDescription
+    } else if localNetworkDenied {
+      connected = false
+      status = Self.localNetworkOffStatus
+      error = Self.localNetworkOff
     } else {
       connected = false
       status = "Mac unreachable — reconnecting…"
@@ -301,6 +333,9 @@ import Observation
     retainedRun = nil
     terminalError = ""
   }
+  static let localNetworkOffStatus = "Local Network access is off"
+  static let localNetworkOff =
+    "Coven Chat needs Local Network access to reach your Mac. Turn on Coven Chat in Settings › Privacy & Security › Local Network."
   private static func explain(_ error: Error) -> String {
     if let known = error as? CompanionError { return known.localizedDescription }
     return

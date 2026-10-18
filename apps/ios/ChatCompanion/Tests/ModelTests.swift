@@ -19,6 +19,7 @@ import XCTest
   var sendGate: CheckedContinuation<Run, Error>?
   var gate: CheckedContinuation<Snapshot, Error>?
   var delaySnapshot = false
+  var failSnapshot = false
   var invalidated = false
   var snapshotValue = Snapshot(
     version: 1, familiars: [Familiar(id: "astra", name: "astra", displayName: "Astra")],
@@ -28,6 +29,7 @@ import XCTest
       delaySnapshot = false
       return try await withCheckedThrowingContinuation { gate = $0 }
     }
+    if failSnapshot { throw URLError(.timedOut) }
     return snapshotValue
   }
   func history(familiarId: String) async throws -> History {
@@ -58,7 +60,11 @@ import XCTest
   func model(_ client: FakeClient, _ suppliedStore: MemoryStore? = nil) -> CompanionModel {
     let store = suppliedStore ?? MemoryStore()
     store.value = pairing()
-    return CompanionModel(store: store, makeClient: { _ in client })
+    return CompanionModel(
+      store: store, makeClient: { _ in client }, localNetworkBlocks: { _ in false })
+  }
+  func link() -> String {
+    "coven-chat://pair?endpoint=https://192.168.1.2:8443&token=\(String(repeating: "a", count: 64))&fingerprint=\(String(repeating: "b", count: 64))"
   }
   func testConnectReadAndSendUseSelectedFamiliar() async {
     let api = FakeClient()
@@ -152,6 +158,67 @@ import XCTest
     XCTAssertTrue(model.familiars.isEmpty)
     XCTAssertEqual(model.draft, "")
     XCTAssertFalse(model.error.isEmpty)
+  }
+  func testDeniedLocalNetworkNamesTheSettingUntilAccessReturns() async {
+    let api = FakeClient()
+    let model = model(api)
+    await model.refresh()
+    api.failSnapshot = true
+    await model.refresh()
+    XCTAssertFalse(model.connected)
+    XCTAssertNotEqual(model.error, CompanionModel.localNetworkOff)
+    model.localNetworkAccess(allowed: false)
+    XCTAssertTrue(model.localNetworkDenied)
+    XCTAssertEqual(model.status, CompanionModel.localNetworkOffStatus)
+    XCTAssertEqual(model.error, CompanionModel.localNetworkOff)
+    await model.refresh()
+    XCTAssertEqual(model.error, CompanionModel.localNetworkOff, "a retry keeps naming the setting")
+    model.localNetworkAccess(allowed: true)
+    XCTAssertFalse(model.localNetworkDenied)
+    XCTAssertEqual(model.error, "")
+    api.failSnapshot = false
+    await model.refresh()
+    XCTAssertTrue(model.connected)
+  }
+  func testPairingBlockedByLocalNetworkNamesTheSetting() async {
+    let api = FakeClient()
+    api.failSnapshot = true
+    var probed: [URL] = []
+    let model = CompanionModel(
+      store: MemoryStore(), makeClient: { _ in api },
+      localNetworkBlocks: { url in
+        probed.append(url)
+        return true
+      })
+    await model.pair(link: link())
+    XCTAssertNil(model.pairing)
+    XCTAssertEqual(probed.map(\.port), [8443])
+    XCTAssertTrue(model.localNetworkDenied)
+    XCTAssertEqual(model.error, CompanionModel.localNetworkOff)
+  }
+  func testPairingFailureWithLocalNetworkAllowedKeepsTheGeneralMessage() async {
+    let api = FakeClient()
+    api.failSnapshot = true
+    let model = CompanionModel(
+      store: MemoryStore(), makeClient: { _ in api }, localNetworkBlocks: { _ in false })
+    await model.pair(link: link())
+    XCTAssertFalse(model.localNetworkDenied)
+    XCTAssertFalse(model.error.isEmpty)
+    XCTAssertNotEqual(model.error, CompanionModel.localNetworkOff)
+  }
+  func testPairingRefusedByTheMacDoesNotProbeLocalNetwork() async {
+    let api = FakeClient()
+    api.snapshotValue = Snapshot(version: 2, familiars: [], sessions: [], activeRun: nil)
+    var probed = false
+    let model = CompanionModel(
+      store: MemoryStore(), makeClient: { _ in api },
+      localNetworkBlocks: { _ in
+        probed = true
+        return true
+      })
+    await model.pair(link: link())
+    XCTAssertFalse(probed)
+    XCTAssertEqual(model.error, "Update both Chat apps before pairing.")
   }
   func testArchiveAndByteLimitDisableSend() async {
     let api = FakeClient()

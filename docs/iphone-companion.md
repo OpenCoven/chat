@@ -25,9 +25,19 @@ in memory on the phone; Chat continues to save history on the Mac.
 **Turn off** closes the listener and its connections without revoking pairing.
 Turn it on again to permit saved phones. **Forget paired phones** rotates access
 for all phones. **Forget Mac** on iPhone deletes that phone's saved pairing.
-Deleting the app does not: iOS keeps the pairing in the Keychain, so a
-reinstalled app opens already connected. Use **Forget Mac** before you delete
-the app or hand the phone on (#465).
+
+Deleting the app removes the pairing from the phone too. iOS keeps an app's
+Keychain items after the app is deleted, so the app stamps the saved pairing
+with an install identifier that iOS removes along with the app. A reinstalled
+app deletes any pairing it did not save and asks you to pair again (#465).
+Updating the app keeps the pairing. Deleting the app does not change the Mac:
+the access it gave the phone stays valid until **Forget paired phones**
+rotates it for every phone.
+
+iOS asks for Local Network access the first time the app reaches your Mac. If
+the access is off, the app says so instead of reporting an unreachable Mac, and
+**Open Settings** goes to Coven Chat's page in Settings, where the switch is.
+
 The listener starts off when the desktop app launches. Keep the Mac awake and
 Chat running. Public URLs, relays and cellular access are not supported.
 
@@ -174,8 +184,15 @@ TestFlight build 0.2.0 (1454) and the published Chat 0.0.5 on macOS 26.7.1
 
 Not proven yet:
 
-- **Local Network permission.** iOS 27.0.1 never asked for it and lists no
-  Local Network switch for the app, although the app declares it and browses
-  `_coven-chat._tcp`. The denied state could not be tested (#465).
+- **Local Network permission.** iOS 27.0.1 never asked for it and listed no
+  Local Network switch for the app, although the app declares it, browses
+  `_coven-chat._tcp` and connects to a LAN address. Apple's
+  [TN3179](https://developer.apple.com/documentation/technotes/tn3179-understanding-local-network-privacy)
+  says each of those needs the permission. Apple's iOS 27 and 27.2 release
+  notes describe no change to it. The Simulator does not apply Local Network
+  privacy, so it cannot stand in for a phone. The app detects a denial in the
+  two ways TN3179 describes: a browse waiting with `kDNSServiceErr_PolicyDenied`,
+  or a connection whose path reports `localNetworkDenied`. The denied state has
+  still not been seen on a phone (#465).
 - **A change of the Mac's address while paired.** The Mac kept its address
   when its Wi-Fi was turned off and on.
