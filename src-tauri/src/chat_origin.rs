@@ -1,6 +1,6 @@
 use std::{
     fs::{self, File},
-    io::Read,
+    io::{BufRead, BufReader, Read},
     path::Path,
 };
 
@@ -11,33 +11,52 @@ use serde_json::Value;
 const ORIGIN_PROBE_LIMIT: u64 = 256 * 1024;
 
 pub(crate) fn has_chat_origin(data: &Path, id: &str) -> Result<bool, String> {
+    Ok(captured_input(data, id)?.is_some())
+}
+
+/// The input event Chat saved for session `id`, which also names the session
+/// it continued (`parent_session_id`). `None` when the transcript is missing
+/// or Chat did not create it. Only the first two lines are read.
+pub(crate) fn captured_input(data: &Path, id: &str) -> Result<Option<Value>, String> {
     crate::coven_runtime::validate_id(id)?;
     let transcript =
         crate::coven_runtime::transcripts_dir(data, false)?.join(format!("{id}.jsonl"));
     let metadata = match fs::symlink_metadata(&transcript) {
         Ok(metadata) => metadata,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(false),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
         Err(_) => return Err("Cannot inspect saved Coven transcript.".into()),
     };
     if !metadata.is_file() {
         return Err("Saved Coven transcript is invalid.".into());
     }
-    let mut prefix = Vec::new();
-    File::open(&transcript)
-        .map_err(|_| "Cannot read saved Coven transcript.")?
-        .take(ORIGIN_PROBE_LIMIT)
-        .read_to_end(&mut prefix)
-        .map_err(|_| "Cannot read saved Coven transcript.")?;
-    Ok(prefix
-        .split(|b| *b == b'\n')
-        .filter(|line| !line.is_empty())
-        .take(2)
-        .filter_map(|line| serde_json::from_slice::<Value>(line).ok())
-        .any(|event| {
-            event["type"] == "user"
-                && event["source"] == "chat-input"
-                && event["session_id"].as_str() == Some(id)
-        }))
+    let file = File::open(&transcript).map_err(|_| "Cannot read saved Coven transcript.")?;
+    let mut reader = BufReader::new(file.take(ORIGIN_PROBE_LIMIT));
+    let mut line = Vec::new();
+    let mut lines = 0;
+    while lines < 2 {
+        line.clear();
+        let read = reader
+            .read_until(b'\n', &mut line)
+            .map_err(|_| "Cannot read saved Coven transcript.")?;
+        if read == 0 {
+            break;
+        }
+        let text = line.strip_suffix(b"\n").unwrap_or(&line);
+        if text.is_empty() {
+            continue;
+        }
+        lines += 1;
+        let Ok(event) = serde_json::from_slice::<Value>(text) else {
+            continue;
+        };
+        if event["type"] == "user"
+            && event["source"] == "chat-input"
+            && event["session_id"].as_str() == Some(id)
+        {
+            return Ok(Some(event));
+        }
+    }
+    Ok(None)
 }
 
 pub(crate) fn require_chat_origin(data: &Path, id: &str) -> Result<(), String> {
