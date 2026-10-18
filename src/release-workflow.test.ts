@@ -1,5 +1,7 @@
-import { readFileSync } from 'node:fs';
-import { dirname, resolve } from 'node:path';
+import { spawnSync } from 'node:child_process';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { describe, expect, test } from 'vitest';
@@ -16,6 +18,43 @@ function job(name: string, nextName?: string): string {
     throw new Error(`Unable to isolate release workflow job ${name}`);
   }
   return workflow.slice(start, end);
+}
+
+/** The shell of the build job's `Determine signing availability` step, as `os` runs it. */
+function signingScript(os: string): string {
+  const build = job('build', 'publish');
+  const step = build.slice(
+    build.indexOf('- id: signing'),
+    build.indexOf('- name: Import Windows signing certificate'),
+  );
+  const body: string[] = [];
+  for (const line of step.slice(step.indexOf('run: |')).split('\n').slice(1)) {
+    if (line.trim() !== '' && !line.startsWith(' '.repeat(10))) break;
+    body.push(line.slice(10));
+  }
+  return body.join('\n').replaceAll(`\${{ runner.os }}`, os);
+}
+
+/** Runs that step with only `env` set, and returns its exit status, log and outputs. */
+function decideSigning(env: Record<string, string>, os = 'Windows') {
+  const dir = mkdtempSync(join(tmpdir(), 'release-signing-'));
+  const output = join(dir, 'output');
+  writeFileSync(output, '');
+  try {
+    const run = spawnSync('bash', ['-c', signingScript(os)], {
+      env: { PATH: process.env.PATH ?? '', GITHUB_OUTPUT: output, ...env },
+      encoding: 'utf8',
+    });
+    const outputs = Object.fromEntries(
+      readFileSync(output, 'utf8')
+        .split('\n')
+        .filter(Boolean)
+        .map((line) => [line.slice(0, line.indexOf('=')), line.slice(line.indexOf('=') + 1)]),
+    );
+    return { status: run.status, log: `${run.stdout}${run.stderr}`, outputs };
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 }
 
 describe('release workflow specification', () => {
@@ -402,6 +441,109 @@ describe('release workflow specification', () => {
     expect(publish).toContain('**Run anyway**');
     expect(releasingGuide).toContain('SmartScreen');
     expect(releasingGuide).not.toContain('Windows is deferred');
+  });
+
+  test('signs Windows through eSigner or a .pfx, never both, never half', () => {
+    const pfx = { WINDOWS_CERTIFICATE: 'cGZ4', WINDOWS_CERTIFICATE_PASSWORD: 'secret' };
+    const esigner = {
+      ES_USERNAME: 'owner@example.com',
+      ES_PASSWORD: 'secret',
+      ES_CREDENTIAL_ID: 'credential',
+      ES_TOTP_SECRET: 'BASE32SECRET',
+    };
+
+    const unsigned = decideSigning({});
+    expect(unsigned.status).toBe(0);
+    expect(unsigned.outputs).toMatchObject({ windows_signed: 'false', windows_route: 'none' });
+    expect(unsigned.log).toContain('the Windows installers in this release are UNSIGNED');
+
+    const half = decideSigning({ WINDOWS_CERTIFICATE: 'cGZ4' });
+    expect(half.status).toBe(1);
+    expect(half.log).toContain('Only one of WINDOWS_CERTIFICATE and WINDOWS_CERTIFICATE_PASSWORD');
+    const halfRehearsal = decideSigning({ WINDOWS_CERTIFICATE: 'cGZ4', ALLOW_UNSIGNED: 'true' });
+    expect(halfRehearsal.status).toBe(0);
+    expect(halfRehearsal.outputs.windows_signed).toBe('false');
+
+    expect(decideSigning(pfx).outputs).toMatchObject({
+      windows_signed: 'true',
+      windows_route: 'pfx',
+    });
+    expect(decideSigning(esigner).outputs).toMatchObject({
+      windows_signed: 'true',
+      windows_route: 'esigner',
+    });
+
+    const { ES_TOTP_SECRET: _omitted, ...threeOfFour } = esigner;
+    const partial = decideSigning(threeOfFour);
+    expect(partial.status).toBe(1);
+    expect(partial.log).toContain('Only 3 of the four eSigner secrets');
+    expect(decideSigning({ ...threeOfFour, ALLOW_UNSIGNED: 'true' }).outputs.windows_signed).toBe(
+      'false',
+    );
+
+    const both = decideSigning({ ...pfx, ...esigner });
+    expect(both.status).toBe(1);
+    expect(both.log).toContain('Both a .pfx (WINDOWS_CERTIFICATE) and the eSigner secrets');
+
+    // The other platforms build whatever Windows is configured with.
+    expect(decideSigning({ ...pfx, ...esigner }, 'Linux').status).toBe(0);
+  });
+
+  test('installs a pinned CodeSignTool, hands Tauri its wrapper, and checks the publisher', () => {
+    const verify = job('verify-tag', 'build');
+    const build = job('build', 'publish');
+    const step = (name: string, next: string) =>
+      build.slice(build.indexOf(`- name: ${name}`), build.indexOf(`- name: ${next}`));
+    const importStep = step('Import Windows signing certificate', 'Install SSL.com CodeSignTool');
+    const install = step('Install SSL.com CodeSignTool', 'Configure Tauri Windows signing');
+    const configure = step('Configure Tauri Windows signing', 'Build installers');
+    const buildStep = build.slice(build.indexOf('- name: Build installers'));
+    const cleanup = step('Remove Windows signing overlay', 'Stage artifacts');
+    const windowsCheck = build.slice(
+      build.indexOf('- name: Verify Windows installer metadata and signatures'),
+      build.indexOf('uses: actions/upload-artifact@'),
+    );
+
+    // Each route gets only its own setup.
+    expect(importStep).toContain("steps.signing.outputs.windows_route == 'pfx'");
+    expect(install).toContain("steps.signing.outputs.windows_route == 'esigner'");
+
+    // CodeSignTool is fetched by exact version and checked against a pinned hash.
+    expect(install).toContain(
+      'CODESIGNTOOL_URL: https://github.com/SSLcom/CodeSignTool/releases/download/v1.3.2/CodeSignTool-v1.3.2.zip',
+    );
+    expect(install).toMatch(/CODESIGNTOOL_SHA256: [0-9a-f]{64}\n/);
+    expect(install).toContain('if ($hash -ne $env:CODESIGNTOOL_SHA256)');
+    // The wrapper fails on CodeSignTool's output as well as its exit code.
+    expect(install).toContain("'Error|Exception|Missing required option|Unmatched argument'");
+    expect(install).toContain('"-input_file_path=$File"');
+
+    // Tauri calls the wrapper once per file, with the file as one argument.
+    expect(configure).toContain("process.env.WINDOWS_ROUTE === 'esigner'");
+    expect(configure).toContain(
+      "args: ['-NoProfile', '-NonInteractive', '-File', process.env.ESIGNER_WRAPPER, '%1']",
+    );
+    expect(configure).toContain(
+      'certificateThumbprint: process.env.WINDOWS_CERTIFICATE_THUMBPRINT',
+    );
+    for (const name of ['ES_USERNAME', 'ES_PASSWORD', 'ES_CREDENTIAL_ID', 'ES_TOTP_SECRET']) {
+      expect(buildStep).toContain(`${name}: \${{ secrets.${name} }}`);
+      // Not required yet: the account doesn't exist, and Windows still ships unsigned.
+      expect(verify).not.toContain(`${name}: \${{ secrets.${name} }}`);
+    }
+    expect(cleanup).toContain(`"\${RUNNER_TEMP}/CodeSignTool" "\${RUNNER_TEMP}/esigner-sign.ps1"`);
+    expect(build).toContain(`windows_signed: \${{ steps.signing.outputs.windows_signed }}`);
+
+    // A signed installer must be Valid and signed by WINDOWS_PUBLISHER.
+    expect(windowsCheck).toContain(`WINDOWS_PUBLISHER: \${{ vars.WINDOWS_PUBLISHER }}`);
+    expect(windowsCheck).toContain('WINDOWS_PUBLISHER is not set');
+    expect(windowsCheck).toContain("GetNameInfo('SimpleName', $false)");
+    expect(windowsCheck.indexOf("if ($signature.Status -ne 'Valid')")).toBeLessThan(
+      windowsCheck.indexOf("expected '$env:WINDOWS_PUBLISHER'"),
+    );
+    expect(releasingGuide).toContain('### Signing the Windows installers');
+    expect(releasingGuide).toContain('`ES_TOTP_SECRET`');
+    expect(releasingGuide).not.toContain('WINDOWS_SIGN_COMMAND');
   });
 
   test('documents conditional updates and the current storage boundary', () => {

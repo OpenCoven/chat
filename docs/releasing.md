@@ -342,6 +342,11 @@ adds an independent local SSH check.
 | `APPLE_TEAM_ID` | Apple Developer Team ID | `release-signing` |
 | `WINDOWS_CERTIFICATE` | base64 of an Authenticode code-signing `.pfx` (optional: with its password set, the Windows installers are signed; otherwise they ship unsigned, see #411) | `release-signing` |
 | `WINDOWS_CERTIFICATE_PASSWORD` | password for the `.pfx` (optional; set both or neither) | `release-signing` |
+| `ES_USERNAME` | SSL.com account username for eSigner (optional: with all four `ES_*` set, the Windows installers are signed through eSigner; see below) | `release-signing` |
+| `ES_PASSWORD` | SSL.com account password | `release-signing` |
+| `ES_CREDENTIAL_ID` | the eSigner credential ID of the OV code-signing certificate | `release-signing` |
+| `ES_TOTP_SECRET` | the base32 secret from eSigner's automated-signing enrollment, from which CodeSignTool makes each one-time code | `release-signing` |
+| `WINDOWS_PUBLISHER` (variable) | the publisher name the Windows certificate carries; required whenever the Windows installers are signed | `release-signing` |
 | `TAURI_SIGNING_PRIVATE_KEY` | Tauri updater private key (signs updater artifacts; unused while Chat has no updater, § 4) | `release-signing` |
 | `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` | password for the updater private key | `release-signing` |
 | `TAG_ALLOWED_SIGNERS` | allowed-signers file contents for verifying SSH-signed tags | `release-signing` |
@@ -349,6 +354,51 @@ adds an independent local SSH check.
 
 > **Warning:** the workflow references these **by name only**. Never commit any
 > secret value to the repository.
+
+### Signing the Windows installers
+
+Certificate authorities stopped issuing code-signing certificates as exportable
+`.pfx` files in June 2023. The private key now stays in a hardware token or a
+cloud HSM, so Windows signing goes through a service (#411). Val chose **SSL.com
+eSigner** on 2026-10-18. The account is not set up yet, so the installers still
+ship unsigned. The build job supports two ways, and refuses a configuration that
+sets both:
+
+1. **eSigner**: all four `ES_*` secrets. The build downloads SSL.com's
+   CodeSignTool, pinned by version and SHA-256, and runs it on the runner's Java
+   21. It also writes a small wrapper that Tauri runs, as
+   `bundle.windows.signCommand`, on every file it signs: the app executable as
+   well as both installers. The wrapper fails if CodeSignTool's output reports
+   an error, even when its exit code is 0.
+2. **A `.pfx`**: `WINDOWS_CERTIFICATE` and `WINDOWS_CERTIFICATE_PASSWORD`. The
+   certificate is imported into the runner's store, and Tauri signs with it
+   through `signtool`.
+
+A partial set of either way's secrets fails the build rather than shipping
+unsigned. Either way, set `WINDOWS_PUBLISHER` to the name on the certificate,
+`Soul Protocol LLC` for eSigner. The build then checks that every installer has
+a `Valid` Authenticode signature from that publisher. With neither way
+configured, the installers ship unsigned and the release notes say so.
+
+**Setting up eSigner (once the OV certificate is issued):**
+
+1. In the SSL.com account, enroll the certificate in eSigner for **automated
+   signing**. The enrollment shows a QR code and its base32 secret. Store that
+   secret as `ES_TOTP_SECRET`, not in an authenticator app.
+2. Find the credential ID, under the certificate's eSigner details or with
+   CodeSignTool's `get_credential_ids`, and store it as `ES_CREDENTIAL_ID`.
+3. Store the account's username and password as `ES_USERNAME` and
+   `ES_PASSWORD`, and set the `WINDOWS_PUBLISHER` variable.
+4. Rehearse: dispatch the workflow from `main` against an existing tag with
+   `dry_run=true`, and check the Windows job's log for `ok: … is signed by …`
+   on both installers.
+5. Then add the four `ES_*` names to `verify-tag`'s required list, so a missing
+   one refuses a release instead of shipping unsigned.
+
+Each signing uses one of the account's eSigner signings: three or more per
+release (the app executable and both installers). Certificates now last at most
+460 days, so expect to renew yearly. eSigner keeps the same credential ID across
+a renewal, but check it.
 
 ---
 
