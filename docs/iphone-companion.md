@@ -141,8 +141,12 @@ environment. The archive is unsigned, and the export signs it with Apple's
 cloud-managed distribution certificate (`CHAT_IOS_UNSIGNED_ARCHIVE=1`), so the
 runner needs no certificate.
 
-To prove signing from a branch without uploading, run the workflow by hand with
-**testflight** set to `export`. `upload` is refused anywhere but `main`.
+To prove signing without uploading, run the workflow by hand from `main` with
+**testflight** set to `export`. The `release-signing` environment admits only
+`main` and `v*` tags, so a run from another branch stops before the
+**TestFlight** job starts and never receives the App Store Connect key. To check
+signing for an unmerged change, run `Scripts/testflight.sh` on your Mac with
+`CHAT_IOS_EXPORT=export` (see below).
 
 The upload needs an App Store Connect app record for the bundle ID. The App
 Store Connect API can't create one, so create it once on the website under
