@@ -92,6 +92,8 @@ pub(crate) struct CovenRuntimeState {
     shutting_down: Arc<AtomicBool>,
     exit_ready: Arc<AtomicBool>,
     companion_views: Mutex<std::collections::VecDeque<Arc<crate::companion::backend::RunRecord>>>,
+    /// Set once this launch has removed what deleted chats left behind.
+    swept: Arc<AtomicBool>,
 }
 
 impl CovenRuntimeState {
@@ -1076,19 +1078,58 @@ fn normalize_familiar(
 }
 
 #[tauri::command]
-pub(crate) async fn coven_runtime_sessions(app: AppHandle) -> Result<Value, String> {
+pub(crate) async fn coven_runtime_sessions(
+    app: AppHandle,
+    state: State<'_, CovenRuntimeState>,
+) -> Result<Value, String> {
     let data = app
         .path()
         .app_local_data_dir()
         .map_err(|_| "Cannot locate local chat storage.")?;
+    let runs = state.runs.clone();
+    let shutdown = state.shutting_down.clone();
+    let swept = state.swept.clone();
     blocking(move || {
-        let _storage = crate::chat_lifecycle::STORAGE_LOCK
-            .lock()
-            .map_err(|_| "Chat's archive and delete records are unavailable.")?;
-        let value = cli_json(&["sessions", "--all", "--json"])?;
-        visible_sessions(&data, &value)
+        let (value, visible) = {
+            let _storage = crate::chat_lifecycle::STORAGE_LOCK
+                .lock()
+                .map_err(|_| "Chat's archive and delete records are unavailable.")?;
+            let value = cli_json(&["sessions", "--all", "--json"])?;
+            let visible = visible_sessions(&data, &value)?;
+            (value, visible)
+        };
+        sweep_once(&data, &runs, &shutdown, &swept, &value);
+        Ok(visible)
     })
     .await
+}
+
+/// Removes what deleted chats left behind
+/// (`chat_lifecycle::sweep_deleted_leftovers`), once per launch. It needs a
+/// moment with no run, because a run stages its attachments before its
+/// transcript names them. The runs lock comes first, as it does for lifecycle
+/// changes, and only when it is free, so a listing never waits on a run.
+fn sweep_once(
+    data: &Path,
+    runs: &Runs,
+    shutdown: &AtomicBool,
+    swept: &AtomicBool,
+    listing: &Value,
+) {
+    if swept.load(Ordering::SeqCst) {
+        return;
+    }
+    let Ok(active) = runs.try_lock() else { return };
+    if !active.is_empty() || shutdown.load(Ordering::SeqCst) {
+        return;
+    }
+    let Ok(_storage) = crate::chat_lifecycle::STORAGE_LOCK.lock() else {
+        return;
+    };
+    match crate::chat_lifecycle::sweep_deleted_leftovers(data, listing) {
+        Ok(()) => swept.store(true, Ordering::SeqCst),
+        Err(error) => eprintln!("{error}"),
+    }
 }
 
 fn visible_sessions(data: &Path, value: &Value) -> Result<Value, String> {
@@ -1276,7 +1317,7 @@ fn assemble_history(
     Ok((turns.into_iter().rev().flatten().collect(), has_more))
 }
 
-fn history_sessions(selected: &Value, sessions: &[Value]) -> Result<Vec<Value>, String> {
+pub(crate) fn history_sessions(selected: &Value, sessions: &[Value]) -> Result<Vec<Value>, String> {
     let selected_id = string(selected, "id")?;
     let Some(group) = selected.get("conversation_id").and_then(Value::as_str) else {
         return Ok(vec![selected.clone()]);
@@ -2325,6 +2366,64 @@ mod tests {
         fs::remove_file(data.join("chat-canonical-v1.json")).unwrap();
         fs::remove_dir(transcripts).unwrap();
         fs::remove_dir(data).unwrap();
+    }
+
+    #[test]
+    fn leftover_sweep_waits_for_an_idle_runtime_and_runs_once_per_launch() {
+        let data = std::env::temp_dir().join(uuid::Uuid::new_v4().to_string());
+        let transcripts = data.join("coven-transcripts");
+        fs::create_dir_all(&transcripts).unwrap();
+        let leftover = transcripts.join("p1.jsonl");
+        let write_leftover = || {
+            let lines = [
+                json!({"type":"system","subtype":"init","session_id":"p1"}),
+                json!({"type":"user","source":"chat-input","session_id":"p1","parent_session_id":null}),
+            ];
+            fs::write(&leftover, lines.map(|line| line.to_string()).join("\n")).unwrap();
+        };
+        write_leftover();
+        fs::write(
+            data.join("chat-lifecycle-v1.json"),
+            json!({"h":"deleted"}).to_string(),
+        )
+        .unwrap();
+        let record = |id: &str, group: Option<&str>, at: &str| {
+            json!({"id":id,"conversation_id":group,"familiar_id":"f","project_root":"/work",
+                "harness":"coven-code","created_at":at})
+        };
+        let listing = json!({"sessions":[
+            record("p1", None, "2026-09-01T00:00:00Z"),
+            record("h", Some("p1"), "2026-09-02T00:00:00Z"),
+        ]});
+        let state = CovenRuntimeState::default();
+        let sweep = || {
+            sweep_once(
+                &data,
+                &state.runs,
+                &state.shutting_down,
+                &state.swept,
+                &listing,
+            )
+        };
+
+        let (_, registration) = state.register_run("busy").unwrap();
+        sweep();
+        assert!(
+            leftover.exists(),
+            "a run may be staging files; the sweep must wait"
+        );
+        assert!(!state.swept.load(Ordering::SeqCst));
+        drop(registration);
+        sweep();
+        assert!(
+            !leftover.exists(),
+            "an idle runtime removes the deleted chat's leftovers"
+        );
+        assert!(state.swept.load(Ordering::SeqCst));
+        write_leftover();
+        sweep();
+        assert!(leftover.exists(), "the sweep runs once per launch");
+        fs::remove_dir_all(data).unwrap();
     }
 
     #[test]

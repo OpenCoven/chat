@@ -1,6 +1,7 @@
 use serde::Deserialize;
 use serde_json::{json, Value};
 use std::{
+    collections::HashSet,
     fs::{self, OpenOptions},
     io::Write,
     path::{Path, PathBuf},
@@ -172,6 +173,38 @@ pub(crate) fn remove(data: &Path, run_id: &str) -> Result<(), String> {
         }
     }
     fs::remove_dir_all(root.join(run_id)).map_err(|_| "Cannot remove staged attachments.".into())
+}
+
+/// Removes staged folders that no saved chat input names. Nothing reads a
+/// staged folder after its run (the files travel inside the prompt), so these
+/// are copies left by deleted chats, by earlier versions that didn't record
+/// the folder, or by runs that ended before Coven named a session. Only real
+/// folders with run-id names are removed; files and symbolic links stay.
+/// Callers make sure no run is active.
+pub(crate) fn sweep(data: &Path, named: &HashSet<String>) -> Result<(), String> {
+    let root = data.join("coven-attachments");
+    match fs::symlink_metadata(&root) {
+        Ok(metadata) if metadata.file_type().is_dir() => {}
+        Ok(_) => return Ok(()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(_) => return Err("Cannot inspect attachment storage.".into()),
+    }
+    for entry in fs::read_dir(&root).map_err(|_| "Cannot inspect attachment storage.")? {
+        let entry = entry.map_err(|_| "Cannot inspect attachment storage.")?;
+        let Some(name) = entry.file_name().to_str().map(str::to_owned) else {
+            continue;
+        };
+        if named.contains(&name) || super::validate_id(&name).is_err() {
+            continue;
+        }
+        let kind = entry
+            .file_type()
+            .map_err(|_| "Cannot inspect attachment storage.")?;
+        if kind.is_dir() {
+            fs::remove_dir_all(entry.path()).map_err(|_| "Cannot remove staged attachments.")?;
+        }
+    }
+    Ok(())
 }
 
 fn write_private(path: &Path, bytes: &[u8]) -> Result<(), String> {
