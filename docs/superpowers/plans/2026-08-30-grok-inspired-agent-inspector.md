@@ -1,6 +1,8 @@
 # Grok-Inspired Agent Inspector Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **Status (2026-10-18):** Abandoned without implementation. Familiars Redesign v2 replaced the demo
+> surface three days later (#74), and #333 deleted the `src/demo` files this plan edits. The live
+> familiar inspector is in `src/coven/chat-layout.tsx`. Historical record; do not execute.
 
 **Goal:** Redesign the chat demo's right-side inspector as an OpenCoven-branded, Grok-inspired profile stack with a stable identity hero, derived metrics, contextual cards, and a compact settings footer.
 

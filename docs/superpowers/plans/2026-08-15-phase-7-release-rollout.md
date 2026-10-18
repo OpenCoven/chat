@@ -1,6 +1,8 @@
 # Phase 7 Packaging, Compatibility, Publishing, and Production Rollout Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **Status (2026-10-18):** Superseded. `docs/releasing.md` is the release process of record. v0.0.2
+> through v0.0.5 shipped by 2026-10-14 with macOS signed and notarized, Windows unsigned from
+> v0.0.5, no updater artifacts and no Cave compatibility ranges. Historical record; do not execute.
 
 **Goal:** Publish signed OpenCoven Chat installers and public SDK/CLI packages with proven Cave/Coven compatibility ranges, staged rollout, diagnostics, and rollback.
 

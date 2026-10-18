@@ -1,6 +1,9 @@
 # Phase 3 Send, Stream, and Recovery Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **Status (2026-10-18):** Superseded by #277 (2026-09-14): send, stream and stop run through the
+> Coven CLI in `src-tauri/src/coven_runtime.rs`, and drafts are in memory only. The Cave send and
+> stream routes and Chat's `secure_store.rs` and `drafts.rs` were never built. `README.md` is the
+> product contract. Historical record; do not execute.
 
 **Goal:** Complete the canonical create → send → stream → stop → retry → disconnect → resume → reconcile journey without duplicate execution.
 

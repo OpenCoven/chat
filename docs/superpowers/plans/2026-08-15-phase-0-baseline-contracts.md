@@ -1,6 +1,9 @@
 # Phase 0 Baseline and Contract Governance Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **Status (2026-10-18):** Delivered. Chat was scaffolded in `c634ce0c` (2026-08-17), coven-cave
+> ships the client-v1 contract exporter and fixture, coven ships `crates/coven-client`, and the sdk
+> repository ships the planned packages. Chat's current architecture is in `README.md`. Historical
+> record.
 
 **Goal:** Establish clean implementation branches, reproducible toolchains, deterministic Cave and Coven contract artifacts, public TypeScript package boundaries, and stale-contract CI before any supported client route ships.
 

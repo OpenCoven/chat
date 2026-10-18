@@ -1,5 +1,10 @@
 # OpenCoven Chat v1 Parallel Execution Prompts
 
+> **Status (2026-10-18):** Abandoned. These prompts drive the Beads graph, which Cave retired on
+> 2026-09-14 (coven-cave#5399), for a Cave-client program that #277 replaced with a Coven CLI front
+> end. Do not paste them into an agent session; GitHub issues track current work. Historical record;
+> do not execute.
+
 ## Coordinator Prompt
 
 Copy this prompt into the coordinating agent session:

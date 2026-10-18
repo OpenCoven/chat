@@ -1,6 +1,9 @@
 # Phase 5 Native Lifecycle, Offline Reads, and SDK Tooling Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **Status (2026-10-18):** Abandoned for Chat. The encrypted offline read cache, `cache.rs` and
+> `desktop.rs` were never built, and #277 made Chat a Coven CLI front end with in-memory drafts; the
+> sdk shipped profiles and a secret store on its own. `README.md` is the product contract.
+> Historical record; do not execute.
 
 **Goal:** Make Chat reliable across restart and temporary Cave outages while delivering secret-safe SDK profiles, diagnostics, completions, and compiling TypeScript scaffolds.
 

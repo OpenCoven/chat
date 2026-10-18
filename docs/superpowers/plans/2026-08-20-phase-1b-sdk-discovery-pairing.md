@@ -1,6 +1,9 @@
 # SDK Discovery and Pairing Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **Status (2026-10-18):** Delivered in the sdk repository, which owns this plan: sdk main has Cave
+> discovery and pairing (`packages/cave/src/discovery.ts`, `pairing.ts`), core discovery, and the
+> `discover` and `doctor` CLI commands. The `bd` steps name the retired Beads tracker
+> (coven-cave#5399). Historical record.
 
 **Goal:** Extend the SDK workspace with transport-neutral Cave discovery/pairing, independent Coven IPC discovery, secret-free CLI commands, and packed-package verification without regressing existing familiars or analytics APIs.
 

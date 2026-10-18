@@ -1,6 +1,8 @@
 # Frozen GLib Native Validation Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [x]`) syntax for tracking.
+> **Status (2026-10-18):** Delivered. The native validation workflow and its reconstruction helper
+> landed on 2026-09-10, and #188 closed as completed on 2026-09-24. The last two follow-through
+> boxes were never ticked in this file; #188 holds the outcome. Historical record.
 
 **Goal:** Validate the narrow frozen-production GLib backport on native Linux x64 before publishing or adopting its source revision.
 

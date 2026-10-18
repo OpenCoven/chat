@@ -1,6 +1,10 @@
 # iOS Phase A: Transport Extraction Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **Status (2026-10-18):** Superseded 2026-10-07 and never implemented. The iPhone app that shipped
+> is the LAN companion in `apps/ios/ChatCompanion` (#405), and Chat no longer connects to
+> Cave (#333). Read [`docs/iphone-companion.md`](../../iphone-companion.md) and the
+> [2026-10-07 companion design](../specs/2026-10-07-iphone-companion-design.md) instead. Historical
+> record; do not execute.
 
 **Goal:** Extract Coven Pocket's engine-independent reachability and HTTP transport primitive into a permissively licensed `coven-transport` crate in the SDK repository, and migrate Coven Pocket to consume it without changing its behavior.
 

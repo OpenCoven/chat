@@ -1,6 +1,11 @@
 # iOS Phase D1: chat-ios Foundation Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **Status (2026-10-18):** Superseded 2026-10-07 and never implemented. `OpenCoven/chat-ios` was
+> never created. The iPhone app that shipped is the LAN companion in
+> `apps/ios/ChatCompanion` (#405), and Chat no longer connects to Cave (#333). Read
+> [`docs/iphone-companion.md`](../../iphone-companion.md) and the
+> [2026-10-07 companion design](../specs/2026-10-07-iphone-companion-design.md) instead. Historical
+> record; do not execute.
 
 **Goal:** Stand up `OpenCoven/chat-ios` — a SwiftUI app linking `cave-core` and `coven-transport` through a UniFFI bridge, with an XCFramework pipeline, CI that fails on any GPL dependency, and a Keychain adapter that stores credentials with the right accessibility class.
 

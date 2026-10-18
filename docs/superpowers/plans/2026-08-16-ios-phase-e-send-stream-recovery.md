@@ -1,6 +1,10 @@
 # iOS Phase E: Send, Stream, and Recovery Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **Status (2026-10-18):** Superseded 2026-10-07 and never implemented. The iPhone app that shipped
+> is the LAN companion in `apps/ios/ChatCompanion` (#405), and Chat no longer connects to
+> Cave (#333). Read [`docs/iphone-companion.md`](../../iphone-companion.md) and the
+> [2026-10-07 companion design](../specs/2026-10-07-iphone-companion-design.md) instead. Historical
+> record; do not execute.
 
 **Goal:** Complete the send → stream → background → resume → reconcile loop on a phone, plus the durable outbox that makes an unreachable Cave survivable — without ever producing a duplicate turn or a false success.
 
