@@ -245,8 +245,30 @@ pub(crate) struct SendInput {
     session_id: Option<String>,
     familiar_id: Option<String>,
     harness: Option<String>,
+    /// `coven run --model`; absent leaves the harness on its own default.
+    model: Option<String>,
+    /// `coven run --think`.
+    #[serde(default)]
+    think: bool,
+    /// `coven run --speed`: `fast`, `balanced` or `thorough`.
+    speed: Option<String>,
     #[serde(default)]
     attachments: Vec<attachments::Attachment>,
+}
+
+/// A model id Chat passes as `--model`: 1 to 200 bytes that start with a letter
+/// or digit and hold only the characters a provider-qualified id uses
+/// (`openai/gpt-5.5`), so it can never read as an option. The webview applies
+/// the same rule (`isValidModel` in `src/coven/preferences.ts`).
+fn valid_model(model: &str) -> bool {
+    model.len() <= 200
+        && model
+            .as_bytes()
+            .first()
+            .is_some_and(u8::is_ascii_alphanumeric)
+        && model
+            .bytes()
+            .all(|c| c.is_ascii_alphanumeric() || b"_./:+-".contains(&c))
 }
 
 pub(crate) fn validate_id(id: &str) -> Result<(), String> {
@@ -928,6 +950,34 @@ fn run_arguments(
     if let Some(id) = &input.familiar_id {
         validate_id(id)?;
         args.extend(["--familiar".into(), id.clone()]);
+    }
+    if let Some(model) = &input.model {
+        if !valid_model(model) {
+            return Err(
+                "The model in Settings › Model isn't a model id. Correct it, or clear it to use the engine's default."
+                    .into(),
+            );
+        }
+        args.extend(["--model".into(), model.clone()]);
+    }
+    if let Some(speed) = &input.speed {
+        if !matches!(speed.as_str(), "fast" | "balanced" | "thorough") {
+            return Err("Choose Fast, Balanced or Thorough for Speed in Settings › Model.".into());
+        }
+    }
+    // Coven 0.4.10 declares no reasoning or speed mechanism for Codex: it warns
+    // on stderr and ignores both, and a successful run's stderr is not shown.
+    if harness == "codex" && (input.think || input.speed.is_some()) {
+        return Err(
+            "Codex doesn't support Think longer or Speed. Turn them off in Settings › Model to send to this chat."
+                .into(),
+        );
+    }
+    if input.think {
+        args.push("--think".into());
+    }
+    if let Some(speed) = &input.speed {
+        args.extend(["--speed".into(), speed.clone()]);
     }
     if input.attachments.is_empty() {
         args.extend(["--".into(), prompt.to_owned()]);
@@ -2437,6 +2487,9 @@ mod tests {
             session_id: Some("parent".into()),
             familiar_id: Some("f".into()),
             harness: None,
+            model: None,
+            think: false,
+            speed: None,
             attachments: vec![attachments::Attachment {
                 name: "notes.txt".into(),
                 bytes: b"secret".to_vec(),
@@ -2835,6 +2888,9 @@ mod tests {
             session_id: session.map(str::to_owned),
             familiar_id: familiar.map(str::to_owned),
             harness: None,
+            model: None,
+            think: false,
+            speed: None,
             attachments: vec![],
         };
         let cancel = AtomicBool::new(false);
@@ -2912,6 +2968,9 @@ mod tests {
             session_id: None,
             familiar_id: Some("sage".into()),
             harness: Some("codex".into()),
+            model: None,
+            think: false,
+            speed: None,
             attachments: vec![],
         };
         let args = run_arguments(
@@ -2939,6 +2998,9 @@ mod tests {
             session_id: None,
             familiar_id: None,
             harness: Some("copilot".into()),
+            model: None,
+            think: false,
+            speed: None,
             attachments: vec![],
         };
         assert!(run_arguments(
@@ -2965,6 +3027,145 @@ mod tests {
             .any(|pair| pair == ["--permission", "read-only"]));
         assert!(run_arguments(&input, "codex", Path::new("/safe"), &input.prompt).is_err());
         assert!(run_arguments(&input, "claude", Path::new("/safe"), &input.prompt).is_err());
+    }
+
+    fn run_input(options: Value) -> SendInput {
+        let mut input = json!({ "runId": "run-1", "prompt": "--think; hello" });
+        input
+            .as_object_mut()
+            .unwrap()
+            .extend(options.as_object().unwrap().clone());
+        serde_json::from_value(input).unwrap()
+    }
+
+    #[test]
+    fn model_think_and_speed_are_single_arguments_before_the_prompt() {
+        let input = run_input(json!({
+            "model": "anthropic/claude-sonnet-5-5",
+            "think": true,
+            "speed": "thorough"
+        }));
+        let args = run_arguments(&input, "claude", Path::new("/safe"), &input.prompt).unwrap();
+        let end = args.iter().position(|arg| arg == "--").unwrap();
+        let options = &args[..end];
+        assert!(options
+            .windows(2)
+            .any(|pair| pair == ["--model", "anthropic/claude-sonnet-5-5"]));
+        assert!(options
+            .windows(2)
+            .any(|pair| pair == ["--speed", "thorough"]));
+        assert_eq!(options.iter().filter(|arg| *arg == "--think").count(), 1);
+        assert_eq!(&args[end..], ["--", "--think; hello"]);
+        // The same options reach Coven Code, including with staged attachments.
+        let attached = run_input(json!({
+            "model": "openai/gpt-5.5",
+            "think": true,
+            "speed": "fast",
+            "attachments": [{"name": "note.txt", "bytes": [65]}]
+        }));
+        let args = run_arguments(
+            &attached,
+            "coven-code",
+            Path::new("/safe"),
+            &attached.prompt,
+        )
+        .unwrap();
+        assert_eq!(args.last().map(String::as_str), Some("--stream-json-input"));
+        assert!(args
+            .windows(2)
+            .any(|pair| pair == ["--model", "openai/gpt-5.5"]));
+        assert!(args.windows(2).any(|pair| pair == ["--speed", "fast"]));
+    }
+
+    #[test]
+    fn a_send_without_options_leaves_model_think_and_speed_to_the_harness() {
+        let input = run_input(json!({}));
+        for harness in ["coven-code", "codex", "claude"] {
+            let args = run_arguments(&input, harness, Path::new("/safe"), &input.prompt).unwrap();
+            let end = args.iter().position(|arg| arg == "--").unwrap();
+            assert!(!args[..end]
+                .iter()
+                .any(|arg| ["--model", "--think", "--speed"].contains(&arg.as_str())));
+        }
+    }
+
+    #[test]
+    fn model_ids_that_could_read_as_options_are_refused() {
+        let long = "m".repeat(201);
+        for model in [
+            "",
+            "-rf",
+            "--model=x",
+            "gpt 5",
+            "gpt\n5",
+            "modèle",
+            "openai/gpt;5",
+            long.as_str(),
+        ] {
+            let input = run_input(json!({ "model": model }));
+            let error = run_arguments(&input, "claude", Path::new("/safe"), &input.prompt)
+                .expect_err(model);
+            assert!(error.contains("isn't a model id"), "{model}: {error}");
+            assert!(error.contains("Settings › Model"), "{model}: {error}");
+        }
+        let longest = "m".repeat(200);
+        for model in [
+            "openai/gpt-5.5",
+            "anthropic/claude-opus-5-5",
+            "gpt-5.5:latest",
+            "org_model+v2",
+            longest.as_str(),
+        ] {
+            let input = run_input(json!({ "model": model }));
+            assert!(
+                run_arguments(&input, "codex", Path::new("/safe"), &input.prompt).is_ok(),
+                "{model}"
+            );
+        }
+    }
+
+    #[test]
+    fn speed_must_be_one_coven_accepts() {
+        for speed in ["", "default", "turbo", "Fast", "--fast"] {
+            let input = run_input(json!({ "speed": speed }));
+            let error = run_arguments(&input, "claude", Path::new("/safe"), &input.prompt)
+                .expect_err(speed);
+            assert!(
+                error.contains("Fast, Balanced or Thorough"),
+                "{speed}: {error}"
+            );
+        }
+        for speed in ["fast", "balanced", "thorough"] {
+            let input = run_input(json!({ "speed": speed }));
+            assert!(run_arguments(&input, "coven-code", Path::new("/safe"), &input.prompt).is_ok());
+        }
+    }
+
+    #[test]
+    fn codex_is_never_sent_think_or_speed_it_would_ignore() {
+        for options in [json!({ "think": true }), json!({ "speed": "fast" })] {
+            let input = run_input(options);
+            let error =
+                run_arguments(&input, "codex", Path::new("/safe"), &input.prompt).unwrap_err();
+            assert!(error.contains("Codex doesn't support"), "{error}");
+            assert!(run_arguments(&input, "claude", Path::new("/safe"), &input.prompt).is_ok());
+        }
+    }
+
+    #[test]
+    fn options_are_typed_at_the_boundary() {
+        for options in [
+            json!({ "think": "yes" }),
+            json!({ "model": 5 }),
+            json!({ "effort": "high" }),
+        ] {
+            let mut input = json!({ "runId": "run-1", "prompt": "hello" });
+            input
+                .as_object_mut()
+                .unwrap()
+                .extend(options.as_object().unwrap().clone());
+            assert!(serde_json::from_value::<SendInput>(input).is_err());
+        }
     }
 
     #[cfg(unix)]
@@ -3315,6 +3516,9 @@ mod tests {
             session_id: Some("session-1".into()),
             familiar_id: Some("sage".into()),
             harness: None,
+            model: None,
+            think: false,
+            speed: None,
             attachments: vec![],
         };
         let args =
@@ -3494,6 +3698,9 @@ mod tests {
                 session_id: previous.clone(),
                 familiar_id: Some(familiar.clone()),
                 harness: Some("coven-code".into()),
+                model: None,
+                think: false,
+                speed: None,
                 attachments: vec![],
             };
             let mut observed = Vec::new();
@@ -3633,6 +3840,9 @@ mod tests {
             session_id: None,
             familiar_id: Some(familiar.clone()),
             harness: Some("coven-code".into()),
+            model: None,
+            think: false,
+            speed: None,
             attachments: vec![attachments::Attachment {
                 name: "marker.txt".into(),
                 bytes: format!("{marker}\n").into_bytes(),

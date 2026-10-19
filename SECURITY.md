@@ -25,8 +25,9 @@ first-run setup installs it from `OpenCoven/coven`.
 In either repository, use its private vulnerability reporting rather than a public issue.
 
 OpenCoven Chat does not persist authenticated conversation bodies in IndexedDB, `localStorage`,
-or `sessionStorage`. The window keeps only your selected familiar and display preferences in
-`localStorage`, and unsent drafts stay in memory. The desktop host keeps the following in Chat's
+or `sessionStorage`. The window keeps only your selected familiar and your Settings choices in
+`localStorage`: display preferences, and the harness, model, reasoning and speed your messages ask
+for. Unsent drafts stay in memory. The desktop host keeps the following in Chat's
 local app data folder (on macOS, `~/Library/Application Support/ai.opencoven.chat`):
 
 - **Transcripts.** Chat saves one transcript per message you send, as

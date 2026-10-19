@@ -1269,7 +1269,15 @@ test('resizes the inspector by pointer and keyboard within the room the window l
   const stored = await page.evaluate(() =>
     JSON.parse(localStorage.getItem('opencoven.chat.preferences.v1') ?? 'null'),
   );
-  expect(stored).toEqual({ textSize: 'default', groupTools: true, inspectorWidth: 600 });
+  expect(stored).toEqual({
+    textSize: 'default',
+    groupTools: true,
+    inspectorWidth: 600,
+    harness: 'coven-code',
+    model: '',
+    think: false,
+    speed: 'default',
+  });
 
   await page.getByRole('button', { name: 'Open settings' }).click();
   const settings = page.getByRole('dialog', { name: 'Settings' });

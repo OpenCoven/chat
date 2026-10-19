@@ -125,6 +125,9 @@ pub(crate) fn companion_start(
                 session_id: session,
                 prompt: request.prompt.clone(),
                 harness: None,
+                model: None,
+                think: false,
+                speed: None,
                 attachments: Vec::new(),
             };
             send_local(&data, input, &cancel, &mut |event| {

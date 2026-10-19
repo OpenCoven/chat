@@ -181,15 +181,30 @@ runs it for you: run it in a terminal, then choose **Check again**.
 ## Settings
 
 Open **Settings** with the gear above the familiar list or in the thread header,
-or press **Cmd/Ctrl+,**. It has six sections:
+or press **Cmd/Ctrl+,**. It has seven sections:
 
 - **General:** text size and **Group tool calls**.
+- **Model:** what new chats run on, and the model, reasoning and speed each message asks for.
 - **Chats:** **Show archived chats**.
 - **Access:** the projects Coven declares for the selected familiar.
 - **Devices:** the **iPhone companion**.
 - **Shortcuts:** every keyboard shortcut.
 - **About:** the app version, whether Chat reached the Coven CLI, and what the
   window stores.
+
+**Settings › Model** chooses what runs your messages:
+
+- **Runs on** (Coven Code, Codex or Claude Code) applies when a familiar's chat starts. A chat
+  keeps what it started on, and the inspector's **Runs on** row shows it. Only Coven Code takes
+  attached files, so the composer doesn't offer attaching in a Codex or Claude Code chat.
+- **Model** is passed to the Coven CLI as `--model`. Leave it empty for the engine's default. Chat
+  accepts an id of up to 200 characters that starts with a letter or digit and uses only letters,
+  digits and `_ . / : + -`, and won't send while the field holds anything else.
+- **Think longer** and **Speed** are passed as `--think` and `--speed`. Coven Code and Claude Code
+  use them. Codex ignores them, so Chat doesn't send them to a Codex chat.
+- They apply to every message sent from this window, in new and existing chats. Messages sent
+  from the iPhone companion use the engine's defaults.
+- When a run reports its model, the inspector's **Activity** tab shows it under **Model**.
 
 ## First-run setup
 
@@ -258,8 +273,9 @@ assistant replies. When a capability is unavailable, Chat says so instead of sim
 Installing Coven doesn't configure a model provider, so complete any provider setup your CLI needs
 before you start a run.
 
-Runs use Coven's bundled `coven-code` engine with explicit read-only permissions. Chat doesn't
-grant write access or simulate approval controls. The native runtime supports macOS, Linux, and
+New chats run on Coven's bundled `coven-code` engine unless **Settings › Model** says Codex or
+Claude Code. Every run has explicit read-only permissions. Chat doesn't grant write access or
+simulate approval controls. The native runtime supports macOS, Linux, and
 Windows. Every run's process tree is contained (as a process group on macOS and Linux, and as a
 kill-on-close job on Windows), so **Stop** ends the Coven CLI together with everything it started.
 

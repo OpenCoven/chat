@@ -2,6 +2,24 @@ import { describe, expect, it } from 'vitest';
 import { projectEvents, RAW_LIMIT, RAW_TRUNCATED, summarizeToolInput } from './events';
 
 describe('genuine Coven event projection', () => {
+  it('reports the model the latest run named, and nothing when no run did', () => {
+    expect(projectEvents([{ type: 'system', subtype: 'init', session_id: 'run' }]).model).toBe('');
+    expect(
+      projectEvents([
+        {
+          type: 'system',
+          subtype: 'init',
+          session_id: 'run',
+          model: 'anthropic/claude-sonnet-5-5',
+        },
+        { type: 'system', subtype: 'init', session_id: 'run', model: 'claude-sonnet-5-5' },
+        { type: 'result', session_id: 'run', result: 'done' },
+        { type: 'system', subtype: 'init', session_id: 'run', model: '' },
+        { type: 'system', subtype: 'status', model: 'not-an-init' },
+      ]).model,
+    ).toBe('claude-sonnet-5-5');
+  });
+
   it('preserves explicitly imported Cave system text without displaying runtime system metadata', () => {
     const message = { role: 'system', content: [{ type: 'text', text: 'Cave system notice' }] };
     expect(
@@ -117,6 +135,7 @@ describe('genuine Coven event projection', () => {
     ).toEqual({
       sessionId: 'new-session',
       error: '',
+      model: '',
       messages: [
         { id: '1', role: 'user', text: 'Actual request' },
         { id: '2', role: 'assistant', text: 'Actual answer' },

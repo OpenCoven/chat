@@ -2814,7 +2814,15 @@ describe('inspector resizing', () => {
     fireEvent.keyDown(separator, { key: 'ArrowRight' });
     expect(inspectorWidth(container)).toBe('280px');
     expect(separator).toHaveFocus();
-    expect(stored()).toEqual({ textSize: 'default', groupTools: true, inspectorWidth: 280 });
+    expect(stored()).toEqual({
+      textSize: 'default',
+      groupTools: true,
+      inspectorWidth: 280,
+      harness: 'coven-code',
+      model: '',
+      think: false,
+      speed: 'default',
+    });
     unmount();
     const next = render(<ChatLayout {...layoutProps()} ready />);
     expect(inspectorWidth(next.container)).toBe('280px');
@@ -2932,5 +2940,151 @@ describe('inspector resizing', () => {
     expect(screen.getByRole('dialog', { name: 'Settings' })).toBeInTheDocument();
     fireEvent.keyDown(handle(), { key: 'ArrowLeft' });
     expect(inspectorWidth(container)).toBe('376px');
+  });
+});
+
+describe('model settings', () => {
+  const KEY = 'opencoven.chat.preferences.v1';
+  const astra = [{ id: 'f', name: 'Astra' }];
+  afterEach(() => localStorage.clear());
+
+  function stored() {
+    const raw = localStorage.getItem(KEY);
+    return raw === null ? null : (JSON.parse(raw) as Record<string, unknown>);
+  }
+
+  function overviewRunsOn() {
+    return screen.getByRole('button', { name: /^(Coven Code|Codex|Claude Code)/ });
+  }
+
+  it('keeps the harness, model, reasoning and speed chosen in Settings and sends with them', () => {
+    const props = {
+      ...layoutProps(),
+      familiars: astra,
+      familiarId: 'f',
+      ready: true,
+      connected: true,
+      draft: 'hello',
+    };
+    render(<ChatLayout {...props} />);
+    const model = openSettingsAt('Model');
+    const runsOn = within(model).getByRole('group', { name: 'Runs on' });
+    expect(within(runsOn).getByRole('button', { name: 'Coven Code' })).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    );
+    fireEvent.click(within(runsOn).getByRole('button', { name: 'Claude Code' }));
+    expect(within(runsOn).getByRole('button', { name: 'Claude Code' })).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    );
+    fireEvent.change(within(model).getByRole('textbox', { name: 'Model' }), {
+      target: { value: ' anthropic/claude-sonnet-5-5 ' },
+    });
+    fireEvent.click(within(model).getByRole('checkbox', { name: 'Think longer' }));
+    const speed = within(model).getByRole('group', { name: 'Speed' });
+    fireEvent.click(within(speed).getByRole('button', { name: 'Thorough' }));
+    expect(model).toHaveTextContent('Codex ignores it');
+    expect(model).toHaveTextContent('Messages sent from your iPhone use the engine');
+    expect(stored()).toMatchObject({
+      harness: 'claude',
+      model: 'anthropic/claude-sonnet-5-5',
+      think: true,
+      speed: 'thorough',
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Close settings' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+    expect(props.onSend).toHaveBeenCalledExactlyOnceWith({
+      harness: 'claude',
+      model: 'anthropic/claude-sonnet-5-5',
+      think: true,
+      speed: 'thorough',
+    });
+  });
+
+  it('says plainly when a model id could not be sent, until it is corrected or cleared', () => {
+    render(<ChatLayout {...layoutProps()} ready />);
+    const model = openSettingsAt('Model');
+    const field = within(model).getByRole('textbox', { name: 'Model' });
+    fireEvent.change(field, { target: { value: '--model=x' } });
+    expect(field).toHaveAttribute('aria-invalid', 'true');
+    expect(field).toHaveAccessibleDescription(
+      /Messages won't send until you correct it or clear it/,
+    );
+    fireEvent.change(field, { target: { value: '' } });
+    expect(field).not.toHaveAttribute('aria-invalid');
+    expect(model).toHaveTextContent("use the engine's default");
+  });
+
+  it('shows what a chat runs on, which opens Settings, and the model its latest run reported', () => {
+    const { rerender } = render(
+      <ChatLayout {...layoutProps()} familiars={astra} familiarId="f" ready connected />,
+    );
+    expect(overviewRunsOn()).toHaveTextContent('Coven Code');
+    expect(overviewRunsOn()).toHaveAttribute('title', "Astra's chat will start on Coven Code.");
+    fireEvent.click(overviewRunsOn());
+    expect(screen.getByRole('region', { name: 'Model' })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Close settings' }));
+    rerender(
+      <ChatLayout
+        {...layoutProps()}
+        familiars={astra}
+        familiarId="f"
+        sessions={[{ id: 's', title: 'Astra', familiarId: 'f', harness: 'codex' }]}
+        sessionId="s"
+        model="openai/gpt-5.5"
+        ready
+        connected
+      />,
+    );
+    expect(overviewRunsOn()).toHaveTextContent('Codex');
+    expect(overviewRunsOn()).toHaveAttribute(
+      'title',
+      'This chat runs on Codex. A chat keeps what it started on.',
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Activity' }));
+    expect(screen.getByRole('region', { name: 'Activity' })).toHaveTextContent(
+      'Modelopenai/gpt-5.5',
+    );
+  });
+
+  it('leaves the model row out when no run reported one', () => {
+    render(<ChatLayout {...layoutProps()} familiars={astra} familiarId="f" ready connected />);
+    fireEvent.click(screen.getByRole('button', { name: 'Activity' }));
+    expect(screen.getByRole('region', { name: 'Activity' })).not.toHaveTextContent('Model');
+  });
+
+  it('offers attaching only where Coven Code will run the message', () => {
+    const base = {
+      ...layoutProps(),
+      familiars: astra,
+      familiarId: 'f',
+      ready: true,
+      connected: true,
+      onAttach: vi.fn(),
+    };
+    const { rerender } = render(<ChatLayout {...base} />);
+    expect(screen.getByRole('button', { name: 'Attach file' })).toBeEnabled();
+    const model = openSettingsAt('Model');
+    fireEvent.click(within(model).getByRole('button', { name: 'Codex' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Close settings' }));
+    expect(screen.queryByRole('button', { name: 'Attach file' })).not.toBeInTheDocument();
+    // An existing Coven Code chat still takes files, whatever new chats start on.
+    rerender(
+      <ChatLayout
+        {...base}
+        sessions={[{ id: 's', title: 'Astra', familiarId: 'f', harness: 'coven-code' }]}
+        sessionId="s"
+      />,
+    );
+    expect(screen.getByRole('button', { name: 'Attach file' })).toBeEnabled();
+    rerender(
+      <ChatLayout
+        {...base}
+        sessions={[{ id: 's', title: 'Astra', familiarId: 'f', harness: 'claude' }]}
+        sessionId="s"
+      />,
+    );
+    expect(screen.queryByRole('button', { name: 'Attach file' })).not.toBeInTheDocument();
   });
 });

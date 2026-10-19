@@ -8,10 +8,28 @@ import { CopyButton } from './copy-button';
 import { FamiliarAvatar } from './familiar-avatar';
 import { INSPECTOR_DEFAULT_WIDTH } from './inspector-width';
 import { closeModal, openModal } from './modal';
-import { type Preferences, TEXT_SCALE, TEXT_SIZE_LABEL, TEXT_SIZES } from './preferences';
+import {
+  HARNESS_LABEL,
+  HARNESSES,
+  isValidModel,
+  MODEL_MAX,
+  type Preferences,
+  SPEED_LABEL,
+  SPEEDS,
+  TEXT_SCALE,
+  TEXT_SIZE_LABEL,
+  TEXT_SIZES,
+} from './preferences';
 import './settings-dialog.css';
 
-export type SettingsSection = 'general' | 'chats' | 'access' | 'devices' | 'shortcuts' | 'about';
+export type SettingsSection =
+  | 'general'
+  | 'model'
+  | 'chats'
+  | 'access'
+  | 'devices'
+  | 'shortcuts'
+  | 'about';
 
 const SECTIONS: readonly Readonly<{
   id: SettingsSection;
@@ -24,6 +42,12 @@ const SECTIONS: readonly Readonly<{
     label: 'General',
     icon: 'sliders-horizontal',
     blurb: 'How conversations read in this window.',
+  },
+  {
+    id: 'model',
+    label: 'Model',
+    icon: 'brain',
+    blurb: 'What runs the messages you send from this window.',
   },
   { id: 'chats', label: 'Chats', icon: 'chats-circle', blurb: 'What the familiars sidebar lists.' },
   {
@@ -170,6 +194,7 @@ export function SettingsDialog(props: SettingsDialogProps) {
           </header>
           <div className="coven-settings-scroll">
             {active?.id === 'general' ? <GeneralSection {...props} /> : null}
+            {active?.id === 'model' ? <ModelSection {...props} /> : null}
             {active?.id === 'chats' ? <ChatsSection {...props} /> : null}
             {active?.id === 'access' ? <AccessSection {...props} /> : null}
             {active?.id === 'devices' ? <DevicesSection {...props} /> : null}
@@ -196,9 +221,17 @@ function Row({
   hint,
   control,
   htmlFor,
-}: Readonly<{ label: string; hint?: ReactNode; control: ReactNode; htmlFor?: string }>) {
+  stacked,
+}: Readonly<{
+  label: string;
+  hint?: ReactNode;
+  control: ReactNode;
+  htmlFor?: string;
+  /** Puts a wide control under its label instead of beside it. */
+  stacked?: boolean;
+}>) {
   return (
-    <div className="coven-settings-row">
+    <div className={cx('coven-settings-row', stacked && 'coven-settings-row--stacked')}>
       <span className="coven-settings-row-copy">
         {htmlFor ? (
           <label className="coven-settings-row-label" htmlFor={htmlFor}>
@@ -309,6 +342,128 @@ function GeneralSection({ preferences, onPreferences }: SettingsDialogProps) {
           }
         />
       </Group>
+    </>
+  );
+}
+
+/** A set of mutually exclusive choices drawn as one segmented control. */
+function Choices<T extends string>({
+  label,
+  options,
+  labels,
+  value,
+  onChange,
+}: Readonly<{
+  label: string;
+  options: readonly T[];
+  labels: Readonly<Record<T, string>>;
+  value: T;
+  onChange: (value: T) => void;
+}>) {
+  return (
+    <fieldset className="fr-segmented" aria-label={label}>
+      {options.map((option) => (
+        <button
+          key={option}
+          type="button"
+          className="fr-segmented-option"
+          aria-pressed={value === option}
+          onClick={() => onChange(option)}
+        >
+          {labels[option]}
+        </button>
+      ))}
+    </fieldset>
+  );
+}
+
+function ModelSection({ preferences, onPreferences }: SettingsDialogProps) {
+  const modelId = useId();
+  const modelErrorId = useId();
+  const thinkId = useId();
+  const validModel = isValidModel(preferences.model);
+  return (
+    <>
+      <Group title="New chats">
+        <Row
+          stacked
+          label="Runs on"
+          hint="A familiar's chat starts on this and keeps it from then on. Only Coven Code takes attached files."
+          control={
+            <Choices
+              label="Runs on"
+              options={HARNESSES}
+              labels={HARNESS_LABEL}
+              value={preferences.harness}
+              onChange={(harness) => onPreferences({ harness })}
+            />
+          }
+        />
+      </Group>
+      <Group title="Every message">
+        <Row
+          stacked
+          label="Model"
+          htmlFor={modelId}
+          hint={
+            validModel ? (
+              "Leave it empty to use the engine's default, or enter the id your provider gives, such as openai/gpt-5.5."
+            ) : (
+              <span id={modelErrorId} className="coven-settings-row-error">
+                A model id starts with a letter or digit and uses only letters, digits and _ . / : +
+                -. Messages won't send until you correct it or clear it.
+              </span>
+            )
+          }
+          control={
+            <span className="coven-access-filter coven-model-field">
+              <input
+                id={modelId}
+                type="text"
+                placeholder="Engine default"
+                spellCheck={false}
+                autoComplete="off"
+                autoCapitalize="off"
+                maxLength={MODEL_MAX}
+                value={preferences.model}
+                aria-invalid={validModel ? undefined : true}
+                aria-describedby={validModel ? undefined : modelErrorId}
+                onChange={(event) => onPreferences({ model: event.target.value.trim() })}
+              />
+            </span>
+          }
+        />
+        <Row
+          label="Think longer"
+          htmlFor={thinkId}
+          hint="Ask for deeper reasoning. Coven Code and Claude Code use it. Codex ignores it, so Chat doesn't send it there."
+          control={
+            <Switch
+              id={thinkId}
+              checked={preferences.think}
+              onChange={(think) => onPreferences({ think })}
+            />
+          }
+        />
+        <Row
+          stacked
+          label="Speed"
+          hint="How long to spend on a reply. Coven Code and Claude Code use it. Codex ignores it, so Chat doesn't send it there."
+          control={
+            <Choices
+              label="Speed"
+              options={SPEEDS}
+              labels={SPEED_LABEL}
+              value={preferences.speed}
+              onChange={(speed) => onPreferences({ speed })}
+            />
+          }
+        />
+      </Group>
+      <p className="coven-settings-footnote">
+        These apply to messages you send from this window. Messages sent from your iPhone use the
+        engine's defaults.
+      </p>
     </>
   );
 }
