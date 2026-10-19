@@ -11,7 +11,7 @@ import { Icon, type IconName } from './minimal-icons';
  * and the design's own overrides folded in, under `fr-*` class names.
  */
 
-export type InspectorTab = 'overview' | 'activity';
+export type InspectorTab = 'overview' | 'activity' | 'missions';
 /**
  * Presence is declared here rather than derived from a fixture: the design
  * system is what the app renders, so its vocabulary must not depend on mock
@@ -19,7 +19,7 @@ export type InspectorTab = 'overview' | 'activity';
  */
 export type Presence = 'available' | 'working' | 'offline';
 
-export const INSPECTOR_TABS: readonly InspectorTab[] = ['overview', 'activity'];
+export const INSPECTOR_TABS: readonly InspectorTab[] = ['overview', 'activity', 'missions'];
 
 /** Join class names, dropping the falsy ones. */
 export function cx(...parts: readonly (string | false | null | undefined)[]): string {
