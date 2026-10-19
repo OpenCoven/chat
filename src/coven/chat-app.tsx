@@ -835,6 +835,24 @@ export function ChatApp({
         setRetryKey('');
         navigate({ ...latest, drafts: { ...latest.drafts, [draftKey(latest)]: value } });
       }}
+      onEditDraft={(chat, edit) => {
+        const latest = navigationRef.current;
+        // Text prepared in one chat never lands in another familiar's draft.
+        if (
+          lifecyclePending.current ||
+          latest.familiarId !== chat.familiarId ||
+          latest.sessionId !== chat.sessionId
+        )
+          return false;
+        const key = draftKey(latest);
+        const value = edit(latest.drafts[key] ?? '');
+        if (value === null) return false;
+        // An edit like any other: a failed send restores nothing over it.
+        draftVersions.current[key] = (draftVersions.current[key] ?? 0) + 1;
+        setRetryKey('');
+        navigate({ ...latest, drafts: { ...latest.drafts, [key]: value } });
+        return true;
+      }}
       onSend={() => void send()}
       onCancel={() => void cancel()}
       onRefresh={() => {
