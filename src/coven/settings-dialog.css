@@ -779,3 +779,15 @@
     transition: none;
   }
 }
+
+/* The inspector width row: the number, then its reset. */
+.coven-inspector-width {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.coven-inspector-width-value {
+  font-variant-numeric: tabular-nums;
+  color: var(--text-secondary);
+}

@@ -1,4 +1,5 @@
 import { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
+import { INSPECTOR_DEFAULT_WIDTH, preferredInspectorWidth } from './inspector-width';
 
 /**
  * Display preferences the reader sets in Settings. They describe how this
@@ -11,6 +12,8 @@ export type Preferences = Readonly<{
   textSize: TextSize;
   /** Fold consecutive tool calls into one summary line. */
   groupTools: boolean;
+  /** The inspector rail's preferred width in CSS pixels, a number and nothing more. */
+  inspectorWidth: number;
 }>;
 
 export const TEXT_SIZES: readonly TextSize[] = ['compact', 'default', 'large', 'larger'];
@@ -30,7 +33,11 @@ export const TEXT_SCALE: Readonly<Record<TextSize, number>> = {
   larger: 1.22,
 };
 
-export const DEFAULT_PREFERENCES: Preferences = { textSize: 'default', groupTools: true };
+export const DEFAULT_PREFERENCES: Preferences = {
+  textSize: 'default',
+  groupTools: true,
+  inspectorWidth: INSPECTOR_DEFAULT_WIDTH,
+};
 
 export const PREFERENCES_KEY = 'opencoven.chat.preferences.v1';
 
@@ -48,6 +55,7 @@ export function readPreferences(): Preferences {
         : DEFAULT_PREFERENCES.textSize,
       groupTools:
         typeof record.groupTools === 'boolean' ? record.groupTools : DEFAULT_PREFERENCES.groupTools,
+      inspectorWidth: preferredInspectorWidth(record.inspectorWidth),
     };
   } catch {
     return DEFAULT_PREFERENCES;

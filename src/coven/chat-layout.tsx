@@ -36,6 +36,8 @@ import type { ChatMessage } from './events';
 import { LinkReviewContext } from './external-link-review';
 import { FamiliarAvatar } from './familiar-avatar';
 import { FormattedMessage, REVEAL_EVENT, ToolActivity, type ToolRow } from './formatted-message';
+import { InspectorResizer } from './inspector-resizer';
+import { inspectorRoom, settleInspectorWidth } from './inspector-width';
 import { useMentionCompletion } from './mention-completion';
 import {
   type Preferences,
@@ -641,6 +643,28 @@ export function ChatLayout(props: ChatLayoutProps) {
   useFocusReturn('sidebar', sidebar, sidebarOpener, shellRef, sidebarRef);
   useFocusReturn('inspector', inspector, inspectorOpener, shellRef, inspectorRef);
   const scrim = (drawers && (sidebar || inspector)) || (inspectorOverlay && inspector);
+  // The inspector's width while it sits in the grid: the reader's preference,
+  // clamped to what the measured shell leaves after the left track and the
+  // conversation's minimum. A drag previews a width before it is kept.
+  const [shellWidth, setShellWidth] = useState(0);
+  useEffect(() => {
+    const shell = shellRef.current;
+    if (!shell || typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver((entries) => {
+      const width = entries[0]?.contentRect.width;
+      if (typeof width === 'number') setShellWidth(width);
+    });
+    observer.observe(shell);
+    return () => observer.disconnect();
+  }, []);
+  const [previewWidth, setPreviewWidth] = useState<number | null>(null);
+  const resizable = inspector && !inspectorOverlay;
+  // The same widths the shell's CSS variables name below.
+  const leftTrack = sidebar && !drawers ? 300 : 28;
+  const room = inspectorRoom(shellWidth, leftTrack);
+  const inspectorWidth = settleInspectorWidth(previewWidth ?? preferences.inspectorWidth, room);
+  const direction =
+    shellRef.current && getComputedStyle(shellRef.current).direction === 'rtl' ? 'rtl' : 'ltr';
   // Narrowing folds rails away; widening never forces them back open.
   const previousTier = useRef(tier);
   useEffect(() => {
@@ -1063,12 +1087,12 @@ export function ChatLayout(props: ChatLayoutProps) {
         data-tier={tier}
         data-sidebar={sidebar ? 'open' : 'closed'}
         data-inspector={inspector ? 'open' : 'closed'}
+        data-resizing={previewWidth === null ? undefined : 'inspector'}
         style={
           {
             '--coven-text-scale': TEXT_SCALE[preferences.textSize],
             '--coven-sidebar-w': sidebar && !drawers ? '300px' : 'var(--coven-rail-tab-w)',
-            '--coven-inspector-w':
-              inspector && !inspectorOverlay ? '360px' : 'var(--coven-rail-tab-w)',
+            '--coven-inspector-w': resizable ? `${inspectorWidth}px` : 'var(--coven-rail-tab-w)',
           } as CSSProperties
         }
       >
@@ -1684,6 +1708,15 @@ export function ChatLayout(props: ChatLayoutProps) {
           aria-hidden={!inspector || undefined}
           inert={!inspector}
         >
+          {resizable ? (
+            <InspectorResizer
+              width={inspectorWidth}
+              room={room}
+              direction={direction}
+              onPreview={setPreviewWidth}
+              onCommit={(width) => setPreferences({ inspectorWidth: width })}
+            />
+          ) : null}
           <div className="fr-inspector-inner">
             <button
               type="button"

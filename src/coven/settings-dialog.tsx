@@ -6,6 +6,7 @@ import { Icon, type IconName } from '../design/minimal-icons';
 import type { CovenProjectAccess } from '../lib/coven-runtime';
 import { CopyButton } from './copy-button';
 import { FamiliarAvatar } from './familiar-avatar';
+import { INSPECTOR_DEFAULT_WIDTH } from './inspector-width';
 import { closeModal, openModal } from './modal';
 import { type Preferences, TEXT_SCALE, TEXT_SIZE_LABEL, TEXT_SIZES } from './preferences';
 import './settings-dialog.css';
@@ -273,6 +274,26 @@ function GeneralSection({ preferences, onPreferences }: SettingsDialogProps) {
         >
           Messages in every chat read at this size.
         </p>
+      </Group>
+      <Group title="Inspector">
+        <Row
+          label="Inspector width"
+          hint="Drag the inspector's left edge, or focus its Resize inspector handle and use the arrow keys, Home and End. The conversation keeps at least 440px."
+          control={
+            <span className="coven-inspector-width">
+              <span className="coven-inspector-width-value">{preferences.inspectorWidth}px</span>
+              <button
+                type="button"
+                className="fr-btn fr-btn--secondary fr-btn--sm"
+                aria-label="Reset inspector width"
+                disabled={preferences.inspectorWidth === INSPECTOR_DEFAULT_WIDTH}
+                onClick={() => onPreferences({ inspectorWidth: INSPECTOR_DEFAULT_WIDTH })}
+              >
+                Reset
+              </button>
+            </span>
+          }
+        />
       </Group>
       <Group title="Tool activity">
         <Row
