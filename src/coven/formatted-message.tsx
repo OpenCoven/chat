@@ -4,6 +4,7 @@ import remarkGfm from 'remark-gfm';
 import { CopyButton } from './copy-button';
 import { LinkReviewScope, ReviewLink } from './external-link-review';
 import './formatted-message.css';
+import { MarkdownTable, ProseSourceContext } from './markdown-table';
 import { usePreferences } from './preferences';
 import { segmentToolCalls, toolGroupSummary, toolKind } from './tool-activity';
 
@@ -32,7 +33,7 @@ function codeLanguage(code: TreeNode | undefined): string | undefined {
   return list.find((name) => name.startsWith('language-'))?.slice('language-'.length);
 }
 
-const components: Components = {
+const baseComponents: Components = {
   a({ href, children, title }) {
     if (!href) return <span>{children}</span>;
     return href.startsWith('#') ? (
@@ -64,10 +65,26 @@ const components: Components = {
       </div>
     );
   },
+};
+
+/** A message's table: the scrolling table with its Copy table Markdown and Expand table controls. */
+const components: Components = {
+  ...baseComponents,
+  table({ children, node }) {
+    return (
+      <MarkdownTable node={node} render={renderSnapshot}>
+        {children}
+      </MarkdownTable>
+    );
+  },
+};
+
+/** An expanded table's snapshot: the same safe policy, with the table alone and no controls. */
+const snapshotComponents: Components = {
+  ...baseComponents,
   table({ children }) {
     return (
-      // biome-ignore lint/a11y/noNoninteractiveTabindex: Overflowing tables need keyboard scrolling.
-      <section className="coven-markdown-table" aria-label="Table" tabIndex={0}>
+      <section className="coven-markdown-table">
         <table>{children}</table>
       </section>
     );
@@ -75,19 +92,26 @@ const components: Components = {
 };
 const plugins = [remarkGfm];
 
-function Prose({ text }: { text: string }) {
+function Prose({ text, snapshot }: { text: string; snapshot?: boolean | undefined }) {
   return (
-    <Markdown
-      remarkPlugins={plugins}
-      components={components}
-      skipHtml
-      urlTransform={(url, key) =>
-        key === 'href' && /^(https?:\/\/|#)/i.test(url) ? defaultUrlTransform(url) : undefined
-      }
-    >
-      {text}
-    </Markdown>
+    // Tables resolve their source positions against exactly this text.
+    <ProseSourceContext.Provider value={text}>
+      <Markdown
+        remarkPlugins={plugins}
+        components={snapshot ? snapshotComponents : components}
+        skipHtml
+        urlTransform={(url, key) =>
+          key === 'href' && /^(https?:\/\/|#)/i.test(url) ? defaultUrlTransform(url) : undefined
+        }
+      >
+        {text}
+      </Markdown>
+    </ProseSourceContext.Provider>
   );
+}
+
+function renderSnapshot(source: string) {
+  return <Prose text={source} snapshot />;
 }
 
 /**
