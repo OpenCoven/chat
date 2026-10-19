@@ -9,6 +9,7 @@ import {
   useRef,
   useState,
 } from 'react';
+import { canOpenReviewedLinks, openReviewedLink } from '../lib/link-opener';
 import { copyText } from './copy-text';
 import './external-link-review.css';
 import { closeModal, openModal } from './modal';
@@ -130,6 +131,15 @@ export function LinkReviewScope({ children }: Readonly<{ children: ReactNode }>)
 }
 
 type CopyOutcome = 'idle' | 'copied' | 'failed';
+/** What the desktop host said about the address Open handed it. */
+type SendOutcome = 'idle' | 'sending' | 'sent' | Readonly<{ refused: string }>;
+
+/** The host's refusal as it came; its messages already name Copy address. */
+function refusalText(failure: unknown): string {
+  if (typeof failure === 'string' && failure) return failure;
+  if (failure instanceof Error && failure.message) return failure.message;
+  return "Chat couldn't hand the address on. Use Copy address instead.";
+}
 
 function LinkReviewDialog({ pending, onDone }: Readonly<{ pending: Pending; onDone: () => void }>) {
   const { review, origin, fallback } = pending;
@@ -138,7 +148,10 @@ function LinkReviewDialog({ pending, onDone }: Readonly<{ pending: Pending; onDo
   const finished = useRef(false);
   const opened = useRef(false);
   const [requested, setRequested] = useState(false);
+  const [sent, setSent] = useState<SendOutcome>('idle');
   const [copy, setCopy] = useState<CopyOutcome>('idle');
+  // The desktop app opens through its host; a browser build keeps the anchor.
+  const desktop = canOpenReviewedLinks();
   const titleId = useId();
   const descriptionId = useId();
 
@@ -177,6 +190,21 @@ function LinkReviewDialog({ pending, onDone }: Readonly<{ pending: Pending; onDo
     opened.current = true;
     setRequested(true);
   };
+
+  const send = () => {
+    if (opened.current || review.kind !== 'ready') return;
+    opened.current = true;
+    setSent('sending');
+    openReviewedLink(review.address).then(
+      () => {
+        if (!finished.current) setSent('sent');
+      },
+      (failure: unknown) => {
+        if (!finished.current) setSent({ refused: refusalText(failure) });
+      },
+    );
+  };
+  const pressed = requested || sent !== 'idle';
 
   const label = pending.label.trim();
   const showLabel =
@@ -245,6 +273,9 @@ function LinkReviewDialog({ pending, onDone }: Readonly<{ pending: Pending; onDo
             {review.signIn ? (
               <p className="coven-link-review-note">
                 {`The text before “@” is a sign-in name, not the site. This link goes to ${review.host}.`}
+                {desktop
+                  ? " Chat won't open an address with a sign-in name. Copy it if you trust it."
+                  : null}
               </p>
             ) : null}
             {review.international ? (
@@ -258,6 +289,13 @@ function LinkReviewDialog({ pending, onDone }: Readonly<{ pending: Pending; onDo
                   Chat asked to open this address but can't confirm that a page opened. If none did,
                   use Copy address.
                 </span>
+              ) : null}
+              {sent === 'sending' ? <span>Sending the address to your browser…</span> : null}
+              {sent === 'sent' ? (
+                <span>Sent the address to your browser. If no page opened, use Copy address.</span>
+              ) : null}
+              {typeof sent === 'object' ? (
+                <span className="coven-link-review-failed">{sent.refused}</span>
               ) : null}
               {copy === 'copied' ? <span>Copied the address.</span> : null}
               {copy === 'failed' ? (
@@ -273,7 +311,7 @@ function LinkReviewDialog({ pending, onDone }: Readonly<{ pending: Pending; onDo
                 className="fr-btn fr-btn--secondary"
                 onClick={finish}
               >
-                {requested ? 'Close' : 'Cancel'}
+                {pressed ? 'Close' : 'Cancel'}
               </button>
               <button
                 type="button"
@@ -287,22 +325,37 @@ function LinkReviewDialog({ pending, onDone }: Readonly<{ pending: Pending; onDo
               >
                 Copy address
               </button>
-              {/* The same hand-off a Markdown link made before review: an anchor the
-                  webview opens outside the window. Nothing else can open it. */}
-              <a
-                className="fr-btn fr-btn--primary coven-link-review-open"
-                href={review.address}
-                target="_blank"
-                rel="noopener noreferrer"
-                referrerPolicy="no-referrer"
-                aria-disabled={requested || undefined}
-                onClick={open}
-                onAuxClick={(event) => {
-                  if (event.button === 1) open(event);
-                }}
-              >
-                Open
-              </a>
+              {desktop ? (
+                // The host checks the address again and refuses a sign-in name,
+                // so such a link is only offered to copy.
+                review.signIn ? null : (
+                  <button
+                    type="button"
+                    className="fr-btn fr-btn--primary coven-link-review-open"
+                    aria-disabled={sent !== 'idle' || undefined}
+                    onClick={send}
+                  >
+                    Open
+                  </button>
+                )
+              ) : (
+                // In a browser build, the same hand-off a Markdown link made
+                // before review: an anchor the browser opens outside the page.
+                <a
+                  className="fr-btn fr-btn--primary coven-link-review-open"
+                  href={review.address}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  referrerPolicy="no-referrer"
+                  aria-disabled={requested || undefined}
+                  onClick={open}
+                  onAuxClick={(event) => {
+                    if (event.button === 1) open(event);
+                  }}
+                >
+                  Open
+                </a>
+              )}
             </div>
           </>
         ) : (

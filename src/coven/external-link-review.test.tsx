@@ -1,6 +1,7 @@
 import { act, fireEvent, render, screen, within } from '@testing-library/react';
 import { type ReactNode, useRef, useState } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { canOpenReviewedLinks, openReviewedLink } from '../lib/link-opener';
 import { watchNavigation } from '../test/watch-navigation';
 import {
   LinkReviewContext,
@@ -10,6 +11,12 @@ import {
   reviewAddress,
 } from './external-link-review';
 import { FormattedMessage } from './formatted-message';
+
+// The browser build keeps the anchor; the desktop path is switched on per test.
+vi.mock('../lib/link-opener', () => ({
+  canOpenReviewedLinks: vi.fn(() => false),
+  openReviewedLink: vi.fn(),
+}));
 
 const REVIEW = { name: 'Open this link?' } as const;
 const originalClipboard = Object.getOwnPropertyDescriptor(navigator, 'clipboard');
@@ -541,5 +548,82 @@ describe('a link to an IPv6 address', () => {
     fireEvent.click(within(review()).getByRole('button', { name: 'Close' }));
     fireEvent.click(screen.getByRole('link', { name: 'https://[2001:db8::1]/y' }));
     expect(openControl()).toHaveAttribute('href', 'https://[2001:db8::1]/y');
+  });
+});
+
+describe('opening from the desktop app', () => {
+  beforeEach(() => {
+    vi.mocked(canOpenReviewedLinks).mockReturnValue(true);
+  });
+  afterEach(() => {
+    vi.mocked(canOpenReviewedLinks).mockReturnValue(false);
+    vi.mocked(openReviewedLink).mockReset();
+  });
+
+  function openButton() {
+    return within(review()).getByRole('button', { name: 'Open' });
+  }
+
+  it('hands the reviewed address to the host once and says only that it was sent', async () => {
+    let accept!: () => void;
+    vi.mocked(openReviewedLink).mockReturnValue(
+      new Promise<void>((resolve) => {
+        accept = resolve;
+      }),
+    );
+    render(<FormattedMessage text="[docs](https://example.com/docs?a=1#b)" />);
+    fireEvent.click(screen.getByRole('link', { name: 'docs' }));
+    expect(within(review()).queryByRole('link', { name: 'Open' })).not.toBeInTheDocument();
+    fireEvent.click(openButton());
+    fireEvent.click(openButton());
+    fireEvent.keyDown(openButton(), { key: 'Enter' });
+    expect(openReviewedLink).toHaveBeenCalledExactlyOnceWith('https://example.com/docs?a=1#b');
+    expect(openButton()).toHaveAttribute('aria-disabled', 'true');
+    expect(review()).toHaveTextContent('Sending the address to your browser');
+    await act(async () => accept());
+    const dialog = review();
+    expect(dialog).toHaveTextContent('Sent the address to your browser.');
+    expect(dialog).not.toHaveTextContent(/\bopened the\b|loaded/i);
+    expect(navigation.opened).toEqual([]);
+    expect(within(dialog).getByRole('button', { name: 'Close' })).toBeInTheDocument();
+    expect(within(dialog).getByRole('button', { name: 'Copy address' })).toBeEnabled();
+  });
+
+  it("shows the host's refusal as it came, which names Copy address", async () => {
+    const refusal = "Your system didn't take the address. Use Copy address instead.";
+    vi.mocked(openReviewedLink).mockRejectedValue(refusal);
+    render(<FormattedMessage text="[docs](https://example.com/docs)" />);
+    fireEvent.click(screen.getByRole('link', { name: 'docs' }));
+    await act(async () => {
+      fireEvent.click(openButton());
+    });
+    expect(within(review()).getByText(refusal)).toHaveClass('coven-link-review-failed');
+    expect(review()).not.toHaveTextContent('Sent the address');
+  });
+
+  it('offers Copy address instead of Open for an address with a sign-in name', () => {
+    render(<FormattedMessage text="[account](https://bank.example@evil.example/)" />);
+    fireEvent.click(screen.getByRole('link', { name: 'account' }));
+    expect(within(review()).queryByRole('button', { name: 'Open' })).not.toBeInTheDocument();
+    expect(within(review()).queryByRole('link', { name: 'Open' })).not.toBeInTheDocument();
+    expect(review()).toHaveTextContent(
+      "Chat won't open an address with a sign-in name. Copy it if you trust it.",
+    );
+    expect(within(review()).getByRole('button', { name: 'Copy address' })).toBeEnabled();
+  });
+
+  it('ignores an answer that arrives after the review closed', async () => {
+    let accept!: () => void;
+    vi.mocked(openReviewedLink).mockReturnValue(
+      new Promise<void>((resolve) => {
+        accept = resolve;
+      }),
+    );
+    render(<FormattedMessage text="[docs](https://example.com/docs)" />);
+    fireEvent.click(screen.getByRole('link', { name: 'docs' }));
+    fireEvent.click(openButton());
+    fireEvent.click(within(review()).getByRole('button', { name: 'Close' }));
+    await act(async () => accept());
+    expect(screen.queryByRole('dialog', REVIEW)).not.toBeInTheDocument();
   });
 });
