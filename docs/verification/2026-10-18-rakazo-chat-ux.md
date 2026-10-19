@@ -162,16 +162,17 @@ runs nothing, so it proves the build, not how the app behaves.
 
 ## Packaged desktop lanes
 
-No packaged lane was **run** on this candidate: the macOS bundle was built here and the Linux bundle
-in CI, and neither was launched. Each lane's runtime rows stay **unverified**, for the reason given,
-and nothing above replaces them. The per-feature pending rows are kept on #485
+No packaged lane's behaviour rows were run on this candidate. The macOS bundle was built here and
+launched once as a startup smoke under an isolated identifier; the Linux bundle was built in CI and
+never launched; Windows was not built. Each lane's behaviour rows stay **unverified**, for the reason
+given, and nothing above replaces them. The per-feature pending rows are kept on #485
 ([first set](https://github.com/OpenCoven/chat/issues/485#issuecomment-6258525498),
 [additions](https://github.com/OpenCoven/chat/issues/485#issuecomment-6258933027)); the checklist
 below is the macOS hand-run version of them for this candidate.
 
 | Lane | State | Why, and what exists instead |
 | --- | --- | --- |
-| Packaged macOS (WKWebView) | **Built locally, not launched; runtime unverified** | A release `.app` of the exact tree was built here once the volume had 16 GB free (see "macOS build provenance"). It was not launched: this terminal has no Accessibility or Screen Recording grant, by Val's standing decision, so window steps are Val's to run by hand, and the built app is the one to run. The checklist below is written for that. |
+| Packaged macOS (WKWebView) | **Built locally; launched once as a smoke (starts, webview up, no crash, no startup storage); every behaviour row unverified** | A release `.app` of the exact tree was built here once the volume had 16 GB free (see "macOS build provenance"). It was not launched: this terminal has no Accessibility or Screen Recording grant, by Val's standing decision, so window steps are Val's to run by hand, and the built app is the one to run. The checklist below is written for that. |
 | Packaged Windows (WebView2) | **Unverified** | No Windows machine in this session. Cross-compilation would not be runtime evidence. |
 | Packaged Linux (WebKitGTK) | **Built, not run; unverified at runtime** | The exact tree bundled on `ubuntu-latest` in CI run 39194949333 (`pnpm app:build`, *Desktop build* job, success). No Linux machine in this session to launch the bundle, and CI keeps no artifact. |
 
@@ -195,7 +196,31 @@ Cargo finished the `release` profile in 1 m 47 s from cached crates; `src-tauri/
 | Signature | ad-hoc, linker-signed (`flags=0x20002(adhoc,linker-signed)`), no Team ID, not notarized; CDHash `e21259c4c25e2dfb475efb37531204e901ab6df0`. A release build signs and notarizes in CI; this local build does not, so it runs from this path on this Mac but is not a distributable. |
 | Native deps | tauri 2.11.2, wry 0.55.1 (unchanged from `main`) |
 | Host | macOS 26.7.1 (25G241), arm64 |
-| Launched | **No.** Nothing below the build line was exercised. |
+| Launched | **Yes, once, as a smoke under an isolated identifier; no UI row exercised.** See "macOS launch smoke". The `ai.opencoven.chat` bundle itself was not launched. |
+
+### macOS launch smoke (packaged, isolated identifier)
+
+To see whether the packaged candidate starts on this Mac without touching Val's Chat data, the same
+tree was bundled once more at 03:49Z with `tauri build --bundles app --config
+'{"identifier":"ai.opencoven.chat.acceptance480","productName":"OpenCoven Chat Acceptance"}'`
+(binary sha256 `1b4b4b87a4b690e9fae8b419a749aefad0cc6053061a86696a18732f26be585f`, CDHash
+`79493d0ae11873ef4d3e3a8eac6b309fbe3234a6`; only the identifier and name differ from the bundle above),
+then launched with `open -n` at 03:51:19Z and observed for 25 s from the terminal only.
+
+| Observation | Result |
+| --- | --- |
+| Process | `opencoven-chat` pid 4470 alive at 25 s, RSS about 167 MB |
+| WKWebView | `~/Library/WebKit/ai.opencoven.chat.acceptance480/WebsiteData/` was created with the usual `Default`, `IndexedDB`, `SearchHistory` and salt directories: the webview initialized its data store |
+| Browser storage after first launch | no `*.localstorage` database existed, so nothing was written to local storage at startup |
+| App storage | no `~/Library/Application Support/ai.opencoven.chat.acceptance480` was created (Chat writes there only once a chat exists) |
+| Crash reports | none under `~/Library/Logs/DiagnosticReports` for the process |
+| Exit | `SIGTERM` at 03:51:44Z; process gone within 3 s |
+| Cleanup | the isolated `WebKit`, `Caches`, `HTTPStorages` and saved-state directories were removed; none remained |
+| Not captured | the `runningboardd` "Now tracking" line (the `log show` query returned nothing in the window) and whether any pixels rendered. No Accessibility or Screen Recording grant exists for this terminal, by Val's standing decision, so nothing in the window was observed or operated. |
+
+This proves the packaged candidate launches on macOS 26.7.1 arm64, brings up WKWebView, writes
+nothing to browser storage at startup, and exits cleanly. It proves nothing about the eight behaviour
+rows in the checklist below; those still need hands on the window.
 
 ### Hand-run checklist for the packaged macOS candidate (for Val)
 
@@ -241,11 +266,11 @@ app; quit the installed Chat first.
 
 | Child | Proposed | Implemented on a branch | Merged | Independently verified | Packaged |
 | --- | --- | --- | --- | --- | --- |
-| #481 link review | yes | #486 | **yes**, `bbdb1108` | source + jsdom + Chromium on the candidate; clipboard defect found and fixed before merge | macOS bundle built locally and Linux bundle built in CI, neither launched |
+| #481 link review | yes | #486 | **yes**, `bbdb1108` | source + jsdom + Chromium on the candidate; clipboard defect found and fixed before merge | macOS bundle built and start-smoked (no UI row run); Linux bundle built in CI, not launched; Windows not built |
 | #482 quote selection | yes | #488 | **yes**, `cdb98ce3` | source + jsdom + Chromium on the candidate | built, not launched (same bundles) |
 | #483 tables | yes | #487 @ `35e004e0` | **yes**, `72a64036` (03:21Z) | source + jsdom + Chromium on the candidate; CI green on the exact head | built, not launched (same bundles) |
 | #484 inspector resize | yes, optional; **retained, not deferred** | #489 @ `72b6e252` | **yes**, `4342d2ad` (03:45Z) | source + jsdom + Chromium on the candidate; CI green on the exact head | built, not launched (same bundles) |
-| #485 acceptance | yes | this record + `chat-ux-integration.test.tsx` on `review/candidate-480` (PR #490) | no | unit, browser, CI and diff lanes run; macOS and Linux bundles built; no desktop runtime row verified | Windows not built; nothing launched anywhere |
+| #485 acceptance | yes | this record + `chat-ux-integration.test.tsx` on `review/candidate-480` (PR #490) | no | unit, browser, CI and diff lanes run; macOS bundle built and start-smoked; Linux bundle built; no desktop behaviour row verified | Windows not built; macOS launched once as a smoke only |
 
 Green checks and this record are not merge or release authorization. All four children are on `main`
 (`cdb98ce3`, `bbdb1108`, `72a64036`, `4342d2ad`), each with content identical to the verified candidate.
