@@ -1,0 +1,109 @@
+.coven-missions-form {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.coven-missions-label {
+  color: var(--text-secondary);
+  font-size: 11px;
+}
+
+.coven-missions-input {
+  width: 100%;
+  min-width: 0;
+  padding: 6px 9px;
+  border: 1px solid var(--border-hairline);
+  border-radius: 7px;
+  background: var(--bg-sunken);
+  color: var(--text-primary);
+  font: inherit;
+  font-size: 12px;
+}
+
+.coven-missions-prompt {
+  resize: vertical;
+  min-height: 72px;
+}
+
+.coven-missions-input:focus-visible {
+  outline: none;
+  border-color: var(--ring-focus);
+  box-shadow: 0 0 0 1px var(--ring-focus);
+}
+
+.coven-missions-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 6px;
+}
+
+.coven-missions-review,
+.coven-missions-gate {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.coven-missions-status,
+.coven-missions-detail {
+  display: block;
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.coven-missions-notice {
+  margin: 0;
+  color: var(--color-warning);
+  font-size: 12px;
+}
+
+.coven-missions-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.coven-mission {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.coven-mission-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 0;
+}
+
+.coven-mission-title {
+  overflow: hidden;
+  color: var(--text-primary);
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.coven-mission-state {
+  flex: none;
+  color: var(--text-secondary);
+  font-size: 11px;
+}
+
+.coven-mission[data-state="unavailable"] .coven-mission-state,
+.coven-mission[data-state="failed"] .coven-mission-state,
+.coven-mission[data-state="revoked"] .coven-mission-state {
+  color: var(--color-warning);
+}
+
+.coven-mission-reason {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 12px;
+}

@@ -39,6 +39,7 @@ import { FormattedMessage, REVEAL_EVENT, ToolActivity, type ToolRow } from './fo
 import { InspectorResizer } from './inspector-resizer';
 import { inspectorRoom, settleInspectorWidth } from './inspector-width';
 import { useMentionCompletion } from './mention-completion';
+import { MissionPanel } from './mission-panel';
 import {
   type Preferences,
   PreferencesContext,
@@ -1893,6 +1894,15 @@ export function ChatLayout(props: ChatLayoutProps) {
                     </p>
                   </div>
                 </div>
+              ) : null}
+              {tab === 'missions' ? (
+                familiar ? (
+                  <MissionPanel key={familiar.id} familiar={familiar} name={name} />
+                ) : (
+                  <div className="coven-details fr-card fr-card--lift">
+                    <p>Select a familiar to send it a mission.</p>
+                  </div>
+                )
               ) : null}
             </section>
           </div>

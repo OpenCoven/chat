@@ -422,6 +422,38 @@ also fold into one summary line, such as "Ran 4 commands and read 2 files". Clic
 call, or turn off **Group tool calls** in **Settings › General**. The bundled engine's Claude CLI
 provider reports calls as text only, so those rows carry the one-line summary alone.
 
+## Missions
+
+The inspector's **Missions** tab asks the selected familiar to look into something in a project,
+without a chat. A mission is read-only: Coven runs it on this computer with tools that can only
+read files, so it can't change files, run commands, or use paid cloud services. Chat sends it
+through your installed Coven (`coven missions`) and shows only what Coven reports.
+
+1. Give the mission a title, say what to look into, and choose a project folder and a time
+   limit. The folder list offers the familiar's declared projects.
+2. **Review mission** shows exactly what will be sent: the familiar and the version Coven has on
+   record for it, the project, how it runs, and the time limit. Nothing is sent until you choose
+   **Send mission**.
+3. The mission then shows Coven's state for it, such as *Waiting to start*, *Running*,
+   *Finished* or *Couldn't run*, with the reason in plain words. **Cancel mission** stops one
+   that hasn't finished.
+
+The current Coven records missions but can't run them yet, so each one ends as *Couldn't run*
+with "Nothing ran". Chat says so instead of showing progress that didn't happen.
+
+When Chat can't confirm that Coven received a mission, the mission shows *Checking whether Coven
+received this mission* and Chat keeps asking with the same request. It never reports that nothing
+happened until Coven confirms it. If the familiar changed after you reviewed a mission, Coven
+refuses it, and Chat asks you to review it again.
+
+When the familiar can't take a mission, the tab says why and offers **Try again**. That happens
+when Coven is too old to have missions, isn't running, or doesn't know the familiar yet. For the
+last case, the tab shows the `coven familiar-ledger register` command to run.
+
+Chat keeps a mission's keys only while it is open, until the storage proposed in
+`docs/mission-storage-design.md` is approved. The window never receives those keys, and no
+mission text reaches browser storage.
+
 ## Remote screen (VNC)
 
 The **Show screen** button in the thread header opens a viewer pane above the transcript. Enter the
