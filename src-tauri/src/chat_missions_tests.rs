@@ -1328,3 +1328,105 @@ fn a_mission_still_being_checked_cannot_be_removed() {
     assert!(missions.forget(&id).unwrap_err().contains("still checking"));
     assert!(missions.record(&id).is_ok());
 }
+
+/// Opt-in round trip against a running Coven daemon, through the real
+/// `coven` on `PATH`. Point `HOME` and `COVEN_HOME` at a scratch home with a
+/// registered familiar, name it in `COVEN_CHAT_MISSION_SMOKE_FAMILIAR`, and
+/// name a project directory in `COVEN_CHAT_MISSION_SMOKE_PROJECT`. Under M0
+/// the mission settles `unavailable`; nothing launches.
+#[test]
+#[ignore = "requires a running Coven daemon at or after coven#1368 in a scratch COVEN_HOME"]
+fn installed_coven_missions_round_trip() {
+    let familiar = std::env::var("COVEN_CHAT_MISSION_SMOKE_FAMILIAR").unwrap();
+    let project = std::env::var("COVEN_CHAT_MISSION_SMOKE_PROJECT").unwrap();
+    let missions = Missions::default();
+
+    let MissionPreparation::Ready {
+        root_id,
+        revision_id,
+        envelope_digest,
+        ..
+    } = prepare(&live, &familiar).unwrap()
+    else {
+        panic!("the scratch familiar cannot take a mission");
+    };
+    eprintln!("prepare: root={root_id} revision={revision_id} digest={envelope_digest}");
+    let base = SubmitInput {
+        familiar_id: familiar.clone(),
+        root_id: root_id.clone(),
+        revision_id: revision_id.clone(),
+        envelope_digest: envelope_digest.clone(),
+        project_cwd: project.clone(),
+        statement: "Why does the build fail?".into(),
+        prompt: "Read README.md and say what it contains.".into(),
+        timeout_minutes: 10,
+    };
+
+    // M-15: Chat refuses out-of-range input before anything is sent.
+    let mut bounds = base.clone();
+    bounds.timeout_minutes = 61;
+    assert!(submit(&missions, &live, &bounds, SystemTime::now(), &no_pause).is_err());
+
+    // M-05: a digest Coven does not advertise.
+    let mut wrong = base.clone();
+    wrong.envelope_digest = "0".repeat(64);
+    let refused = submit(&missions, &live, &wrong, SystemTime::now(), &no_pause).unwrap();
+    eprintln!("M-05: {refused:?}");
+    assert!(
+        matches!(refused, MissionAnswer::Refused { ref code, .. } if code == "CAPABILITY_UNSUPPORTED")
+    );
+
+    // M-04 a: a revision that is not the root's active head.
+    let mut stale = base.clone();
+    stale.revision_id = format!(
+        "{}:999",
+        revision_id.rsplit_once(':').map(|(head, _)| head).unwrap()
+    );
+    let refused = submit(&missions, &live, &stale, SystemTime::now(), &no_pause).unwrap();
+    eprintln!("M-04 a: {refused:?}");
+    assert!(matches!(
+        refused,
+        MissionAnswer::Refused { ref code, ref current_revision_id, .. }
+            if code == "REVISION_CONFLICT" && current_revision_id.as_deref() == Some(revision_id.as_str())
+    ));
+    assert!(missions.list(&familiar).unwrap().is_empty());
+
+    // M-06: a valid submit commits, and settles unavailable under M0.
+    let answer = submit(&missions, &live, &base, SystemTime::now(), &no_pause).unwrap();
+    eprintln!("submit: {answer:?}");
+    let MissionAnswer::View { mission } = answer else {
+        panic!("expected Coven's view of the committed mission");
+    };
+    assert_eq!(
+        (mission.root_id.as_str(), mission.revision_id.as_str()),
+        (root_id.as_str(), revision_id.as_str())
+    );
+    let id = mission.mission_id.clone();
+    let answer = read(&missions, &live, &id, SystemTime::now(), &no_pause).unwrap();
+    eprintln!("get: {answer:?}");
+    let MissionAnswer::View { mission } = answer else {
+        panic!("expected Coven's view");
+    };
+    assert_eq!(mission.state, "unavailable");
+    assert_eq!(mission.reason.as_deref(), Some("authority_unavailable"));
+    assert!(mission.terminal);
+    assert_eq!(mission.result.as_ref().unwrap().usage, None);
+    assert_eq!(missions.record(&id).unwrap().phase, Phase::Terminal);
+
+    // M-09: cancelling a settled mission answers with its view, twice.
+    for _ in 0..2 {
+        let answer = cancel(&missions, &live, &id, &no_pause).unwrap();
+        eprintln!("cancel: {answer:?}");
+        assert!(matches!(answer, MissionAnswer::Settled { ref mission } if mission.terminal));
+    }
+
+    // Chat reads only missions it sent.
+    assert!(read(
+        &missions,
+        &live,
+        &mission_id_for("someone-else:key"),
+        SystemTime::now(),
+        &no_pause
+    )
+    .is_err());
+}
