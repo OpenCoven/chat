@@ -511,6 +511,8 @@ network plugin permission. The main window's capability, `src-tauri/capabilities
 lets it invoke only:
 
 - the seven `coven_runtime_*` commands the chat interface uses,
+- the seven `mission_*` commands that send one read-only familiar mission, follow it and
+  cancel it (#155), which keep each mission's keys on the native side,
 - the four `setup_*` commands of first-run setup,
 - the five `companion_*` commands of the opt-in iPhone companion,
 - the three `coven_screen_*` commands of the screen relay,

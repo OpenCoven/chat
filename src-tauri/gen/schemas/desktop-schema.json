@@ -387,6 +387,48 @@
           "markdownDescription": "Enables the coven_screen_send command without any pre-configured scope."
         },
         {
+          "description": "Enables the mission_cancel command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-mission-cancel",
+          "markdownDescription": "Enables the mission_cancel command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the mission_get command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-mission-get",
+          "markdownDescription": "Enables the mission_get command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the mission_list command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-mission-list",
+          "markdownDescription": "Enables the mission_list command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the mission_prepare command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-mission-prepare",
+          "markdownDescription": "Enables the mission_prepare command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the mission_submit command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-mission-submit",
+          "markdownDescription": "Enables the mission_submit command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the mission_watch command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-mission-watch",
+          "markdownDescription": "Enables the mission_watch command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the mission_watch_stop command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-mission-watch-stop",
+          "markdownDescription": "Enables the mission_watch_stop command without any pre-configured scope."
+        },
+        {
           "description": "Enables the setup_cancel command without any pre-configured scope.",
           "type": "string",
           "const": "allow-setup-cancel",
@@ -619,6 +661,48 @@
           "type": "string",
           "const": "deny-coven-screen-send",
           "markdownDescription": "Denies the coven_screen_send command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the mission_cancel command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-mission-cancel",
+          "markdownDescription": "Denies the mission_cancel command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the mission_get command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-mission-get",
+          "markdownDescription": "Denies the mission_get command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the mission_list command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-mission-list",
+          "markdownDescription": "Denies the mission_list command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the mission_prepare command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-mission-prepare",
+          "markdownDescription": "Denies the mission_prepare command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the mission_submit command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-mission-submit",
+          "markdownDescription": "Denies the mission_submit command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the mission_watch command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-mission-watch",
+          "markdownDescription": "Denies the mission_watch command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the mission_watch_stop command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-mission-watch-stop",
+          "markdownDescription": "Denies the mission_watch_stop command without any pre-configured scope."
         },
         {
           "description": "Denies the setup_cancel command without any pre-configured scope.",

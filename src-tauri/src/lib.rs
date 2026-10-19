@@ -265,6 +265,7 @@ fn builder() -> tauri::Builder<tauri::Wry> {
     tauri::Builder::default()
         .manage(NativeConnectionState::default())
         .manage(coven_runtime::CovenRuntimeState::default())
+        .manage(coven_runtime::missions::MissionState::default())
         .manage(screen_relay::ScreenRelayState::default())
         .manage(companion::CompanionState::default())
         .invoke_handler(tauri::generate_handler![
@@ -280,6 +281,13 @@ fn builder() -> tauri::Builder<tauri::Wry> {
             coven_runtime::coven_runtime_read,
             coven_runtime::coven_runtime_send,
             coven_runtime::coven_runtime_cancel,
+            coven_runtime::missions::mission_prepare,
+            coven_runtime::missions::mission_list,
+            coven_runtime::missions::mission_submit,
+            coven_runtime::missions::mission_get,
+            coven_runtime::missions::mission_cancel,
+            coven_runtime::missions::mission_watch,
+            coven_runtime::missions::mission_watch_stop,
             screen_relay::coven_screen_connect,
             screen_relay::coven_screen_send,
             screen_relay::coven_screen_disconnect,

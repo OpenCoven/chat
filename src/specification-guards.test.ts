@@ -68,6 +68,18 @@ const covenRuntimeCommands = [
   'coven_runtime_send',
   'coven_runtime_cancel',
 ];
+// Missions (#155): one bounded, read-only familiar mission over the CLI's
+// `coven missions` commands. The webview names a mission by its id; adoption
+// keys stay native. See src-tauri/src/chat_missions.rs.
+const missionCommands = [
+  'mission_prepare',
+  'mission_list',
+  'mission_submit',
+  'mission_get',
+  'mission_cancel',
+  'mission_watch',
+  'mission_watch_stop',
+];
 // The screen relay is the one place the webview may name a network
 // destination: a WebSocket upgrade the host performs itself, forwarding
 // opaque frames for the VNC viewer. See src-tauri/src/screen_relay.rs.
@@ -255,9 +267,12 @@ describe('Phase 1 specification guards', () => {
       ...companionCommands.map((command) => `allow-${command.replaceAll('_', '-')}`),
       'core:event:allow-listen',
       'core:event:allow-unlisten',
-      ...[...covenRuntimeCommands, ...screenRelayCommands, ...setupCommands].map(
-        (command) => `allow-${command.replaceAll('_', '-')}`,
-      ),
+      ...[
+        ...covenRuntimeCommands,
+        ...missionCommands,
+        ...screenRelayCommands,
+        ...setupCommands,
+      ].map((command) => `allow-${command.replaceAll('_', '-')}`),
       'core:window:allow-set-title',
     ]);
     for (const command of registeredCommandNames(readText('src-tauri/src/commands.rs'))) {
@@ -732,6 +747,7 @@ describe('Phase 1 specification guards', () => {
     const expectedCommands = [
       ...companionCommands,
       ...covenRuntimeCommands,
+      ...missionCommands,
       ...screenRelayCommands,
       ...setupCommands,
       'app_identity',
@@ -799,6 +815,7 @@ describe('Phase 1 specification guards', () => {
     expect(invokeHandlerCommandNames(lib)).toEqual([
       ...companionCommands.map((command) => `companion::${command}`),
       ...covenRuntimeCommands.map((command) => `coven_runtime::${command}`),
+      ...missionCommands.map((command) => `coven_runtime::missions::${command}`),
       ...screenRelayCommands.map((command) => `screen_relay::${command}`),
       ...setupCommands.map((command) => `setup::${command}`),
       ...expected,
