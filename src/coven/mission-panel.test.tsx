@@ -63,6 +63,7 @@ function client(overrides: Partial<Missions> = {}): Missions {
     cancel: vi.fn().mockResolvedValue({ kind: 'settled', mission: view({ revision: 4 }) }),
     watch: vi.fn().mockResolvedValue(undefined),
     stopWatch: vi.fn().mockResolvedValue(undefined),
+    remove: vi.fn().mockResolvedValue(undefined),
     ...overrides,
   };
 }
@@ -205,6 +206,19 @@ describe('Missions tab', () => {
     expect(api.cancel).toHaveBeenCalledWith(ID);
     unmount();
     expect(api.stopWatch).toHaveBeenCalledWith(ID);
+  });
+
+  it('shows missions kept from before a restart and removes a finished one', async () => {
+    const api = client({
+      list: vi.fn().mockResolvedValue([{ missionId: ID, phase: 'terminal' }]),
+    });
+    render(<MissionPanel familiar={familiar} name="Sage" missions={api} />);
+    expect(await screen.findByText('Couldn’t run')).toBeVisible();
+    expect(api.get).toHaveBeenCalledWith(ID);
+    expect(api.watch).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: 'Remove' }));
+    await waitFor(() => expect(screen.queryByText('Couldn’t run')).not.toBeInTheDocument());
+    expect(api.remove).toHaveBeenCalledWith(ID);
   });
 
   it('says a mission that was not sent changed nothing', async () => {

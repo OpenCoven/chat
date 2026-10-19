@@ -283,6 +283,7 @@ fn builder() -> tauri::Builder<tauri::Wry> {
             coven_runtime::coven_runtime_cancel,
             coven_runtime::missions::mission_prepare,
             coven_runtime::missions::mission_list,
+            coven_runtime::missions::mission_remove,
             coven_runtime::missions::mission_submit,
             coven_runtime::missions::mission_get,
             coven_runtime::missions::mission_cancel,

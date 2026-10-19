@@ -450,9 +450,10 @@ When the familiar can't take a mission, the tab says why and offers **Try again*
 when Coven is too old to have missions, isn't running, or doesn't know the familiar yet. For the
 last case, the tab shows the `coven familiar-ledger register` command to run.
 
-Chat keeps a mission's keys only while it is open, until the storage proposed in
-`docs/mission-storage-design.md` is approved. The window never receives those keys, and no
-mission text reaches browser storage.
+Chat keeps each mission's keys in a private folder, so it shows the mission again after a
+restart and can still learn the outcome of one it was sending when it closed (see
+`SECURITY.md` and `docs/mission-storage-design.md`). **Remove** forgets a finished mission. The
+window never receives those keys, and no mission text reaches browser storage.
 
 ## Remote screen (VNC)
 
@@ -543,8 +544,8 @@ network plugin permission. The main window's capability, `src-tauri/capabilities
 lets it invoke only:
 
 - the seven `coven_runtime_*` commands the chat interface uses,
-- the seven `mission_*` commands that send one read-only familiar mission, follow it and
-  cancel it (#155), which keep each mission's keys on the native side,
+- the eight `mission_*` commands that send one read-only familiar mission, follow it,
+  cancel it and remove it (#155), which keep each mission's keys on the native side,
 - the four `setup_*` commands of first-run setup,
 - the five `companion_*` commands of the opt-in iPhone companion,
 - the three `coven_screen_*` commands of the screen relay,

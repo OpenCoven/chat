@@ -44,6 +44,12 @@ local app data folder (on macOS, `~/Library/Application Support/ai.opencoven.cha
 - **Companion credentials.** The iPhone companion's certificate and key, its
   bearer token, and its send receipts live in a private `iphone-companion/`
   folder.
+- **Missions.** For each mission you send from Chat, a private `coven-missions/`
+  folder keeps the keys Chat needs to learn its outcome after a restart: the
+  mission's id, the familiar it was sent to and that familiar's revision, and the
+  Coven owner that accepted it. It keeps no title, prompt, project path or
+  result; Chat reads those from Coven. On macOS and Linux only your user account
+  can read it. Removing a finished mission removes its record.
 
 The window can't reach the operating system keyring. Only the Cave adapter and the
 installation-identity commands use it, and the window can call neither

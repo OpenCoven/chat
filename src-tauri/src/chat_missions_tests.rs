@@ -1004,3 +1004,164 @@ fn answers_reach_the_window_in_their_documented_shape() {
         json!({ "status": "unavailable", "reason": "update-coven", "detail": "" })
     );
 }
+
+#[test]
+fn timestamps_read_back_exactly_as_written() {
+    for millis in [0, 951_868_799_000, NOW, NOW + 600_000] {
+        assert_eq!(parse_timestamp(&timestamp(at(millis))), Some(at(millis)));
+    }
+    for bad in [
+        "2026-10-18T12:10:00Z",
+        "2026-13-18T12:10:00.123Z",
+        "2026-02-30T12:10:00.123Z",
+        "2026-10-18 12:10:00.123Z",
+        "x026-10-18T12:10:00.123Z",
+    ] {
+        assert_eq!(parse_timestamp(bad), None, "{bad}");
+    }
+}
+
+/// A submit through `missions` that Coven answers but leaves open.
+fn sent(missions: &Missions, project: &Path) -> String {
+    let fake = Fake::new(vec![step(unknown), step(unknown), step(unknown)]);
+    let (_, id) = submitted(missions, &fake, project);
+    id
+}
+
+#[test]
+fn records_survive_a_restart_without_any_task_body() {
+    let data = Scratch::new();
+    let project = Scratch::new();
+    let missions = Missions::default();
+    missions.open(data.path()).unwrap();
+    let id = sent(&missions, project.path());
+
+    let folder = data.path().join("coven-missions");
+    let file = folder.join("missions-v1.json");
+    let text = fs::read_to_string(&file).unwrap();
+    assert!(text.contains(&id));
+    for body in [
+        "Why does the build fail?",
+        "Read the last CI log",
+        "timeoutMinutes",
+        "project",
+    ] {
+        assert!(!text.contains(body), "the record file holds {body}");
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        assert_eq!(
+            fs::metadata(&folder).unwrap().permissions().mode() & 0o777,
+            0o700
+        );
+        assert_eq!(
+            fs::metadata(&file).unwrap().permissions().mode() & 0o777,
+            0o600
+        );
+    }
+
+    // After a restart the record is back, without the payload, so the
+    // unanswered submit is settled by reading it (M-01, M-02).
+    let restarted = Missions::default();
+    restarted.open(data.path()).unwrap();
+    let record = restarted.record(&id).unwrap();
+    assert_eq!(record.phase, Phase::Sending);
+    assert!(record.payload.is_none());
+    assert_eq!(record.valid_until, at(NOW + 600_000));
+    let fake = Fake::new(vec![step(|call| {
+        printed(0, &view(&call.mission_id(), 2, "unavailable"))
+    })]);
+    let run = |args: &[&str], input: Option<&[u8]>| fake.run(args, input);
+    assert!(matches!(
+        read(&restarted, &run, &id, at(NOW + 1_000), &no_pause).unwrap(),
+        MissionAnswer::View { .. }
+    ));
+    assert_eq!(
+        fake.calls()[0].args,
+        ["missions", "get", id.as_str(), "--json"]
+    );
+
+    // The settled phase and the owner are kept too.
+    let again = Missions::default();
+    again.open(data.path()).unwrap();
+    let record = again.record(&id).unwrap();
+    assert_eq!(record.phase, Phase::Terminal);
+    assert_eq!(record.principal_id.as_deref(), Some(OWNER));
+
+    // A finished mission can be removed, and stays removed.
+    again.forget(&id).unwrap();
+    let last = Missions::default();
+    last.open(data.path()).unwrap();
+    assert!(last.record(&id).is_err());
+}
+
+#[test]
+fn an_unreadable_record_file_is_left_alone_and_nothing_is_sent() {
+    let data = Scratch::new();
+    let folder = data.path().join("coven-missions");
+    fs::create_dir_all(&folder).unwrap();
+    let file = folder.join("missions-v1.json");
+    for contents in [
+        "not json".to_owned(),
+        json!({ "version": 2, "missions": [] }).to_string(),
+        json!({ "version": 1, "missions": [{ "adoptionKey": "chat-mission:x", "missionId": "mission-1" }] }).to_string(),
+    ] {
+        fs::write(&file, &contents).unwrap();
+        let missions = Missions::default();
+        assert!(missions.open(data.path()).unwrap_err().contains("can't read its mission list"));
+        assert_eq!(fs::read_to_string(&file).unwrap(), contents);
+    }
+    #[cfg(unix)]
+    {
+        fs::remove_file(&file).unwrap();
+        let elsewhere = data.path().join("elsewhere.json");
+        fs::write(
+            &elsewhere,
+            json!({ "version": 1, "missions": [] }).to_string(),
+        )
+        .unwrap();
+        std::os::unix::fs::symlink(&elsewhere, &file).unwrap();
+        assert!(Missions::default().open(data.path()).is_err());
+    }
+
+    // A file where the folder belongs is refused the same way.
+    let data = Scratch::new();
+    fs::write(
+        data.path().join("coven-missions"),
+        "a file where the folder goes",
+    )
+    .unwrap();
+    assert!(Missions::default().open(data.path()).is_err());
+
+    // A record that can't be saved is dropped, and the submit is never sent.
+    // The folder is replaced by a file after the list opened, which no
+    // account can write through (CI runs these tests as root).
+    let data = Scratch::new();
+    let project = Scratch::new();
+    let folder = data.path().join("coven-missions");
+    fs::create_dir_all(&folder).unwrap();
+    let missions = Missions::default();
+    missions.open(data.path()).unwrap();
+    fs::remove_dir(&folder).unwrap();
+    fs::write(&folder, "a file where the folder goes").unwrap();
+    let fake = Fake::new(vec![]);
+    let run = |args: &[&str], input: Option<&[u8]>| fake.run(args, input);
+    let refused = submit(&missions, &run, &input(project.path()), at(NOW), &no_pause);
+    assert!(refused.unwrap_err().contains("nothing was sent"));
+    assert!(fake.calls().is_empty());
+    assert!(missions.list("sage").unwrap().is_empty());
+}
+
+#[test]
+fn a_mission_still_being_checked_cannot_be_removed() {
+    let missions = Missions::default();
+    let id = record(
+        &missions,
+        "chat-mission:5e2b6c35-55e7-4c0a-9a5e-36d27c6a0c41",
+        Phase::Sending,
+        None,
+    );
+    assert!(missions.forget(&id).unwrap_err().contains("still checking"));
+    assert!(missions.record(&id).is_ok());
+}

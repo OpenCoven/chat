@@ -411,6 +411,12 @@
           "markdownDescription": "Enables the mission_prepare command without any pre-configured scope."
         },
         {
+          "description": "Enables the mission_remove command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-mission-remove",
+          "markdownDescription": "Enables the mission_remove command without any pre-configured scope."
+        },
+        {
           "description": "Enables the mission_submit command without any pre-configured scope.",
           "type": "string",
           "const": "allow-mission-submit",
@@ -685,6 +691,12 @@
           "type": "string",
           "const": "deny-mission-prepare",
           "markdownDescription": "Denies the mission_prepare command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the mission_remove command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-mission-remove",
+          "markdownDescription": "Denies the mission_remove command without any pre-configured scope."
         },
         {
           "description": "Denies the mission_submit command without any pre-configured scope.",

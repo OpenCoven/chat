@@ -74,6 +74,7 @@ const covenRuntimeCommands = [
 const missionCommands = [
   'mission_prepare',
   'mission_list',
+  'mission_remove',
   'mission_submit',
   'mission_get',
   'mission_cancel',

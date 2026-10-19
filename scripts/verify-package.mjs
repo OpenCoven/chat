@@ -43,6 +43,7 @@ export const ALLOWED_PERMISSIONS = [
   'allow-coven-runtime-cancel',
   'allow-mission-prepare',
   'allow-mission-list',
+  'allow-mission-remove',
   'allow-mission-submit',
   'allow-mission-get',
   'allow-mission-cancel',

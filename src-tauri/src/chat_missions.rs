@@ -9,13 +9,16 @@
 //! happened".
 //!
 //! Adoption keys stay on this side; the window names a mission by its id.
-//! Until the storage design (docs/mission-storage-design.md) is approved, the
-//! records live only in memory, for as long as this process runs.
+//! Each record is kept in a private file in Chat's app data folder, as
+//! docs/mission-storage-design.md describes, so Chat can learn a mission's
+//! outcome after a restart. The file holds keys and bindings only, never a
+//! task body.
 
 use std::{
     collections::HashMap,
-    io::Write,
-    path::Path,
+    fs::{self, File, OpenOptions},
+    io::{Read, Write},
+    path::{Path, PathBuf},
     process::{Command, Stdio},
     sync::{
         atomic::{AtomicBool, Ordering},
@@ -28,7 +31,7 @@ use std::{
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
-use tauri::{ipc::Channel, State};
+use tauri::{ipc::Channel, AppHandle, Manager, State};
 
 use super::{
     blocking, home, pipe_reader, resolve_cli, stderr_text, tool_search_path, validate_id,
@@ -307,6 +310,48 @@ fn timestamp(at: SystemTime) -> String {
     )
 }
 
+/// The instant a timestamp in `timestamp`'s form names.
+fn parse_timestamp(text: &str) -> Option<SystemTime> {
+    let bytes = text.as_bytes();
+    if bytes.len() != 24 || &text[23..] != "Z" || [4, 7].iter().any(|&at| bytes[at] != b'-') {
+        return None;
+    }
+    if bytes[10] != b'T' || bytes[13] != b':' || bytes[16] != b':' || bytes[19] != b'.' {
+        return None;
+    }
+    let number = |range: std::ops::Range<usize>| -> Option<i64> {
+        let digits = text.get(range)?;
+        digits
+            .bytes()
+            .all(|b| b.is_ascii_digit())
+            .then(|| digits.parse().ok())?
+    };
+    let (year, month, day) = (number(0..4)?, number(5..7)?, number(8..10)?);
+    let (hour, minute, second, millis) = (
+        number(11..13)?,
+        number(14..16)?,
+        number(17..19)?,
+        number(20..23)?,
+    );
+    if !(1..=12).contains(&month)
+        || !(1..=31).contains(&day)
+        || hour > 23
+        || minute > 59
+        || second > 59
+    {
+        return None;
+    }
+    // Days since 1970-01-01 from a civil date (H. Hinnant's algorithm).
+    let y = if month <= 2 { year - 1 } else { year };
+    let era = y.div_euclid(400);
+    let yoe = y - era * 400;
+    let doy = (153 * ((month + 9) % 12) + 2) / 5 + day - 1;
+    let days = era * 146_097 + yoe * 365 + yoe / 4 - yoe / 100 + doy - 719_468;
+    let millis = ((days * 86_400 + hour * 3600 + minute * 60 + second) * 1000) + millis;
+    let at = UNIX_EPOCH + Duration::from_millis(u64::try_from(millis).ok()?);
+    (timestamp(at) == text).then_some(at)
+}
+
 // ---------------------------------------------------------------------------
 // What the window sees
 
@@ -417,7 +462,7 @@ pub(crate) struct MissionEntry {
 // ---------------------------------------------------------------------------
 // Records
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub(crate) enum Phase {
     /// Written before the submit is sent; no answer has proved a commit.
@@ -447,6 +492,7 @@ struct Record {
 pub(crate) struct Missions {
     records: Mutex<HashMap<String, Record>>,
     watches: Mutex<HashMap<String, Arc<AtomicBool>>>,
+    store: Mutex<Store>,
 }
 
 #[derive(Default, Clone)]
@@ -465,18 +511,32 @@ impl Drop for Missions {
 const STATE_UNAVAILABLE: &str = "Chat's mission list is unavailable.";
 
 impl Missions {
+    /// Records a mission before anything is sent for it. If the record can't
+    /// be saved, it is dropped again and nothing is sent.
     fn insert(&self, record: Record) -> Result<(), String> {
-        let mut records = self.records.lock().map_err(|_| STATE_UNAVAILABLE)?;
-        if records.len() >= RECORD_LIMIT {
-            let oldest = records
-                .values()
-                .filter(|record| record.phase == Phase::Terminal)
-                .min_by_key(|record| record.created_at)
-                .map(|record| record.mission_id.clone())
-                .ok_or("Chat is already following 100 unfinished missions. Wait for one to finish, then try again.")?;
-            records.remove(&oldest);
+        let mission_id = record.mission_id.clone();
+        let mut evicted = None;
+        {
+            let mut records = self.records.lock().map_err(|_| STATE_UNAVAILABLE)?;
+            if records.len() >= RECORD_LIMIT {
+                let oldest = records
+                    .values()
+                    .filter(|record| record.phase == Phase::Terminal)
+                    .min_by_key(|record| record.created_at)
+                    .map(|record| record.mission_id.clone())
+                    .ok_or("Chat is already following 100 unfinished missions. Wait for one to finish, then try again.")?;
+                evicted = records.remove(&oldest);
+            }
+            records.insert(mission_id.clone(), record);
         }
-        records.insert(record.mission_id.clone(), record);
+        if let Err(error) = self.save() {
+            let mut records = self.records.lock().map_err(|_| STATE_UNAVAILABLE)?;
+            records.remove(&mission_id);
+            if let Some(evicted) = evicted {
+                records.insert(evicted.mission_id.clone(), evicted);
+            }
+            return Err(error);
+        }
         Ok(())
     }
 
@@ -489,12 +549,16 @@ impl Missions {
             .ok_or_else(|| "Chat didn't send this mission, so it won't read it.".into())
     }
 
+    /// Changes a record and saves it. The change stays in memory even when
+    /// the save fails, and the error says so.
     fn update(&self, mission_id: &str, change: impl FnOnce(&mut Record)) -> Result<(), String> {
-        let mut records = self.records.lock().map_err(|_| STATE_UNAVAILABLE)?;
-        if let Some(record) = records.get_mut(mission_id) {
-            change(record);
+        {
+            let mut records = self.records.lock().map_err(|_| STATE_UNAVAILABLE)?;
+            if let Some(record) = records.get_mut(mission_id) {
+                change(record);
+            }
         }
-        Ok(())
+        self.save()
     }
 
     fn remove(&self, mission_id: &str) -> Result<(), String> {
@@ -502,7 +566,15 @@ impl Missions {
             .lock()
             .map_err(|_| STATE_UNAVAILABLE)?
             .remove(mission_id);
-        Ok(())
+        self.save()
+    }
+
+    /// Saves what an answer proved. The answer is shown whatever happens to
+    /// the file: a record that stays behind is settled again after a restart.
+    fn settle(&self, result: Result<(), String>) {
+        if let Err(error) = result {
+            eprintln!("Coven Chat: a mission record could not be saved ({error}).");
+        }
     }
 
     fn list(&self, familiar_id: &str) -> Result<Vec<MissionEntry>, String> {
@@ -523,7 +595,7 @@ impl Missions {
 
     /// Records what a view proved: the mission exists, under this owner.
     fn observed(&self, view: &MissionView) -> Result<(), String> {
-        self.update(&view.mission_id, |record| {
+        let result = self.update(&view.mission_id, |record| {
             record.principal_id = Some(view.principal_id.clone());
             record.payload = None;
             record.phase = if view.terminal {
@@ -531,8 +603,239 @@ impl Missions {
             } else {
                 Phase::Committed
             };
+        });
+        self.settle(result);
+        Ok(())
+    }
+
+    /// Forgets a mission the person removed. One Chat is still settling
+    /// can't be removed.
+    fn forget(&self, mission_id: &str) -> Result<(), String> {
+        if self.record(mission_id)?.phase == Phase::Sending {
+            return Err("Chat is still checking whether Coven received this mission, so it can't be removed yet.".into());
+        }
+        self.remove(mission_id)
+    }
+
+    /// Opens the record file in `data`, loading what an earlier run of Chat
+    /// kept. Until the file is readable, every mission command refuses.
+    fn open(&self, data: &Path) -> Result<(), String> {
+        let mut store = self.store.lock().map_err(|_| STATE_UNAVAILABLE)?;
+        let folder = data.join(STORE_FOLDER);
+        if store.open && store.folder.as_deref() == Some(folder.as_path()) {
+            return Ok(());
+        }
+        let kept = load(&folder)?;
+        let mut records = self.records.lock().map_err(|_| STATE_UNAVAILABLE)?;
+        for record in kept {
+            records.entry(record.mission_id.clone()).or_insert(record);
+        }
+        store.folder = Some(folder);
+        store.open = true;
+        Ok(())
+    }
+
+    fn save(&self) -> Result<(), String> {
+        let store = self.store.lock().map_err(|_| STATE_UNAVAILABLE)?;
+        let Some(folder) = store.folder.as_deref().filter(|_| store.open) else {
+            return Ok(());
+        };
+        let records = self.records.lock().map_err(|_| STATE_UNAVAILABLE)?;
+        let mut kept: Vec<&Record> = records.values().collect();
+        kept.sort_by_key(|record| record.created_at);
+        let file = KeptRecords {
+            version: 1,
+            missions: kept.into_iter().map(KeptRecord::from).collect(),
+        };
+        let bytes =
+            serde_json::to_vec(&file).map_err(|_| "Chat could not encode its mission list.")?;
+        persist(folder, &bytes)
+    }
+}
+
+// ---------------------------------------------------------------------------
+// The record file (docs/mission-storage-design.md)
+
+const STORE_FOLDER: &str = "coven-missions";
+const STORE_FILE: &str = "missions-v1.json";
+const STORE_LIMIT: usize = 64 * 1024;
+const UNREADABLE: &str = "Chat can't read its mission list, so it won't send or follow missions until the list is readable. Chat left the file unchanged.";
+
+#[derive(Default)]
+struct Store {
+    folder: Option<PathBuf>,
+    open: bool,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct KeptRecords {
+    version: u32,
+    missions: Vec<KeptRecord>,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct KeptFamiliar {
+    familiar_id: String,
+    root_id: String,
+    revision_id: String,
+}
+
+/// One record as it is kept: keys and bindings, never a task body.
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct KeptRecord {
+    adoption_key: String,
+    mission_id: String,
+    familiar: KeptFamiliar,
+    principal_id: Option<String>,
+    phase: Phase,
+    valid_until: String,
+    cancel_key: Option<String>,
+    created_at: String,
+}
+
+impl From<&Record> for KeptRecord {
+    fn from(record: &Record) -> Self {
+        Self {
+            adoption_key: record.key.clone(),
+            mission_id: record.mission_id.clone(),
+            familiar: KeptFamiliar {
+                familiar_id: record.familiar_id.clone(),
+                root_id: record.root_id.clone(),
+                revision_id: record.revision_id.clone(),
+            },
+            principal_id: record.principal_id.clone(),
+            phase: record.phase,
+            valid_until: timestamp(record.valid_until),
+            cancel_key: record.cancel_key.clone(),
+            created_at: timestamp(record.created_at),
+        }
+    }
+}
+
+fn key_shape(key: &str, prefix: &str) -> bool {
+    key.strip_prefix(prefix)
+        .and_then(|rest| rest.strip_prefix(':'))
+        .is_some_and(|uuid| uuid::Uuid::parse_str(uuid).is_ok() && uuid.len() == 36)
+}
+
+impl KeptRecord {
+    fn record(self) -> Option<Record> {
+        let familiar = self.familiar;
+        let valid = key_shape(&self.adoption_key, "chat-mission")
+            && self.mission_id == mission_id_for(&self.adoption_key)
+            && validate_id(&familiar.familiar_id).is_ok()
+            && root_id(&familiar.root_id)
+            && revision_id(&familiar.revision_id)
+            && self
+                .principal_id
+                .as_deref()
+                .is_none_or(|principal| !principal.is_empty() && principal.len() <= 200)
+            && self
+                .cancel_key
+                .as_deref()
+                .is_none_or(|key| key_shape(key, "chat-mission-cancel"));
+        valid.then_some(Record {
+            key: self.adoption_key,
+            mission_id: self.mission_id,
+            familiar_id: familiar.familiar_id,
+            root_id: familiar.root_id,
+            revision_id: familiar.revision_id,
+            principal_id: self.principal_id,
+            phase: self.phase,
+            valid_until: parse_timestamp(&self.valid_until)?,
+            created_at: parse_timestamp(&self.created_at)?,
+            payload: None,
+            cancel_key: self.cancel_key,
         })
     }
+}
+
+/// The records an earlier run kept in `folder`, or none when it never kept
+/// any. A file that is not exactly what Chat writes is refused, and left as
+/// it is: its keys may be the only way to learn a mission's outcome.
+fn load(folder: &Path) -> Result<Vec<Record>, String> {
+    let path = folder.join(STORE_FILE);
+    let metadata = match fs::symlink_metadata(&path) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(_) => return Err(UNREADABLE.into()),
+    };
+    if !metadata.is_file() || metadata.len() > STORE_LIMIT as u64 {
+        return Err(UNREADABLE.into());
+    }
+    let mut bytes = Vec::new();
+    File::open(&path)
+        .and_then(|file| file.take(STORE_LIMIT as u64 + 1).read_to_end(&mut bytes))
+        .map_err(|_| UNREADABLE)?;
+    let kept: KeptRecords = serde_json::from_slice(&bytes).map_err(|_| UNREADABLE)?;
+    if kept.version != 1 || kept.missions.len() > RECORD_LIMIT {
+        return Err(UNREADABLE.into());
+    }
+    let records: Vec<Record> = kept
+        .missions
+        .into_iter()
+        .map(KeptRecord::record)
+        .collect::<Option<_>>()
+        .ok_or(UNREADABLE)?;
+    let mut ids: Vec<&str> = records
+        .iter()
+        .map(|record| record.mission_id.as_str())
+        .collect();
+    ids.sort_unstable();
+    ids.dedup();
+    if ids.len() != records.len() {
+        return Err(UNREADABLE.into());
+    }
+    Ok(records)
+}
+
+/// Writes the record file in a private folder: a new temporary file, synced,
+/// renamed into place, then the folder synced.
+fn persist(folder: &Path, bytes: &[u8]) -> Result<(), String> {
+    const FAILED: &str = "Chat could not save its mission list, so nothing was sent.";
+    if bytes.len() > STORE_LIMIT {
+        return Err(FAILED.into());
+    }
+    match fs::symlink_metadata(folder) {
+        Ok(metadata) if metadata.is_dir() => {}
+        Ok(_) => return Err(FAILED.into()),
+        Err(_) => {
+            let mut builder = fs::DirBuilder::new();
+            builder.recursive(true);
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::DirBuilderExt;
+                builder.mode(0o700);
+            }
+            builder.create(folder).map_err(|_| FAILED)?;
+        }
+    }
+    let temporary = folder.join(format!("missions-{}.tmp", uuid::Uuid::new_v4()));
+    let write = (|| {
+        let mut options = OpenOptions::new();
+        options.write(true).create_new(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            options.mode(0o600);
+        }
+        let mut file = options.open(&temporary).map_err(|_| FAILED)?;
+        file.write_all(bytes).map_err(|_| FAILED)?;
+        file.sync_all().map_err(|_| FAILED)?;
+        fs::rename(&temporary, folder.join(STORE_FILE)).map_err(|_| FAILED)?;
+        #[cfg(unix)]
+        File::open(folder)
+            .and_then(|directory| directory.sync_all())
+            .map_err(|_| FAILED)?;
+        Ok::<_, String>(())
+    })();
+    if write.is_err() && temporary.exists() {
+        let _ = fs::remove_file(&temporary);
+    }
+    write
 }
 
 // ---------------------------------------------------------------------------
@@ -1028,13 +1331,13 @@ fn send_submit(
                 });
             }
             Reply::Refused(error) => {
-                missions.remove(&mission_id)?;
+                missions.settle(missions.remove(&mission_id));
                 return Ok(refusal(&error));
             }
             // Only the first send can prove nothing reached Coven; a later
             // one leaves an earlier send's outcome open.
             Reply::NotSent(message) if send == 0 => {
-                missions.remove(&mission_id)?;
+                missions.settle(missions.remove(&mission_id));
                 return Ok(MissionAnswer::NotSent { message });
             }
             Reply::NotSent(_) | Reply::Unknown => {}
@@ -1098,7 +1401,7 @@ fn read(
                 // Coven refuses a submit once its validUntil has passed, so
                 // only then is "no such mission" final (M-01).
                 Phase::Sending if now >= record.valid_until => {
-                    missions.remove(mission_id)?;
+                    missions.settle(missions.remove(mission_id));
                     MissionAnswer::NeverSent {
                         mission_id: mission_id.to_owned(),
                     }
@@ -1179,7 +1482,7 @@ fn cancel(
                 });
             }
             Reply::Refused(error) => {
-                forget_key()?;
+                missions.settle(forget_key());
                 // A settled mission answers with its view (M-09).
                 if error["code"] == "ILLEGAL_TRANSITION" {
                     if let Some(settled) = error.pointer("/details/mission") {
@@ -1199,7 +1502,7 @@ fn cancel(
                 return Ok(refusal(&error));
             }
             Reply::NotSent(message) if send == 0 => {
-                forget_key()?;
+                missions.settle(forget_key());
                 return Ok(MissionAnswer::NotSent { message });
             }
             Reply::NotSent(_) | Reply::Unknown => {}
@@ -1221,6 +1524,16 @@ fn live(args: &[&str], input: Option<&[u8]>) -> Result<CliOutput, RunFailure> {
     coven(args, input, &AtomicBool::new(false))
 }
 
+/// The mission records, opened in this app's data folder.
+fn opened(app: &AppHandle, state: &State<'_, MissionState>) -> Result<Arc<Missions>, String> {
+    let data = app
+        .path()
+        .app_local_data_dir()
+        .map_err(|_| "Cannot locate local chat storage.")?;
+    state.0.open(&data)?;
+    Ok(state.0.clone())
+}
+
 #[tauri::command]
 pub(crate) async fn mission_prepare(familiar_id: String) -> Result<MissionPreparation, String> {
     blocking(move || prepare(&live, &familiar_id)).await
@@ -1228,19 +1541,34 @@ pub(crate) async fn mission_prepare(familiar_id: String) -> Result<MissionPrepar
 
 #[tauri::command]
 pub(crate) async fn mission_list(
+    app: AppHandle,
     state: State<'_, MissionState>,
     familiar_id: String,
 ) -> Result<Vec<MissionEntry>, String> {
     validate_id(&familiar_id)?;
-    state.0.list(&familiar_id)
+    opened(&app, &state)?.list(&familiar_id)
+}
+
+/// Forgets a finished mission the person removed from the list.
+#[tauri::command]
+pub(crate) async fn mission_remove(
+    app: AppHandle,
+    state: State<'_, MissionState>,
+    mission_id: String,
+) -> Result<(), String> {
+    if !mission_id_shape(&mission_id) {
+        return Err("Invalid mission id.".into());
+    }
+    opened(&app, &state)?.forget(&mission_id)
 }
 
 #[tauri::command]
 pub(crate) async fn mission_submit(
+    app: AppHandle,
     state: State<'_, MissionState>,
     input: SubmitInput,
 ) -> Result<MissionAnswer, String> {
-    let missions = state.0.clone();
+    let missions = opened(&app, &state)?;
     blocking(move || {
         submit(
             &missions,
@@ -1255,10 +1583,11 @@ pub(crate) async fn mission_submit(
 
 #[tauri::command]
 pub(crate) async fn mission_get(
+    app: AppHandle,
     state: State<'_, MissionState>,
     mission_id: String,
 ) -> Result<MissionAnswer, String> {
-    let missions = state.0.clone();
+    let missions = opened(&app, &state)?;
     blocking(move || {
         read(
             &missions,
@@ -1273,10 +1602,11 @@ pub(crate) async fn mission_get(
 
 #[tauri::command]
 pub(crate) async fn mission_cancel(
+    app: AppHandle,
     state: State<'_, MissionState>,
     mission_id: String,
 ) -> Result<MissionAnswer, String> {
-    let missions = state.0.clone();
+    let missions = opened(&app, &state)?;
     blocking(move || cancel(&missions, &live, &mission_id, &pause_between_sends)).await
 }
 
@@ -1286,6 +1616,7 @@ pub(crate) async fn mission_cancel(
 /// effect between reads and no watch outlives a read.
 #[tauri::command]
 pub(crate) async fn mission_watch(
+    app: AppHandle,
     state: State<'_, MissionState>,
     mission_id: String,
     on_event: Channel<MissionAnswer>,
@@ -1293,7 +1624,7 @@ pub(crate) async fn mission_watch(
     if !mission_id_shape(&mission_id) {
         return Err("Invalid mission id.".into());
     }
-    let missions = state.0.clone();
+    let missions = opened(&app, &state)?;
     missions.record(&mission_id)?;
     let stop = Arc::new(AtomicBool::new(false));
     let mine = stop.clone();

@@ -15,6 +15,7 @@ const NATIVE_COMMANDS: &[&str] = &[
     "coven_runtime_cancel",
     "mission_prepare",
     "mission_list",
+    "mission_remove",
     "mission_submit",
     "mission_get",
     "mission_cancel",
