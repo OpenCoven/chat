@@ -1,7 +1,7 @@
 # Mission records: storage design
 
-Status (2026-10-19): **proposed, awaiting Val's approval.** Chat persists nothing
-for missions until this design is approved. Issue: #155. Contract:
+Status (2026-10-19): **approved by Val, as written.** Chat persists mission records
+only as this document describes. Issue: #155. Contract:
 [OpenCoven/coven#1313](https://github.com/OpenCoven/coven/issues/1313), as built on
 Coven `main` at `1450f97f`.
 
