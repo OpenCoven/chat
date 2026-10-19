@@ -81,6 +81,33 @@ describe('reviewAddress', () => {
     expect(reviewAddress('http://[::1]:8080/x')).toMatchObject({ host: '[::1]:8080' });
   });
 
+  it('reads an IPv6 host that Markdown percent-encoded, and nothing else that way', () => {
+    // Markdown writes the destination `https://[::1]:8080/x` as `https://%5B::1%5D:8080/x`.
+    expect(reviewAddress('https://%5B::1%5D:8080/x')).toMatchObject({
+      kind: 'ready',
+      address: 'https://[::1]:8080/x',
+      host: '[::1]:8080',
+    });
+    expect(reviewAddress('https://user@%5B2001:db8::1%5D/')).toMatchObject({
+      kind: 'ready',
+      address: 'https://user@[2001:db8::1]/',
+      host: '[2001:db8::1]',
+      signIn: true,
+    });
+    // Brackets anywhere else stay as written, and a bracketed name is still no host.
+    expect(reviewAddress('https://example.com/a%5Bb%5D')).toMatchObject({
+      address: 'https://example.com/a%5Bb%5D',
+    });
+    for (const destination of [
+      'https://%5Bevil.example%5D/',
+      'https://%5B::1%5D.example/',
+      'https://%5B%5D/',
+      'https://%5B1:2:3%5D/',
+      'javascript://%5B::1%5D/',
+    ])
+      expect(reviewAddress(destination)).toEqual({ kind: 'unreadable' });
+  });
+
   it('refuses anything that is not a complete web address', () => {
     for (const destination of [
       'https://',
@@ -493,5 +520,26 @@ describe('inside another dialog', () => {
     fireEvent.click(screen.getByText('orphan'));
     expect(screen.queryByRole('dialog')).toBeNull();
     expect(navigation.opened).toEqual([]);
+  });
+});
+
+describe('a link to an IPv6 address', () => {
+  it('is reviewed and opened as written', () => {
+    render(
+      <Conversation chat="a:1">
+        <FormattedMessage text="[local](https://[::1]:8080/x) and <https://[2001:db8::1]/y>" />
+      </Conversation>,
+    );
+    fireEvent.click(screen.getByRole('link', { name: 'local' }));
+    expect(review().querySelector('.coven-link-review-host')).toHaveTextContent('[::1]:8080');
+    expect(review().querySelector('.coven-link-review-address')).toHaveTextContent(
+      'https://[::1]:8080/x',
+    );
+    expect(navigation.opened).toEqual([]);
+    fireEvent.click(openControl());
+    expect(navigation.opened).toEqual(['https://[::1]:8080/x']);
+    fireEvent.click(within(review()).getByRole('button', { name: 'Close' }));
+    fireEvent.click(screen.getByRole('link', { name: 'https://[2001:db8::1]/y' }));
+    expect(openControl()).toHaveAttribute('href', 'https://[2001:db8::1]/y');
   });
 });
