@@ -608,15 +608,6 @@ impl Missions {
         Ok(())
     }
 
-    /// Forgets a mission the person removed. One Chat is still settling
-    /// can't be removed.
-    fn forget(&self, mission_id: &str) -> Result<(), String> {
-        if self.record(mission_id)?.phase == Phase::Sending {
-            return Err("Chat is still checking whether Coven received this mission, so it can't be removed yet.".into());
-        }
-        self.remove(mission_id)
-    }
-
     /// Opens the record file in `data`, loading what an earlier run of Chat
     /// kept. Until the file is readable, every mission command refuses.
     fn open(&self, data: &Path) -> Result<(), String> {
@@ -1351,6 +1342,28 @@ fn send_submit(
     Ok(MissionAnswer::Checking { mission_id })
 }
 
+/// Forgets a mission the person removed. Chat never drops a record that isn't
+/// terminal, so only a finished mission, or one Coven no longer has (M-11 a),
+/// can go: a mission still at work stays where Chat can follow and cancel it.
+fn forget(
+    missions: &Missions,
+    run: Run,
+    mission_id: &str,
+    now: SystemTime,
+    pause: &dyn Fn(usize),
+) -> Result<(), String> {
+    match missions.record(mission_id)?.phase {
+        Phase::Sending => Err("Chat is still checking whether Coven received this mission, so it can't be removed yet.".into()),
+        Phase::Terminal => missions.remove(mission_id),
+        Phase::Committed => match read(missions, run, mission_id, now, pause)? {
+            MissionAnswer::Gone { .. } => missions.remove(mission_id),
+            MissionAnswer::View { mission } if mission.terminal => missions.remove(mission_id),
+            MissionAnswer::View { .. } => Err("Coven is still working on this mission, so Chat keeps it. Cancel it, or wait until it finishes.".into()),
+            _ => Err("Chat couldn't confirm with Coven that this mission is finished, so it keeps it. Try again once Coven answers.".into()),
+        },
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Reading
 
@@ -1564,7 +1577,17 @@ pub(crate) async fn mission_remove(
     if !mission_id_shape(&mission_id) {
         return Err("Invalid mission id.".into());
     }
-    opened(&app, &state)?.forget(&mission_id)
+    let missions = opened(&app, &state)?;
+    blocking(move || {
+        forget(
+            &missions,
+            &live,
+            &mission_id,
+            SystemTime::now(),
+            &pause_between_sends,
+        )
+    })
+    .await
 }
 
 #[tauri::command]

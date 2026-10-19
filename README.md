@@ -473,8 +473,10 @@ last case, the tab shows the `coven familiar-ledger register` command to run.
 
 Chat keeps each mission's keys in a private folder, so it shows the mission again after a
 restart and can still learn the outcome of one it was sending when it closed (see
-`SECURITY.md` and `docs/mission-storage-design.md`). **Remove** forgets a finished mission. The
-window never receives those keys, and no mission text reaches browser storage.
+`SECURITY.md` and `docs/mission-storage-design.md`). **Remove** forgets a finished mission, or
+one Coven says it no longer has. Chat asks Coven first, so a mission still at work stays listed
+until it finishes. The window never receives those keys, and no mission text reaches browser
+storage.
 
 ## Remote screen (VNC)
 
