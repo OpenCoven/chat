@@ -1252,8 +1252,11 @@ fn records_survive_a_restart_without_any_task_body() {
     assert_eq!(record.phase, Phase::Terminal);
     assert_eq!(record.principal_id.as_deref(), Some(OWNER));
 
-    // A finished mission can be removed, and stays removed.
-    again.forget(&id).unwrap();
+    // A finished mission can be removed without asking Coven, and stays removed.
+    let idle = Fake::new(vec![]);
+    let run = |args: &[&str], input: Option<&[u8]>| idle.run(args, input);
+    forget(&again, &run, &id, at(NOW), &no_pause).unwrap();
+    assert!(idle.calls().is_empty());
     let last = Missions::default();
     last.open(data.path()).unwrap();
     assert!(last.record(&id).is_err());
@@ -1325,8 +1328,62 @@ fn a_mission_still_being_checked_cannot_be_removed() {
         Phase::Sending,
         None,
     );
-    assert!(missions.forget(&id).unwrap_err().contains("still checking"));
+    let fake = Fake::new(vec![]);
+    let run = |args: &[&str], input: Option<&[u8]>| fake.run(args, input);
+    let refused = forget(&missions, &run, &id, at(NOW), &no_pause).unwrap_err();
+    assert!(refused.contains("still checking"));
     assert!(missions.record(&id).is_ok());
+    assert!(fake.calls().is_empty());
+}
+
+#[test]
+fn a_mission_coven_is_still_working_on_cannot_be_removed() {
+    // The storage design: Chat never drops a record that isn't terminal, so a
+    // mission still at work stays where Chat can follow and cancel it.
+    let missions = Missions::default();
+    let id = record(
+        &missions,
+        "chat-mission:still-running",
+        Phase::Committed,
+        None,
+    );
+    let fake = Fake::new(vec![
+        step(|call| printed(0, &view(&call.mission_id(), 3, "running"))),
+        step(|call| {
+            let mut checking = view(&call.mission_id(), 4, "reconciling");
+            checking["reason"] = json!("ambiguous_execution");
+            printed(0, &checking)
+        }),
+        step(|_| Err(RunFailure::NotStarted("coven is not running".into()))),
+        step(|call| printed(0, &view(&call.mission_id(), 5, "completed"))),
+    ]);
+    let run = |args: &[&str], input: Option<&[u8]>| fake.run(args, input);
+    for kept in ["still working", "still working", "couldn't read"] {
+        let refused = forget(&missions, &run, &id, at(NOW), &no_pause).unwrap_err();
+        assert!(refused.contains(kept), "{refused}");
+        assert!(missions.record(&id).is_ok());
+    }
+    // Once Coven reports it finished, it can go. Every check asked Coven.
+    forget(&missions, &run, &id, at(NOW), &no_pause).unwrap();
+    assert!(missions.record(&id).is_err());
+    assert!(fake.done());
+    assert!(fake
+        .calls()
+        .iter()
+        .all(|call| call.args[..2] == ["missions", "get"]));
+}
+
+#[test]
+fn a_mission_coven_no_longer_has_can_be_removed() {
+    // M-11 a: Coven answers NOT_FOUND for a mission it once accepted, so the
+    // window offers Remove, and the record can go though it isn't terminal.
+    let missions = Missions::default();
+    let id = record(&missions, "chat-mission:gone", Phase::Committed, None);
+    let fake = Fake::new(vec![step(not_found)]);
+    let run = |args: &[&str], input: Option<&[u8]>| fake.run(args, input);
+    forget(&missions, &run, &id, at(NOW), &no_pause).unwrap();
+    assert!(missions.record(&id).is_err());
+    assert!(fake.done());
 }
 
 /// Opt-in round trip against a running Coven daemon, through the real
