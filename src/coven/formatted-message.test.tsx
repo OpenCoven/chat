@@ -1,5 +1,6 @@
-import { act, fireEvent, render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen, within } from '@testing-library/react';
 import type { ReactNode } from 'react';
+import { watchNavigation } from '../test/watch-navigation';
 import {
   FormattedMessage,
   REVEAL_EVENT,
@@ -64,13 +65,31 @@ test('keeps external links separate from the app and blocks active markup or tra
       }
     />,
   );
+  // The one surviving link carries no address the webview could open by itself.
   const link = screen.getByRole('link', { name: 'Docs' });
-  expect(link).toHaveAttribute('href', 'https://example.com/docs');
-  expect(link).toHaveAttribute('target', '_blank');
-  expect(link).toHaveAttribute('rel', 'noopener noreferrer');
+  expect(link).not.toHaveAttribute('href');
+  expect(link).not.toHaveAttribute('target');
+  expect(link).toHaveAttribute('aria-haspopup', 'dialog');
   expect(screen.getAllByRole('link')).toHaveLength(1);
-  expect(container.querySelector('script, iframe, img')).toBeNull();
+  expect(container.querySelector('a[href], script, iframe, img')).toBeNull();
   expect(screen.getByText(/Tracking image/)).toBeInTheDocument();
+});
+
+test('an external link opens nothing until the reader reviews its destination', () => {
+  const navigation = watchNavigation();
+  try {
+    render(<FormattedMessage text="Read [the docs](https://example.com/docs)." />);
+    const link = screen.getByRole('link', { name: 'the docs' });
+    fireEvent.click(link);
+    fireEvent(link, new MouseEvent('auxclick', { bubbles: true, cancelable: true, button: 1 }));
+    fireEvent.click(link, { metaKey: true });
+    expect(navigation.opened).toEqual([]);
+    const review = screen.getByRole('dialog', { name: 'Open this link?' });
+    fireEvent.click(within(review).getByRole('link', { name: 'Open' }));
+    expect(navigation.opened).toEqual(['https://example.com/docs']);
+  } finally {
+    navigation.stop();
+  }
 });
 
 test('handles incomplete streamed Markdown and updates to the complete message', () => {
@@ -305,17 +324,18 @@ test('a collapsed row says how much its result holds, and nothing while it is ru
   expect(rows[3]).not.toHaveTextContent(/line|output/);
 });
 
-test('external links show their address on hover unless the author gave a title', () => {
+test("an author's link title never stands in for the destination", () => {
   render(
     <FormattedMessage
-      text={'See [docs](https://example.com/docs) and [titled](https://example.com/t "The title").'}
+      text={'See [docs](https://evil.example/docs "https://good.example/docs").'}
     />,
   );
-  expect(screen.getByRole('link', { name: 'docs' })).toHaveAttribute(
-    'title',
-    'https://example.com/docs',
-  );
-  expect(screen.getByRole('link', { name: 'titled' })).toHaveAttribute('title', 'The title');
+  const link = screen.getByRole('link', { name: 'docs' });
+  expect(link).not.toHaveAttribute('title');
+  fireEvent.click(link);
+  const review = screen.getByRole('dialog', { name: 'Open this link?' });
+  expect(within(review).getByText('evil.example')).toBeInTheDocument();
+  expect(review).not.toHaveTextContent('good.example');
 });
 
 describe('grouped tool calls', () => {

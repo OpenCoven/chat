@@ -1391,6 +1391,143 @@ test('formats streamed replies and keeps wide code and tables inside the transcr
   await expect(page.getByRole('heading', { name: 'Structured reply' })).toHaveCount(1);
 });
 
+// Chromium only: this proves the review flow in a browser, not what a desktop webview does with Open.
+test('copies the reviewed address honestly when the async clipboard refuses', async ({
+  page,
+  context,
+}) => {
+  await context.grantPermissions(['clipboard-read', 'clipboard-write']);
+  const address = 'https://docs.example.test/guide?step=2#install';
+  await installRuntimeFixture(page, true, `See [the guide](${address}).`);
+  await page.goto('/');
+  const composer = page.getByRole('textbox', { name: 'Message Local familiar' });
+  await expect(composer).toBeEnabled();
+  await composer.fill('Where are the docs?');
+  await page.getByRole('button', { name: 'Send', exact: true }).click();
+  await page.getByRole('link', { name: 'the guide' }).click();
+  const review = page.getByRole('dialog', { name: 'Open this link?' });
+  await expect(review).toBeVisible();
+  const status = review.locator('.coven-link-review-status');
+  const copy = review.getByRole('button', { name: 'Copy address' });
+  // The webview refuses the async clipboard, so Chat falls back to the copy command,
+  // behind a modal that leaves the rest of the page inert.
+  const original = await page.evaluate(() => {
+    const write = navigator.clipboard.writeText.bind(navigator.clipboard);
+    Object.defineProperty(navigator.clipboard, 'writeText', {
+      configurable: true,
+      value: () => Promise.reject(new Error('denied')),
+    });
+    return Boolean(write);
+  });
+  expect(original).toBe(true);
+  const clipboard = () =>
+    page.evaluate(() => Clipboard.prototype.readText.call(navigator.clipboard));
+  const reset = () =>
+    page.evaluate(() => Clipboard.prototype.writeText.call(navigator.clipboard, 'before'));
+
+  await reset();
+  await copy.click();
+  await expect(status).toHaveText('Copied the address.');
+  expect(await clipboard()).toBe(address);
+
+  // Text the reader selected in the review is not what Copy address copies.
+  await reset();
+  await page.evaluate(() => {
+    const range = document.createRange();
+    range.selectNodeContents(document.querySelector('.coven-link-review-host') as Node);
+    getSelection()?.removeAllRanges();
+    getSelection()?.addRange(range);
+  });
+  await copy.click();
+  await expect(status).toHaveText('Copied the address.');
+  expect(await clipboard()).toBe(address);
+  await expect(copy).toBeFocused();
+
+  // With no way to copy at all, the review says so and claims nothing.
+  await reset();
+  await page.evaluate(() => {
+    Object.defineProperty(document, 'execCommand', { configurable: true, value: () => false });
+  });
+  await copy.click();
+  await expect(status).toHaveText(
+    "Couldn't copy the address. Try again, or select it above and copy it.",
+  );
+  expect(await clipboard()).toBe('before');
+});
+
+test('reviews an external link before anything opens, then opens only that address', async ({
+  page,
+  context,
+}) => {
+  await page.setViewportSize({ width: 480, height: 640 });
+  const address = `https://docs.example.test/guide?step=2&${'q='.padEnd(400, 'x')}#install`;
+  const outside: string[] = [];
+  context.on('request', (request) => {
+    if (/example\.test/.test(request.url())) outside.push(request.url());
+  });
+  await context.route('https://docs.example.test/**', (route) =>
+    route.fulfill({ status: 200, contentType: 'text/plain', body: 'fixture page' }),
+  );
+  await installRuntimeFixture(
+    page,
+    true,
+    `See [the guide](${address}) and ![pixel](https://img.example.test/p.png).`,
+  );
+  await page.goto('/');
+  const composer = page.getByRole('textbox', { name: 'Message Local familiar' });
+  await expect(composer).toBeEnabled();
+  await composer.fill('Where are the docs?');
+  await page.getByRole('button', { name: 'Send', exact: true }).click();
+  const link = page.getByRole('link', { name: 'the guide' });
+  await expect(link).toBeVisible();
+  await expect(page.locator('.fr-transcript a[href^="http"]')).toHaveCount(0);
+
+  const review = page.getByRole('dialog', { name: 'Open this link?' });
+  await link.focus();
+  await page.keyboard.press('Enter');
+  await expect(review).toBeVisible();
+  await expect(review.getByRole('button', { name: 'Cancel' })).toBeFocused();
+  await expect(review.locator('.coven-link-review-host')).toHaveText('docs.example.test');
+  await expect(review.locator('.coven-link-review-address')).toHaveText(address);
+  // The modal keeps focus: Tab cycles its three controls and never reaches the composer.
+  for (const name of ['Copy address', 'Open', 'Cancel']) {
+    await page.keyboard.press('Tab');
+    await expect(review.getByRole(name === 'Open' ? 'link' : 'button', { name })).toBeFocused();
+  }
+  const fits = await review.evaluate((node) => {
+    const box = node.getBoundingClientRect();
+    return box.left >= 0 && box.right <= window.innerWidth;
+  });
+  expect(fits).toBe(true);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(480);
+  await page.keyboard.press('Escape');
+  await expect(review).toBeHidden();
+  await expect(link).toBeFocused();
+
+  await link.click({ modifiers: ['ControlOrMeta'] });
+  await expect(review).toBeVisible();
+  await review.getByRole('button', { name: 'Cancel' }).click();
+  await link.click({ button: 'middle' });
+  await expect(review).toBeVisible();
+  expect(context.pages()).toHaveLength(1);
+  expect(outside).toEqual([]);
+
+  const [opened] = await Promise.all([
+    context.waitForEvent('page'),
+    review.getByRole('link', { name: 'Open' }).click(),
+  ]);
+  await opened.waitForLoadState();
+  expect(opened.url()).toBe(address);
+  await page.bringToFront();
+  // A second press, even past the disabled state, opens nothing more.
+  await expect(review.getByRole('link', { name: 'Open' })).toHaveAttribute('aria-disabled', 'true');
+  await review.getByRole('link', { name: 'Open' }).click({ force: true });
+  await expect(review).toContainText("can't confirm that a page opened");
+  expect(context.pages()).toHaveLength(2);
+  // The only outside request is the opened page itself; a request never carries the #fragment.
+  expect(outside).toEqual([address.replace(/#.*$/, '')]);
+});
+
 test('separates CLI tool summaries from prose and reveals their exact arguments', async ({
   page,
 }, testInfo) => {

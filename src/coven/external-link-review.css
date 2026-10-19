@@ -1,0 +1,145 @@
+/* External links in a message: no address of their own, so they say what they are by look. */
+.coven-link {
+  color: var(--accent-presence);
+  text-decoration: underline;
+  text-underline-offset: 0.18em;
+  cursor: pointer;
+  border-radius: 2px;
+}
+
+.coven-link:focus-visible {
+  outline: var(--ring-width) solid var(--ring-focus);
+  outline-offset: var(--ring-offset);
+}
+
+/*
+ * The review sits inside the message it came from, so it resets what the
+ * reading surface sets (pre-wrap, its type scale) instead of inheriting it.
+ */
+.coven-link-review {
+  color: var(--text-primary);
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-strong);
+  border-radius: 16px;
+  padding: 0;
+  width: min(520px, calc(100vw - 32px));
+  max-height: calc(100vh - 32px);
+  font-size: 14px;
+  line-height: 1.5;
+  letter-spacing: 0;
+  white-space: normal;
+  overflow-wrap: normal;
+  text-align: start;
+}
+
+.coven-link-review::backdrop {
+  background: rgba(6, 6, 8, 0.6);
+  backdrop-filter: blur(6px);
+}
+
+.coven-link-review-frame {
+  padding: 24px;
+}
+
+.coven-link-review h2 {
+  margin: 0 0 4px;
+  font-size: 20px;
+  line-height: 1.3;
+}
+
+.coven-link-review p {
+  margin: 0 0 12px;
+}
+
+.coven-link-review-lede {
+  color: var(--text-secondary);
+}
+
+.coven-link-review-facts {
+  display: grid;
+  gap: 4px;
+  margin: 16px 0;
+}
+
+.coven-link-review-facts dt {
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.coven-link-review-facts dd {
+  margin: 0 0 8px;
+  min-width: 0;
+}
+
+.coven-link-review-host {
+  font-size: 18px;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+/* Every character of the address, unwrapped by meaning: long paths and queries break anywhere. */
+.coven-link-review-address {
+  display: block;
+  max-height: 10.5em;
+  overflow: auto;
+  padding: 8px 10px;
+  border: 1px solid var(--border-hairline);
+  border-radius: var(--radius-control);
+  background: var(--bg-sunken);
+  font-family: var(--font-jetbrains-mono);
+  font-size: 12px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-all;
+  user-select: text;
+}
+
+.coven-link-review-label {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+}
+
+.coven-link-review-note {
+  color: var(--text-secondary);
+}
+
+.coven-link-review-failed {
+  color: var(--color-danger);
+}
+
+.coven-link-review-status {
+  display: grid;
+  gap: 4px;
+}
+
+.coven-link-review-status:empty {
+  display: none;
+}
+
+.coven-link-review-status > span {
+  margin-bottom: 8px;
+}
+
+.coven-link-review-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.coven-link-review-actions .fr-btn {
+  min-height: 36px;
+}
+
+.coven-link-review-open {
+  text-decoration: none;
+}
+
+.coven-link-review-open[aria-disabled="true"] {
+  opacity: 0.5;
+  cursor: default;
+}

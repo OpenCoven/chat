@@ -356,11 +356,30 @@ after you dismiss the notice or reopen the app. When Coven gave no reason, the l
 
 Assistant replies render Markdown headings, lists, emphasis, quotes, code, tables, and task lists.
 Wide code and tables scroll inside the message. Raw HTML is disabled, and remote Markdown images
-aren't fetched automatically. Links open outside the window, so hovering one shows its address
-first. Each reply has a **Copy** control that copies its Markdown source, and so do your own
-messages. Each fenced code block names its language and has its own **Copy** control for the code
-alone. The control reports "Copied" only after the clipboard accepts the text, and "Copy failed"
-when it doesn't.
+aren't fetched automatically. Only web (`http` and `https`) links and in-page `#` links stay links;
+any other destination shows as plain text. Each reply has a **Copy** control that copies its
+Markdown source, and so do your own messages. Each fenced code block names its language and has its
+own **Copy** control for the code alone. The control reports "Copied" only after the clipboard
+accepts the text, and "Copy failed" when it doesn't.
+
+A web link in a reply never opens straight from the message. A click, a middle or modifier click,
+or Enter on a focused link first shows **Open this link?**. It names the site on its own line, shows
+the full address as plain text, and shows the link's own text when that differs. A Markdown title
+never stands in for the address, and when text before an `@` could pass for the site, the review
+says which site the link reaches. Chat doesn't rate the site or fetch anything from it.
+
+- **Open** asks the window to open exactly the address shown, once. Chat can't confirm that a page
+  opened, so it never says one did. If nothing appears, use **Copy address** and paste it into your
+  browser.
+- **Copy address** says "Copied the address." only after the clipboard accepts it. When the
+  clipboard refuses, the review says so and you can try again.
+- **Cancel**, Escape, or a click outside closes the review and returns you to the link.
+
+Switching familiar or chat closes an open review, and so does its message going away; focus then
+returns to the conversation. Chat won't open or copy an address over 8,192 bytes once encoded, or
+one that isn't a complete web address, and never shortens one to fit; the reply's **Copy** still
+copies it as written. Because links in a reply carry no address of their own, the right-click menu
+offers only text actions. Chat keeps no address after the review closes.
 
 Tool calls appear as activity rows between the prose. Each row expands to the call's input and,
 once reported, its result, with each block labeled and given its own **Copy** control. The turn's
