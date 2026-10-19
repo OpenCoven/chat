@@ -23,9 +23,19 @@ export async function copyText(text: string): Promise<boolean> {
   host.style.left = '0';
   host.style.opacity = '0';
   const active = document.activeElement;
-  document.body.appendChild(host);
+  // An open modal leaves the rest of the page inert, so the copy target joins
+  // the dialog the reader is in. The command copies whatever is selected, so
+  // unless the target holds focus and all of its text, nothing true was copied.
+  (active?.closest('dialog[open]') ?? document.body).appendChild(host);
   try {
+    host.focus({ preventScroll: true });
     host.select();
+    if (
+      document.activeElement !== host ||
+      host.selectionStart !== 0 ||
+      host.selectionEnd !== host.value.length
+    )
+      return false;
     return document.execCommand('copy');
   } catch {
     return false;

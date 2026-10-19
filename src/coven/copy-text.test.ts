@@ -44,4 +44,49 @@ describe('copyText', () => {
     Object.defineProperty(document, 'execCommand', { configurable: true, value: undefined });
     await expect(copyText('nope')).resolves.toBe(false);
   });
+
+  it('copies from inside the dialog the reader is in, where a modal leaves the page inert', async () => {
+    stubClipboard(undefined);
+    const dialog = document.createElement('dialog');
+    dialog.setAttribute('open', '');
+    const button = document.createElement('button');
+    dialog.append(button);
+    document.body.append(dialog);
+    button.focus();
+    const seen: { tag?: string; inDialog?: boolean; selected?: string } = {};
+    Object.defineProperty(document, 'execCommand', {
+      configurable: true,
+      value: vi.fn(() => {
+        const active = document.activeElement;
+        if (active) seen.tag = active.tagName;
+        seen.inDialog = Boolean(active?.closest('dialog') === dialog);
+        if (active instanceof HTMLTextAreaElement)
+          seen.selected = active.value.slice(active.selectionStart, active.selectionEnd);
+        return true;
+      }),
+    });
+    try {
+      await expect(copyText('https://example.com/docs')).resolves.toBe(true);
+      expect(seen).toEqual({
+        tag: 'TEXTAREA',
+        inDialog: true,
+        selected: 'https://example.com/docs',
+      });
+      expect(document.activeElement).toBe(button);
+      expect(dialog.querySelector('textarea')).toBeNull();
+    } finally {
+      dialog.remove();
+    }
+  });
+
+  it('reports failure when the copy target cannot take focus, whatever the command says', async () => {
+    stubClipboard(undefined);
+    vi.spyOn(HTMLTextAreaElement.prototype, 'focus').mockImplementation(() => {});
+    vi.spyOn(HTMLTextAreaElement.prototype, 'select').mockImplementation(() => {});
+    Object.defineProperty(document, 'execCommand', {
+      configurable: true,
+      value: vi.fn().mockReturnValue(true),
+    });
+    await expect(copyText('https://example.com/docs')).resolves.toBe(false);
+  });
 });
