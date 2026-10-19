@@ -237,6 +237,75 @@ describe('Missions tab', () => {
     expect(api.remove).toHaveBeenCalledWith(ID);
   });
 
+  it.each([
+    {
+      vector: 'M-10, an ambiguous run',
+      phase: 'committed' as const,
+      mission: (() => {
+        const checking = view({ state: 'reconciling', terminal: false, revision: 3 });
+        checking.reason = 'ambiguous_execution';
+        delete checking.result;
+        return checking;
+      })(),
+      label: 'Checking what happened',
+      text: 'Coven is checking whether the mission finished. It will say once it knows.',
+      removable: false,
+    },
+    {
+      vector: 'M-13, expiry before dispatch',
+      phase: 'terminal' as const,
+      mission: view({
+        state: 'rejected',
+        reason: 'expired_before_dispatch',
+        result: {
+          outcome: 'rejected',
+          settledAt: '2026-10-18T12:10:00.000Z',
+          observation: 'unknown',
+          reports: 0,
+          usage: null,
+        },
+      }),
+      label: 'Not started',
+      text: 'Nothing ran. Coven couldn’t start the mission in time.',
+      removable: true,
+    },
+    {
+      vector: 'M-08, a cancel before launch',
+      phase: 'terminal' as const,
+      mission: (() => {
+        const cancelled = view({
+          state: 'cancelled',
+          cancellation: 'cancelled',
+          result: {
+            outcome: 'cancelled',
+            settledAt: '2026-10-18T12:00:02.000Z',
+            observation: 'complete',
+            reports: 0,
+            usage: null,
+          },
+        });
+        delete cancelled.reason;
+        return cancelled;
+      })(),
+      label: 'Cancelled',
+      text: undefined,
+      removable: true,
+    },
+  ])('shows $vector as Coven reports it', async ({ phase, mission, label, text, removable }) => {
+    const api = client({
+      list: vi.fn().mockResolvedValue([{ missionId: ID, phase }]),
+      get: vi.fn().mockResolvedValue({ kind: 'view', mission }),
+      watch: vi.fn(() => new Promise<void>(() => {})),
+    });
+    render(<MissionPanel familiar={familiar} name="Sage" missions={api} />);
+    expect(await screen.findByText(label)).toBeVisible();
+    if (text) expect(screen.getByText(text)).toBeVisible();
+    // Only a running or waiting mission can be cancelled.
+    expect(screen.queryByRole('button', { name: 'Cancel mission' })).not.toBeInTheDocument();
+    expect(Boolean(screen.queryByRole('button', { name: 'Remove' }))).toBe(removable);
+    expect(screen.queryByText(/nothing changed/i)).not.toBeInTheDocument();
+  });
+
   it('says a mission that was not sent changed nothing', async () => {
     const api = client({
       submit: vi.fn().mockResolvedValue({ kind: 'not-sent', message: 'No running Coven daemon.' }),

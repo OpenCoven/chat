@@ -895,6 +895,135 @@ fn a_revocation_during_observation_ends_the_watch_with_the_revoked_view() {
 }
 
 #[test]
+fn a_cancel_while_queued_reports_the_cancelled_view() {
+    // M-08: Coven cancels a mission before it launches. Chat shows the
+    // cancelled view with its receipt, and the record settles.
+    let missions = Missions::default();
+    let id = record(
+        &missions,
+        "chat-mission:queued-cancel",
+        Phase::Committed,
+        None,
+    );
+    let fake = Fake::new(vec![step(|call| {
+        let mut done = view(&call.mission_id(), 3, "cancelled");
+        done["cancellation"] = json!({ "cancellationId": "mc:3", "requestedAt": "2026-10-18T12:00:02.000Z", "outcome": "cancelled" });
+        applied(
+            call,
+            "mission.cancel.v1",
+            "committed",
+            json!({ "cancellation": done["cancellation"], "mission": done }),
+        )
+    })]);
+    let run = |args: &[&str], input: Option<&[u8]>| fake.run(args, input);
+    let MissionAnswer::View { mission } = cancel(&missions, &run, &id, &no_pause).unwrap() else {
+        panic!("expected the cancelled view");
+    };
+    assert_eq!(mission.state, "cancelled");
+    assert!(mission.terminal);
+    assert_eq!(mission.reason, None);
+    assert_eq!(mission.cancellation.as_deref(), Some("cancelled"));
+    assert_eq!(mission.attempts, 0);
+    assert_eq!(mission.result.as_ref().unwrap().outcome, "cancelled");
+    assert_eq!(missions.record(&id).unwrap().phase, Phase::Terminal);
+}
+
+#[test]
+fn an_ambiguous_run_stays_open_until_coven_settles_it() {
+    // M-10: the harness timed out with its last write unobserved. Coven says
+    // reconciling / ambiguous_execution until recovery settles it; Chat keeps
+    // following, never treats it as finished, and settles only on Coven's word.
+    let missions = Missions::default();
+    let id = record(&missions, "chat-mission:ambiguous", Phase::Committed, None);
+    let reconciling = |call: &Call| {
+        let mut checking = view(&call.mission_id(), 3, "reconciling");
+        checking["reason"] = json!("ambiguous_execution");
+        printed(0, &checking)
+    };
+    let fake = Fake::new(vec![
+        step(|call| printed(0, &view(&call.mission_id(), 2, "running"))),
+        step(reconciling),
+        step(reconciling),
+        step(|call| printed(0, &view(&call.mission_id(), 4, "completed"))),
+    ]);
+    let run = |args: &[&str], input: Option<&[u8]>| fake.run(args, input);
+    let sent = RefCell::new(Vec::new());
+    watch(&missions, &run, &id, &AtomicBool::new(false), &|answer| {
+        if let MissionAnswer::View { mission } = &answer {
+            let phase = missions.record(&id).unwrap().phase;
+            assert_eq!(
+                phase == Phase::Terminal,
+                mission.terminal,
+                "{}",
+                mission.state
+            );
+        }
+        sent.borrow_mut().push(answer);
+        Ok(())
+    })
+    .unwrap();
+    let states: Vec<(u64, String, bool, Option<String>)> = sent
+        .borrow()
+        .iter()
+        .map(|answer| match answer {
+            MissionAnswer::View { mission } => (
+                mission.revision,
+                mission.state.clone(),
+                mission.terminal,
+                mission.reason.clone(),
+            ),
+            other => panic!("unexpected {other:?}"),
+        })
+        .collect();
+    assert_eq!(
+        states,
+        [
+            (2, "running".into(), false, None),
+            (
+                3,
+                "reconciling".into(),
+                false,
+                Some("ambiguous_execution".into())
+            ),
+            (4, "completed".into(), true, None),
+        ]
+    );
+    assert!(fake.done());
+    assert_eq!(missions.record(&id).unwrap().phase, Phase::Terminal);
+}
+
+#[test]
+fn a_mission_that_expires_before_dispatch_settles_rejected() {
+    // M-13: validUntil passes while the mission waits to start. Coven rejects
+    // it with expired_before_dispatch; nothing launched, and the watch ends.
+    let missions = Missions::default();
+    let id = record(&missions, "chat-mission:expired", Phase::Committed, None);
+    let fake = Fake::new(vec![
+        step(|call| printed(0, &view(&call.mission_id(), 1, "queued"))),
+        step(|call| {
+            let mut expired = view(&call.mission_id(), 2, "rejected");
+            expired["reason"] = json!("expired_before_dispatch");
+            printed(0, &expired)
+        }),
+    ]);
+    let run = |args: &[&str], input: Option<&[u8]>| fake.run(args, input);
+    let last = RefCell::new(None);
+    watch(&missions, &run, &id, &AtomicBool::new(false), &|answer| {
+        *last.borrow_mut() = Some(answer);
+        Ok(())
+    })
+    .unwrap();
+    let Some(MissionAnswer::View { mission }) = last.into_inner() else {
+        panic!("expected the rejected view");
+    };
+    assert_eq!(mission.state, "rejected");
+    assert_eq!(mission.reason.as_deref(), Some("expired_before_dispatch"));
+    assert_eq!(mission.attempts, 0);
+    assert!(fake.done());
+    assert_eq!(missions.record(&id).unwrap().phase, Phase::Terminal);
+}
+
+#[test]
 fn the_window_never_receives_a_key_and_cannot_supply_one() {
     let missions = Missions::default();
     let id = record(&missions, "chat-mission:nokey", Phase::Committed, None);
