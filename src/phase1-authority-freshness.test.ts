@@ -85,7 +85,8 @@ afterEach(() => {
 });
 const check = () => checkAuthorityFreshness('HEAD', root);
 
-describe('phase 1 authority freshness', () => {
+// Each check runs the freshness script, which gives every git call up to 30 s.
+describe('phase 1 authority freshness', { timeout: 30_000 }, () => {
   test('accepts a repin to an unchanged merged authority', () => {
     expect(check().failures).toEqual([]);
   });
