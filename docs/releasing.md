@@ -424,9 +424,7 @@ downloading a newer release, once, to a version that has one.
   `src-tauri/tauri.conf.json`, a `plugins.updater` section with the public key
   and one endpoint:
   `https://github.com/OpenCoven/chat/releases/download/updater/latest.json`.
-  `scripts/verify-package.mjs` holds that configuration. Until the change that
-  adds the plugin lands, it still refuses an updater, and every release behaves
-  as before.
+  `scripts/verify-package.mjs` holds that configuration.
 - **The base config keeps `bundle.createUpdaterArtifacts: false`.** With it on,
   every `tauri build` needs the private key, including CI's desktop build and
   your local `app:build`. A release whose tree configures the updater, and
@@ -468,8 +466,8 @@ downloading a newer release, once, to a version that has one.
    It prints the **public key** and writes the **private key**, encrypted with
    a password you choose, to the given path. Use a password: the workflow
    requires `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`.
-2. **The public key** goes into `plugins.updater.pubkey`, in the same change
-   that adds the plugin.
+2. **The public key** goes into `plugins.updater.pubkey` in
+   `src-tauri/tauri.conf.json`.
 3. **The private key and its password** go into `release-signing` as
    `TAURI_SIGNING_PRIVATE_KEY` and `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`, and
    nowhere else in GitHub.
