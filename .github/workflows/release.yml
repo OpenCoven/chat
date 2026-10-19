@@ -1436,9 +1436,9 @@ jobs:
           fi
           notes="Automated release of OpenCoven Chat ${VERSION}.
 
-          Verify downloads against \`SHA256SUMS\`:
+          Verify downloads against \`SHA256SUMS\` in the folder that holds them:
 
-              shasum -a 256 -c SHA256SUMS
+              shasum -a 256 -c --ignore-missing SHA256SUMS
 
           ${windows_note}
 
