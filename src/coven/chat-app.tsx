@@ -18,6 +18,7 @@ import { type SetWindowTitle, setWindowTitle } from '../lib/window-title';
 import { type ChatAttachment, MAX_ATTACHMENTS, readAttachments } from './attachments';
 import { ChatLayout } from './chat-layout';
 import { projectEvents } from './events';
+import { isValidModel, type RunOptions, sendOptions } from './preferences';
 
 const defaultRuntime = createCovenRuntime();
 const STORAGE_KEY = 'opencoven.chat.navigation.v1';
@@ -429,7 +430,7 @@ export function ChatApp({
     };
   }, [runtime, available, navigation.sessionId, reads, depth]);
 
-  async function send() {
+  async function send(options: RunOptions) {
     const current = navigationRef.current;
     if (lifecyclePending.current) return;
     if (sessions.some((session) => session.id === current.sessionId && session.archived)) {
@@ -440,6 +441,15 @@ export function ChatApp({
       setError('Select a familiar before sending a message.');
       return;
     }
+    if (!isValidModel(options.model)) {
+      setError(
+        "The model in Settings › Model isn't a model id. Correct it, or clear it to use the engine's default.",
+      );
+      return;
+    }
+    const chatHarness = current.sessionId
+      ? sessions.find((session) => session.id === current.sessionId)?.harness
+      : undefined;
     const key = draftKey(current);
     const prompt = current.drafts[key] ?? '';
     const selectedFiles = attachmentRef.current[key] ?? [];
@@ -498,6 +508,7 @@ export function ChatApp({
             : {}),
           ...(current.sessionId ? { sessionId: current.sessionId } : {}),
           ...(current.familiarId ? { familiarId: current.familiarId } : {}),
+          ...sendOptions(options, chatHarness),
         },
         (event) => {
           if (lifetime.current !== life || activeRun.current !== run) return;
@@ -710,10 +721,11 @@ export function ChatApp({
     return byFamiliar;
   }, [familiars, navigation]);
   const liveEvents = runOutputs[draftKey(navigation)]?.events;
-  const messages = useMemo(
-    () => projectEvents(liveEvents ? [...events, ...liveEvents] : events).messages,
+  const projection = useMemo(
+    () => projectEvents(liveEvents ? [...events, ...liveEvents] : events),
     [events, liveEvents],
   );
+  const messages = projection.messages;
 
   return (
     <ChatLayout
@@ -800,7 +812,7 @@ export function ChatApp({
       error={error || runOutputs[draftKey(navigation)]?.error || ''}
       // A failed run restores what it was sent; the notice can send it again.
       {...(runOutputs[draftKey(navigation)]?.error && !busy && retryKey === draftKey(navigation)
-        ? { onRetry: () => void send() }
+        ? { onRetry: (options: RunOptions) => void send(options) }
         : {})}
       onDismissError={() => {
         setError('');
@@ -853,7 +865,8 @@ export function ChatApp({
         navigate({ ...latest, drafts: { ...latest.drafts, [key]: value } });
         return true;
       }}
-      onSend={() => void send()}
+      onSend={(options) => void send(options)}
+      model={projection.model}
       onCancel={() => void cancel()}
       onRefresh={() => {
         if (!activeRun.current && !lifecyclePending.current) {

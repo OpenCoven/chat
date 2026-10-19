@@ -70,10 +70,13 @@ export function summarizeToolInput(input: unknown): { args: string; raw: string 
 export function projectEvents(events: readonly CovenRunEvent[]): {
   sessionId: string;
   error: string;
+  /** The model the latest run named in `system.init` or `result`; '' if none did. */
+  model: string;
   messages: ChatMessage[];
 } {
   let sessionId = '';
   let error = '';
+  let model = '';
   const messages: ChatMessage[] = [];
   let deltaMessage: (typeof messages)[number] | undefined;
   let deltaSession: unknown;
@@ -151,6 +154,7 @@ export function projectEvents(events: readonly CovenRunEvent[]): {
     }
     if ((event.type === 'system' && event.subtype === 'init') || event.type === 'result') {
       if (typeof event.session_id === 'string') sessionId = event.session_id;
+      if (typeof event.model === 'string' && event.model) model = event.model;
     }
     if (event.type === 'result' && event.is_error === true) {
       error =
@@ -252,5 +256,5 @@ export function projectEvents(events: readonly CovenRunEvent[]): {
         ...(attachments.length ? { attachments } : {}),
       });
   }
-  return { sessionId, error, messages };
+  return { sessionId, error, model, messages };
 }

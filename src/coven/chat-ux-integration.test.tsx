@@ -247,6 +247,10 @@ describe('the inspector handle beside the dialogs', () => {
       textSize: 'default',
       groupTools: true,
       inspectorWidth: 376,
+      harness: 'coven-code',
+      model: '',
+      think: false,
+      speed: 'default',
     });
     for (const word of ['alpha', 'docs.example.test', 'Guide', 'Draft', 'Where do I start'])
       expect(stored).not.toContain(word);

@@ -51,6 +51,12 @@ export type CovenSendInput = {
   sessionId?: string;
   familiarId?: string;
   harness?: 'coven-code' | 'codex' | 'claude';
+  /** `coven run --model`; omit to leave the harness on its own default. */
+  model?: string;
+  /** `coven run --think`: ask for deeper reasoning. Not for Codex. */
+  think?: boolean;
+  /** `coven run --speed`: a latency and reasoning hint. Not for Codex. */
+  speed?: 'fast' | 'balanced' | 'thorough';
   attachments?: readonly { name: string; bytes: readonly number[] }[];
 };
 export type CovenRunResult = { runId: string; sessionId?: string; events: CovenRunEvent[] };

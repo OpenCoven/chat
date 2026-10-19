@@ -277,6 +277,26 @@
   display: none;
 }
 
+/* A wide control, such as a segmented choice or a text field, sits under its label. */
+.coven-settings-row--stacked {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 10px;
+}
+
+.coven-settings-row--stacked .coven-settings-row-control {
+  flex-shrink: 1;
+  min-width: 0;
+}
+
+.coven-settings-row-error {
+  color: var(--color-danger);
+}
+
+.coven-model-field:has(input[aria-invalid="true"]) {
+  border-color: var(--color-danger);
+}
+
 /* A checkbox drawn as a switch. */
 .coven-switch {
   appearance: none;

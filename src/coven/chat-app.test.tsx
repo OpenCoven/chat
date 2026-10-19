@@ -10,8 +10,11 @@ import type {
 } from '../lib/coven-runtime';
 import { ChatApp } from './chat-app';
 import type { ChatLayoutProps } from './chat-layout';
+import { DEFAULT_PREFERENCES, type RunOptions, runOptions } from './preferences';
 
 const counters = vi.hoisted(() => ({ layoutRenders: 0 }));
+/** What the mock layout hands `onSend`, as the real one hands the reader's Settings. */
+const choice: { value: RunOptions } = { value: runOptions(DEFAULT_PREFERENCES) };
 
 // Exercise the controller contract independently of the parent's evolving visual layout.
 vi.mock('./chat-layout', () => ({
@@ -60,11 +63,12 @@ function MockLayout(props: ChatLayoutProps) {
       />
       <button
         type="button"
-        onClick={props.onSend}
+        onClick={() => props.onSend(choice.value)}
         disabled={!props.ready || props.busy || props.loading}
       >
         Send
       </button>
+      <output data-testid="model">{props.model ?? ''}</output>
       <QuoteControls {...props} />
       {props.busy && (
         <button type="button" onClick={props.onCancel} disabled={props.cancelling}>
@@ -122,7 +126,7 @@ function MockLayout(props: ChatLayoutProps) {
         </button>
       )}
       {props.onRetry && (
-        <button type="button" onClick={props.onRetry}>
+        <button type="button" onClick={() => props.onRetry?.(choice.value)}>
           Try again
         </button>
       )}
@@ -232,7 +236,10 @@ async function attachNote() {
 }
 
 describe('canonical familiar controller', () => {
-  beforeEach(() => localStorage.clear());
+  beforeEach(() => {
+    localStorage.clear();
+    choice.value = runOptions(DEFAULT_PREFERENCES);
+  });
 
   it('opens only the canonical head, replacing stale navigation without reading the older thread', async () => {
     localStorage.setItem(STORAGE, JSON.stringify({ familiarId: 'f', sessionId: 'older' }));
@@ -1087,5 +1094,89 @@ describe('editing the draft from a quote', () => {
     expect(screen.getByTestId('quote')).toHaveTextContent('false');
     expect(screen.getByRole('textbox')).toHaveValue('kept');
     await act(async () => change.resolve(undefined));
+  });
+});
+
+describe('run options from Settings', () => {
+  beforeEach(() => {
+    localStorage.clear();
+    choice.value = runOptions(DEFAULT_PREFERENCES);
+  });
+
+  it('starts a new chat on the chosen harness with the chosen model and reasoning', async () => {
+    const api = runtime();
+    vi.mocked(api.listSessions).mockResolvedValue([]);
+    await ready(api);
+    choice.value = {
+      harness: 'claude',
+      model: 'anthropic/claude-sonnet-5-5',
+      think: true,
+      speed: 'thorough',
+    };
+    draft('hello');
+    click('Send');
+    await waitFor(() => expect(api.send).toHaveBeenCalledTimes(1));
+    expect(vi.mocked(api.send).mock.calls[0]?.[0]).toMatchObject({
+      familiarId: 'f',
+      prompt: 'hello',
+      harness: 'claude',
+      model: 'anthropic/claude-sonnet-5-5',
+      think: true,
+      speed: 'thorough',
+    });
+  });
+
+  it('keeps an existing chat on its harness, and never sends Codex what it would ignore', async () => {
+    const api = runtime();
+    await ready(api);
+    choice.value = { harness: 'codex', model: 'openai/gpt-5.5', think: true, speed: 'fast' };
+    draft('first');
+    click('Send');
+    await waitFor(() => expect(api.send).toHaveBeenCalledTimes(1));
+    const toCovenCode = vi.mocked(api.send).mock.calls[0]?.[0];
+    expect(toCovenCode).toMatchObject({ sessionId: 'one', model: 'openai/gpt-5.5', think: true });
+    expect(toCovenCode).not.toHaveProperty('harness');
+    await waitFor(() => expect(screen.getByTestId('run-familiar')).toHaveTextContent('idle'));
+
+    const codex = { ...second, harness: 'codex' };
+    vi.mocked(api.listSessions).mockResolvedValue([first, codex]);
+    vi.mocked(api.readSession).mockImplementation(async (id: string) => ({
+      session: id === 'two' ? codex : { ...first, id },
+      events: [],
+    }));
+    click('Refresh');
+    click('Other familiar');
+    await waitFor(() => expect(screen.getByTestId('head')).toHaveTextContent('two'));
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Send' })).toBeEnabled());
+    choice.value = { harness: 'claude', model: 'openai/gpt-5.5', think: true, speed: 'fast' };
+    draft('second');
+    click('Send');
+    await waitFor(() => expect(api.send).toHaveBeenCalledTimes(2));
+    const toCodex = vi.mocked(api.send).mock.calls[1]?.[0];
+    expect(toCodex).toMatchObject({ sessionId: 'two', model: 'openai/gpt-5.5' });
+    for (const key of ['harness', 'think', 'speed']) expect(toCodex).not.toHaveProperty(key);
+  });
+
+  it('refuses a model id that is not one before anything is sent, and keeps the draft', async () => {
+    const api = runtime();
+    await ready(api);
+    choice.value = { ...runOptions(DEFAULT_PREFERENCES), model: '--model=x' };
+    draft('keep me');
+    click('Send');
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      "The model in Settings › Model isn't a model id",
+    );
+    expect(api.send).not.toHaveBeenCalled();
+    expect(screen.getByRole('textbox')).toHaveValue('keep me');
+  });
+
+  it('passes on the model the conversation reported', async () => {
+    const api = runtime();
+    vi.mocked(api.readSession).mockResolvedValue({
+      session: first,
+      events: [{ type: 'system', subtype: 'init', session_id: 'one', model: 'openai/gpt-5.5' }],
+    });
+    await ready(api);
+    await waitFor(() => expect(screen.getByTestId('model')).toHaveTextContent('openai/gpt-5.5'));
   });
 });

@@ -41,8 +41,12 @@ import { inspectorRoom, settleInspectorWidth } from './inspector-width';
 import { useMentionCompletion } from './mention-completion';
 import { MissionPanel } from './mission-panel';
 import {
+  canAttach,
+  harnessLabel,
   type Preferences,
   PreferencesContext,
+  type RunOptions,
+  runOptions,
   TEXT_SCALE,
   useStoredPreferences,
 } from './preferences';
@@ -97,6 +101,8 @@ export type ChatLayoutProps = Readonly<{
     archived?: boolean;
     preview?: string;
     projectRoot?: string;
+    /** The harness the chat runs on, which it keeps for good. */
+    harness?: string;
   }[];
   messages: readonly ChatMessage[];
   attachments?: readonly ChatAttachment[];
@@ -147,7 +153,7 @@ export type ChatLayoutProps = Readonly<{
   /** Clears the error notice; absent when the host cannot clear it. */
   onDismissError?: () => void;
   /** Sends the restored draft again; present only while a failed run's error shows. */
-  onRetry?: () => void;
+  onRetry?: (options: RunOptions) => void;
   /** Reads the chat's history again; present only while a failed read's error shows. */
   onReloadChat?: () => void;
   /** The host-side VNC relay; absent in the browser, where the pane says so. */
@@ -160,7 +166,10 @@ export type ChatLayoutProps = Readonly<{
   onDraft: (value: string) => void;
   /** Applies Quote selection to the draft as it stands now; absent, nothing can be quoted. */
   onEditDraft?: EditDraft | undefined;
-  onSend: () => void;
+  /** Sends the draft with the run options the reader set in Settings › Model. */
+  onSend: (options: RunOptions) => void;
+  /** The model the conversation's latest run reported; absent or empty when none did. */
+  model?: string | undefined;
   onCancel: () => void;
   onRefresh: () => void;
 }>;
@@ -736,6 +745,12 @@ export function ChatLayout(props: ChatLayoutProps) {
   }
   const familiar = props.familiars.find((item) => item.id === props.familiarId);
   const session = props.sessions.find((item) => item.id === props.sessionId);
+  const run = runOptions(preferences);
+  // An existing chat keeps the harness it started on. Before the harness could
+  // be chosen, Chat started every chat on Coven Code.
+  const chatHarness = session ? (session.harness ?? 'coven-code') : undefined;
+  // Only Coven Code takes attached files; the host refuses them for the others.
+  const onAttach = canAttach(run, chatHarness) ? props.onAttach : undefined;
   const name = familiar?.name ?? 'Coven';
   // A run belongs to the familiar it was sent to, not to whichever is shown.
   const runFamiliarId = props.busy ? props.runFamiliarId || props.familiarId : '';
@@ -827,7 +842,7 @@ export function ChatLayout(props: ChatLayoutProps) {
   // Files dragged onto the thread attach as if picked. The native host hands
   // drops to the webview (dragDropEnabled is off), so they arrive as File
   // objects and go through the same checks as the picker.
-  const canRequestAttachment = Boolean(props.onAttach) && !props.attaching && !composerDisabled;
+  const canRequestAttachment = Boolean(onAttach) && !props.attaching && !composerDisabled;
   const canDrop = canRequestAttachment && !props.busy;
   const [dragDepth, setDragDepth] = useState(0);
   const dragging = dragDepth > 0;
@@ -865,7 +880,7 @@ export function ChatLayout(props: ChatLayoutProps) {
       setDragDepth(0);
       const files = Array.from(event.dataTransfer.files);
       // Let the controller report an active-run rejection instead of swallowing the drop.
-      if (canRequestAttachment && files.length) props.onAttach?.(files);
+      if (canRequestAttachment && files.length) onAttach?.(files);
     },
   };
   const composerRef = useRef<HTMLTextAreaElement>(null);
@@ -1511,7 +1526,11 @@ export function ChatLayout(props: ChatLayoutProps) {
                   {props.onRetry &&
                   !composerDisabled &&
                   (props.draft.trim() || props.attachments?.length) ? (
-                    <FamButton size="sm" className="coven-error-retry" onClick={props.onRetry}>
+                    <FamButton
+                      size="sm"
+                      className="coven-error-retry"
+                      onClick={() => props.onRetry?.(run)}
+                    >
                       Try again
                     </FamButton>
                   ) : null}
@@ -1627,7 +1646,7 @@ export function ChatLayout(props: ChatLayoutProps) {
                   onValueChange={props.onDraft}
                   label={composer.label}
                   placeholder={composer.placeholder}
-                  onSend={props.onSend}
+                  onSend={() => props.onSend(run)}
                   {...(oversize
                     ? {
                         warning: {
@@ -1655,7 +1674,7 @@ export function ChatLayout(props: ChatLayoutProps) {
                       />
                     );
                   }}
-                  {...(props.onAttach && !props.busy && !props.attaching
+                  {...(onAttach && !props.busy && !props.attaching
                     ? { onAttach: () => fileInput.current?.click() }
                     : {})}
                   {...(!props.busy && props.onRemoveAttachment
@@ -1673,7 +1692,7 @@ export function ChatLayout(props: ChatLayoutProps) {
                     disabled={composerDisabled || props.busy}
                   />
                 </Composer>
-                {props.onAttach ? (
+                {onAttach ? (
                   <>
                     <input
                       ref={fileInput}
@@ -1684,7 +1703,7 @@ export function ChatLayout(props: ChatLayoutProps) {
                       accept={ATTACHMENT_ACCEPT}
                       disabled={props.busy || props.attaching}
                       onChange={(event) => {
-                        props.onAttach?.(Array.from(event.target.files ?? []));
+                        onAttach?.(Array.from(event.target.files ?? []));
                         event.target.value = '';
                       }}
                     />
@@ -1806,6 +1825,23 @@ export function ChatLayout(props: ChatLayoutProps) {
                         </span>
                       </div>
                       <div className="fr-row">
+                        <span className="fr-row-label">Runs on</span>
+                        <button
+                          type="button"
+                          className="coven-access-summary"
+                          aria-haspopup="dialog"
+                          title={
+                            chatHarness
+                              ? `This chat runs on ${harnessLabel(chatHarness)}. A chat keeps what it started on.`
+                              : `${name}'s chat will start on ${harnessLabel(run.harness)}.`
+                          }
+                          onClick={() => openSettings('model')}
+                        >
+                          {harnessLabel(chatHarness ?? run.harness)}
+                          <span aria-hidden="true"> ›</span>
+                        </button>
+                      </div>
+                      <div className="fr-row">
                         <span className="fr-row-label">Last activity</span>
                         {formatAbsoluteTime(session?.updatedAt) ? (
                           <time
@@ -1863,6 +1899,17 @@ export function ChatLayout(props: ChatLayoutProps) {
                       <div className="fr-row">
                         <span className="fr-row-label">Last run</span>
                         <span className="fr-row-value">{lastRunText(props.lastRun)}</span>
+                      </div>
+                    ) : null}
+                    {props.model ? (
+                      <div className="fr-row">
+                        <span className="fr-row-label">Model</span>
+                        <code
+                          className="fr-row-value coven-row-value--path"
+                          title={`Reported by the latest run: ${props.model}`}
+                        >
+                          {props.model}
+                        </code>
                       </div>
                     ) : null}
                     <div className="fr-row">
