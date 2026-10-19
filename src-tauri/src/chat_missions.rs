@@ -1284,17 +1284,22 @@ fn submit(
         cancel_key: None,
     })?;
     let record = missions.record(&mission_id)?;
-    send_submit(missions, run, &record, &payload, pause)
+    send_submit(missions, run, &record, &payload, pause, true)
 }
 
 /// Sends the submit with its key until an answer proves what happened, at
 /// most `SENDS` times. A later send can only replay the first commit.
+/// `first` is true only while no send of this submit has ever been attempted:
+/// only then can "nothing was sent" prove that Coven never saw it. A resend
+/// of an unanswered submit passes false, because the earlier send may have
+/// reached Coven.
 fn send_submit(
     missions: &Missions,
     run: Run,
     record: &Record,
     payload: &[u8],
     pause: &dyn Fn(usize),
+    first: bool,
 ) -> Result<MissionAnswer, String> {
     let args = [
         "missions",
@@ -1334,9 +1339,9 @@ fn send_submit(
                 missions.settle(missions.remove(&mission_id));
                 return Ok(refusal(&error));
             }
-            // Only the first send can prove nothing reached Coven; a later
-            // one leaves an earlier send's outcome open.
-            Reply::NotSent(message) if send == 0 => {
+            // Only the first send ever can prove nothing reached Coven; a
+            // later one leaves an earlier send's outcome open.
+            Reply::NotSent(message) if first && send == 0 => {
                 missions.settle(missions.remove(&mission_id));
                 return Ok(MissionAnswer::NotSent { message });
             }
@@ -1365,7 +1370,7 @@ fn read(
     // After validUntil, reading the mission settles it instead.
     if record.phase == Phase::Sending && now < record.valid_until {
         if let Some(payload) = record.payload.clone() {
-            return send_submit(missions, run, &record, &payload, pause);
+            return send_submit(missions, run, &record, &payload, pause, false);
         }
     }
     let output = run(&["missions", "get", mission_id, "--json"], None).map_err(
