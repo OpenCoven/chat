@@ -79,6 +79,22 @@ async function compose() {
 }
 
 describe('Missions tab', () => {
+  it('keeps every mission field out of browser storage', async () => {
+    // SECURITY.md: no mission content reaches localStorage or sessionStorage.
+    // This guards the whole tab: composing, reviewing, sending and showing
+    // Coven's answer leave both stores exactly as they were.
+    window.localStorage.clear();
+    window.sessionStorage.clear();
+    const api = client();
+    render(<MissionPanel familiar={familiar} name="Sage" missions={api} />);
+    await compose();
+    fireEvent.click(screen.getByRole('button', { name: 'Send mission' }));
+    expect(await screen.findByText('Couldn’t run')).toBeVisible();
+    expect(api.submit).toHaveBeenCalledTimes(1);
+    expect(window.localStorage.length).toBe(0);
+    expect(window.sessionStorage.length).toBe(0);
+  });
+
   it('says why a familiar cannot take a mission and retries on request', async () => {
     const api = client({
       prepare: vi
