@@ -2691,3 +2691,246 @@ describe('external link review in the transcript', () => {
     expect(screen.getByRole('log', { name: 'Messages' })).toHaveFocus();
   });
 });
+
+describe('inspector resizing', () => {
+  const KEY = 'opencoven.chat.preferences.v1';
+  afterEach(() => {
+    localStorage.clear();
+    vi.unstubAllGlobals();
+  });
+
+  function inspectorWidth(container: HTMLElement) {
+    return container
+      .querySelector<HTMLElement>('.coven-chat')
+      ?.style.getPropertyValue('--coven-inspector-w');
+  }
+
+  function handle() {
+    return screen.getByRole('separator', { name: 'Resize inspector' });
+  }
+
+  function stored() {
+    const raw = localStorage.getItem(KEY);
+    return raw === null ? null : (JSON.parse(raw) as Record<string, unknown>);
+  }
+
+  /** jsdom has no pointer capture; the handle must still ask for it. */
+  function capturable(element: HTMLElement) {
+    const capture = { set: vi.fn(), release: vi.fn() };
+    Object.assign(element, {
+      setPointerCapture: capture.set,
+      releasePointerCapture: capture.release,
+      hasPointerCapture: () => true,
+    });
+    return capture;
+  }
+
+  function mockViewport(maxWidth: number) {
+    Object.defineProperty(window, 'matchMedia', {
+      configurable: true,
+      writable: true,
+      value: (query: string) => {
+        const limit = Number(/max-width:\s*(\d+)px/.exec(query)?.[1] ?? Number.NaN);
+        return {
+          matches: Number.isFinite(limit) && maxWidth <= limit,
+          media: query,
+          addEventListener: () => undefined,
+          removeEventListener: () => undefined,
+        } as unknown as MediaQueryList;
+      },
+    });
+    return () => Reflect.deleteProperty(window, 'matchMedia');
+  }
+
+  /** A measurable shell: the test reports the width the observer would. */
+  function measurable() {
+    let report: ((width: number) => void) | undefined;
+    vi.stubGlobal(
+      'ResizeObserver',
+      class {
+        constructor(private callback: (entries: { contentRect: { width: number } }[]) => void) {}
+        observe() {
+          report = (width: number) => this.callback([{ contentRect: { width } }]);
+        }
+        unobserve() {}
+        disconnect() {}
+      },
+    );
+    return (width: number) => {
+      if (!report) throw new Error('The shell is not being measured.');
+      act(() => report?.(width));
+    };
+  }
+
+  it('offers a separator with its value state only while the inspector is inline', () => {
+    const { container } = render(<ChatLayout {...layoutProps()} ready />);
+    const separator = handle();
+    expect(separator).toHaveAttribute('aria-orientation', 'vertical');
+    expect(separator).toHaveAttribute('aria-controls', 'coven-familiar-inspector');
+    expect(separator).toHaveAttribute('aria-valuenow', '360');
+    expect(separator).toHaveAttribute('aria-valuemin', '280');
+    expect(separator).toHaveAttribute('aria-valuemax', '600');
+    expect(separator).toHaveAttribute('tabindex', '0');
+    expect(inspectorWidth(container)).toBe('360px');
+    fireEvent.click(screen.getByRole('button', { name: 'Close inspector' }));
+    expect(screen.queryByRole('separator', { name: 'Resize inspector' })).toBeNull();
+    expect(inspectorWidth(container)).toBe('var(--coven-rail-tab-w)');
+    fireEvent.click(screen.getByRole('button', { name: 'Show inspector' }));
+    expect(handle()).toHaveAttribute('aria-valuenow', '360');
+  });
+
+  it('offers no separator in the medium and compact drawers', () => {
+    for (const width of [900, 390]) {
+      const restore = mockViewport(width);
+      try {
+        const { container, unmount } = render(<ChatLayout {...layoutProps()} ready />);
+        fireEvent.click(screen.getByRole('button', { name: 'Show inspector' }));
+        expect(container.querySelector('.coven-chat')).toHaveAttribute('data-inspector', 'open');
+        expect(screen.queryByRole('separator', { name: 'Resize inspector' })).toBeNull();
+        expect(inspectorWidth(container)).toBe('var(--coven-rail-tab-w)');
+        unmount();
+      } finally {
+        restore();
+      }
+    }
+  });
+
+  it('steps 16px by arrow, jumps with Home and End, saves the number, and keeps it for the next window', () => {
+    const { container, unmount } = render(<ChatLayout {...layoutProps()} ready />);
+    const separator = handle();
+    separator.focus();
+    fireEvent.keyDown(separator, { key: 'ArrowLeft' });
+    expect(inspectorWidth(container)).toBe('376px');
+    expect(separator).toHaveAttribute('aria-valuenow', '376');
+    fireEvent.keyDown(separator, { key: 'ArrowRight' });
+    fireEvent.keyDown(separator, { key: 'ArrowRight' });
+    expect(inspectorWidth(container)).toBe('344px');
+    fireEvent.keyDown(separator, { key: 'End' });
+    expect(inspectorWidth(container)).toBe('600px');
+    fireEvent.keyDown(separator, { key: 'ArrowLeft' });
+    expect(inspectorWidth(container)).toBe('600px');
+    fireEvent.keyDown(separator, { key: 'Home' });
+    expect(inspectorWidth(container)).toBe('280px');
+    fireEvent.keyDown(separator, { key: 'ArrowRight' });
+    expect(inspectorWidth(container)).toBe('280px');
+    expect(separator).toHaveFocus();
+    expect(stored()).toEqual({ textSize: 'default', groupTools: true, inspectorWidth: 280 });
+    unmount();
+    const next = render(<ChatLayout {...layoutProps()} ready />);
+    expect(inspectorWidth(next.container)).toBe('280px');
+  });
+
+  it('drags under pointer capture and settles on release, cancel or lost capture', () => {
+    const { container } = render(<ChatLayout {...layoutProps()} ready />);
+    const shell = container.querySelector('.coven-chat');
+    const separator = handle();
+    const capture = capturable(separator);
+    fireEvent.pointerDown(separator, { pointerId: 7, button: 0, clientX: 1000 });
+    expect(capture.set).toHaveBeenCalledWith(7);
+    expect(shell).toHaveAttribute('data-resizing', 'inspector');
+    // The edge follows the pointer: left is wider, right is narrower.
+    fireEvent.pointerMove(separator, { pointerId: 7, clientX: 900 });
+    expect(inspectorWidth(container)).toBe('460px');
+    fireEvent.pointerMove(separator, { pointerId: 7, clientX: 1200 });
+    expect(inspectorWidth(container)).toBe('280px');
+    fireEvent.pointerMove(separator, { pointerId: 7, clientX: 950 });
+    expect(inspectorWidth(container)).toBe('410px');
+    // Another pointer never steers the drag.
+    fireEvent.pointerMove(separator, { pointerId: 8, clientX: 100 });
+    expect(inspectorWidth(container)).toBe('410px');
+    fireEvent.pointerUp(separator, { pointerId: 7, clientX: 950 });
+    expect(shell).not.toHaveAttribute('data-resizing');
+    expect(stored()?.inspectorWidth).toBe(410);
+    fireEvent.pointerMove(separator, { pointerId: 7, clientX: 500 });
+    expect(inspectorWidth(container)).toBe('410px');
+
+    fireEvent.pointerDown(separator, { pointerId: 9, button: 0, clientX: 1000 });
+    fireEvent.pointerMove(separator, { pointerId: 9, clientX: 990 });
+    expect(inspectorWidth(container)).toBe('420px');
+    fireEvent.pointerCancel(separator, { pointerId: 9 });
+    expect(shell).not.toHaveAttribute('data-resizing');
+    fireEvent.pointerMove(separator, { pointerId: 9, clientX: 600 });
+    expect(inspectorWidth(container)).toBe('420px');
+
+    fireEvent.pointerDown(separator, { pointerId: 10, button: 0, clientX: 1000 });
+    expect(shell).toHaveAttribute('data-resizing', 'inspector');
+    fireEvent(separator, new Event('lostpointercapture', { bubbles: true }));
+    expect(shell).not.toHaveAttribute('data-resizing');
+    // A secondary button never starts a drag.
+    fireEvent.pointerDown(separator, { pointerId: 11, button: 2, clientX: 1000 });
+    expect(shell).not.toHaveAttribute('data-resizing');
+    expect(stored()?.inspectorWidth).toBe(420);
+  });
+
+  it('keeps the preferred width while the window clamps it, and gives it back with room', () => {
+    const measure = measurable();
+    const { container } = render(<ChatLayout {...layoutProps()} ready />);
+    const separator = handle();
+    fireEvent.keyDown(separator, { key: 'End' });
+    expect(inspectorWidth(container)).toBe('600px');
+    // 1200 wide with the 300px familiars rail: 440px for the conversation leaves 460.
+    measure(1200);
+    expect(inspectorWidth(container)).toBe('460px');
+    expect(separator).toHaveAttribute('aria-valuenow', '460');
+    expect(separator).toHaveAttribute('aria-valuemax', '460');
+    expect(stored()?.inspectorWidth).toBe(600);
+    // A key that cannot move the edge changes nothing, the preference included.
+    fireEvent.keyDown(separator, { key: 'ArrowLeft' });
+    expect(inspectorWidth(container)).toBe('460px');
+    expect(stored()?.inspectorWidth).toBe(600);
+    // Closing the familiars rail leaves its 28px tab: room for the full preference.
+    fireEvent.click(screen.getByRole('button', { name: 'Hide familiars' }));
+    expect(inspectorWidth(container)).toBe('600px');
+    fireEvent.click(screen.getByRole('button', { name: 'Show familiars' }));
+    expect(inspectorWidth(container)).toBe('460px');
+    measure(1800);
+    expect(inspectorWidth(container)).toBe('600px');
+    // Narrower than the minimum allows: the minimum holds rather than overflowing further.
+    measure(1101);
+    expect(inspectorWidth(container)).toBe('361px');
+    expect(stored()?.inspectorWidth).toBe(600);
+  });
+
+  it('reads a malformed stored width as the default and clamps one out of range', () => {
+    localStorage.setItem(KEY, JSON.stringify({ inspectorWidth: 'wide' }));
+    const first = render(<ChatLayout {...layoutProps()} ready />);
+    expect(inspectorWidth(first.container)).toBe('360px');
+    first.unmount();
+    localStorage.setItem(KEY, JSON.stringify({ inspectorWidth: 5000 }));
+    const second = render(<ChatLayout {...layoutProps()} ready />);
+    expect(inspectorWidth(second.container)).toBe('600px');
+    second.unmount();
+    localStorage.setItem(KEY, JSON.stringify({ inspectorWidth: Number.NaN }));
+    const third = render(<ChatLayout {...layoutProps()} ready />);
+    expect(inspectorWidth(third.container)).toBe('360px');
+  });
+
+  it('shows the width in Settings and resets it to the default', () => {
+    const { container } = render(<ChatLayout {...layoutProps()} ready />);
+    fireEvent.keyDown(handle(), { key: 'End' });
+    const general = openSettingsAt('General');
+    expect(general).toHaveTextContent('600px');
+    const reset = within(general).getByRole('button', { name: 'Reset inspector width' });
+    expect(reset).toBeEnabled();
+    fireEvent.click(reset);
+    expect(inspectorWidth(container)).toBe('360px');
+    expect(general).toHaveTextContent('360px');
+    expect(reset).toBeDisabled();
+    expect(stored()?.inspectorWidth).toBe(360);
+  });
+
+  it('still resizes when storage refuses, and ignores keys from behind a dialog', () => {
+    const { container } = render(<ChatLayout {...layoutProps()} ready />);
+    const setItem = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
+      throw new Error('denied');
+    });
+    fireEvent.keyDown(handle(), { key: 'ArrowLeft' });
+    expect(inspectorWidth(container)).toBe('376px');
+    expect(setItem).toHaveBeenCalled();
+    setItem.mockRestore();
+    fireEvent.click(screen.getByRole('button', { name: 'Open settings' }));
+    expect(screen.getByRole('dialog', { name: 'Settings' })).toBeInTheDocument();
+    fireEvent.keyDown(handle(), { key: 'ArrowLeft' });
+    expect(inspectorWidth(container)).toBe('376px');
+  });
+});

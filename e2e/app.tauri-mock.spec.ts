@@ -1217,6 +1217,75 @@ test('reserves full-height clickable rail tabs and widens the shared chat column
   ).toEqual([true, true]);
 });
 
+test('resizes the inspector by pointer and keyboard within the room the window leaves', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1400, height: 800 });
+  await installRuntimeFixture(page);
+  await page.goto('/');
+  const composer = page.getByRole('textbox', { name: 'Message Local familiar' });
+  await expect(composer).toBeEnabled();
+  const handle = page.getByRole('separator', { name: 'Resize inspector' });
+  const inspector = page.locator('.fr-inspector');
+  const width = () => inspector.evaluate((node) => node.getBoundingClientRect().width);
+  await expect.poll(width).toBe(360);
+  await expect(handle).toHaveAttribute('aria-valuenow', '360');
+
+  // Dragging the edge 100px toward the conversation widens the rail by 100px.
+  const box = await handle.boundingBox();
+  if (!box) throw new Error('The resize handle has no box.');
+  const x = box.x + box.width / 2;
+  const y = box.y + 300;
+  await page.mouse.move(x, y);
+  await page.mouse.down();
+  await page.mouse.move(x - 100, y, { steps: 5 });
+  await expect(page.locator('.coven-chat')).toHaveAttribute('data-resizing', 'inspector');
+  await page.mouse.up();
+  await expect(page.locator('.coven-chat')).not.toHaveAttribute('data-resizing', /./);
+  await expect.poll(width).toBe(460);
+
+  await handle.focus();
+  await page.keyboard.press('ArrowRight');
+  await expect.poll(width).toBe(444);
+  await page.keyboard.press('End');
+  await expect.poll(width).toBe(600);
+  await expect(handle).toHaveAttribute('aria-valuenow', '600');
+  // The composer stays in its column, left of the rail.
+  const composerBox = await composer.boundingBox();
+  const inspectorBox = await inspector.boundingBox();
+  if (!composerBox || !inspectorBox) throw new Error('Composer or inspector has no box.');
+  expect(composerBox.x + composerBox.width).toBeLessThanOrEqual(inspectorBox.x);
+
+  // 1200 wide with the 300px familiars rail leaves 460 once the conversation keeps 440.
+  await page.setViewportSize({ width: 1200, height: 800 });
+  await expect.poll(width).toBe(460);
+  await expect(handle).toHaveAttribute('aria-valuemax', '460');
+  await page.setViewportSize({ width: 1400, height: 800 });
+  await expect.poll(width).toBe(600);
+
+  await page.reload();
+  await expect(composer).toBeEnabled();
+  await expect.poll(width).toBe(600);
+  const stored = await page.evaluate(() =>
+    JSON.parse(localStorage.getItem('opencoven.chat.preferences.v1') ?? 'null'),
+  );
+  expect(stored).toEqual({ textSize: 'default', groupTools: true, inspectorWidth: 600 });
+
+  await page.getByRole('button', { name: 'Open settings' }).click();
+  const settings = page.getByRole('dialog', { name: 'Settings' });
+  await settings.getByRole('button', { name: 'General' }).click();
+  await expect(settings).toContainText('600px');
+  await settings.getByRole('button', { name: 'Reset inspector width' }).click();
+  await settings.getByRole('button', { name: 'Close settings' }).click();
+  await expect.poll(width).toBe(360);
+  expect(
+    await page.evaluate(() => [
+      document.documentElement.scrollWidth <= innerWidth,
+      document.documentElement.scrollHeight <= innerHeight,
+    ]),
+  ).toEqual([true, true]);
+});
+
 test('toggles rails by keyboard while preserving composer focus and text', async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 });
   await installRuntimeFixture(page);

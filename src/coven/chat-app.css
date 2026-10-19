@@ -1084,3 +1084,71 @@
   justify-content: flex-end;
   margin: 0 0 8px;
 }
+
+/* --------------------------------------------------------- inspector resize */
+
+/*
+ * In the grid the inspector's left edge is a handle; the rail hosts it. The
+ * handle is a 24px pointer target (WCAG 2.5.8) lying wholly inside the rail,
+ * so it never covers the conversation's scrollbar, and the rail's content
+ * steps in to leave that strip free of other controls.
+ */
+.coven-chat[data-tier="wide"] .fr-inspector {
+  position: relative;
+}
+
+.coven-chat[data-tier="wide"] .fr-inspector-inner {
+  padding-left: 10px;
+}
+
+.coven-inspector-resizer {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  z-index: 52;
+  width: 24px;
+  cursor: col-resize;
+  touch-action: none;
+  outline: none;
+}
+
+/* The handle shows itself on the rail's edge under the pointer and when it has focus. */
+.coven-inspector-resizer::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: 2px;
+  background: transparent;
+  transition: background-color 120ms;
+}
+
+.coven-inspector-resizer:hover::after,
+.coven-chat[data-resizing="inspector"] .coven-inspector-resizer::after {
+  background: color-mix(in oklch, var(--accent-presence) 70%, transparent);
+}
+
+.coven-inspector-resizer:focus-visible::after {
+  background: var(--ring-focus);
+  width: 3px;
+}
+
+/* While the edge is being dragged nothing else selects, and the pointer stays a resize cursor. */
+.coven-chat[data-resizing] {
+  cursor: col-resize;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.coven-chat[data-resizing] .fr-inspector,
+.coven-chat[data-resizing] .fr-thread {
+  transition: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .coven-inspector-resizer::after {
+    transition: none;
+  }
+}
