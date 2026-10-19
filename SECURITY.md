@@ -57,6 +57,13 @@ installation-identity commands use it, and the window can call neither
 (`src-tauri/capabilities/default.json`). Reports showing that conversation data reaches browser
 storage, or that these files are readable by other user accounts, are in scope.
 
+The window can ask the host to open a web address only through the link review's **Open**
+(`open_reviewed_link`). The host checks the address again: it must be an `http` or `https` address
+that names a site, at most 8,192 bytes of printable ASCII, with no sign-in name. The host then passes
+it, as one argument and never through a shell, to the system's URL handler. Reports of an address
+that reaches anything other than the default browser, or of a link that opens without the review,
+are in scope.
+
 ## Reporting a vulnerability
 
 > **Warning:** Don't open a public issue for a security problem.

@@ -393,9 +393,14 @@ the full address as plain text, and shows the link's own text when that differs.
 never stands in for the address, and when text before an `@` could pass for the site, the review
 says which site the link reaches. Chat doesn't rate the site or fetch anything from it.
 
-- **Open** asks the window to open exactly the address shown, once. Chat can't confirm that a page
-  opened, so it never says one did. If nothing appears, use **Copy address** and paste it into your
-  browser.
+- **Open** hands exactly the address shown to your default browser, once. In the desktop app, the
+  native side checks the address again (an http or https address that names a site, up to 8,192
+  bytes, with no sign-in name) and passes it to the system's URL handler: `open -u` on macOS,
+  `xdg-open` on Linux, and `url.dll,FileProtocolHandler` through `rundll32` on Windows. The review
+  then says "Sent the address to your browser." That means the system took it, not that a page
+  loaded. If nothing appears, or the system refused, use **Copy address** and paste it into your
+  browser. A link whose address carries a sign-in name is offered to copy only. In a browser
+  build, Open is a plain link the browser opens itself.
 - **Copy address** says "Copied the address." only after the clipboard accepts it. When the
   clipboard refuses, the review says so and you can try again.
 - **Cancel**, Escape, or a click outside closes the review and returns you to the link.
@@ -565,6 +570,8 @@ lets it invoke only:
 - the four `setup_*` commands of first-run setup,
 - the five `companion_*` commands of the opt-in iPhone companion,
 - the three `coven_screen_*` commands of the screen relay,
+- `open_reviewed_link`, which hands one reviewed web address from the link review to the system's
+  default browser (#505),
 - Tauri's event listen and unlisten, so the window can follow runs started
   from the iPhone,
 - Tauri's permission to set its own window title.

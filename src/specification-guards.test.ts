@@ -93,6 +93,10 @@ const screenRelayCommands = [
 // install steps. The webview chooses a step by name; the only text it sends
 // to a process is a familiar's name, validated in Rust and passed after `--`.
 const setupCommands = ['setup_check', 'setup_run', 'setup_cancel', 'setup_create_familiar'];
+// The link review's Open (#505): the host checks one reviewed http(s) address
+// and hands it to the system's default handler as one argument, never through
+// a shell. See src-tauri/src/link_opener.rs.
+const linkOpenerCommands = ['open_reviewed_link'];
 
 function readText(relativePath: string) {
   return readFileSync(resolve(projectRoot, relativePath), 'utf8');
@@ -273,6 +277,7 @@ describe('Phase 1 specification guards', () => {
         ...missionCommands,
         ...screenRelayCommands,
         ...setupCommands,
+        ...linkOpenerCommands,
       ].map((command) => `allow-${command.replaceAll('_', '-')}`),
       'core:window:allow-set-title',
     ]);
@@ -751,6 +756,7 @@ describe('Phase 1 specification guards', () => {
       ...missionCommands,
       ...screenRelayCommands,
       ...setupCommands,
+      ...linkOpenerCommands,
       'app_identity',
       'app_installation_id',
       'cave_read_discovery',
@@ -819,6 +825,7 @@ describe('Phase 1 specification guards', () => {
       ...missionCommands.map((command) => `coven_runtime::missions::${command}`),
       ...screenRelayCommands.map((command) => `screen_relay::${command}`),
       ...setupCommands.map((command) => `setup::${command}`),
+      ...linkOpenerCommands.map((command) => `link_opener::${command}`),
       ...expected,
     ]);
     const setup = readText('src-tauri/src/setup.rs');

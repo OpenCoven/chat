@@ -13,6 +13,8 @@ declare global {
     __covenFixture: { calls: string[]; inputs?: unknown[]; finish?: () => void };
     /** Overrides the first familiar's name, for layout tests with long names. */
     __fixtureFamiliarName?: string;
+    /** Addresses the window asked the host to open, in order. */
+    __openedLinks?: unknown[];
   }
 }
 
@@ -280,6 +282,10 @@ async function installRuntimeFixture(
               }
               case 'coven_runtime_cancel':
                 rejectRun?.(new Error('Coven run was cancelled.'));
+                return null;
+              // The host would hand the address to the system; the fixture records it.
+              case 'open_reviewed_link':
+                window.__openedLinks = [...(window.__openedLinks ?? []), args.address];
                 return null;
               // The one Tauri core permission the window holds: its own title.
               case 'plugin:window|set_title':
@@ -1569,7 +1575,7 @@ test('reviews an external link before anything opens, then opens only that addre
   // The modal keeps focus: Tab cycles its three controls and never reaches the composer.
   for (const name of ['Copy address', 'Open', 'Cancel']) {
     await page.keyboard.press('Tab');
-    await expect(review.getByRole(name === 'Open' ? 'link' : 'button', { name })).toBeFocused();
+    await expect(review.getByRole('button', { name })).toBeFocused();
   }
   const fits = await review.evaluate((node) => {
     const box = node.getBoundingClientRect();
@@ -1589,20 +1595,17 @@ test('reviews an external link before anything opens, then opens only that addre
   expect(context.pages()).toHaveLength(1);
   expect(outside).toEqual([]);
 
-  const [opened] = await Promise.all([
-    context.waitForEvent('page'),
-    review.getByRole('link', { name: 'Open' }).click(),
-  ]);
-  await opened.waitForLoadState();
-  expect(opened.url()).toBe(address);
-  await page.bringToFront();
-  // A second press, even past the disabled state, opens nothing more.
-  await expect(review.getByRole('link', { name: 'Open' })).toHaveAttribute('aria-disabled', 'true');
-  await review.getByRole('link', { name: 'Open' }).click({ force: true });
-  await expect(review).toContainText("can't confirm that a page opened");
-  expect(context.pages()).toHaveLength(2);
-  // The only outside request is the opened page itself; a request never carries the #fragment.
-  expect(outside).toEqual([address.replace(/#.*$/, '')]);
+  // In the desktop app, Open asks the host to hand the reviewed address to the
+  // system; the webview itself opens nothing.
+  const open = review.getByRole('button', { name: 'Open' });
+  await open.click();
+  await expect(review).toContainText('Sent the address to your browser.');
+  // A second press, even past the disabled state, hands nothing more on.
+  await expect(open).toHaveAttribute('aria-disabled', 'true');
+  await open.click({ force: true });
+  expect(await page.evaluate(() => window.__openedLinks)).toEqual([address]);
+  expect(context.pages()).toHaveLength(1);
+  expect(outside).toEqual([]);
 });
 
 // Chromium only: this proves the table controls in a browser, not what a desktop webview does.

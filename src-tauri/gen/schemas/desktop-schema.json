@@ -435,6 +435,12 @@
           "markdownDescription": "Enables the mission_watch_stop command without any pre-configured scope."
         },
         {
+          "description": "Enables the open_reviewed_link command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-open-reviewed-link",
+          "markdownDescription": "Enables the open_reviewed_link command without any pre-configured scope."
+        },
+        {
           "description": "Enables the setup_cancel command without any pre-configured scope.",
           "type": "string",
           "const": "allow-setup-cancel",
@@ -715,6 +721,12 @@
           "type": "string",
           "const": "deny-mission-watch-stop",
           "markdownDescription": "Denies the mission_watch_stop command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the open_reviewed_link command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-open-reviewed-link",
+          "markdownDescription": "Denies the open_reviewed_link command without any pre-configured scope."
         },
         {
           "description": "Denies the setup_cancel command without any pre-configured scope.",

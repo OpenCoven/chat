@@ -28,6 +28,7 @@ const NATIVE_COMMANDS: &[&str] = &[
     "setup_run",
     "setup_cancel",
     "setup_create_familiar",
+    "open_reviewed_link",
     "app_identity",
     "app_installation_id",
     "cave_read_discovery",
