@@ -758,11 +758,44 @@ fn refusal(error: &Value) -> MissionAnswer {
 // ---------------------------------------------------------------------------
 // Preparing
 
+/// The newest Coven release without `coven missions`. Such a Coven reads
+/// `coven missions …` as a task to cast rather than a command, so Chat never
+/// sends it one.
+const LAST_RELEASE_WITHOUT_MISSIONS: (u64, u64, u64) = (0, 4, 10);
+
+/// The release a `coven --version` line names, such as `coven v0.4.10 (…)`.
+/// A development build names no release.
+fn release(version: &[u8]) -> Option<(u64, u64, u64)> {
+    let line = std::str::from_utf8(version).ok()?;
+    let mut parts = line
+        .split_whitespace()
+        .nth(1)?
+        .strip_prefix('v')?
+        .split('.');
+    let mut number = || parts.next()?.parse::<u64>().ok();
+    let release = (number()?, number()?, number()?);
+    parts.next().is_none().then_some(release)
+}
+
 fn prepare(run: Run, familiar_id: &str) -> Result<MissionPreparation, String> {
     validate_id(familiar_id)?;
     let unavailable = |reason: &'static str, detail: String| {
         Ok(MissionPreparation::Unavailable { reason, detail })
     };
+    match run(&["--version"], None) {
+        Err(RunFailure::NotStarted(detail)) => return unavailable("coven-not-ready", detail),
+        Ok(output)
+            if output.code == Some(0)
+                && release(&output.stdout)
+                    .is_some_and(|release| release <= LAST_RELEASE_WITHOUT_MISSIONS) =>
+        {
+            return unavailable(
+                "update-coven",
+                String::from_utf8_lossy(&output.stdout).trim().to_owned(),
+            );
+        }
+        _ => {}
+    }
     let output = match run(&["missions", "envelopes", "--json"], None) {
         Ok(output) => output,
         Err(RunFailure::NotStarted(detail) | RunFailure::Interrupted(detail)) => {
@@ -789,6 +822,17 @@ fn prepare(run: Run, familiar_id: &str) -> Result<MissionPreparation, String> {
                     .map(str::to_owned)
             }),
         Some(2) => return unavailable("update-coven", output.stderr),
+        // No daemon, and a Coven too old to have the command, both exit 1 with
+        // nothing printed. Asking the command for its own help needs no daemon.
+        Some(1) if printed_nothing(&output.stdout) => {
+            let knows_it = run(&["missions", "envelopes", "--help"], None)
+                .is_ok_and(|help| help.code == Some(0));
+            return if knows_it {
+                unavailable("coven-not-ready", output.stderr)
+            } else {
+                unavailable("update-coven", output.stderr)
+            };
+        }
         _ => return unavailable("coven-not-ready", output.stderr),
     };
     let Some(envelope_digest) = envelope_digest else {

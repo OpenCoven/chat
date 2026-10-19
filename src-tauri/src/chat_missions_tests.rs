@@ -297,9 +297,25 @@ fn live_root(status: &str) -> Value {
         ] })
 }
 
+/// `coven --version` printing `line`.
+fn version(line: &'static str) -> Step {
+    step(move |_| {
+        Ok(CliOutput {
+            code: Some(0),
+            stdout: format!("{line}\n").into_bytes(),
+            stderr: String::new(),
+        })
+    })
+}
+
+/// A Coven build with missions, from before a release carries them.
+const DEVELOPMENT: &str =
+    "coven archive/20261019-1363-landed-1-g896dd4a6 (engine coven-code 0.8.0, pinned 0.8.0)";
+
 #[test]
 fn preparing_names_the_exact_revision_and_envelope() {
     let fake = Fake::new(vec![
+        version(DEVELOPMENT),
         step(|_| printed(0, &envelopes())),
         step(|_| {
             printed(
@@ -323,11 +339,43 @@ fn preparing_names_the_exact_revision_and_envelope() {
             envelope_digest: DIGEST.into(),
         }
     );
-    assert_eq!(fake.calls()[0].args, ["missions", "envelopes", "--json"]);
+    let calls: Vec<Vec<String>> = fake.calls().into_iter().map(|call| call.args).collect();
     assert_eq!(
-        fake.calls()[1].args,
-        ["familiar-ledger", "history", "sage", "--json"]
+        calls,
+        [
+            vec!["--version"],
+            vec!["missions", "envelopes", "--json"],
+            vec!["familiar-ledger", "history", "sage", "--json"],
+        ]
     );
+}
+
+#[test]
+fn an_older_coven_is_never_sent_a_mission_command() {
+    // Coven 0.4.10 and earlier read `coven missions …` as a task to cast, so
+    // Chat stops at the version.
+    for line in [
+        "coven v0.4.10 (engine coven-code 0.8.0, pinned 0.8.0)",
+        "coven v0.3.2",
+    ] {
+        let fake = Fake::new(vec![version(line)]);
+        let run = |args: &[&str], input: Option<&[u8]>| fake.run(args, input);
+        assert!(matches!(
+            prepare(&run, "sage").unwrap(),
+            MissionPreparation::Unavailable {
+                reason: "update-coven",
+                ..
+            }
+        ));
+        assert_eq!(fake.calls().len(), 1, "{line}");
+    }
+    assert_eq!(
+        release(b"coven v0.4.11 (engine coven-code 0.8.0)\n"),
+        Some((0, 4, 11))
+    );
+    assert_eq!(release(DEVELOPMENT.as_bytes()), None);
+    assert_eq!(release(b"coven v0.4"), None);
+    assert_eq!(release(b"coven v1.2.3.4"), None);
 }
 
 #[test]
@@ -340,15 +388,33 @@ fn preparing_says_why_a_familiar_cannot_take_a_mission() {
             ready => panic!("expected unavailable, got {ready:?}"),
         }
     };
-    // A Coven without `coven missions envelopes` rejects the usage.
+    // A Coven with missions but without `coven missions envelopes` rejects
+    // the usage.
     assert_eq!(
-        reason(vec![step(|_| silent(2, "unrecognized subcommand"))]),
+        reason(vec![
+            version(DEVELOPMENT),
+            step(|_| silent(2, "unrecognized subcommand"))
+        ]),
         "update-coven"
     );
-    // No daemon, or one from before the advertisement.
+    // Exit 1 with nothing printed: a Coven that knows the command has no
+    // daemon to ask, or one from before the advertisement.
     assert_eq!(
-        reason(vec![step(|_| silent(1, "no running Coven daemon"))]),
+        reason(vec![
+            version(DEVELOPMENT),
+            step(|_| silent(1, "no running Coven daemon")),
+            step(|_| silent(0, "")),
+        ]),
         "coven-not-ready"
+    );
+    // A Coven that doesn't know the command, read as a task it won't cast.
+    assert_eq!(
+        reason(vec![
+            version(DEVELOPMENT),
+            step(|_| silent(1, "Error: refusing to cast without an interactive terminal")),
+            step(|_| silent(1, "Error: refusing to cast without an interactive terminal")),
+        ]),
+        "update-coven"
     );
     assert_eq!(
         reason(vec![step(|_| Err(RunFailure::NotStarted(
@@ -356,12 +422,17 @@ fn preparing_says_why_a_familiar_cannot_take_a_mission() {
         )))]),
         "coven-not-ready"
     );
+    // A version that can't be read is no reason to stop.
     assert_eq!(
-        reason(vec![step(|_| printed(0, &json!({ "envelopes": [] })))]),
+        reason(vec![
+            step(|_| silent(1, "")),
+            step(|_| printed(0, &json!({ "envelopes": [] }))),
+        ]),
         "no-read-envelope"
     );
     assert_eq!(
         reason(vec![
+            version(DEVELOPMENT),
             step(|_| printed(0, &envelopes())),
             step(|_| printed(0, &history(json!([])))),
         ]),
@@ -369,6 +440,7 @@ fn preparing_says_why_a_familiar_cannot_take_a_mission() {
     );
     assert_eq!(
         reason(vec![
+            version(DEVELOPMENT),
             step(|_| printed(0, &envelopes())),
             step(|_| printed(0, &history(json!([live_root("revoked")])))),
         ]),
@@ -376,6 +448,7 @@ fn preparing_says_why_a_familiar_cannot_take_a_mission() {
     );
     assert_eq!(
         reason(vec![
+            version(DEVELOPMENT),
             step(|_| printed(0, &envelopes())),
             step(|_| silent(1, "Error: the ledger could not be read")),
         ]),
