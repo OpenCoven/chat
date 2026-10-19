@@ -1,5 +1,5 @@
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -20,13 +20,9 @@ function job(name: string, nextName?: string): string {
   return workflow.slice(start, end);
 }
 
-/** The shell of the build job's `Determine signing availability` step, as `os` runs it. */
-function signingScript(os: string): string {
-  const build = job('build', 'publish');
-  const step = build.slice(
-    build.indexOf('- id: signing'),
-    build.indexOf('- name: Import Windows signing certificate'),
-  );
+/** The shell of the step that `marker` starts, as `os` runs it. */
+function stepScript(jobText: string, marker: string, os = 'Linux'): string {
+  const step = jobText.slice(jobText.indexOf(marker));
   const body: string[] = [];
   for (const line of step.slice(step.indexOf('run: |')).split('\n').slice(1)) {
     if (line.trim() !== '' && !line.startsWith(' '.repeat(10))) break;
@@ -35,14 +31,28 @@ function signingScript(os: string): string {
   return body.join('\n').replaceAll(`\${{ runner.os }}`, os);
 }
 
-/** Runs that step with only `env` set, and returns its exit status, log and outputs. */
-function decideSigning(env: Record<string, string>, os = 'Windows') {
-  const dir = mkdtempSync(join(tmpdir(), 'release-signing-'));
-  const output = join(dir, 'output');
-  writeFileSync(output, '');
+/**
+ * Runs a step's shell with only `env` set, in a directory holding `conf` as
+ * src-tauri/tauri.conf.json. `git show <sha>:src-tauri/tauri.conf.json` is
+ * answered with the same file, so a step that reads the verified commit sees it.
+ */
+function runStep(script: string, env: Record<string, string>, conf: Record<string, unknown>) {
+  const dir = mkdtempSync(join(tmpdir(), 'release-step-'));
   try {
-    const run = spawnSync('bash', ['-c', signingScript(os)], {
-      env: { PATH: process.env.PATH ?? '', GITHUB_OUTPUT: output, ...env },
+    mkdirSync(join(dir, 'src-tauri'));
+    mkdirSync(join(dir, 'bin'));
+    writeFileSync(join(dir, 'src-tauri/tauri.conf.json'), JSON.stringify(conf));
+    writeFileSync(join(dir, 'bin/git'), '#!/bin/sh\ncat src-tauri/tauri.conf.json\n');
+    chmodSync(join(dir, 'bin/git'), 0o755);
+    const output = join(dir, 'output');
+    writeFileSync(output, '');
+    const run = spawnSync('bash', ['-c', script], {
+      cwd: dir,
+      env: {
+        PATH: `${join(dir, 'bin')}:${dirname(process.execPath)}:${process.env.PATH ?? ''}`,
+        GITHUB_OUTPUT: output,
+        ...env,
+      },
       encoding: 'utf8',
     });
     const outputs = Object.fromEntries(
@@ -55,6 +65,19 @@ function decideSigning(env: Record<string, string>, os = 'Windows') {
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
+}
+
+const withUpdater = {
+  plugins: { updater: { pubkey: 'key', endpoints: ['https://example.invalid/latest.json'] } },
+};
+const updaterKey = { TAURI_SIGNING_PRIVATE_KEY: 'k', TAURI_SIGNING_PRIVATE_KEY_PASSWORD: 'p' };
+
+/**
+ * Runs the build job's `Determine signing availability` step as `os` runs it,
+ * for a tree that configures no updater, and returns its status, log and outputs.
+ */
+function decideSigning(env: Record<string, string>, os = 'Windows') {
+  return runStep(stepScript(job('build', 'publish'), '- id: signing', os), env, {});
 }
 
 describe('release workflow specification', () => {
@@ -73,7 +96,9 @@ describe('release workflow specification', () => {
     expect(verify).toContain('moved after the workflow event');
     expect(verify).toContain('which is not reachable from origin/main');
     expect(verify.indexOf('actions/setup-node@')).toBeLessThan(verify.indexOf('node -p'));
-    expect(publish.indexOf('actions/setup-node@')).toBeLessThan(publish.indexOf("node <<'EOF'"));
+    expect(publish.indexOf('actions/setup-node@')).toBeLessThan(
+      publish.indexOf('node scripts/updater-manifest.mjs'),
+    );
     expect(build).toContain(`ref: \${{ needs.verify-tag.outputs.sha }}`);
     expect(publish).toContain(`ref: \${{ needs.verify-tag.outputs.sha }}`);
     expect(workflow).toContain("if: needs.verify-tag.outputs.dry_run != 'true'");
@@ -116,7 +141,7 @@ describe('release workflow specification', () => {
     expect(publish).toContain('--draft');
     expect(publish).toContain(`gh release edit "\${TAG}"`);
     expect(publish).toContain('Duplicate release asset name');
-    expect(publish).toContain('Updater signature is empty');
+    expect(publish).toContain('node scripts/updater-manifest.mjs');
     expect(publish.indexOf('Generate latest.json updater manifest')).toBeLessThan(
       publish.indexOf('Generate and verify SHA256SUMS'),
     );
@@ -260,11 +285,133 @@ describe('release workflow specification', () => {
     expect(workflow).toMatch(/workflow_dispatch:[\s\S]*?allow_unsigned:[\s\S]*?default: false/);
     expect(verify).toContain(`ALLOW_UNSIGNED: \${{ inputs.allow_unsigned }}`);
 
-    // Auto-update is opt-in, so the updater key must not be treated as
-    // mandatory; requiring it would block every release until § 4 is done.
-    // The name still appears in the comment explaining that exemption, so this
-    // checks for the secret actually being bound rather than merely mentioned.
-    expect(verify).not.toMatch(/TAURI_SIGNING_PRIVATE_KEY: \$\{\{ secrets\./);
+    // The updater key is required only for a tree that configures the
+    // updater, which this early gate cannot see: it runs before the checkout.
+    // The name still appears in the comment explaining that, so this checks
+    // for the secret actually being bound rather than merely mentioned.
+    const requireStep = verify.slice(
+      verify.indexOf('- name: Require signing material'),
+      verify.indexOf('actions/checkout@'),
+    );
+    expect(requireStep).not.toMatch(/TAURI_SIGNING_PRIVATE_KEY: \$\{\{ secrets\./);
+  });
+
+  test('requires the updater key only for a tree that configures the updater', () => {
+    const verify = job('verify-tag', 'build');
+    const gate = 'name: Require updater signing when the tree configures the updater';
+    // It reads the config from the verified commit, after the tag checks.
+    expect(verify.indexOf(gate)).toBeGreaterThan(verify.indexOf('- id: check'));
+    expect(verify).toContain(`git show "\${EXPECTED_SHA}:src-tauri/tauri.conf.json"`);
+    const script = stepScript(verify, gate);
+
+    const older = runStep(script, { EXPECTED_SHA: 'abc123' }, {});
+    expect(older.status).toBe(0);
+    expect(older.log).toContain('This tree configures no updater');
+
+    expect(runStep(script, { ...updaterKey, EXPECTED_SHA: 'abc123' }, withUpdater).status).toBe(0);
+
+    const noPassword = runStep(
+      script,
+      { TAURI_SIGNING_PRIVATE_KEY: 'k', EXPECTED_SHA: 'abc123' },
+      withUpdater,
+    );
+    expect(noPassword.status).toBe(1);
+    expect(noPassword.log).toContain(
+      'This tree configures the updater, but release-signing is missing TAURI_SIGNING_PRIVATE_KEY_PASSWORD',
+    );
+
+    const rehearsal = runStep(
+      script,
+      { ALLOW_UNSIGNED: 'true', EXPECTED_SHA: 'abc123' },
+      withUpdater,
+    );
+    expect(rehearsal.status).toBe(0);
+    expect(rehearsal.log).toContain('This rehearsal builds no updater artifacts');
+  });
+
+  test('turns the updater on only with the configuration and both secrets', () => {
+    const build = job('build', 'publish');
+    const script = stepScript(build, '- id: signing');
+
+    const older = runStep(script, updaterKey, {});
+    expect(older.status).toBe(0);
+    expect(older.outputs.updater).toBe('off');
+    expect(older.log).toContain('This tree configures no updater');
+
+    expect(runStep(script, updaterKey, withUpdater).outputs.updater).toBe('on');
+
+    // A re-run of failed jobs skips verify-tag, so the build refuses too.
+    const emptied = runStep(script, { TAURI_SIGNING_PRIVATE_KEY: 'k' }, withUpdater);
+    expect(emptied.status).toBe(1);
+    expect(emptied.log).toContain('refusing to build a release that cannot update anyone');
+
+    const rehearsal = runStep(script, { ALLOW_UNSIGNED: 'true' }, withUpdater);
+    expect(rehearsal.status).toBe(0);
+    expect(rehearsal.outputs.updater).toBe('off');
+    expect(build).toContain(`updater: \${{ steps.signing.outputs.updater }}`);
+  });
+
+  test('builds updater artifacts through a release-only overlay and stages the v2 names', () => {
+    const build = job('build', 'publish');
+    const overlay = build.slice(
+      build.indexOf('- name: Configure updater artifacts'),
+      build.indexOf('- name: Build installers'),
+    );
+    expect(overlay).toContain("if: steps.signing.outputs.updater == 'on'");
+    expect(overlay).toContain('{ "bundle": { "createUpdaterArtifacts": true } }');
+    expect(overlay).toContain('TAURI_UPDATER_OVERLAY=src-tauri/release-updater.conf.json');
+    // Both overlays reach tauri build, the signing one first.
+    expect(build).toContain(
+      `for overlay in "\${TAURI_CONFIG_OVERLAY:-}" "\${TAURI_UPDATER_OVERLAY:-}"; do`,
+    );
+    const cleanup = build.slice(build.indexOf('- name: Remove updater overlay'));
+    expect(cleanup).toMatch(/^- name: Remove updater overlay\s+if: always\(\)\s/);
+    expect(cleanup).toContain('rm -f src-tauri/release-updater.conf.json');
+
+    const stage = build.slice(build.indexOf('- name: Stage artifacts'));
+    for (const glob of [
+      'msi/*.msi.sig',
+      'nsis/*.exe.sig',
+      'appimage/*.AppImage.sig',
+      'deb/*.deb.sig',
+      'macos/*.app.tar.gz.sig',
+    ]) {
+      expect(stage).toContain(glob);
+    }
+    for (const legacy of ['.msi.zip', '.nsis.zip', '.AppImage.tar.gz']) {
+      expect(stage.slice(0, stage.indexOf('- name: Smoke-test artifacts'))).not.toContain(legacy);
+    }
+  });
+
+  test('writes the feed and moves the pointer release only for a published updater run', () => {
+    const publish = job('publish');
+    const manifest = publish.slice(
+      publish.indexOf('- name: Generate latest.json updater manifest'),
+      publish.indexOf('- name: Generate and verify SHA256SUMS'),
+    );
+    expect(manifest).toContain(`UPDATER: \${{ needs.build.outputs.updater }}`);
+    expect(manifest).toContain('the build jobs reported the updater off');
+    // Older trees get neither the generator nor the smoke flag.
+    expect(publish).toContain(
+      `if [ "\${UPDATER}" = "on" ]; then\n            args+=(--updater on)`,
+    );
+
+    const pointer = publish.slice(
+      publish.indexOf('- name: Point the auto-update feed at this release'),
+    );
+    expect(publish.indexOf('- name: Point the auto-update feed at this release')).toBeGreaterThan(
+      publish.indexOf('- name: Publish GitHub release'),
+    );
+    expect(pointer).toContain(
+      "if: needs.verify-tag.outputs.dry_run != 'true' && needs.build.outputs.updater == 'on'",
+    );
+    expect(pointer).toContain('Refusing to move the auto-update feed from an allow_unsigned run');
+    expect(pointer).toContain('--prerelease --latest=false');
+    expect(pointer).toContain(
+      `gh release upload updater release/latest.json --repo "\${REPO}" --clobber`,
+    );
+    expect(pointer).toContain('releases/download/updater/latest.json');
+    expect(pointer).toContain('cmp -s served-latest.json release/latest.json');
   });
 
   test('never publishes an allow_unsigned build', () => {
@@ -547,7 +694,9 @@ describe('release workflow specification', () => {
   });
 
   test('documents conditional updates and the current storage boundary', () => {
-    expect(releasingGuide).toContain('conditionally generates the updater manifest');
+    expect(releasingGuide).toContain(
+      'generates the updater feed when the tagged tree configures auto-update',
+    );
     expect(releasingGuide).toContain('leave `dry_run` at its default value of `true`');
     expect(releasingGuide).not.toMatch(/^\s*pnpm\b/m);
     expect(securityPolicy).not.toContain('currently `0.0.1`');

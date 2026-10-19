@@ -8,9 +8,10 @@ import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
 import {
   expectedInstallers,
-  expectedUpdaterArchives,
+  expectedUpdaterArtifacts,
   smokeTestRelease,
 } from '../scripts/release-smoke.mjs';
+import { buildUpdaterManifest } from '../scripts/updater-manifest.mjs';
 
 const projectRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const VERSION = JSON.parse(readFileSync(join(projectRoot, 'src-tauri/tauri.conf.json'), 'utf8'))
@@ -60,6 +61,27 @@ function rootWith(mutate: (conf: Record<string, unknown>) => void) {
   return root;
 }
 
+type Conf = Record<string, unknown> & { plugins?: Record<string, unknown> };
+
+/** The tagged tree without the updater, whatever the live config says. */
+const withoutUpdater = () =>
+  rootWith((conf) => {
+    delete (conf as Conf).plugins?.updater;
+  });
+
+/** The tagged tree with the updater configured, as the release overlay expects. */
+const withUpdater = () =>
+  rootWith((conf) => {
+    const typed = conf as Conf;
+    typed.plugins = {
+      ...typed.plugins,
+      updater: {
+        pubkey: 'test-public-key',
+        endpoints: ['https://github.com/OpenCoven/chat/releases/download/updater/latest.json'],
+      },
+    };
+  });
+
 const smoke = (
   releaseDir: string,
   options: {
@@ -67,9 +89,15 @@ const smoke = (
     tag?: string;
     allowUnsigned?: boolean;
     windowsSigning?: 'signed' | 'unsigned';
+    updater?: 'on' | 'off';
   } = {},
 ) =>
-  smokeTestRelease({ releaseDir, root: options.root ?? projectRoot, version: VERSION, ...options });
+  smokeTestRelease({
+    releaseDir,
+    root: options.root ?? withoutUpdater(),
+    version: VERSION,
+    ...options,
+  });
 
 describe('release smoke test', () => {
   it('passes a complete unsigned release with the updater off, and says so', () => {
@@ -117,9 +145,20 @@ describe('release smoke test', () => {
       'OpenCoven.Chat_0.0.5_amd64.AppImage',
       'OpenCoven.Chat_0.0.5_amd64.deb',
     ]);
-    expect([...expectedUpdaterArchives('0.0.3').keys()]).toContain(
-      'aarch64-apple-darwin-OpenCoven.Chat.app.tar.gz',
-    );
+  });
+
+  it('maps every updater artifact to its installer key, with one default per platform', () => {
+    // tauri-cli 2.11.4 signs the Windows and Linux installers themselves and
+    // archives only the macOS app; tauri-plugin-updater 2.12 looks up
+    // `{os}-{arch}-{installer}` before `{os}-{arch}`.
+    expect(Object.fromEntries(expectedUpdaterArtifacts('0.0.6'))).toEqual({
+      'aarch64-apple-darwin-OpenCoven.Chat.app.tar.gz': ['darwin-aarch64-app', 'darwin-aarch64'],
+      'x86_64-apple-darwin-OpenCoven.Chat.app.tar.gz': ['darwin-x86_64-app', 'darwin-x86_64'],
+      'OpenCoven.Chat_0.0.6_x64_en-US.msi': ['windows-x86_64-msi'],
+      'OpenCoven.Chat_0.0.6_x64-setup.exe': ['windows-x86_64-nsis', 'windows-x86_64'],
+      'OpenCoven.Chat_0.0.6_amd64.AppImage': ['linux-x86_64-appimage', 'linux-x86_64'],
+      'OpenCoven.Chat_0.0.6_amd64.deb': ['linux-x86_64-deb'],
+    });
   });
 
   it('refuses an installer that kept the space in its name', () => {
@@ -233,90 +272,167 @@ describe('release smoke test', () => {
     );
   });
 
-  it('fails updater assets while createUpdaterArtifacts is off', () => {
-    const archive = [...expectedUpdaterArchives(VERSION).keys()][2] as string;
+  it('fails updater assets while the updater is off', () => {
+    const [mac] = [...expectedUpdaterArtifacts(VERSION).keys()];
+    const msi = expectedInstallers(VERSION)[2] as string;
     const failures = smoke(
-      release({ [archive]: 'zip', [`${archive}.sig`]: 'sig', 'latest.json': '{}' }),
+      release({ [mac as string]: 'archive', [`${msi}.sig`]: 'sig', 'latest.json': '{}' }),
     ).failures;
     expect(failures).toContain(
-      `Updater asset ${archive} is present but createUpdaterArtifacts is off.`,
+      `Updater asset ${mac} is present but the updater is off for this run.`,
     );
     expect(failures).toContain(
-      `Updater asset ${archive}.sig is present but createUpdaterArtifacts is off.`,
+      `Updater asset ${msi}.sig is present but the updater is off for this run.`,
     );
-    expect(failures).toContain('latest.json is present but createUpdaterArtifacts is off.');
+    expect(failures).toContain('latest.json is present but the updater is off for this run.');
   });
 
-  describe('once the updater is enabled', () => {
-    const on = () =>
-      rootWith((conf) => {
-        (conf.bundle as Record<string, unknown>).createUpdaterArtifacts = true;
-      });
-    function updaterRelease(
-      options: { dropSig?: string; platforms?: string[]; bothWindows?: boolean } = {},
-    ) {
-      const archives = expectedUpdaterArchives(VERSION);
-      const extra: Record<string, string> = {};
-      // The manifest step accepts one archive per platform, so a producible
-      // release carries the MSI updater archive and not the NSIS one as well.
-      const names = [...archives.keys()].filter(
-        (name) => options.bothWindows === true || !name.endsWith('.nsis.zip'),
-      );
-      for (const name of names) {
-        extra[name] = `archive ${name}`;
-        if (options.dropSig !== name) extra[`${name}.sig`] = `signature ${name}`;
-      }
-      const platforms = options.platforms ?? [...new Set(archives.values())];
-      extra['latest.json'] = JSON.stringify({
-        version: VERSION,
-        platforms: Object.fromEntries(platforms.map((key) => [key, { signature: 's', url: 'u' }])),
-      });
-      return release(extra);
-    }
+  it('refuses an updater the tagged tree does not configure', () => {
+    expect(smoke(release(), { updater: 'on' }).failures).toContain(
+      'The build reported the updater on, but src-tauri/tauri.conf.json has no plugins.updater.',
+    );
+    expect(() => smoke(release(), { updater: 'maybe' as unknown as 'on' })).toThrow(
+      'updater must be one of on, off',
+    );
+  });
 
-    it('passes signed archives with a matching latest.json', () => {
-      const report = smoke(updaterRelease(), { root: on() });
+  describe('once the tree configures the updater', () => {
+    const TAG = `v${VERSION}`;
+    /** A release the build produced with the updater on, and the feed the publish job writes. */
+    function updaterRelease() {
+      const dir = release();
+      const names = [...expectedInstallers(VERSION)];
+      for (const name of expectedUpdaterArtifacts(VERSION).keys()) {
+        if (!names.includes(name)) {
+          writeFileSync(join(dir, name), `archive ${name}`);
+          names.push(name);
+        }
+        writeFileSync(join(dir, `${name}.sig`), `signature of ${name}\n`);
+        names.push(`${name}.sig`);
+      }
+      const manifest = buildUpdaterManifest({
+        releaseDir: dir,
+        version: VERSION,
+        tag: TAG,
+        repo: 'OpenCoven/chat',
+        notes: 'notes',
+        pubDate: '2026-10-18T00:00:00.000Z',
+      });
+      writeFileSync(join(dir, 'latest.json'), JSON.stringify(manifest));
+      names.push('latest.json');
+      writeChecksums(dir, names);
+      return { dir, names, manifest };
+    }
+    const rewrite = (dir: string, names: string[], manifest: unknown) => {
+      writeFileSync(join(dir, 'latest.json'), JSON.stringify(manifest));
+      writeChecksums(dir, names);
+    };
+
+    it('passes signed artifacts with the feed the publish job writes', () => {
+      const { dir, manifest } = updaterRelease();
+      const report = smoke(dir, { root: withUpdater(), tag: TAG, updater: 'on' });
       expect(report.failures).toEqual([]);
       expect(report.updater).toMatchObject({ state: 'enabled', manifest: true });
-    });
-
-    it('fails two updater archives for the same platform', () => {
-      const [msi, nsis] = [...expectedUpdaterArchives(VERSION).keys()].filter((name) =>
-        /\.(msi|nsis)\.zip$/.test(name),
+      expect(Object.keys(manifest.platforms).sort()).toEqual(
+        [...expectedUpdaterArtifacts(VERSION).values()].flat().sort(),
       );
-      expect(smoke(updaterRelease({ bothWindows: true }), { root: on() }).failures).toContain(
-        `Updater archives ${msi} and ${nsis} both map to windows-x86_64.`,
+      expect(manifest.platforms['windows-x86_64']).toEqual(
+        manifest.platforms['windows-x86_64-nsis'],
       );
-    });
-
-    it('fails an updater archive without its signature', () => {
-      const archive = [...expectedUpdaterArchives(VERSION).keys()][0] as string;
-      expect(smoke(updaterRelease({ dropSig: archive }), { root: on() }).failures).toContain(
-        `Updater archive ${archive} has no signature.`,
+      expect(manifest.platforms['linux-x86_64-deb']?.url).toBe(
+        `https://github.com/OpenCoven/chat/releases/download/${TAG}/OpenCoven.Chat_${VERSION}_amd64.deb`,
+      );
+      // The feed carries the signature's contents, not a path to it.
+      expect(manifest.platforms['darwin-aarch64']?.signature).toBe(
+        `signature of aarch64-apple-darwin-OpenCoven.Chat.app.tar.gz`,
       );
     });
 
-    it('fails a latest.json that omits a platform', () => {
-      expect(
-        smoke(
-          updaterRelease({ platforms: ['darwin-aarch64', 'darwin-x86_64', 'windows-x86_64'] }),
-          { root: on() },
-        ).failures,
-      ).toContain('latest.json has no linux-x86_64 entry.');
+    it('fails an artifact without its signature, and a signature with no artifact', () => {
+      const { dir, names } = updaterRelease();
+      const deb = `OpenCoven.Chat_${VERSION}_amd64.deb`;
+      const dmg = `OpenCoven.Chat_${VERSION}_aarch64.dmg`;
+      rmSync(join(dir, `${deb}.sig`));
+      writeFileSync(join(dir, `${dmg}.sig`), 'stray');
+      writeChecksums(dir, [...names.filter((name) => name !== `${deb}.sig`), `${dmg}.sig`]);
+      const failures = smoke(dir, { root: withUpdater(), tag: TAG, updater: 'on' }).failures;
+      expect(failures).toContain(`Updater artifact ${deb} has no signature.`);
+      expect(failures).toContain(`Signature ${dmg}.sig matches no updater artifact.`);
     });
 
-    it('fails when the updater is on but produced nothing', () => {
-      expect(smoke(release(), { root: on() }).failures).toContain(
-        'createUpdaterArtifacts is on but no updater archive was produced.',
+    it('fails a feed that omits a platform, points elsewhere or carries another signature', () => {
+      const { dir, names, manifest } = updaterRelease();
+      const exe = `OpenCoven.Chat_${VERSION}_x64-setup.exe`;
+      const platforms = { ...manifest.platforms } as Record<
+        string,
+        { signature: string; url: string }
+      >;
+      delete platforms['linux-x86_64-deb'];
+      platforms['windows-x86_64-nsis'] = {
+        signature: platforms['windows-x86_64-nsis']?.signature as string,
+        url: `https://github.com/OpenCoven/chat/releases/download/v0.0.1/${exe}`,
+      };
+      platforms['darwin-x86_64'] = {
+        url: platforms['darwin-x86_64']?.url as string,
+        signature: 'forged',
+      };
+      platforms['windows-aarch64'] = platforms['windows-x86_64'] as {
+        signature: string;
+        url: string;
+      };
+      rewrite(dir, names, { ...manifest, platforms });
+      const failures = smoke(dir, { root: withUpdater(), tag: TAG, updater: 'on' }).failures;
+      expect(failures).toContain('latest.json has no linux-x86_64-deb entry.');
+      expect(failures).toContain(
+        `latest.json windows-x86_64-nsis does not point at ${exe} in this release.`,
       );
+      expect(failures).toContain(
+        'latest.json darwin-x86_64 signature differs from x86_64-apple-darwin-OpenCoven.Chat.app.tar.gz.sig.',
+      );
+      expect(failures).toContain('latest.json names unexpected platform windows-aarch64.');
+    });
+
+    it('fails a production run that produced no updater artifacts', () => {
+      expect(smoke(release(), { root: withUpdater() }).failures).toContain(
+        'src-tauri/tauri.conf.json configures the updater, but this run produced no updater artifacts. TAURI_SIGNING_PRIVATE_KEY and its password are required on the production path.',
+      );
+    });
+
+    it('lets an allow_unsigned rehearsal without the key go, and says why', () => {
+      const report = smoke(release(), { root: withUpdater(), allowUnsigned: true });
+      expect(report.failures).toEqual([]);
+      expect(report.updater).toEqual({
+        state: 'disabled',
+        reason:
+          'allow_unsigned rehearsal without the updater signing key; no updater artifacts or latest.json',
+      });
+    });
+
+    it('refuses to write a feed with a missing or empty signature', () => {
+      const { dir } = updaterRelease();
+      const appImage = `OpenCoven.Chat_${VERSION}_amd64.AppImage`;
+      writeFileSync(join(dir, `${appImage}.sig`), '  \n');
+      const build = () =>
+        buildUpdaterManifest({
+          releaseDir: dir,
+          version: VERSION,
+          tag: TAG,
+          repo: 'OpenCoven/chat',
+          notes: 'notes',
+          pubDate: 'now',
+        });
+      expect(build).toThrow(`Updater signature ${appImage}.sig is empty.`);
+      rmSync(join(dir, `${appImage}.sig`));
+      expect(build).toThrow(`Updater artifact ${appImage} has no signature.`);
     });
   });
 
   it('exits non-zero from the command line on a failure and zero on a clean release', () => {
     const script = join(projectRoot, 'scripts/release-smoke.mjs');
+    const root = withoutUpdater();
     const clean = spawnSync(
       process.execPath,
-      [script, '--dir', release(), '--version', VERSION, '--allow-unsigned'],
+      [script, '--dir', release(), '--version', VERSION, '--root', root, '--allow-unsigned'],
       {
         cwd: projectRoot,
         encoding: 'utf8',
@@ -329,7 +445,17 @@ describe('release smoke test', () => {
     });
     const signedWindows = spawnSync(
       process.execPath,
-      [script, '--dir', release(), '--version', VERSION, '--windows-signing', 'signed'],
+      [
+        script,
+        '--dir',
+        release(),
+        '--version',
+        VERSION,
+        '--root',
+        root,
+        '--windows-signing',
+        'signed',
+      ],
       { cwd: projectRoot, encoding: 'utf8' },
     );
     expect(signedWindows.status).toBe(0);
@@ -345,10 +471,14 @@ describe('release smoke test', () => {
     expect(badFlag.stderr).toContain('windowsSigning must be one of signed, unsigned');
     const broken = release();
     rmSync(join(broken, 'SHA256SUMS'));
-    const failed = spawnSync(process.execPath, [script, '--dir', broken, '--version', VERSION], {
-      cwd: projectRoot,
-      encoding: 'utf8',
-    });
+    const failed = spawnSync(
+      process.execPath,
+      [script, '--dir', broken, '--version', VERSION, '--root', root],
+      {
+        cwd: projectRoot,
+        encoding: 'utf8',
+      },
+    );
     expect(failed.status).toBe(1);
     expect(failed.stderr).toContain('::error::SHA256SUMS is missing.');
   });
