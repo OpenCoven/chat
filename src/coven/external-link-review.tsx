@@ -35,6 +35,13 @@ export type AddressReview =
 const utf8 = new TextEncoder();
 
 /**
+ * Markdown percent-encodes the brackets around an IPv6 host, so a host written
+ * `[::1]` arrives as `%5B::1%5D` and no longer parses. Only brackets in the
+ * host position around IPv6 characters are put back; the parser still decides.
+ */
+const ENCODED_IPV6_HOST = /^(https?:\/\/(?:[^/?#@]*@)?)%5B([0-9a-f:.]+)%5D(?=[:/?#]|$)/i;
+
+/**
  * Parses a destination that Markdown policy already limited to http(s) and
  * says what the reader will review. The address is never shortened: one past
  * the limit is refused whole.
@@ -42,7 +49,7 @@ const utf8 = new TextEncoder();
 export function reviewAddress(destination: string): AddressReview {
   let url: URL;
   try {
-    url = new URL(destination);
+    url = new URL(destination.replace(ENCODED_IPV6_HOST, '$1[$2]'));
   } catch {
     return { kind: 'unreadable' };
   }
