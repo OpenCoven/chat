@@ -162,29 +162,50 @@ runs nothing, so it proves the build, not how the app behaves.
 
 ## Packaged desktop lanes
 
-None of the three packaged lanes was run on this candidate. Each stays **unverified**, for the reason
-given, and nothing above replaces them. The per-feature pending rows are kept on #485
+No packaged lane was **run** on this candidate: the macOS bundle was built here and the Linux bundle
+in CI, and neither was launched. Each lane's runtime rows stay **unverified**, for the reason given,
+and nothing above replaces them. The per-feature pending rows are kept on #485
 ([first set](https://github.com/OpenCoven/chat/issues/485#issuecomment-6258525498),
 [additions](https://github.com/OpenCoven/chat/issues/485#issuecomment-6258933027)); the checklist
 below is the macOS hand-run version of them for this candidate.
 
 | Lane | State | Why, and what exists instead |
 | --- | --- | --- |
-| Packaged macOS (WKWebView) | **Blocked, unverified** | No `.app` was built here: the Rust crate cache is incomplete (`cargo fetch --offline` needs the network) and the volume sat at 100% with about 5 GB free while three sessions ran suites, so a release build risked `ENOSPC` for everyone. This terminal also has no Accessibility or Screen Recording grant, by Val's standing decision, so window steps are Val's to run by hand. The checklist below is written for that. |
+| Packaged macOS (WKWebView) | **Built locally, not launched; runtime unverified** | A release `.app` of the exact tree was built here once the volume had 16 GB free (see "macOS build provenance"). It was not launched: this terminal has no Accessibility or Screen Recording grant, by Val's standing decision, so window steps are Val's to run by hand, and the built app is the one to run. The checklist below is written for that. |
 | Packaged Windows (WebView2) | **Unverified** | No Windows machine in this session. Cross-compilation would not be runtime evidence. |
 | Packaged Linux (WebKitGTK) | **Built, not run; unverified at runtime** | The exact tree bundled on `ubuntu-latest` in CI run 39194949333 (`pnpm app:build`, *Desktop build* job, success). No Linux machine in this session to launch the bundle, and CI keeps no artifact. |
 
-Build provenance that does exist: the frontend the packaged app would embed is the `dist/` from
-`corepack pnpm build` at the candidate (digests in the tables above). The native side is
-byte-identical to `main`'s, so a packaged `main` build with the candidate's `dist/` would run the same
-webview code; no such build was made.
+### macOS build provenance
+
+Built 2026-10-19 03:42–03:44Z in `.worktrees/candidate-480` at `c4f6ce87` (tree `3d4c9001`: the
+candidate tree `1536f098` plus this record and the new test; `src/` and `src-tauri/` identical to the
+candidate), with `node_modules/.bin/tauri build --bundles app` (tauri-cli 2.11.4) and the pinned
+toolchain on `PATH` (`rustc 1.95.0 (59807616e 2026-04-14)`, `cargo 1.95.0`). The frontend step
+(`corepack pnpm build`, Vite 8.2.1) produced `dist/` with digest
+`171d8233d52bed74ac3d7a2ddc7053b3a85a948534b5e0b2991b1a06da2ac7d7`, the same digest the e2e lane
+built; its `index-D2bJ8htj.js` contains the slice's strings ("Open this link?", "Quote selection",
+"Expand table", "Expanded table", "Copy table Markdown", "Resize inspector", "Couldn't copy the
+address"). Tauri embeds that `dist/` compressed, so a plain grep of the binary finds none of them.
+Cargo finished the `release` profile in 1 m 47 s from cached crates; `src-tauri/target` is 1.2 GB.
+
+| Fact | Value |
+| --- | --- |
+| Bundle | `src-tauri/target/release/bundle/macos/OpenCoven Chat.app`, 17 MB, `CFBundleIdentifier` `ai.opencoven.chat`, `CFBundleShortVersionString` 0.0.5, `LSMinimumSystemVersion` 10.15 |
+| Binary | `Contents/MacOS/opencoven-chat`, Mach-O 64-bit arm64, 17,317,344 bytes, sha256 `10b099001a60adb370cda4790411f75d8a18130b9a4dfcb6916a4a17c1172cbc` |
+| Signature | ad-hoc, linker-signed (`flags=0x20002(adhoc,linker-signed)`), no Team ID, not notarized; CDHash `e21259c4c25e2dfb475efb37531204e901ab6df0`. A release build signs and notarizes in CI; this local build does not, so it runs from this path on this Mac but is not a distributable. |
+| Native deps | tauri 2.11.2, wry 0.55.1 (unchanged from `main`) |
+| Host | macOS 26.7.1 (25G241), arm64 |
+| Launched | **No.** Nothing below the build line was exercised. |
 
 ### Hand-run checklist for the packaged macOS candidate (for Val)
 
-Build from `review/candidate-480` at `f77db71c` with the pinned toolchain
+Run the built app above (`open "src-tauri/target/release/bundle/macos/OpenCoven Chat.app"` from
+`.worktrees/candidate-480`; it is ad-hoc signed, so Gatekeeper lets a local build run), or rebuild
+from `review/candidate-480` with the pinned toolchain
 (`PATH=$HOME/.rustup/toolchains/1.95.0-aarch64-apple-darwin/bin:$PATH corepack pnpm app:build`).
 Record the commit, the `codesign -dvvv` CDHash of the app, and the macOS version with each row. Use a
-familiar whose replies are synthetic.
+familiar whose replies are synthetic. The build shares `ai.opencoven.chat` storage with the installed
+app; quit the installed Chat first.
 
 1. **Link review.** In a reply with `[docs](https://docs.example.test/start)`: click, middle-click and
    ⌘-click the link. Each must show *Open this link?* and nothing else must open. Right-click: the menu
@@ -220,11 +241,11 @@ familiar whose replies are synthetic.
 
 | Child | Proposed | Implemented on a branch | Merged | Independently verified | Packaged |
 | --- | --- | --- | --- | --- | --- |
-| #481 link review | yes | #486 | **yes**, `bbdb1108` | source + jsdom + Chromium on the candidate; clipboard defect found and fixed before merge | no |
-| #482 quote selection | yes | #488 | **yes**, `cdb98ce3` | source + jsdom + Chromium on the candidate | no |
-| #483 tables | yes | #487 @ `35e004e0` | **yes**, `72a64036` (03:21Z) | source + jsdom + Chromium on the candidate; CI green on the exact head | no |
+| #481 link review | yes | #486 | **yes**, `bbdb1108` | source + jsdom + Chromium on the candidate; clipboard defect found and fixed before merge | macOS bundle built locally and Linux bundle built in CI, neither launched |
+| #482 quote selection | yes | #488 | **yes**, `cdb98ce3` | source + jsdom + Chromium on the candidate | built, not launched (same bundles) |
+| #483 tables | yes | #487 @ `35e004e0` | **yes**, `72a64036` (03:21Z) | source + jsdom + Chromium on the candidate; CI green on the exact head | built, not launched (same bundles) |
 | #484 inspector resize | yes, optional; **retained, not deferred** (PR #489 open) | #489 @ `e85c2301` | no | source + jsdom + Chromium on the candidate | no |
-| #485 acceptance | yes | this record + `chat-ux-integration.test.tsx` on `review/candidate-480` | no | unit, browser and diff lanes run; desktop lanes not | no |
+| #485 acceptance | yes | this record + `chat-ux-integration.test.tsx` on `review/candidate-480` (PR #490) | no | unit, browser, CI and diff lanes run; macOS and Linux bundles built; no desktop runtime row verified | Windows not built; nothing launched anywhere |
 
 Green checks and this record are not merge or release authorization. #489 is Val's call; it touches
 `e2e/app.tauri-mock.spec.ts` and `README.md`, which #487's merge also changed, so it needs a rebase
