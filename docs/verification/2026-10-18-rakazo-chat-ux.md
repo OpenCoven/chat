@@ -12,7 +12,7 @@ packaged or released evidence unless a row says so in as many words.
 | Candidate commit | `9a3ed664cb04859505d3cac7a008c47b70317c5d`, tree `1536f09830b5e5bf5b856ff42e63ae1a9b29b7d5`, branch `review/candidate-480`. The same tree was first built as `f77db71c` (with #489 @ `e85c2301`, an identical tree) under a stray test identity that the repo's shared `.git/config` carried; the merges were redone as `9a3ed664` with the right author. Results taken on `f77db71c` hold for `9a3ed664` because the trees are byte-identical. |
 | #481 link review | **merged** as `bbdb1108` (PR #486) |
 | #482 quote selection | **merged** as `cdb98ce3` (PR #488) |
-| #483 tables | PR #487 `feat/markdown-table` @ `35e004e0`, rebased onto `bbdb1108` and retargeted to `main`; `e1b422e3` (the feature) + `35e004e0` (fix: snapshot keeps reference links resolved outside the table's source slice) |
+| #483 tables | PR #487 `feat/markdown-table` @ `35e004e0` (`e1b422e3` the feature + `35e004e0` fix: snapshot keeps reference links resolved outside the table's source slice). **Merged** by Val as squash `72a64036` at 03:21Z, after this candidate was built; `git diff` of the candidate against that `main` is exactly the #489 files plus this record and the new test, so the merged content is byte-identical to what was verified. |
 | #484 inspector resize (optional, retained) | PR #489 `feat/inspector-resize` @ `72b6e252`, rebased onto `bbdb1108` (re-authored from `e85c2301`, same tree `5bf07bfb`) |
 | Merge order | `origin/main` → #487 `35e004e0` → #489 `72b6e252`; each a signed `--no-ff` merge; no conflicts |
 | Earlier candidate | `46e2e59f` (`f9e5d423` + the four branch heads before the merges). It differs from the final tree only by #487's fix commit (`formatted-message.tsx`, `markdown-table.tsx`, `markdown-table.test.tsx`); the rows below say which candidate each result was taken on. |
@@ -119,8 +119,9 @@ Run in `.worktrees/candidate-480`.
 **Environment, not candidate:** the Phase 1 harness case "passes Windows Job name and PID as exactly
 two PowerShell arguments" fails on this Mac on `main` and on the candidate alike, because the Homebrew
 `pwsh` crashes on launch with `System.IO.FileLoadException: The given assembly name was invalid`
-(reproduced by invoking `pwsh` directly, 0.13 s). No PR touches that file; CI's *Web checks* job is the
-authority for it. Skipped tests in the `windows-*` files mean "not run here", not passed.
+(reproduced by invoking `pwsh` directly, 0.13 s). No PR touches those files. CI's *Web checks* job ran
+both suites on the exact candidate head `d2c9c8f6` and passed (see "CI on the exact heads"). Skipped
+tests in the `windows-*` files mean "not run here", not passed.
 
 ## Browser production preview lane (lane: Browser production preview, Chromium)
 
@@ -150,9 +151,14 @@ the GraphQL budget was spent.
 | #487 `35e004e0` | success | success | success | success | success | success | skipped by path filter (no `src-tauri/` or workflow change) |
 | #489 `72b6e252` | success | success | success | success | success | in progress at 03:29Z | skipped by path filter |
 | `main` `bbdb1108` | the merged #486 and #488 ran their own CI green before Val merged them (every job green on `c976afb0` and `5ef3d5f6`) |
+| **candidate** `d2c9c8f6` (tree `1536f098` + this record and the new test; PR #490, run [39194949333](https://github.com/OpenCoven/chat/actions/runs/39194949333)) | success | success | **success** | **success** | success | **success** | skipped by path filter |
 
-CI's *Desktop build* job runs `pnpm app:build` on `ubuntu-latest`; it uploads no artifact and runs
-nothing, so a pass proves the tree bundles on Linux, not how it behaves.
+The candidate row is the exact tree under review. Its *Web checks* job ran `test:unit:normal` and
+`test:unit:heavy` on `ubuntu-latest` and passed, which covers the two files that fail on this Mac
+only because its `pwsh` crashes (`client-v1-conformance-workflow.test.ts`, `phase1-conformance.test.ts`).
+Its *E2E* job passed the same 70 Chromium cases on Linux. Its *Desktop build* job ran `pnpm app:build`
+on `ubuntu-latest` and succeeded, so the exact tree bundles on Linux. That job uploads no artifact and
+runs nothing, so it proves the build, not how the app behaves.
 
 ## Packaged desktop lanes
 
@@ -166,7 +172,7 @@ below is the macOS hand-run version of them for this candidate.
 | --- | --- | --- |
 | Packaged macOS (WKWebView) | **Blocked, unverified** | No `.app` was built here: the Rust crate cache is incomplete (`cargo fetch --offline` needs the network) and the volume sat at 100% with about 5 GB free while three sessions ran suites, so a release build risked `ENOSPC` for everyone. This terminal also has no Accessibility or Screen Recording grant, by Val's standing decision, so window steps are Val's to run by hand. The checklist below is written for that. |
 | Packaged Windows (WebView2) | **Unverified** | No Windows machine in this session. Cross-compilation would not be runtime evidence. |
-| Packaged Linux (WebKitGTK) | **Unverified at runtime** | No Linux machine in this session. See "CI on the exact heads" for the Linux bundle result. |
+| Packaged Linux (WebKitGTK) | **Built, not run; unverified at runtime** | The exact tree bundled on `ubuntu-latest` in CI run 39194949333 (`pnpm app:build`, *Desktop build* job, success). No Linux machine in this session to launch the bundle, and CI keeps no artifact. |
 
 Build provenance that does exist: the frontend the packaged app would embed is the `dist/` from
 `corepack pnpm build` at the candidate (digests in the tables above). The native side is
@@ -216,9 +222,10 @@ familiar whose replies are synthetic.
 | --- | --- | --- | --- | --- | --- |
 | #481 link review | yes | #486 | **yes**, `bbdb1108` | source + jsdom + Chromium on the candidate; clipboard defect found and fixed before merge | no |
 | #482 quote selection | yes | #488 | **yes**, `cdb98ce3` | source + jsdom + Chromium on the candidate | no |
-| #483 tables | yes | #487 @ `35e004e0`, on `main` | no | source + jsdom + Chromium on the candidate | no |
+| #483 tables | yes | #487 @ `35e004e0` | **yes**, `72a64036` (03:21Z) | source + jsdom + Chromium on the candidate; CI green on the exact head | no |
 | #484 inspector resize | yes, optional; **retained, not deferred** (PR #489 open) | #489 @ `e85c2301` | no | source + jsdom + Chromium on the candidate | no |
 | #485 acceptance | yes | this record + `chat-ux-integration.test.tsx` on `review/candidate-480` | no | unit, browser and diff lanes run; desktop lanes not | no |
 
-Green checks and this record are not merge or release authorization. Merging #487 and #489 is Val's
-call; both touch `e2e/app.tauri-mock.spec.ts` and `README.md`, so whichever lands second rebases.
+Green checks and this record are not merge or release authorization. #489 is Val's call; it touches
+`e2e/app.tauri-mock.spec.ts` and `README.md`, which #487's merge also changed, so it needs a rebase
+before it lands. Once it does, `review/candidate-480` rebases down to this record and the new test.
