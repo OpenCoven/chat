@@ -1,4 +1,5 @@
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { useState } from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type {
   CovenRunEvent,
@@ -64,6 +65,7 @@ function MockLayout(props: ChatLayoutProps) {
       >
         Send
       </button>
+      <QuoteControls {...props} />
       {props.busy && (
         <button type="button" onClick={props.onCancel} disabled={props.cancelling}>
           Stop
@@ -130,6 +132,34 @@ function MockLayout(props: ChatLayoutProps) {
         </button>
       )}
     </div>
+  );
+}
+
+/** Edits the draft the way the layout's Quote selection does, with the chat it saw. */
+function QuoteControls(props: ChatLayoutProps) {
+  const [result, setResult] = useState('');
+  const here = { familiarId: props.familiarId, sessionId: props.sessionId };
+  const quote = (edit: (draft: string) => string | null) =>
+    setResult(String(props.onEditDraft?.(here, edit) ?? 'absent'));
+  return (
+    <>
+      <button type="button" onClick={() => quote((value) => `${value}[quote]`)}>
+        Quote
+      </button>
+      <button
+        type="button"
+        onClick={() => {
+          props.onFamiliar('g');
+          quote((value) => `${value}[quote]`);
+        }}
+      >
+        Quote after switching
+      </button>
+      <button type="button" onClick={() => quote(() => null)}>
+        Decline quote
+      </button>
+      <output data-testid="quote">{result}</output>
+    </>
   );
 }
 
@@ -963,5 +993,99 @@ describe('phone run synchronization', () => {
     await waitFor(() => expect(screen.getByRole('button', { name: 'Send' })).toBeEnabled());
     expect(api.listSessions).toHaveBeenCalled();
     await waitFor(() => expect(screen.getAllByText('From the phone')).toHaveLength(1));
+  });
+});
+
+describe('editing the draft from a quote', () => {
+  beforeEach(() => localStorage.clear());
+
+  it('appends to the draft as it stands now, never sends, and keeps attachments', async () => {
+    const api = runtime();
+    await ready(api);
+    draft('Thanks');
+    await attachNote();
+    click('Quote');
+    expect(screen.getByTestId('quote')).toHaveTextContent('true');
+    expect(screen.getByRole('textbox')).toHaveValue('Thanks[quote]');
+    expect(screen.getByRole('button', { name: 'note.txt' })).toBeInTheDocument();
+    expect(api.send).not.toHaveBeenCalled();
+    expect(localStorage.getItem(STORAGE)).not.toContain('quote');
+    expect(localStorage.getItem(STORAGE)).not.toContain('Thanks');
+  });
+
+  it.each([
+    ['their own chats', [first, second]],
+    // Neither has a chat yet, so both show the same empty session id.
+    ['no chat yet', []],
+  ])(
+    "puts nothing in either familiar's draft when the familiar changed first (%s)",
+    async (_case, heads) => {
+      const api = runtime();
+      vi.mocked(api.listSessions).mockResolvedValue(heads);
+      await ready(api);
+      draft('mine');
+      click('Quote after switching');
+      expect(screen.getByTestId('quote')).toHaveTextContent('false');
+      await waitFor(() => expect(screen.getByTestId('familiar')).toHaveTextContent('g'));
+      expect(screen.getByRole('textbox')).toHaveValue('');
+      click('First familiar');
+      await waitFor(() => expect(screen.getByTestId('familiar')).toHaveTextContent('f'));
+      expect(screen.getByRole('textbox')).toHaveValue('mine');
+      expect(screen.getByTestId('drafts')).toHaveTextContent(JSON.stringify({ f: 'mine' }));
+    },
+  );
+
+  it.each(['fails', 'is cancelled'])(
+    'keeps a quote added while the send %s, and sends nothing again',
+    async (ending) => {
+      const api = runtime();
+      const run = deferred<CovenRunResult>();
+      vi.mocked(api.send).mockReturnValueOnce(run.promise);
+      await ready(api);
+      draft('submitted');
+      click('Send');
+      expect(screen.getByRole('textbox')).toHaveValue('');
+      click('Quote');
+      expect(screen.getByRole('textbox')).toHaveValue('[quote]');
+      if (ending === 'is cancelled') {
+        click('Stop');
+        await waitFor(() => expect(api.cancel).toHaveBeenCalledOnce());
+      }
+      await act(async () =>
+        run.reject(new Error(ending === 'fails' ? 'Provider failed' : 'Cancelled')),
+      );
+      await waitFor(() => expect(screen.queryByText('Stop')).not.toBeInTheDocument());
+      expect(screen.getByRole('textbox')).toHaveValue('[quote]');
+      expect(screen.queryByRole('button', { name: 'Try again' })).not.toBeInTheDocument();
+      expect(api.send).toHaveBeenCalledTimes(1);
+    },
+  );
+
+  it('withdraws Try again once a quote edits the restored draft', async () => {
+    const api = runtime();
+    vi.mocked(api.send).mockRejectedValueOnce(new Error('engine exited'));
+    await ready(api);
+    draft('work');
+    click('Send');
+    await screen.findByRole('button', { name: 'Try again' });
+    click('Quote');
+    expect(screen.getByRole('textbox')).toHaveValue('work[quote]');
+    expect(screen.queryByRole('button', { name: 'Try again' })).not.toBeInTheDocument();
+    expect(api.send).toHaveBeenCalledTimes(1);
+  });
+
+  it('changes nothing when the edit declines or a lifecycle change is under way', async () => {
+    const api = runtime();
+    const change = deferred<undefined>();
+    vi.mocked(api.changeChatLifecycle).mockReturnValueOnce(change.promise);
+    await ready(api);
+    draft('kept');
+    click('Decline quote');
+    expect(screen.getByTestId('quote')).toHaveTextContent('false');
+    click('Archive');
+    click('Quote');
+    expect(screen.getByTestId('quote')).toHaveTextContent('false');
+    expect(screen.getByRole('textbox')).toHaveValue('kept');
+    await act(async () => change.resolve(undefined));
   });
 });

@@ -140,6 +140,23 @@ Unsent drafts are kept per familiar, in memory only. They survive switching fami
 closing the window. Conversation content never reaches browser storage (see `SECURITY.md`), and
 only the selected familiar and your **Settings** choices are remembered across restarts.
 
+Select a passage inside one message, yours or a reply, and **Quote selection** appears above the
+composer, after the conversation in the tab order. Choosing it adds the passage to the end of the
+shown familiar's draft as Markdown quote lines (`> `), with a blank line before and after, and puts
+the cursor after it. The draft's existing text and attached files stay as they were, and nothing is
+sent. A quote is ordinary draft text: edit or delete it before sending like anything else you type.
+
+- A selection that reaches past one message, or into a name, a **Copy** control, a code block's
+  language bar, tool activity, a notice or an attachment card, offers no quote.
+- A quote, with its `> ` marks and blank lines, can be up to 4,096 bytes, and the message must stay
+  within the 32,768-byte limit. Past either, nothing is added and the action says why. A passage is
+  never shortened to fit.
+- If the passage changed or left the chat, or the familiar or chat changed, before you choose the
+  action, nothing is added and the action asks you to select the passage again.
+- **Dismiss quote** or Escape closes the action. While a passage waits to be quoted, the
+  conversation holds its place instead of following a streaming reply.
+- The selection is held in memory only while the action is open, and is never stored.
+
 ## When the list is empty
 
 With a connected CLI but no familiars configured, the empty thread and the composer say so instead

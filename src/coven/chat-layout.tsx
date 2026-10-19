@@ -42,6 +42,7 @@ import {
   TEXT_SCALE,
   useStoredPreferences,
 } from './preferences';
+import { type EditDraft, useQuoteSelection } from './quote-action';
 import {
   LEFT_RAIL_HINT,
   LEFT_RAIL_SHORTCUT,
@@ -153,6 +154,8 @@ export type ChatLayoutProps = Readonly<{
   screenLoadRfb?: LoadRfb | undefined;
   onFamiliar: (id: string) => void;
   onDraft: (value: string) => void;
+  /** Applies Quote selection to the draft as it stands now; absent, nothing can be quoted. */
+  onEditDraft?: EditDraft | undefined;
   onSend: () => void;
   onCancel: () => void;
   onRefresh: () => void;
@@ -447,7 +450,9 @@ const TranscriptBlock = memo(
     ) : block.message.role === 'user' ? (
       <div className="fr-user fr-msg" data-block-id={blockId}>
         <div className="fr-user-body">
-          <div className="fr-bubble fr-bubble--user coven-message">{block.message.text}</div>
+          <div className="fr-bubble fr-bubble--user coven-message" data-quote-source={blockId}>
+            {block.message.text}
+          </div>
           {block.message.text ? (
             <CopyButton
               className="coven-message-copy coven-message-copy--user"
@@ -508,7 +513,10 @@ const TranscriptBlock = memo(
               />
             ) : null}
           </span>
-          <div className="fr-bubble fr-bubble--familiar coven-message">
+          <div
+            className="fr-bubble fr-bubble--familiar coven-message"
+            data-quote-source={block.message.role === 'assistant' ? blockId : undefined}
+          >
             {block.message.role === 'assistant' ? (
               <FormattedMessage text={block.message.text} />
             ) : (
@@ -838,6 +846,17 @@ export function ChatLayout(props: ChatLayoutProps) {
     field.setSelectionRange(end, end);
     return true;
   });
+  const quote = useQuoteSelection({
+    transcriptRef,
+    composerRef,
+    messages: props.messages,
+    familiarId: props.familiarId,
+    sessionId: props.sessionId,
+    familiarName: name,
+    disabled: composerDisabled || !props.onEditDraft,
+    promptLimit: PROMPT_LIMIT_BYTES,
+    onEditDraft: props.onEditDraft,
+  });
   useEffect(() => {
     if (!composerFocus) return;
     if (composerFocus.id !== props.familiarId) {
@@ -864,7 +883,7 @@ export function ChatLayout(props: ChatLayoutProps) {
   // jump control can say how many arrived while they were reading back.
   const seenCount = useRef(props.messages.length);
   const previousSession = useRef(props.sessionId);
-  // biome-ignore lint/correctness/useExhaustiveDependencies: new messages and the live row change the transcript's scroll height.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: new messages and the live row change the transcript's scroll height; a passage waiting to be quoted holds it, and letting go of one is no reason to scroll.
   useEffect(() => {
     if (previousSession.current !== props.sessionId) {
       // A position held for an earlier-turns read belongs to the old chat.
@@ -880,7 +899,8 @@ export function ChatLayout(props: ChatLayoutProps) {
       keepFromBottom.current = null;
       return;
     }
-    if (transcript && nearBottom.current) transcript.scrollTop = transcript.scrollHeight;
+    if (transcript && nearBottom.current && !quote.holding)
+      transcript.scrollTop = transcript.scrollHeight;
   }, [props.messages, props.sessionId, props.busy, props.loading]);
   const unseen = showLatest ? Math.max(0, props.messages.length - seenCount.current) : 0;
   const lastMessage = props.messages[props.messages.length - 1];
@@ -1533,6 +1553,7 @@ export function ChatLayout(props: ChatLayoutProps) {
                   ) : null}
                 </button>
               )}
+              {quote.action}
               <div className="coven-composer-context" title={workspace}>
                 {workspace ? `${workspaceLabel}: ${workspace}` : 'No workspace reported'}
               </div>
@@ -1558,7 +1579,10 @@ export function ChatLayout(props: ChatLayoutProps) {
                 <Composer
                   textareaRef={composerRef}
                   textareaProps={mentionCompletion.textareaProps}
-                  onKeyDown={mentionCompletion.onKeyDown}
+                  onKeyDown={(event) => {
+                    quote.onComposerKeyDown(event);
+                    if (!event.defaultPrevented) mentionCompletion.onKeyDown(event);
+                  }}
                   className="coven-compact-composer"
                   minRows={1}
                   attachmentIcon="plus"

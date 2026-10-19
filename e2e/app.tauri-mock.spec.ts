@@ -496,6 +496,126 @@ test('typing anywhere starts a message with that very letter', async ({ page }) 
   await expect(composer).toHaveValue('hey');
 });
 
+test('quotes a selected passage into the draft from the pointer or the keyboard, never sending it', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 820, height: 720 });
+  await installRuntimeFixture(page, true, 'The plan has three steps.\n\nFirst, read the source.');
+  await page.goto('/');
+  const composer = page.getByRole('textbox', { name: 'Message Local familiar' });
+  await expect(composer).toBeEnabled();
+  await composer.fill('What is the plan?');
+  await page.getByRole('button', { name: 'Send', exact: true }).click();
+  await expect(page.getByText('First, read the source.')).toBeVisible();
+  await page.evaluate(() => window.__covenFixture.finish?.());
+  await expect(page.getByRole('button', { name: 'Stop', exact: true })).toHaveCount(0);
+  await expect(composer).toHaveValue('');
+  const sends = () =>
+    page.evaluate(
+      () => window.__covenFixture.calls.filter((call) => call === 'coven_runtime_send').length,
+    );
+  expect(await sends()).toBe(1);
+
+  // Drag across "three steps" in the reply, as a reader would.
+  const words = await page.evaluate(() => {
+    const walker = document.createTreeWalker(
+      document.querySelector('.fr-bubble--familiar') ?? document.body,
+      NodeFilter.SHOW_TEXT,
+    );
+    for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+      const at = node.textContent?.indexOf('three steps') ?? -1;
+      if (at < 0) continue;
+      const range = document.createRange();
+      range.setStart(node, at);
+      range.setEnd(node, at + 'three steps'.length);
+      const box = range.getBoundingClientRect();
+      return { left: box.left, right: box.right, y: box.top + box.height / 2 };
+    }
+    throw new Error('The reply text is missing.');
+  });
+  await page.mouse.move(words.left + 1, words.y);
+  await page.mouse.down();
+  await page.mouse.move(words.right - 1, words.y, { steps: 5 });
+  await page.mouse.up();
+  const quote = page.getByRole('button', { name: 'Quote selection' });
+  await expect(quote).toBeVisible();
+  await expect(page.getByText("from Local familiar's reply")).toBeVisible();
+  for (const control of [quote, page.getByRole('button', { name: 'Dismiss quote' })]) {
+    const box = await control.boundingBox();
+    expect(box?.width ?? 0).toBeGreaterThanOrEqual(24);
+    expect(box?.height ?? 0).toBeGreaterThanOrEqual(24);
+  }
+  // At this width the inspector folds away, so fewer texts are on screen to measure.
+  for (const colorScheme of ['dark', 'light'] as const) {
+    await page.emulateMedia({ colorScheme });
+    expect(await contrastFailures(page, { minimum: 10 })).toEqual([]);
+  }
+  await quote.click();
+  await expect(composer).toHaveValue('> three steps\n\n');
+  await expect(composer).toBeFocused();
+  expect(await composer.evaluate((field: HTMLTextAreaElement) => field.selectionStart)).toBe(
+    '> three steps\n\n'.length,
+  );
+  await expect(quote).toHaveCount(0);
+
+  // The reader adds a word, then quotes both paragraphs from the keyboard.
+  await page.keyboard.type('Why?');
+  await page.evaluate(() => {
+    const paragraphs = document.querySelectorAll('.fr-bubble--familiar p');
+    const range = document.createRange();
+    range.setStart(paragraphs[0] as Node, 0);
+    range.setEnd(paragraphs[1] as Node, 1);
+    getSelection()?.removeAllRanges();
+    getSelection()?.addRange(range);
+  });
+  await expect(quote).toBeVisible();
+  // The action follows the conversation in the tab order.
+  await page.getByRole('button', { name: 'Copy reply' }).focus();
+  await page.keyboard.press('Tab');
+  await expect(quote).toBeFocused();
+  // Enter quotes; holding it repeats into the composer, which must not send.
+  await page.keyboard.down('Enter');
+  await page.keyboard.down('Enter');
+  await page.keyboard.up('Enter');
+  await expect(composer).toBeFocused();
+  await expect(composer).toHaveValue(
+    '> three steps\n\nWhy?\n\n> The plan has three steps.\n>\n> First, read the source.\n\n',
+  );
+  expect(await sends()).toBe(1);
+
+  // Escape dismisses the action and hands the keyboard back to the conversation.
+  await page.evaluate(() => {
+    const range = document.createRange();
+    range.selectNodeContents(document.querySelector('.fr-bubble--user') as Node);
+    getSelection()?.removeAllRanges();
+    getSelection()?.addRange(range);
+  });
+  await expect(page.getByText('from your message')).toBeVisible();
+  await page.getByRole('button', { name: 'Copy reply' }).focus();
+  await page.keyboard.press('Tab');
+  await page.keyboard.press('Escape');
+  await expect(quote).toHaveCount(0);
+  await expect(page.getByRole('log', { name: 'Messages' })).toBeFocused();
+  // Cmd/Ctrl+F still opens find.
+  await page.keyboard.press('ControlOrMeta+f');
+  await expect(page.getByRole('searchbox', { name: 'Find in conversation' })).toBeFocused();
+
+  // Nothing the reader selected or quoted reaches browser storage; the fixture's
+  // own record of the fake runtime is not the app's.
+  const stored = await page.evaluate(() =>
+    JSON.stringify(
+      [localStorage, sessionStorage].flatMap((storage) =>
+        Object.keys(storage)
+          .filter((key) => key !== 'coven-browser-fixture')
+          .map((key) => storage.getItem(key)),
+      ),
+    ),
+  );
+  expect(stored).not.toContain('three steps');
+  expect(stored).not.toContain('Why?');
+  expect(await sends()).toBe(1);
+});
+
 test('sends actual attachment bytes and retains them after cancellation', async ({ page }) => {
   await page.setViewportSize({ width: 820, height: 600 });
   await installRuntimeFixture(page);
