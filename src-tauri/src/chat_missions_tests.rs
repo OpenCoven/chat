@@ -786,6 +786,139 @@ fn a_resend_that_cannot_reach_coven_keeps_checking() {
 }
 
 #[test]
+fn a_duplicate_submit_uses_a_new_key_and_passes_covens_refusal_through() {
+    // M-03 c: the person sends the same mission twice. Each submit has a key
+    // of its own, so Coven sees a second mission and applies its concurrency
+    // limit. Chat shows that refusal and keeps only the first record.
+    let project = Scratch::new();
+    let missions = Missions::default();
+    let fake = Fake::new(vec![
+        step(|call| committed(call, "committed", "queued")),
+        step(|call| {
+            rejected(
+                call,
+                "mission.submit.v1",
+                json!({ "code": "CONCURRENCY_LIMIT", "message": "one active mission per familiar root and project" }),
+            )
+        }),
+    ]);
+    let (first, first_id) = submitted(&missions, &fake, project.path());
+    assert!(matches!(first, MissionAnswer::View { .. }));
+    let run = |args: &[&str], input: Option<&[u8]>| fake.run(args, input);
+    let second = submit(&missions, &run, &input(project.path()), at(NOW), &no_pause).unwrap();
+    assert!(matches!(
+        second,
+        MissionAnswer::Refused { ref code, .. } if code == "CONCURRENCY_LIMIT"
+    ));
+    let calls = fake.calls();
+    assert_ne!(calls[0].key(), calls[1].key());
+    assert_eq!(calls[0].input, calls[1].input);
+    let listed = missions.list("sage").unwrap();
+    assert_eq!(listed.len(), 1);
+    assert_eq!(listed[0].mission_id, first_id);
+}
+
+#[test]
+fn a_cancel_that_loses_to_completion_reports_the_completed_view() {
+    // M-07: Coven arbitrates the race; Chat shows its verdict unchanged.
+    let missions = Missions::default();
+    let id = record(&missions, "chat-mission:race", Phase::Committed, None);
+    let fake = Fake::new(vec![step(|call| {
+        let mut done = view(&call.mission_id(), 6, "completed");
+        done["cancellation"] = json!({ "cancellationId": "mc:2", "requestedAt": "2026-10-18T12:00:03.000Z", "outcome": "lost_to_completion" });
+        applied(
+            call,
+            "mission.cancel.v1",
+            "committed",
+            json!({ "cancellation": done["cancellation"], "mission": done }),
+        )
+    })]);
+    let run = |args: &[&str], input: Option<&[u8]>| fake.run(args, input);
+    let MissionAnswer::View { mission } = cancel(&missions, &run, &id, &no_pause).unwrap() else {
+        panic!("expected the completed view");
+    };
+    assert_eq!(mission.state, "completed");
+    assert!(mission.terminal);
+    assert_eq!(mission.cancellation.as_deref(), Some("lost_to_completion"));
+    assert_eq!(mission.result.as_ref().unwrap().outcome, "completed");
+    assert_eq!(missions.record(&id).unwrap().phase, Phase::Terminal);
+}
+
+#[test]
+fn a_revocation_during_observation_ends_the_watch_with_the_revoked_view() {
+    // M-12: the familiar revision is withdrawn while the mission runs. Coven
+    // reports cancelling, then revoked; the watch ends on the terminal view.
+    let missions = Missions::default();
+    let id = record(&missions, "chat-mission:revoked", Phase::Committed, None);
+    let fake = Fake::new(vec![
+        step(|call| printed(0, &view(&call.mission_id(), 2, "running"))),
+        step(|call| printed(0, &view(&call.mission_id(), 3, "cancelling"))),
+        step(|call| {
+            let mut revoked = view(&call.mission_id(), 4, "revoked");
+            revoked["reason"] = json!("familiar_revision_revoked");
+            printed(0, &revoked)
+        }),
+    ]);
+    let run = |args: &[&str], input: Option<&[u8]>| fake.run(args, input);
+    let sent = RefCell::new(Vec::new());
+    watch(&missions, &run, &id, &AtomicBool::new(false), &|answer| {
+        sent.borrow_mut().push(answer);
+        Ok(())
+    })
+    .unwrap();
+    let states: Vec<(u64, String, Option<String>)> = sent
+        .borrow()
+        .iter()
+        .map(|answer| match answer {
+            MissionAnswer::View { mission } => (
+                mission.revision,
+                mission.state.clone(),
+                mission.reason.clone(),
+            ),
+            other => panic!("unexpected {other:?}"),
+        })
+        .collect();
+    assert_eq!(
+        states,
+        [
+            (2, "running".into(), None),
+            (3, "cancelling".into(), None),
+            (
+                4,
+                "revoked".into(),
+                Some("familiar_revision_revoked".into())
+            ),
+        ]
+    );
+    assert!(fake.done());
+    assert_eq!(missions.record(&id).unwrap().phase, Phase::Terminal);
+}
+
+#[test]
+fn the_window_never_receives_a_key_and_cannot_supply_one() {
+    let missions = Missions::default();
+    let id = record(&missions, "chat-mission:nokey", Phase::Committed, None);
+    // What the window lists and shows carries no adoption or cancel key.
+    let listed = serde_json::to_string(&missions.list("sage").unwrap()).unwrap();
+    assert!(!listed.contains("chat-mission:nokey"));
+    assert!(!listed.to_lowercase().contains("key"));
+    let shown =
+        serde_json::to_string(&parse_view(&view(&id, 1, "unavailable"), "sage").unwrap()).unwrap();
+    assert!(!shown.to_lowercase().contains("key"));
+    // The window cannot choose a key, or add any other field, to a submit.
+    let with_key = json!({
+        "familiarId": "sage", "rootId": ROOT, "revisionId": REVISION, "envelopeDigest": DIGEST,
+        "projectCwd": "/tmp", "statement": "x", "prompt": "y", "timeoutMinutes": 5,
+        "adoptionKey": "chosen",
+    });
+    assert!(serde_json::from_value::<SubmitInput>(with_key).is_err());
+    // A view whose statement is over Coven's limit is refused, not truncated.
+    let mut long = view(&id, 1, "unavailable");
+    long["task"]["statement"] = json!("é".repeat(STATEMENT_LIMIT + 1));
+    assert!(parse_view(&long, "sage").is_err());
+}
+
+#[test]
 fn views_for_another_mission_familiar_or_owner_are_dropped() {
     // M-11 b.
     let missions = Missions::default();
