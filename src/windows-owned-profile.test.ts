@@ -3,6 +3,8 @@ import { readFileSync } from 'node:fs';
 import { describe, expect, test } from 'vitest';
 
 const source = readFileSync('scripts/windows-job-supervisor.cs', 'utf8');
+// PowerShell starts slowly inside a busy parallel run, so a test that drives it
+// allows as long as the process it starts (30 s), not vitest's 5 s default.
 const pwshAvailable =
   spawnSync('pwsh', ['-NoLogo', '-NoProfile', '-Command', 'exit 0']).status === 0;
 
@@ -138,6 +140,7 @@ if (-not $observed -or $owned.Path -cne $failureRoot) { throw 'Reflection did no
     expect(result.error).toBeUndefined();
     expect(result.status, result.stderr).toBe(0);
   },
+  30_000,
 );
 
 function factorySource(startMarker: string): string {

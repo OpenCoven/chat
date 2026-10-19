@@ -50,10 +50,13 @@ function runPowerShell(block: string) {
   }
 }
 
+// PowerShell starts slowly inside a busy parallel run, so a test that drives it
+// allows as long as the process it starts (30 s), not vitest's 5 s default.
 const pwshAvailable =
   spawnSync('pwsh', ['-NoLogo', '-NoProfile', '-Command', 'exit 0']).status === 0;
 
 describe('bounded Windows supervisor source', () => {
+  // A Windows-style checkout runs a chain of git commands.
   test('retains exact workflow and C# bytes under Windows-style checkout', () => {
     const directory = mkdtempSync(resolve(tmpdir(), 'chat-codec-checkout-'));
     const paths = [
@@ -77,7 +80,7 @@ describe('bounded Windows supervisor source', () => {
     } finally {
       rmSync(directory, { recursive: true, force: true });
     }
-  });
+  }, 30_000);
 
   test('verifies the checked-in workflow payload with the current platform compressor', () => {
     const workflow = readFileSync(resolve('.github/workflows/client-v1-conformance.yml'), 'utf8');
@@ -153,19 +156,27 @@ describe('bounded Windows supervisor source', () => {
       ).toThrow();
   });
 
-  test.skipIf(!pwshAvailable)('PowerShell decodes and compiles the complete supervisor', () => {
-    const result = runPowerShell(renderWindowsSupervisorSource(source));
-    expect(result.error).toBeUndefined();
-    expect(result.status, result.stderr).toBe(0);
-    expect(result.stdout).toContain('COMPILED');
-  });
+  test.skipIf(!pwshAvailable)(
+    'PowerShell decodes and compiles the complete supervisor',
+    () => {
+      const result = runPowerShell(renderWindowsSupervisorSource(source));
+      expect(result.error).toBeUndefined();
+      expect(result.status, result.stderr).toBe(0);
+      expect(result.stdout).toContain('COMPILED');
+    },
+    30_000,
+  );
 
-  test.skipIf(!pwshAvailable)('PowerShell decodes and compiles the verified source', () => {
-    const result = runPowerShell(renderWindowsSupervisorSource(sentinel));
-    expect(result.error).toBeUndefined();
-    expect(result.status, result.stderr).toBe(0);
-    expect(result.stdout).toContain('COMPILED');
-  });
+  test.skipIf(!pwshAvailable)(
+    'PowerShell decodes and compiles the verified source',
+    () => {
+      const result = runPowerShell(renderWindowsSupervisorSource(sentinel));
+      expect(result.error).toBeUndefined();
+      expect(result.status, result.stderr).toBe(0);
+      expect(result.stdout).toContain('COMPILED');
+    },
+    30_000,
+  );
 
   const block = renderWindowsSupervisorSource(sentinel);
   const invalidSources = [
