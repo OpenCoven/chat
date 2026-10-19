@@ -114,6 +114,8 @@ export interface Missions {
   submit(input: MissionSubmitInput): Promise<MissionAnswer>;
   get(missionId: string): Promise<MissionAnswer>;
   cancel(missionId: string): Promise<MissionAnswer>;
+  /** Forgets a finished mission, so it no longer comes back after a restart. */
+  remove(missionId: string): Promise<void>;
   /** Resolves when the watch ends; each changed answer reaches `onAnswer` first. */
   watch(missionId: string, onAnswer: (answer: MissionAnswer) => void): Promise<void>;
   stopWatch(missionId: string): Promise<void>;
@@ -346,6 +348,9 @@ export function createMissions(
         if (isMissionAnswer(value)) onAnswer(value);
       };
       await call('mission_watch', { missionId: id, onEvent: channel });
+    },
+    async remove(id) {
+      await call('mission_remove', { missionId: id });
     },
     async stopWatch(id) {
       await call('mission_watch_stop', { missionId: id });

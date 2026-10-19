@@ -334,6 +334,16 @@ export function MissionPanel({ familiar, name, missions = defaultMissions }: Pro
     setTracked((list) => list.filter((item) => item.missionId !== missionId));
   }
 
+  async function remove(missionId: string) {
+    setNotice('');
+    try {
+      await missions.remove(missionId);
+      dismiss(missionId);
+    } catch (reason) {
+      setNotice(message(reason));
+    }
+  }
+
   return (
     <div className="fr-stack coven-missions">
       <div className="coven-details fr-card fr-card--lift">
@@ -504,6 +514,7 @@ export function MissionPanel({ familiar, name, missions = defaultMissions }: Pro
               onCancel={() => void act(missionId, 'cancel')}
               onCheck={() => void act(missionId, 'get')}
               onDismiss={() => dismiss(missionId)}
+              onRemove={() => void remove(missionId)}
             />
           ))}
         </ul>
@@ -518,12 +529,14 @@ function MissionCard({
   onCancel,
   onCheck,
   onDismiss,
+  onRemove,
 }: {
   answer: MissionAnswer;
   name: string;
   onCancel: () => void;
   onCheck: () => void;
   onDismiss: () => void;
+  onRemove: () => void;
 }) {
   const view = viewOf(answer);
   if (!view) {
@@ -542,6 +555,10 @@ function MissionCard({
           {answer.kind === 'checking' ? (
             <FamButton size="sm" onClick={onCheck}>
               Check again
+            </FamButton>
+          ) : answer.kind === 'gone' ? (
+            <FamButton size="sm" onClick={onRemove}>
+              Remove
             </FamButton>
           ) : (
             <FamButton size="sm" onClick={onDismiss}>
@@ -599,6 +616,12 @@ function MissionCard({
         <div className="coven-missions-actions">
           <FamButton size="sm" onClick={onCancel}>
             Cancel mission
+          </FamButton>
+        </div>
+      ) : view.terminal ? (
+        <div className="coven-missions-actions">
+          <FamButton size="sm" onClick={onRemove}>
+            Remove
           </FamButton>
         </div>
       ) : null}
