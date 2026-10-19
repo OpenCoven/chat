@@ -145,6 +145,7 @@ let expandedOwner: symbol | null = null;
 
 type Snapshot = Readonly<{
   source: string;
+  children: ReactNode;
   origin: HTMLElement;
   key: string;
   fallback: () => HTMLElement | null;
@@ -153,18 +154,15 @@ type Snapshot = Readonly<{
 /**
  * A table in a message: the same scrolling table as before, with two controls
  * above it. Copy table Markdown copies the table's exact source. Expand table
- * opens a dialog holding a snapshot of that source, rendered through the same
- * safe Markdown; links inside it go through the same review as in the message.
+ * opens a dialog holding a snapshot of that source, retained from the same
+ * safe Markdown parse; links inside it go through the same review as in the message.
  */
 export function MarkdownTable({
   node,
   children,
-  render,
 }: Readonly<{
   node?: TableNode | undefined;
   children?: ReactNode;
-  /** Renders a source snapshot through the message's safe Markdown policy. */
-  render: (source: string) => ReactNode;
 }>) {
   const text = useContext(ProseSourceContext);
   const context = useContext(LinkReviewContext);
@@ -186,7 +184,13 @@ export function MarkdownTable({
   const expand = (origin: HTMLElement) => {
     if (source.kind !== 'ready' || expandedOwner) return;
     expandedOwner = owner.current;
-    setSnapshot({ source: source.source, origin, key: context.key, fallback: context.fallback });
+    setSnapshot({
+      source: source.source,
+      children,
+      origin,
+      key: context.key,
+      fallback: context.fallback,
+    });
   };
   const release = () => {
     if (expandedOwner === owner.current) expandedOwner = null;
@@ -217,9 +221,7 @@ export function MarkdownTable({
       <section className="coven-markdown-table" aria-label="Table" tabIndex={0}>
         <table>{children}</table>
       </section>
-      {current ? (
-        <ExpandedTable owner={owner.current} snapshot={current} render={render} onDone={release} />
-      ) : null}
+      {current ? <ExpandedTable owner={owner.current} snapshot={current} onDone={release} /> : null}
     </>
   );
 }
@@ -227,12 +229,10 @@ export function MarkdownTable({
 function ExpandedTable({
   owner,
   snapshot,
-  render,
   onDone,
 }: Readonly<{
   owner: symbol;
   snapshot: Snapshot;
-  render: (source: string) => ReactNode;
   onDone: () => void;
 }>) {
   const { source, origin, fallback } = snapshot;
@@ -241,8 +241,6 @@ function ExpandedTable({
   const finished = useRef(false);
   const titleId = useId();
   const descriptionId = useId();
-  // Parsed once per snapshot, however often the message behind it changes.
-  const table = useMemo(() => render(source), [render, source]);
 
   useEffect(() => {
     const node = dialog.current;
@@ -345,7 +343,11 @@ function ExpandedTable({
         <section className="coven-table-dialog-body" aria-label="Table" tabIndex={0}>
           {/* Links in the snapshot review inside this dialog, so the review stacks above it. */}
           <div className="coven-formatted">
-            <LinkReviewScope>{table}</LinkReviewScope>
+            <LinkReviewScope>
+              <section className="coven-markdown-table">
+                <table>{snapshot.children}</table>
+              </section>
+            </LinkReviewScope>
           </div>
         </section>
       </div>

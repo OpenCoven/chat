@@ -256,6 +256,18 @@ describe('table controls in a message', () => {
     expect(screen.getByRole('cell', { name: 'Ready' })).toBeInTheDocument();
   });
 
+  it('preserves reference links resolved outside the table in its snapshot', () => {
+    render(
+      <FormattedMessage
+        text={'| Site |\n| --- |\n| [Docs][docs] |\n\n[docs]: https://docs.example/'}
+      />,
+    );
+    fireEvent.click(expandButtons()[0] as HTMLElement);
+    const link = within(expanded()).getByRole('link', { name: 'Docs' });
+    fireEvent.click(link);
+    expect(screen.getByRole('dialog', REVIEW)).toHaveTextContent('https://docs.example/');
+  });
+
   it('expands into a labelled dialog, keeps Tab inside, and Escape returns focus to Expand', () => {
     render(<FormattedMessage text={`${TABLE}\n\nMore [docs](https://d.example/) here.`} />);
     const [expand] = expandButtons();

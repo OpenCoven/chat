@@ -33,7 +33,7 @@ function codeLanguage(code: TreeNode | undefined): string | undefined {
   return list.find((name) => name.startsWith('language-'))?.slice('language-'.length);
 }
 
-const baseComponents: Components = {
+const components: Components = {
   a({ href, children, title }) {
     if (!href) return <span>{children}</span>;
     return href.startsWith('#') ? (
@@ -65,40 +65,19 @@ const baseComponents: Components = {
       </div>
     );
   },
-};
-
-/** A message's table: the scrolling table with its Copy table Markdown and Expand table controls. */
-const components: Components = {
-  ...baseComponents,
   table({ children, node }) {
-    return (
-      <MarkdownTable node={node} render={renderSnapshot}>
-        {children}
-      </MarkdownTable>
-    );
-  },
-};
-
-/** An expanded table's snapshot: the same safe policy, with the table alone and no controls. */
-const snapshotComponents: Components = {
-  ...baseComponents,
-  table({ children }) {
-    return (
-      <section className="coven-markdown-table">
-        <table>{children}</table>
-      </section>
-    );
+    return <MarkdownTable node={node}>{children}</MarkdownTable>;
   },
 };
 const plugins = [remarkGfm];
 
-function Prose({ text, snapshot }: { text: string; snapshot?: boolean | undefined }) {
+function Prose({ text }: { text: string }) {
   return (
     // Tables resolve their source positions against exactly this text.
     <ProseSourceContext.Provider value={text}>
       <Markdown
         remarkPlugins={plugins}
-        components={snapshot ? snapshotComponents : components}
+        components={components}
         skipHtml
         urlTransform={(url, key) =>
           key === 'href' && /^(https?:\/\/|#)/i.test(url) ? defaultUrlTransform(url) : undefined
@@ -108,10 +87,6 @@ function Prose({ text, snapshot }: { text: string; snapshot?: boolean | undefine
       </Markdown>
     </ProseSourceContext.Provider>
   );
-}
-
-function renderSnapshot(source: string) {
-  return <Prose text={source} snapshot />;
 }
 
 /**
