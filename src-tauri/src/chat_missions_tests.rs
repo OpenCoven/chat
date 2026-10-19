@@ -756,6 +756,36 @@ fn a_restart_settles_an_unanswered_submit_by_reading_it() {
 }
 
 #[test]
+fn a_resend_that_cannot_reach_coven_keeps_checking() {
+    // M-02: the first send was answered with exit 3, so Coven may hold the
+    // mission. A later send that never reaches Coven proves nothing, so the
+    // record stays and the answer is still "checking".
+    let missions = Missions::default();
+    let id = record(
+        &missions,
+        "chat-mission:unreachable",
+        Phase::Sending,
+        Some(b"{}".to_vec()),
+    );
+    let fake = Fake::new(vec![
+        step(|_| silent(1, "no running Coven daemon")),
+        step(|_| silent(1, "no running Coven daemon")),
+        step(|_| silent(1, "no running Coven daemon")),
+    ]);
+    let run = |args: &[&str], input: Option<&[u8]>| fake.run(args, input);
+    assert_eq!(
+        read(&missions, &run, &id, at(NOW), &no_pause).unwrap(),
+        MissionAnswer::Checking {
+            mission_id: id.clone()
+        }
+    );
+    let kept = missions.record(&id).unwrap();
+    assert_eq!(kept.phase, Phase::Sending);
+    assert_eq!(kept.payload.as_deref(), Some(&b"{}"[..]));
+    assert!(fake.done());
+}
+
+#[test]
 fn views_for_another_mission_familiar_or_owner_are_dropped() {
     // M-11 b.
     let missions = Missions::default();
