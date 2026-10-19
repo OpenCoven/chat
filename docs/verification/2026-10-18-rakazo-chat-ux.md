@@ -172,7 +172,7 @@ below is the macOS hand-run version of them for this candidate.
 
 | Lane | State | Why, and what exists instead |
 | --- | --- | --- |
-| Packaged macOS (WKWebView) | **Built locally; launched once as a smoke (starts, webview up, no crash, no startup storage); every behaviour row unverified** | A release `.app` of the exact tree was built here once the volume had 16 GB free (see "macOS build provenance"). It was not launched: this terminal has no Accessibility or Screen Recording grant, by Val's standing decision, so window steps are Val's to run by hand, and the built app is the one to run. The checklist below is written for that. |
+| Packaged macOS (WKWebView) | **Built locally; launch smoke passed; in-engine probe in the real WKWebView passed the rows it can drive (see below); hand-driven rows unverified** | A release `.app` of the exact tree was built here once the volume had 16 GB free (see "macOS build provenance"). It was not launched: this terminal has no Accessibility or Screen Recording grant, by Val's standing decision, so window steps are Val's to run by hand, and the built app is the one to run. The checklist below is written for that. |
 | Packaged Windows (WebView2) | **Unverified** | No Windows machine in this session. Cross-compilation would not be runtime evidence. |
 | Packaged Linux (WebKitGTK) | **Built, not run; unverified at runtime** | The exact tree bundled on `ubuntu-latest` in CI run 39194949333 (`pnpm app:build`, *Desktop build* job, success). No Linux machine in this session to launch the bundle, and CI keeps no artifact. |
 
@@ -196,7 +196,7 @@ Cargo finished the `release` profile in 1 m 47 s from cached crates; `src-tauri/
 | Signature | ad-hoc, linker-signed (`flags=0x20002(adhoc,linker-signed)`), no Team ID, not notarized; CDHash `e21259c4c25e2dfb475efb37531204e901ab6df0`. A release build signs and notarizes in CI; this local build does not, so it runs from this path on this Mac but is not a distributable. |
 | Native deps | tauri 2.11.2, wry 0.55.1 (unchanged from `main`) |
 | Host | macOS 26.7.1 (25G241), arm64 |
-| Launched | **Yes, once, as a smoke under an isolated identifier; no UI row exercised.** See "macOS launch smoke". The `ai.opencoven.chat` bundle itself was not launched. |
+| Launched | **Yes, once, as a smoke under an isolated identifier**, and the same tree ran under `tauri dev` for the in-engine probe. See the two sections below. The `ai.opencoven.chat` bundle itself was not launched. |
 
 ### macOS launch smoke (packaged, isolated identifier)
 
@@ -221,6 +221,35 @@ then launched with `open -n` at 03:51:19Z and observed for 25 s from the termina
 This proves the packaged candidate launches on macOS 26.7.1 arm64, brings up WKWebView, writes
 nothing to browser storage at startup, and exits cleanly. It proves nothing about the eight behaviour
 rows in the checklist below; those still need hands on the window.
+
+### macOS in-engine probe (real WKWebView, synthetic input)
+
+Run 2026-10-19 04:00Z and 04:02Z. The candidate tree ran under `tauri dev` with the isolated identifier
+`ai.opencoven.chat.acceptance480` (Val's Chat data untouched) and a temporary, uncommitted hook in
+`src/main.tsx` that, instead of the app, mounted the real `ChatLayout` with a synthetic reply (a link, a
+list, a table holding a link) inside the real webview, drove it with synthetic DOM events, and posted
+observations to a `/__probe` endpoint on the dev server. No Tauri IPC, no Coven CLI, no pixels observed,
+no OS-level automation. The hook and its Vite config were deleted afterwards; nothing of them is in
+this branch. The webview reported `Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15`,
+`__TAURI_INTERNALS__` present, `showModal`, `setPointerCapture`, `clipboard.writeText` and
+`execCommand` all functions, a 1180×748 window, `document.hasFocus()` true. The first run stopped at
+the quote step because the probe's own selection swept over the table's Expand/Copy controls, which
+the resolver rejects by design; the second run completed every step.
+
+| Row | Observed in WKWebView |
+| --- | --- |
+| Link review | Click opens *Open this link?*; `dialog.matches(':modal')` true; site `docs.example.test`, full address `https://docs.example.test/start`; initial focus on Cancel; `composer.focus()` while the modal is open does not land (inert background holds); Escape closes it and focus returns to the `span[role=link]`. |
+| Open | One press: `aria-disabled="true"`, status "Chat asked to open this address but can't confirm that a page opened…", first button reads Close, still one open dialog. Second press: nothing. `runningboardd` logged **no** browser or other app launch in the window, matching the source trace that the pinned wry drops `target="_blank"`. |
+| Copy address, Copy table Markdown, `copyText` | WebKit refused both `navigator.clipboard.writeText` and `execCommand('copy')` for a synthetic click (no user activation). Each time the UI said "Couldn't copy the address" or "Copy failed", never "Copied", and `copyText` returned `false`. None of the probe's texts reached the system pasteboard (`pbpaste` before and after). Whether a real click's copy succeeds is Val's row. |
+| Quote across a paragraph and a list | `Selection.toString()` = `"Steps:\n\none\ntwo"`; **Quote selection** offered; draft became `> Steps:\n>\n> one\n> two\n\n`; composer focused after; `onSend` never called. |
+| Quote and tables | A table cell alone quotes (`> alpha`). A sweep from the paragraph into the table (`"…two\nField\tLink\nalpha"`) offers no quote, because it covers the Expand/Copy controls. |
+| Sheet with a review inside | Sheet `:modal`; review `:modal` and a DOM descendant of the sheet; Escape closes only the review and focuses the inner link; Escape again closes the sheet and focuses Expand. |
+| Inspector by keyboard (wide tier) | ArrowLeft 360→376 px; End→440 px (= 1180 − 300 − 440; `aria-valuemax` 440); Home→280 px. The composer's box stayed inside the viewport. Pointer drag was not driven (a synthetic pointer id cannot hold capture). |
+| Storage after the journey | `localStorage` keys: `opencoven.chat.navigation.v1` (the pre-existing selected-chat key) and `opencoven.chat.preferences.v1` = `{"textSize":"default","groupTools":true,"inspectorWidth":280}`; `sessionStorage` empty; no IndexedDB databases. |
+
+What this does and does not prove: the real WKWebView engine runs the merged components as the jsdom and
+Chromium suites say it should, for the rows above. It does not prove what a real pointer, a real
+keyboard, the native context menu, VoiceOver, or a real Coven run do; those are the hand-run rows below.
 
 ### Hand-run checklist for the packaged macOS candidate (for Val)
 
