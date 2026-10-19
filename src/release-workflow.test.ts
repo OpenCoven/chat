@@ -212,6 +212,18 @@ describe('release workflow specification', () => {
     expect(rename).toBeLessThan(publish.indexOf('- name: Generate and verify SHA256SUMS'));
   });
 
+  test('tells readers to check only the installers they downloaded', () => {
+    const publish = job('publish');
+    const body = publish.slice(publish.indexOf('Verify downloads against'));
+
+    // A reader downloads one installer, not all six. Without --ignore-missing,
+    // `shasum -c` fails on every file that isn't in the folder, which reads as
+    // a corrupt download. releasing.md step 9 gives the same command.
+    expect(body).toMatch(/^ +shasum -a 256 -c --ignore-missing SHA256SUMS$/m);
+    expect(body).not.toMatch(/^ +shasum -a 256 -c SHA256SUMS$/m);
+    expect(releasingGuide).toContain('shasum -a 256 -c --ignore-missing SHA256SUMS');
+  });
+
   test('never hands Tauri incomplete Apple credentials', () => {
     const build = job('build', 'publish');
 
