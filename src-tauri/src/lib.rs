@@ -15,6 +15,7 @@ mod coven_runtime;
 mod familiar_avatar;
 mod hpke_bound;
 mod keyring;
+mod link_opener;
 mod metadata;
 mod operation;
 mod screen_relay;
@@ -296,6 +297,7 @@ fn builder() -> tauri::Builder<tauri::Wry> {
             setup::setup_run,
             setup::setup_cancel,
             setup::setup_create_familiar,
+            link_opener::open_reviewed_link,
             app_identity,
             app_installation_id,
             cave_read_discovery,
