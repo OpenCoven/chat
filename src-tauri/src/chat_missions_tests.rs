@@ -1135,24 +1135,22 @@ fn an_unreadable_record_file_is_left_alone_and_nothing_is_sent() {
     assert!(Missions::default().open(data.path()).is_err());
 
     // A record that can't be saved is dropped, and the submit is never sent.
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        let data = Scratch::new();
-        let project = Scratch::new();
-        let folder = data.path().join("coven-missions");
-        fs::create_dir_all(&folder).unwrap();
-        let missions = Missions::default();
-        missions.open(data.path()).unwrap();
-        fs::set_permissions(&folder, fs::Permissions::from_mode(0o500)).unwrap();
-        let fake = Fake::new(vec![]);
-        let run = |args: &[&str], input: Option<&[u8]>| fake.run(args, input);
-        let refused = submit(&missions, &run, &input(project.path()), at(NOW), &no_pause);
-        fs::set_permissions(&folder, fs::Permissions::from_mode(0o700)).unwrap();
-        assert!(refused.unwrap_err().contains("nothing was sent"));
-        assert!(fake.calls().is_empty());
-        assert!(missions.list("sage").unwrap().is_empty());
-    }
+    // The folder is replaced by a file after the list opened, which no
+    // account can write through (CI runs these tests as root).
+    let data = Scratch::new();
+    let project = Scratch::new();
+    let folder = data.path().join("coven-missions");
+    fs::create_dir_all(&folder).unwrap();
+    let missions = Missions::default();
+    missions.open(data.path()).unwrap();
+    fs::remove_dir(&folder).unwrap();
+    fs::write(&folder, "a file where the folder goes").unwrap();
+    let fake = Fake::new(vec![]);
+    let run = |args: &[&str], input: Option<&[u8]>| fake.run(args, input);
+    let refused = submit(&missions, &run, &input(project.path()), at(NOW), &no_pause);
+    assert!(refused.unwrap_err().contains("nothing was sent"));
+    assert!(fake.calls().is_empty());
+    assert!(missions.list("sage").unwrap().is_empty());
 }
 
 #[test]
