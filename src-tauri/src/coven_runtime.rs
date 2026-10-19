@@ -24,6 +24,9 @@ pub(crate) mod attachments;
 #[path = "familiar_projects.rs"]
 mod familiar_projects;
 
+#[path = "chat_missions.rs"]
+pub(crate) mod missions;
+
 #[path = "companion/runtime.rs"]
 mod companion_adapter;
 pub(crate) use companion_adapter::{companion_history, companion_snapshot, companion_start};
