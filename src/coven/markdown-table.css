@@ -1,0 +1,123 @@
+/*
+ * Table controls sit on a quiet bar above the table, like the code bar. The
+ * bar is chrome, not message text: it cannot be selected or quoted.
+ */
+.coven-table-bar {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 4px;
+  margin: 0.75em 0 0;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.coven-table-bar + .coven-markdown-table {
+  margin-top: 2px;
+}
+
+.coven-table-note {
+  flex: 1;
+  color: var(--text-muted);
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+/*
+ * The expanded table: one sheet over the window, holding a snapshot of the
+ * table's source. It resets what the message bubble sets (pre-wrap, its type
+ * scale) so the sheet reads as its own surface.
+ */
+.coven-table-dialog {
+  color: var(--text-primary);
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-strong);
+  border-radius: 16px;
+  padding: 0;
+  width: min(1200px, calc(100vw - 32px));
+  max-width: none;
+  max-height: calc(100vh - 32px);
+  font-size: 14px;
+  line-height: 1.5;
+  letter-spacing: 0;
+  white-space: normal;
+  overflow-wrap: normal;
+  text-align: start;
+  overflow: hidden;
+}
+
+.coven-table-dialog::backdrop {
+  background: rgba(6, 6, 8, 0.6);
+  backdrop-filter: blur(6px);
+}
+
+.coven-table-dialog-frame {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  max-height: calc(100vh - 32px);
+}
+
+.coven-table-dialog-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 20px 24px 12px;
+  border-bottom: 1px solid var(--border-hairline);
+}
+
+.coven-table-dialog-titles {
+  min-width: 0;
+}
+
+.coven-table-dialog h2 {
+  margin: 0 0 4px;
+  font-size: 18px;
+  line-height: 1.3;
+}
+
+.coven-table-dialog p {
+  margin: 0;
+  color: var(--text-secondary);
+}
+
+.coven-table-dialog-actions {
+  display: flex;
+  flex-shrink: 0;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 8px;
+}
+
+/* The snapshot scrolls both ways inside the sheet; the window behind it never moves. */
+.coven-table-dialog-body {
+  overflow: auto;
+  padding: 12px 24px 24px;
+  overscroll-behavior: contain;
+}
+
+.coven-table-dialog-body:focus-visible {
+  outline: var(--ring-width) solid var(--ring-focus);
+  outline-offset: calc(-1 * var(--ring-width));
+}
+
+.coven-table-dialog-body .coven-markdown-table {
+  margin: 0;
+  overflow: visible;
+}
+
+.coven-table-dialog-body :is(th, td) {
+  max-width: none;
+}
+
+@media (max-width: 760px) {
+  .coven-table-dialog-head {
+    flex-direction: column;
+    padding: 16px 16px 10px;
+  }
+
+  .coven-table-dialog-body {
+    padding: 10px 16px 16px;
+  }
+}

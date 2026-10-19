@@ -4,6 +4,7 @@ import remarkGfm from 'remark-gfm';
 import { CopyButton } from './copy-button';
 import { LinkReviewScope, ReviewLink } from './external-link-review';
 import './formatted-message.css';
+import { MarkdownTable, ProseSourceContext } from './markdown-table';
 import { usePreferences } from './preferences';
 import { segmentToolCalls, toolGroupSummary, toolKind } from './tool-activity';
 
@@ -64,29 +65,27 @@ const components: Components = {
       </div>
     );
   },
-  table({ children }) {
-    return (
-      // biome-ignore lint/a11y/noNoninteractiveTabindex: Overflowing tables need keyboard scrolling.
-      <section className="coven-markdown-table" aria-label="Table" tabIndex={0}>
-        <table>{children}</table>
-      </section>
-    );
+  table({ children, node }) {
+    return <MarkdownTable node={node}>{children}</MarkdownTable>;
   },
 };
 const plugins = [remarkGfm];
 
 function Prose({ text }: { text: string }) {
   return (
-    <Markdown
-      remarkPlugins={plugins}
-      components={components}
-      skipHtml
-      urlTransform={(url, key) =>
-        key === 'href' && /^(https?:\/\/|#)/i.test(url) ? defaultUrlTransform(url) : undefined
-      }
-    >
-      {text}
-    </Markdown>
+    // Tables resolve their source positions against exactly this text.
+    <ProseSourceContext.Provider value={text}>
+      <Markdown
+        remarkPlugins={plugins}
+        components={components}
+        skipHtml
+        urlTransform={(url, key) =>
+          key === 'href' && /^(https?:\/\/|#)/i.test(url) ? defaultUrlTransform(url) : undefined
+        }
+      >
+        {text}
+      </Markdown>
+    </ProseSourceContext.Provider>
   );
 }
 

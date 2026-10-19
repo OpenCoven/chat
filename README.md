@@ -381,6 +381,22 @@ one that isn't a complete web address, and never shortens one to fit; the reply'
 copies it as written. Because links in a reply carry no address of their own, the right-click menu
 offers only text actions. Chat keeps no address after the review closes.
 
+Each table in a reply has two controls above it. **Copy table Markdown** copies that table's
+source exactly as the reply wrote it, escapes, alignment markers, links and inline code included,
+and reports "Copied" or "Copy failed" like the other Copy controls. **Expand table** opens the
+table in a sheet over the window, labeled as the table as it read when you expanded it: the reply
+can keep streaming behind it, but the sheet doesn't change until you close it and expand again.
+The sheet scrolls both ways; the conversation and composer stay where they were. Links in the
+sheet go through the same **Open this link?** review, and Escape closes only the topmost of the
+two. **Close**, Escape or a click outside returns you to the Expand control. Switching familiar or
+chat, or the message going away, closes the sheet and returns focus to the conversation. One table
+is expanded at a time. Rows stay in the order the reply gave them; there is no sorting, filtering,
+editing or file export, and Chat keeps nothing about a table once the sheet closes. Chat offers
+the two controls for tables up to 2,000 rows, 64 columns and 256 KB of source, and only when it
+can match the table to its exact source in the reply (a table inside a quote, for example, can't
+be matched). Past that it says so above the table, which still renders and scrolls, and the
+reply's **Copy** still copies everything.
+
 Tool calls appear as activity rows between the prose. Each row expands to the call's input and,
 once reported, its result, with each block labeled and given its own **Copy** control. The turn's
 header counts the calls it holds and how many failed, whether or not the list is folded.

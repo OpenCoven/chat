@@ -1528,6 +1528,69 @@ test('reviews an external link before anything opens, then opens only that addre
   expect(outside).toEqual([address.replace(/#.*$/, '')]);
 });
 
+// Chromium only: this proves the table controls in a browser, not what a desktop webview does.
+test('expands a table into a snapshot sheet and copies its exact source', async ({
+  page,
+  context,
+}) => {
+  await page.setViewportSize({ width: 480, height: 640 });
+  await context.grantPermissions(['clipboard-read', 'clipboard-write']);
+  const table = [
+    '| Field | Link |',
+    '| :-- | --: |',
+    '| a \\| b | [Guide](https://docs.example.test/guide) |',
+    `| ${'wide-'.repeat(60)} | \`c|d\` *é* |`,
+  ].join('\n');
+  await installRuntimeFixture(page, true, `Here it is.\n\n${table}\n\nDone.`);
+  await page.goto('/');
+  const composer = page.getByRole('textbox', { name: 'Message Local familiar' });
+  await expect(composer).toBeEnabled();
+  await composer.fill('Show me the table.');
+  await page.getByRole('button', { name: 'Send', exact: true }).click();
+  const expand = page.getByRole('button', { name: 'Expand table' });
+  await expect(expand).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Copy table Markdown' })).toBeVisible();
+  const transcript = page.locator('.fr-transcript');
+  const scrolled = await transcript.evaluate((node) => node.scrollTop);
+
+  await expand.click();
+  const sheet = page.getByRole('dialog', { name: 'Expanded table' });
+  await expect(sheet).toBeVisible();
+  await expect(sheet.getByRole('button', { name: 'Close' })).toBeFocused();
+  await expect(sheet.getByRole('columnheader', { name: 'Field' })).toBeVisible();
+  await expect(sheet.getByRole('cell', { name: 'a | b' })).toBeVisible();
+  const fits = await sheet.evaluate((node) => {
+    const box = node.getBoundingClientRect();
+    return box.left >= 0 && box.right <= window.innerWidth && box.bottom <= window.innerHeight;
+  });
+  expect(fits).toBe(true);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(480);
+
+  const copy = sheet.getByRole('button', { name: 'Copy table Markdown' });
+  await copy.click();
+  await expect(copy).toHaveText(/Copied/);
+  expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(table);
+
+  // A link in the sheet reviews above it; Escape closes only the review.
+  const link = sheet.getByRole('link', { name: 'Guide' });
+  await expect(page.locator('.coven-table-dialog a[href^="http"]')).toHaveCount(0);
+  await link.focus();
+  await page.keyboard.press('Enter');
+  const review = page.getByRole('dialog', { name: 'Open this link?' });
+  await expect(review).toBeVisible();
+  await expect(review.locator('.coven-link-review-host')).toHaveText('docs.example.test');
+  await page.keyboard.press('Escape');
+  await expect(review).toBeHidden();
+  await expect(sheet).toBeVisible();
+  await expect(link).toBeFocused();
+
+  await page.keyboard.press('Escape');
+  await expect(sheet).toBeHidden();
+  await expect(expand).toBeFocused();
+  expect(await transcript.evaluate((node) => node.scrollTop)).toBe(scrolled);
+  expect(context.pages()).toHaveLength(1);
+});
+
 test('separates CLI tool summaries from prose and reveals their exact arguments', async ({
   page,
 }, testInfo) => {
