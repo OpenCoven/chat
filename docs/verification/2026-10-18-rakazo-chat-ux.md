@@ -13,7 +13,7 @@ packaged or released evidence unless a row says so in as many words.
 | #481 link review | **merged** as `bbdb1108` (PR #486) |
 | #482 quote selection | **merged** as `cdb98ce3` (PR #488) |
 | #483 tables | PR #487 `feat/markdown-table` @ `35e004e0` (`e1b422e3` the feature + `35e004e0` fix: snapshot keeps reference links resolved outside the table's source slice). **Merged** by Val as squash `72a64036` at 03:21Z, after this candidate was built; `git diff` of the candidate against that `main` is exactly the #489 files plus this record and the new test, so the merged content is byte-identical to what was verified. |
-| #484 inspector resize (optional, retained) | PR #489 `feat/inspector-resize` @ `72b6e252`, rebased onto `bbdb1108` (re-authored from `e85c2301`, same tree `5bf07bfb`) |
+| #484 inspector resize (optional, retained) | PR #489 `feat/inspector-resize` @ `72b6e252`, rebased onto `bbdb1108` (re-authored from `e85c2301`, same tree `5bf07bfb`). **Merged** as squash `4342d2ad` at 03:45Z; after it, `git diff` of the candidate against `main` is exactly this record and the new test, so every merged child is byte-identical to what was verified. |
 | Merge order | `origin/main` → #487 `35e004e0` → #489 `72b6e252`; each a signed `--no-ff` merge; no conflicts |
 | Earlier candidate | `46e2e59f` (`f9e5d423` + the four branch heads before the merges). It differs from the final tree only by #487's fix commit (`formatted-message.tsx`, `markdown-table.tsx`, `markdown-table.test.tsx`); the rows below say which candidate each result was taken on. |
 | Lockfile | `pnpm-lock.yaml` sha256 prefix `5def67e3d18bbf75`, identical to `main`'s; no dependency change |
@@ -244,9 +244,11 @@ app; quit the installed Chat first.
 | #481 link review | yes | #486 | **yes**, `bbdb1108` | source + jsdom + Chromium on the candidate; clipboard defect found and fixed before merge | macOS bundle built locally and Linux bundle built in CI, neither launched |
 | #482 quote selection | yes | #488 | **yes**, `cdb98ce3` | source + jsdom + Chromium on the candidate | built, not launched (same bundles) |
 | #483 tables | yes | #487 @ `35e004e0` | **yes**, `72a64036` (03:21Z) | source + jsdom + Chromium on the candidate; CI green on the exact head | built, not launched (same bundles) |
-| #484 inspector resize | yes, optional; **retained, not deferred** (PR #489 open) | #489 @ `e85c2301` | no | source + jsdom + Chromium on the candidate | no |
+| #484 inspector resize | yes, optional; **retained, not deferred** | #489 @ `72b6e252` | **yes**, `4342d2ad` (03:45Z) | source + jsdom + Chromium on the candidate; CI green on the exact head | built, not launched (same bundles) |
 | #485 acceptance | yes | this record + `chat-ux-integration.test.tsx` on `review/candidate-480` (PR #490) | no | unit, browser, CI and diff lanes run; macOS and Linux bundles built; no desktop runtime row verified | Windows not built; nothing launched anywhere |
 
-Green checks and this record are not merge or release authorization. #489 is Val's call; it touches
-`e2e/app.tauri-mock.spec.ts` and `README.md`, which #487's merge also changed, so it needs a rebase
-before it lands. Once it does, `review/candidate-480` rebases down to this record and the new test.
+Green checks and this record are not merge or release authorization. All four children are on `main`
+(`cdb98ce3`, `bbdb1108`, `72a64036`, `4342d2ad`), each with content identical to the verified candidate.
+`review/candidate-480` now differs from `main` by this record and the new test only, so PR #490 reduces
+to those two files on rebase. Source completion is not "shipped": nothing here is release-approved,
+and the desktop runtime rows above are still open.
