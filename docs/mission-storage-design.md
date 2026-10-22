@@ -5,6 +5,10 @@ only as this document describes. Issue: #155. Contract:
 [OpenCoven/coven#1313](https://github.com/OpenCoven/coven/issues/1313), as built on
 Coven `main` at `1450f97f`.
 
+For the remaining release and launching-authority gates, see the
+[M0 integration checkpoint](mission-m0-integration-checkpoint.md). Storage approval does not
+establish that the producer can launch a mission.
+
 `SECURITY.md` lists everything Chat keeps on disk, and says conversation bodies
 never reach browser storage. A mission adds one more thing Chat has to keep across
 restarts: the keys that let it learn what happened to a mission it sent. This
