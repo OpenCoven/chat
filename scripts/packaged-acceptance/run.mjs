@@ -108,6 +108,83 @@ function facts(userAgent) {
   return result;
 }
 
+const DEBUG_PORT = 9333;
+
+/** True once the app's WebView2 answers on the remote debugging port. */
+async function debuggerUp(timeout) {
+  return until(
+    'the WebView2 debugging port',
+    async () => (await fetch(`http://127.0.0.1:${DEBUG_PORT}/json/version`)).ok,
+    timeout,
+    500,
+  )
+    .then(() => true)
+    .catch(() => false);
+}
+
+/**
+ * Windows fallback. msedgedriver normally launches a WebView2 app with its
+ * debugging switches in WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS and waits for
+ * DevToolsActivePort. When that never appears, launch the app with a fixed
+ * debugging port instead -- through that variable, then through WebView2's
+ * per-user AdditionalBrowserArguments policy -- and attach by debuggerAddress,
+ * which Microsoft documents for WebView2 apps. Which path worked is recorded.
+ */
+async function attachWindows(env, row) {
+  const flag = `--remote-debugging-port=${DEBUG_PORT}`;
+  const exe = options.application.split('\\').at(-1);
+  const policy = 'HKCU\\Software\\Policies\\Microsoft\\Edge\\WebView2\\AdditionalBrowserArguments';
+  const launch = (extra) =>
+    spawn(options.application, [], { env: { ...env, ...extra }, stdio: 'ignore' });
+  // A WebView2 browser process left from msedgedriver's attempt would be reused
+  // with its own switches; give it time to exit with the app it served.
+  await sleep(5_000);
+  let app = launch({ WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: flag });
+  let how = 'WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS';
+  if (!(await debuggerUp(45_000))) {
+    row.note(
+      'debugging port through WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS',
+      'did not open in 45 s',
+    );
+    app.kill();
+    await sleep(2_000);
+    execFileSync('reg.exe', ['add', policy, '/v', exe, '/t', 'REG_SZ', '/d', flag, '/f']);
+    app = launch({});
+    how = `per-user WebView2 policy ${policy}\\${exe}`;
+    if (!(await debuggerUp(45_000))) {
+      app.kill();
+      throw new Error(
+        'The WebView2 debugging port opened through neither the environment nor the policy.',
+      );
+    }
+  }
+  row.note('debugging port opened through', how);
+  const native = spawn(options['native-driver'], ['--port=4446'], { stdio: 'ignore' });
+  await until(
+    'msedgedriver to listen',
+    async () => (await fetch('http://127.0.0.1:4446/status')).ok,
+    30_000,
+    250,
+  );
+  const session = await Session.start('http://127.0.0.1:4446', {
+    browserName: 'webview2',
+    'ms:edgeOptions': { debuggerAddress: `127.0.0.1:${DEBUG_PORT}` },
+  });
+  row.note('session', 'msedgedriver attached to the running app by debuggerAddress');
+  return {
+    session,
+    close: () => {
+      native.kill();
+      app.kill();
+      try {
+        execFileSync('reg.exe', ['delete', policy, '/v', exe, '/f'], { stdio: 'ignore' });
+      } catch {
+        // Absent when the environment variable was enough.
+      }
+    },
+  };
+}
+
 /**
  * After a failed setup on Linux, compares the engine install under the running
  * app's own environment with a plain one, so a failure can be pinned on the
@@ -288,6 +365,7 @@ const env = {
 };
 const rows = [];
 let driver;
+let attached;
 let session;
 let userAgent = 'unknown';
 const setupRow = { id: 'setup', title: 'First-run setup through the window', observations: [] };
@@ -297,9 +375,17 @@ rows.push(setupRow);
 
 try {
   driver = await startDriver(env);
-  session = await Session.start(driver.base, {
-    'tauri:options': { application: options.application },
-  });
+  try {
+    session = await Session.start(driver.base, {
+      'tauri:options': { application: options.application },
+    });
+    setupRow.note('session', 'tauri-driver launched the app');
+  } catch (error) {
+    if (process.platform !== 'win32' || !/DevToolsActivePort/.test(error.message)) throw error;
+    setupRow.note('tauri-driver session', error.message);
+    attached = await attachWindows(env, setupRow);
+    session = attached.session;
+  }
   userAgent = await session.execute('return navigator.userAgent;');
   await setUp(session, setupRow);
   rows.push(...(await linkRows(session, FIRST, opened, requests)));
@@ -341,6 +427,7 @@ try {
   }
   await sleep(500);
   driver?.child.kill();
+  attached?.close();
   await fixture.close();
 }
 
