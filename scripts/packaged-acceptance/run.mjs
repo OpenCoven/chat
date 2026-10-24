@@ -230,6 +230,22 @@ function diagnoseSetup(row) {
       return `failed (${error.status}): ${`${error.stderr ?? ''}`.trim().split('\n').slice(-3).join(' / ')}`;
     }
   };
+  const engineUrl =
+    'https://github.com/OpenCoven/coven-code/releases/download/v0.8.0/coven-code-linux-x86_64.tar.gz';
+  const fetchEngine = (env) => {
+    try {
+      execFileSync('curl', ['-fsSL', '-o', '/dev/null', engineUrl], {
+        env,
+        timeout: 120_000,
+        stdio: ['ignore', 'ignore', 'pipe'],
+      });
+      return 'downloaded';
+    } catch (error) {
+      return `failed (${error.status}): ${`${error.stderr ?? ''}`.trim().slice(0, 400)}`;
+    }
+  };
+  row.note('curl of the engine with the app environment', fetchEngine({ ...appEnv }));
+  row.note('curl of the engine with a plain environment', fetchEngine(process.env));
   row.note('coven engine install with the app environment', install({ ...appEnv }));
   row.note('coven engine install with a plain environment', install(process.env));
 }
@@ -286,23 +302,18 @@ async function setUp(s, setupRow) {
         return found.length === 1 ? found[0] : null;
       },
       timeout,
-      500,
+      200,
     ).catch((error) => {
       setupRow.note('setup progress lines', progress.slice(-40));
       throw new Error(`${what}: ${error.message}`);
     });
-  // Install Coven carries straight on to the engine; only a failure needs another click.
+  // Install Coven carries straight on to the engine. The familiar form appears
+  // as soon as Coven is in, so wait for the engine step itself to finish.
   await (await s.one('button', 'Install Coven')).click();
-  const name = await next(
-    'Install Coven, then its engine',
-    'textbox',
-    'Familiar name',
-    20 * 60_000,
-  );
-  setupRow.note(
-    'Install Coven',
-    'Coven and then its engine installed; the familiar step is offered',
-  );
+  await next('Install Coven, then its engine', 'heading', 'Coven engine (done)', 20 * 60_000);
+  setupRow.note('Install Coven', 'Coven and then its engine installed');
+  setupRow.note('setup progress lines', progress.slice(-40));
+  const name = await s.one('textbox', 'Familiar name');
   await name.click();
   await name.type(FIRST);
   await (await s.one('button', 'Create familiar')).click();
