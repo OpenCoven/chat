@@ -100,14 +100,6 @@ jobs:
       - uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c # stable
         with:
           toolchain: 1.95.0
-      # SPIKE: until the rebuilt CI image is adopted. Remove before merge.
-      - name: Install WebDriver, display and clipboard tools
-        timeout-minutes: 10
-        run: |
-          if ! command -v WebKitWebDriver >/dev/null; then
-            apt-get update
-            apt-get install -y webkit2gtk-driver xauth xclip dbus-x11 xvfb
-          fi
       - name: Install tauri-driver
         run: cargo install tauri-driver --locked --version "${TAURI_DRIVER_VERSION}"
       - name: Fetch this run's bundle
@@ -237,7 +229,12 @@ jobs:
           Invoke-WebRequest -Uri "https://msedgedriver.microsoft.com/$version/edgedriver_win64.zip" -OutFile $zip
           $dir = Join-Path $env:RUNNER_TEMP 'edgedriver'
           Expand-Archive -Path $zip -DestinationPath $dir -Force
-          "path=$(Join-Path $dir 'msedgedriver.exe')" >> $env:GITHUB_OUTPUT
+          # tauri-driver passes the port; the wrapper adds a verbose log beside the results.
+          $out = Join-Path $env:RUNNER_TEMP 'packaged-acceptance'
+          New-Item -ItemType Directory -Force -Path $out | Out-Null
+          $wrapper = Join-Path $dir 'msedgedriver-logged.cmd'
+          Set-Content -Path $wrapper -Encoding ascii -Value "@`"%~dp0msedgedriver.exe`" %* --verbose `"--log-path=$out\msedgedriver.log`""
+          "path=$wrapper" >> $env:GITHUB_OUTPUT
       - name: Install the MSI
         id: install
         shell: pwsh
@@ -263,6 +260,24 @@ jobs:
             --native-driver "${{ steps.edge.outputs.path }}" `
             --out (Join-Path $env:RUNNER_TEMP 'packaged-acceptance')
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Describe the app after a failure
+        if: failure() && steps.install.outputs.application != ''
+        shell: pwsh
+        run: |
+          $out = Join-Path $env:RUNNER_TEMP 'packaged-acceptance'
+          New-Item -ItemType Directory -Force -Path $out | Out-Null
+          & {
+            'Processes named opencoven-chat or msedgewebview2 still running:'
+            Get-Process -Name opencoven-chat, msedgewebview2 -ErrorAction SilentlyContinue | Format-Table Id, ProcessName, StartTime, MainWindowTitle -AutoSize | Out-String
+            'Application errors in the last 30 minutes:'
+            Get-WinEvent -FilterHashtable @{ LogName = 'Application'; Level = 1, 2; StartTime = (Get-Date).AddMinutes(-30) } -ErrorAction SilentlyContinue | Select-Object -First 20 TimeCreated, ProviderName, Message | Format-List | Out-String
+            'Launching the app directly for 20 seconds:'
+            $app = Start-Process -FilePath "${{ steps.install.outputs.application }}" -PassThru
+            Start-Sleep -Seconds 20
+            $app.Refresh()
+            "exited: $($app.HasExited) exit code: $(if ($app.HasExited) { $app.ExitCode } else { 'n/a' }) window: '$($app.MainWindowTitle)'"
+            if (-not $app.HasExited) { Stop-Process -Id $app.Id -Force }
+          } *>&1 | Tee-Object -FilePath (Join-Path $out 'windows-diagnostics.txt')
       - name: Upload the observations
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
