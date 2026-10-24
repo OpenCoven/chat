@@ -208,8 +208,14 @@ export class Session {
     await this.actions([{ type: 'key', id: 'keyboard', actions: steps }]);
   }
 
-  /** A pointer click on an element's centre with a given button and held modifier. */
+  /**
+   * A pointer click on an element's centre with a given button and held
+   * modifier, after scrolling it into view as a reader would. WebDriver's own
+   * element click refuses controls that appear on hover (opacity 0 until then);
+   * a pointer that moves onto them first is what a person does.
+   */
   async click(element, { button = 0, modifier } = {}) {
+    await element.evaluate("node.scrollIntoView({ block: 'center', inline: 'nearest' });");
     const pointer = {
       type: 'pointer',
       id: 'mouse',
@@ -298,8 +304,8 @@ export class Element {
     return this.session.call(method, `/element/${this.ref}${path}`, body);
   }
 
-  click() {
-    return this.call('POST', '/click', {});
+  click(options) {
+    return this.session.click(this, options);
   }
 
   type(text) {

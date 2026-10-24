@@ -15,6 +15,7 @@ import { startModelFixture } from './model-fixture.mjs';
 import { registerRecorder } from './platform.mjs';
 import {
   composerOf,
+  conversationLoaded,
   inspectorRow,
   linkRows,
   quoteRow,
@@ -251,7 +252,7 @@ try {
   });
   userAgent = await session.execute('return navigator.userAgent;');
   await setUp(session, setupRow);
-  rows.push(...(await linkRows(session, FIRST, opened)));
+  rows.push(...(await linkRows(session, FIRST, opened, requests)));
   rows.push(await tableRow(session, FIRST));
   rows.push(await quoteRow(session, FIRST, requests));
   rows.push(await inspectorRow(session, FIRST));
@@ -261,6 +262,15 @@ try {
   await session.refresh();
   await composerOf(session, FIRST);
   await session.one('button', SECOND, { timeout: 30_000 });
+  try {
+    setupRow.note(
+      `${FIRST}'s conversation loaded after a reload (ms)`,
+      await conversationLoaded(session, setupRow, 'three steps'),
+    );
+  } catch (error) {
+    // Recorded, not fatal: the rows after this one say what they can still see.
+    setupRow.note(`${FIRST}'s conversation after a reload`, error.message);
+  }
   rows.push(await switchRow(session, FIRST, SECOND));
   rows.push(await storageRow(session));
   rows.push(await rightClickRow(session, opened));

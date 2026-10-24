@@ -86,47 +86,102 @@ async function closeReview(s) {
   await s.gone('dialog', REVIEW);
 }
 
+/** Closes whatever review, sheet or menu a failed step left open. */
+async function reset(s) {
+  for (let index = 0; index < 3; index += 1) await s.press(Key.Escape).catch(() => undefined);
+  await s.execute('getSelection()?.removeAllRanges();').catch(() => undefined);
+}
+
+/** Runs one row's steps; a failure is recorded on that row and the window is reset. */
+async function attempt(s, row, work) {
+  try {
+    await work();
+  } catch (error) {
+    row.error = error.message;
+    await reset(s);
+  }
+}
+
+async function copyAddress(s, row, label, expected) {
+  const { review } = await reviewParts(s);
+  await (await s.one('button', 'Copy address', { within: review })).click();
+  await until(
+    'the copy status',
+    async () => (await reviewParts(s)).status === 'Copied the address.',
+  );
+  row.expect(`${label}: Copy address status`, (await reviewParts(s)).status, 'Copied the address.');
+  row.expect(`${label}: system clipboard after Copy address`, readClipboard(), expected);
+}
+
 /** Rows 1, 2 (keyboard part) and 9, and #515's handoff. */
-export async function linkRows(s, familiar, opened) {
-  const results = [];
+export async function linkRows(s, familiar, opened, requests) {
   const row1 = new Row('504-1', 'Link gestures, copy, review');
   const row2 = new Row('504-2', 'Modality and focus return (keyboard part)');
   const row9 = new Row('504-9', 'IPv6 address');
   const handoff = new Row('515', 'Open hands the exact address to the system browser');
-  results.push(row1, row2, row9, handoff);
+  const results = [row1, row2, row9, handoff];
 
-  let current = row1;
   try {
     await send(s, familiar, '[[links]] Where are the docs?', 'link', 'Handoff check');
-    const link = await s.one('link', 'Handoff check');
+  } catch (error) {
+    row1.error = `The reply never rendered: ${error.message}`;
+    for (const row of results.slice(1)) row.skipped = true;
+    return results;
+  }
+  const link = () => s.one('link', 'Handoff check');
+
+  await attempt(s, row1, async () => {
     row1.expect(
       'transcript anchors with a live http(s) href',
       (await s.css('.fr-transcript a[href^="http"]')).length,
       0,
     );
-
-    await s.click(link);
-    let parts = await reviewParts(s);
+    await s.click(await link());
+    const parts = await reviewParts(s);
     row1.check('primary click opens the review', Boolean(parts.review));
     row1.expect('review site', parts.host, 'example.com');
     row1.expect('review address', parts.address, ADDRESSES.query);
+    await closeReview(s);
+    await s.click(await link(), { modifier: Key.Control });
+    row1.expect('Ctrl-click opens the review', (await s.all('dialog', REVIEW)).length, 1);
+    await (await s.one('button', 'Cancel', { within: (await reviewParts(s)).review })).click();
+    await s.gone('dialog', REVIEW);
+    await s.click(await link(), { button: 1 });
+    row1.expect('middle-click opens the review', (await s.all('dialog', REVIEW)).length, 1);
+    await closeReview(s);
+    row1.expect('nothing reached the browser from review gestures', opened.received().length, 0);
+    await s.click(await link());
+    await copyAddress(s, row1, 'query address', ADDRESSES.query);
+    await closeReview(s);
+  });
 
-    current = row2;
+  await attempt(s, row2, async () => {
+    const anchor = await link();
+    await s.click(anchor);
+    await reviewParts(s);
     row2.expect('focus when the review opens', await focusedName(s), 'Cancel');
     for (const name of ['Copy address', 'Open', 'Cancel']) {
       await s.press(Key.Tab);
       row2.expect(`Tab moves focus to ${name}`, await focusedName(s), name);
     }
-    const blocked =
-      await s.execute(`const composer = document.querySelector('.coven-composer textarea, textarea');
-      const box = composer.getBoundingClientRect();
-      const hit = document.elementFromPoint(box.x + box.width / 2, box.y + box.height / 2);
-      return { composerUnderPointer: composer.contains(hit), x: box.x + box.width / 2, y: box.y + box.height / 2 };`);
+    await closeReview(s);
     row2.expect(
-      'the composer behind the review is not hit-testable',
-      blocked.composerUnderPointer,
-      false,
+      'Escape closes the review and focus returns to the link',
+      await s.isActive(anchor),
+      true,
     );
+
+    // A click outside closes the review by design; it must not reach what is behind it.
+    await s.click(anchor);
+    await reviewParts(s);
+    const behind =
+      await s.execute(`const composer = document.querySelector('.oc-composer textarea');
+      const box = composer.getBoundingClientRect();
+      const x = box.x + box.width / 2;
+      const y = box.y + box.height / 2;
+      return { hit: composer.contains(document.elementFromPoint(x, y)), x, y, value: composer.value };`);
+    row2.expect('the composer behind the review is hit-testable', behind.hit, false);
+    const sent = requests();
     await s.actions([
       {
         type: 'pointer',
@@ -136,8 +191,8 @@ export async function linkRows(s, familiar, opened) {
           {
             type: 'pointerMove',
             origin: 'viewport',
-            x: Math.round(blocked.x),
-            y: Math.round(blocked.y),
+            x: Math.round(behind.x),
+            y: Math.round(behind.y),
           },
           { type: 'pointerDown', button: 0 },
           { type: 'pointerUp', button: 0 },
@@ -145,73 +200,57 @@ export async function linkRows(s, familiar, opened) {
       },
     ]);
     await s.release();
-    row2.expect(
-      'review still open after a click on the composer',
-      (await s.all('dialog', REVIEW)).length,
-      1,
+    await sleep(500);
+    row2.note(
+      'review after a click where the composer is',
+      (await s.all('dialog', REVIEW)).length ? 'open' : 'closed',
     );
     row2.expect(
-      'composer focused after that click',
-      await s.execute('return document.activeElement?.tagName === "TEXTAREA";'),
+      'the composer took focus from that click',
+      await s.execute("return Boolean(document.activeElement?.closest('.oc-composer'));"),
       false,
     );
-    await closeReview(s);
     row2.expect(
-      'Escape closes the review and focus returns to the link',
-      await s.isActive(link),
-      true,
+      'composer text after that click',
+      await s.execute("return document.querySelector('.oc-composer textarea').value;"),
+      behind.value,
     );
+    row2.expect('model requests after that click', requests(), sent);
+    if ((await s.all('dialog', REVIEW)).length === 0) {
+      row2.expect(
+        'focus returns to the link after the outside click',
+        await s.isActive(anchor),
+        true,
+      );
+    } else {
+      await closeReview(s);
+    }
+  });
 
-    current = row1;
-    await s.click(link, { modifier: Key.Control });
-    row1.expect('Ctrl-click opens the review', (await s.all('dialog', REVIEW)).length, 1);
-    await (await s.one('button', 'Cancel', { within: (await reviewParts(s)).review })).click();
-    await s.gone('dialog', REVIEW);
-    await s.click(link, { button: 1 });
-    row1.expect('middle-click opens the review', (await s.all('dialog', REVIEW)).length, 1);
+  await attempt(s, handoff, async () => {
+    await s.click(await link());
+    await openOnce(s, handoff, opened, ADDRESSES.query);
     await closeReview(s);
-    row1.expect('nothing reached the browser from review gestures', opened.received().length, 0);
-
-    await s.click(link);
-    parts = await reviewParts(s);
-    await (await s.one('button', 'Copy address', { within: parts.review })).click();
-    await until(
-      'the copy status',
-      async () => (await reviewParts(s)).status === 'Copied the address.',
-    );
-    row1.expect('Copy address status', (await reviewParts(s)).status, 'Copied the address.');
-    row1.expect('system clipboard after Copy address', readClipboard(), ADDRESSES.query);
-
-    current = handoff;
-    await openOnce(s, handoff, opened, ADDRESSES.query, 0);
-    await closeReview(s);
-
     await s.click(await s.one('link', 'Plain address'));
     handoff.expect('review address (plain)', (await reviewParts(s)).address, ADDRESSES.plain);
-    await openOnce(s, handoff, opened, ADDRESSES.plain, 1);
+    await openOnce(s, handoff, opened, ADDRESSES.plain);
     await closeReview(s);
+  });
 
-    current = row9;
+  await attempt(s, row9, async () => {
     await s.click(await s.one('link', 'Loopback six'));
-    parts = await reviewParts(s);
+    const parts = await reviewParts(s);
     row9.expect('review site', parts.host, '[::1]:8080');
     row9.expect('review address', parts.address, ADDRESSES.ipv6);
-    await (await s.one('button', 'Copy address', { within: parts.review })).click();
-    await until(
-      'the copy status',
-      async () => (await reviewParts(s)).status === 'Copied the address.',
-    );
-    row9.expect('system clipboard after Copy address', readClipboard(), ADDRESSES.ipv6);
-    await openOnce(s, row9, opened, ADDRESSES.ipv6, 2);
+    await copyAddress(s, row9, 'IPv6 address', ADDRESSES.ipv6);
+    await openOnce(s, row9, opened, ADDRESSES.ipv6);
     await closeReview(s);
-  } catch (error) {
-    current.error = error.message;
-  }
-  for (const row of results) if (!row.error && row.observations.length === 0) row.skipped = true;
+  });
   return results;
 }
 
-async function openOnce(s, row, opened, address, before) {
+async function openOnce(s, row, opened, address) {
+  const before = opened.received().length;
   const { review } = await reviewParts(s);
   const open = await s.one('button', 'Open', { within: review });
   await open.click();
@@ -263,9 +302,28 @@ export async function quoteRow(s, familiar, requests) {
         (await s.execute(`return document.body.innerText.includes("from ${familiar}'s reply");`)),
     );
     const sent = requests();
-    await (await s.all('button', 'Copy reply')).at(-1).focus();
+    // The action follows the conversation in the tab order: Tab from whatever precedes it.
+    const previous = await s.execute(
+      `const focusable = [...document.querySelectorAll('a[href], button, textarea, input, select, [tabindex]')]
+        .filter((node) => !node.disabled && node.tabIndex >= 0 && node.getClientRects().length > 0);
+      const index = focusable.indexOf(arguments[0]);
+      return index > 0 ? focusable[index - 1] : null;`,
+      quote,
+    );
+    row.check('a control precedes the action in the tab order', Boolean(previous));
+    row.note(
+      'the control before the action',
+      await previous.evaluate(
+        "return (node.getAttribute('aria-label') || node.textContent || node.tagName).trim().slice(0, 60);",
+      ),
+    );
+    await previous.focus();
     await s.press(Key.Tab);
-    row.expect('Tab from the conversation reaches the action', await s.isActive(quote), true);
+    row.expect(
+      'Tab reaches the action with the passage still captured',
+      await s.isActive(quote),
+      true,
+    );
     await s.actions([
       {
         type: 'key',
@@ -470,6 +528,7 @@ export async function tableRow(s, familiar) {
 export async function inspectorRow(s, familiar) {
   const row = new Row('504-6', 'Inspector resize (keyboard part)');
   try {
+    await s.execute('getSelection()?.removeAllRanges();');
     await resize(s, 1400, 800);
     const handle = await s.one('separator', 'Resize inspector');
     const width = () =>
@@ -504,7 +563,12 @@ export async function inspectorRow(s, familiar) {
     await s.press(Key.End);
     row.expect('End at 1400 wide', await width(), 600);
     let settings = await openSettingsGeneral(s);
-    row.check('Settings > General shows the width', (await settings.text()).includes('600px'));
+    const general = await settings.evaluate('return node.textContent.replace(/\\s+/g, " ");');
+    row.check(
+      'Settings > General shows the width',
+      general.includes('600px'),
+      general.slice(0, 400),
+    );
     await (await s.one('button', 'Reset inspector width', { within: settings })).click();
     await closeSettings(s);
     row.expect('Reset restores 360px', await width(), 360);
@@ -531,7 +595,8 @@ export async function inspectorRow(s, familiar) {
     );
     row.expect('600px returns after widening again', await width(), 600);
     settings = await openSettingsGeneral(s);
-    row.check('Settings still shows 600px', (await settings.text()).includes('600px'));
+    const again = await settings.evaluate('return node.textContent.replace(/\\s+/g, " ");');
+    row.check('Settings still shows 600px', again.includes('600px'), again.slice(0, 400));
     await closeSettings(s);
   } catch (error) {
     row.error = error.message;
@@ -539,6 +604,32 @@ export async function inspectorRow(s, familiar) {
     await resize(s, 1180, 780).catch(() => undefined);
   }
   return row;
+}
+
+/** Waits for a reply containing `text`; reports how long, or how long it showed loading. */
+export async function conversationLoaded(s, row, text, timeout = 90_000) {
+  const started = Date.now();
+  try {
+    await until(
+      `a reply containing "${text}"`,
+      () =>
+        s.execute(
+          "return [...document.querySelectorAll('.fr-bubble--familiar')].some((node) => node.textContent.includes(arguments[0]));",
+          text,
+        ),
+      timeout,
+      250,
+    );
+  } catch {
+    const loading = await s.execute(
+      "return document.body.innerText.includes('Loading conversation');",
+    );
+    row.note('conversation still showing "Loading conversation"', loading);
+    throw new Error(
+      `No reply containing "${text}" after ${timeout / 1000} s (loading shown: ${loading}).`,
+    );
+  }
+  return Date.now() - started;
 }
 
 async function clickAt(s, element) {
@@ -573,6 +664,10 @@ export async function switchRow(s, first, second) {
     await other.type('Draft kept for later');
     await (await s.one('button', first)).click();
     await composerOf(s, first);
+    row.note(
+      `${first}'s conversation loaded after switching back (ms)`,
+      await conversationLoaded(s, row, 'three steps'),
+    );
 
     await selectText(
       s,
@@ -632,9 +727,9 @@ export async function switchRow(s, first, second) {
   return row;
 }
 
-/** Row 8: only the preferences key, with a numeric width, and no conversation text. */
+/** Row 8: only navigation and preferences, a numeric width, and no conversation text. */
 export async function storageRow(s) {
-  const row = new Row('504-8', 'Preference-only storage');
+  const row = new Row('504-8', 'Preference-only storage (per SECURITY.md)');
   try {
     const stored = await s.executeAsync(`const done = arguments[arguments.length - 1];
       const local = {};
@@ -646,7 +741,21 @@ export async function storageRow(s) {
       const finish = (databases) => done({ local, session, databases });
       if (indexedDB.databases) indexedDB.databases().then((list) => finish(list.map((db) => db.name)), () => finish('unreadable'));
       else finish('unsupported');`);
-    row.expect('localStorage keys', Object.keys(stored.local), ['opencoven.chat.preferences.v1']);
+    // SECURITY.md: the window keeps only the selected familiar (navigation) and
+    // Settings choices (preferences) in localStorage. #504's row names only the latter.
+    const keys = Object.keys(stored.local).sort();
+    row.note('localStorage keys', keys);
+    row.check(
+      'only the navigation and preferences keys',
+      keys.every((key) =>
+        ['opencoven.chat.navigation.v1', 'opencoven.chat.preferences.v1'].includes(key),
+      ) && keys.includes('opencoven.chat.preferences.v1'),
+      keys,
+    );
+    if (stored.local['opencoven.chat.navigation.v1']) {
+      const navigation = JSON.parse(stored.local['opencoven.chat.navigation.v1']);
+      row.expect('navigation fields', Object.keys(navigation).sort(), ['familiarId', 'sessionId']);
+    }
     const preferences = JSON.parse(stored.local['opencoven.chat.preferences.v1']);
     row.note('stored preferences', preferences);
     row.expect('inspectorWidth is a number', typeof preferences.inspectorWidth, 'number');
@@ -676,6 +785,7 @@ export async function rightClickRow(s, opened) {
   const row = new Row('504-1-context', 'Right-click on a link (partial)');
   try {
     const before = opened.received().length;
+    await conversationLoaded(s, row, 'three steps');
     const link = (await s.all('link', 'Handoff check')).at(-1);
     await s.click(link, { button: 2 });
     await sleep(1_500);
