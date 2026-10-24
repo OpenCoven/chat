@@ -271,11 +271,24 @@ jobs:
             Get-Process -Name opencoven-chat, msedgewebview2 -ErrorAction SilentlyContinue | Format-Table Id, ProcessName, StartTime, MainWindowTitle -AutoSize | Out-String
             'Application errors in the last 30 minutes:'
             Get-WinEvent -FilterHashtable @{ LogName = 'Application'; Level = 1, 2; StartTime = (Get-Date).AddMinutes(-30) } -ErrorAction SilentlyContinue | Select-Object -First 20 TimeCreated, ProviderName, Message | Format-List | Out-String
-            'Launching the app directly for 20 seconds:'
+            'Launching the app directly for 25 seconds, asking WebView2 for a debugging port:'
+            $env:WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS = '--remote-debugging-port=9334'
             $app = Start-Process -FilePath "${{ steps.install.outputs.application }}" -PassThru
-            Start-Sleep -Seconds 20
+            Start-Sleep -Seconds 25
             $app.Refresh()
             "exited: $($app.HasExited) exit code: $(if ($app.HasExited) { $app.ExitCode } else { 'n/a' }) window: '$($app.MainWindowTitle)'"
+            'WebView2 processes and their command lines:'
+            Get-CimInstance Win32_Process -Filter "Name='msedgewebview2.exe'" | ForEach-Object { "$($_.ProcessId) <- $($_.ParentProcessId): $($_.CommandLine)".Substring(0, [Math]::Min(700, "$($_.ProcessId) <- $($_.ParentProcessId): $($_.CommandLine)".Length)) }
+            'Listening on 9334:'
+            Get-NetTCPConnection -LocalPort 9334 -State Listen -ErrorAction SilentlyContinue | Format-Table LocalAddress, LocalPort, OwningProcess -AutoSize | Out-String
+            'App data folders:'
+            Get-ChildItem (Join-Path $env:LOCALAPPDATA 'ai.opencoven.chat') -Recurse -Depth 2 -ErrorAction SilentlyContinue | Select-Object -First 40 FullName | Out-String
+            Get-ChildItem $env:LOCALAPPDATA -Filter DevToolsActivePort -Recurse -Depth 5 -ErrorAction SilentlyContinue | Select-Object FullName | Out-String
+            Add-Type -AssemblyName System.Windows.Forms, System.Drawing
+            $bounds = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
+            $bitmap = New-Object System.Drawing.Bitmap $bounds.Width, $bounds.Height
+            [System.Drawing.Graphics]::FromImage($bitmap).CopyFromScreen($bounds.Location, [System.Drawing.Point]::Empty, $bounds.Size)
+            $bitmap.Save((Join-Path $out 'desktop.png'))
             if (-not $app.HasExited) { Stop-Process -Id $app.Id -Force }
           } *>&1 | Tee-Object -FilePath (Join-Path $out 'windows-diagnostics.txt')
       - name: Upload the observations
