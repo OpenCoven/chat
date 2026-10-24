@@ -306,16 +306,9 @@ async function setUp(s, setupRow) {
   await name.click();
   await name.type(FIRST);
   await (await s.one('button', 'Create familiar')).click();
-  await until(
-    'the chat',
-    async () => {
-      const proceed = await s.all('button', 'Continue to Chat');
-      if (proceed.length === 1) await proceed[0].click();
-      return (await s.all('textbox', `Message ${FIRST}`)).length === 1;
-    },
-    120_000,
-    500,
-  );
+  // Setup opens the chat by itself once it is complete. "Continue to Chat" is
+  // offered earlier, with no familiar yet, so it is never pressed here.
+  await next('Create familiar', 'textbox', `Message ${FIRST}`, 120_000);
   setupRow.note('Create familiar', `${FIRST}; the chat opened`);
 }
 
