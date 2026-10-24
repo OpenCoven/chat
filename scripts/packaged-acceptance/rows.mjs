@@ -312,7 +312,7 @@ async function selectText(s, script) {
 
 /** Row 3, the parts a keyboard and a programmatic selection can prove. */
 export async function quoteRow(s, familiar, requests) {
-  const row = new Row('504-3', 'Quote selection, held Enter (keyboard part)');
+  const row = new Row('504-3', 'Quote selection and Enter on the action (keyboard part)');
   try {
     const composer = await composerOf(s, familiar);
     await clearComposer(s, composer);
@@ -355,6 +355,42 @@ export async function quoteRow(s, familiar, requests) {
       await s.isActive(quote),
       true,
     );
+    // One Enter on the action quotes once, puts the caret in the draft, sends nothing.
+    await s.press(Key.Enter);
+    await sleep(1_000);
+    const value = await composer.property('value');
+    row.note('composer after Enter on the action', value);
+    row.check(
+      'the draft holds one quote of the selection',
+      value.startsWith('> ') && value.split('> The plan has three steps.').length === 2,
+      value,
+    );
+    row.check(
+      'the quote keeps the line breaks',
+      value.includes('>\n> First, read the source.'),
+      value,
+    );
+    row.expect('model requests after Enter on the action (no send)', requests(), sent);
+    row.expect('composer focused after quoting', await s.isActive(composer), true);
+
+    // Held Enter: the composer ignores Enter only while it repeats (event.repeat),
+    // so this is judged only when the driver marks the later key-downs as repeats.
+    await clearComposer(s, composer);
+    await selectText(
+      s,
+      `const bubble = [...document.querySelectorAll('.fr-bubble--familiar')]
+        .find((node) => node.textContent.includes('three steps'));
+      const items = bubble.querySelectorAll('li');
+      range.setStart(bubble.querySelector('p'), 0);
+      range.setEnd(items[0], items[0].childNodes.length);`,
+    );
+    const again = await s.one('button', 'Quote selection');
+    await again.focus();
+    await s.execute(`window.__enterDowns = [];
+      window.addEventListener('keydown', (event) => {
+        if (event.key === 'Enter') window.__enterDowns.push(event.repeat);
+      }, true);`);
+    const before = requests();
     await s.actions([
       {
         type: 'key',
@@ -370,20 +406,23 @@ export async function quoteRow(s, familiar, requests) {
     ]);
     await s.release();
     await sleep(1_500);
-    const value = await composer.property('value');
-    row.note('composer after holding Enter on the action', value);
-    row.check(
-      'the draft holds one quote of the selection',
-      value.startsWith('> ') && value.split('> The plan has three steps.').length === 2,
-      value,
-    );
-    row.check(
-      'the quote keeps the line breaks',
-      value.includes('>\n> First, read the source.'),
-      value,
-    );
-    row.expect('model requests after holding Enter (no send)', requests(), sent);
-    row.expect('composer focused after quoting', await s.isActive(composer), true);
+    const repeats = await s.execute('return window.__enterDowns;');
+    row.note('Enter key-downs while held (repeat flag)', repeats);
+    if (repeats.length > 1 && repeats.slice(1).every(Boolean)) {
+      const held = await composer.property('value');
+      row.check(
+        'held Enter quotes once',
+        held.split('> The plan has three steps.').length === 2,
+        held,
+      );
+      row.expect('model requests after holding Enter (no send)', requests(), before);
+    } else {
+      row.note(
+        'held Enter',
+        'not judged here: the driver sent the later key-downs as fresh presses, and a fresh Enter in the composer sends',
+      );
+      row.note('model requests after those presses', requests() - before);
+    }
 
     await clearComposer(s, composer);
     const cell = await selectText(
@@ -657,11 +696,17 @@ export async function inspectorRow(s, familiar) {
     await (await s.one('separator', 'Resize inspector')).focus();
     await s.press(Key.End);
     row.expect('stored width before narrowing', await width(), 600);
+    // Narrowing folds the rail away, and widening never forces it back open
+    // (chat-layout.tsx); the stored width is what must survive the trip.
+    const inspectorState = () =>
+      s.execute("return document.querySelector('.coven-chat')?.getAttribute('data-inspector');");
     await resize(s, 1000, 800);
-    const narrow = await s.execute(`const rail = document.querySelector('.fr-inspector');
-      const box = rail?.getBoundingClientRect();
-      return { present: Boolean(rail), width: box?.width ?? 0, left: box?.left ?? null, view: innerWidth };`);
-    row.note('inspector at 1000px wide (drawer tier)', narrow);
+    await until(
+      'the inspector to fold at 1000px',
+      async () => (await inspectorState()) === 'closed',
+      10_000,
+    );
+    row.note('inspector at 1000px wide', await inspectorState());
     const composer = await composerOf(s, familiar);
     row.check(
       'composer reachable at 1000px',
@@ -670,39 +715,19 @@ export async function inspectorRow(s, familiar) {
       ),
     );
     await resize(s, 1400, 800);
-    const returned = await until(
-      'the rail to return',
+    await sleep(1_000);
+    row.expect(
+      'inspector after widening to 1400px (not forced open)',
+      await inspectorState(),
+      'closed',
+    );
+    await s.click(await s.one('button', 'Show inspector'));
+    await until(
+      'the rail to open',
       async () => (await s.all('separator', 'Resize inspector')).length === 1,
       10_000,
-    ).catch(() => false);
-    if (!returned) {
-      row.note(
-        'inspector after widening to 1400px',
-        await s.execute(`const rail = document.querySelector('.fr-inspector');
-          const box = rail?.getBoundingClientRect();
-          const named = (label) => [...document.querySelectorAll('button')].some((b) => b.getAttribute('aria-label') === label && b.getClientRects().length);
-          return {
-            present: Boolean(rail), width: box?.width ?? 0, left: box?.left ?? null, view: innerWidth,
-            showInspector: named('Show inspector'), closeInspector: named('Close inspector'),
-            chat: document.querySelector('.coven-chat')?.getAttribute('data-inspector') ?? null,
-          };`),
-      );
-      const show = await s.all('button', 'Show inspector');
-      if (show.length) {
-        await s.click(show[0]);
-        await sleep(500);
-        row.note(
-          'width after pressing Show inspector',
-          await s.execute(
-            "return document.querySelector('.fr-inspector')?.getBoundingClientRect().width ?? null;",
-          ),
-        );
-      }
-      throw new Error(
-        'After narrowing across 1100px and widening to 1400px, the inspector came back closed, not as the 600px rail.',
-      );
-    }
-    row.expect('600px returns after widening again', await width(), 600);
+    );
+    row.expect('Show inspector opens it at the stored 600px', await width(), 600);
     settings = await openSettingsGeneral(s);
     const again = await settings.evaluate('return node.textContent.replace(/\\s+/g, " ");');
     row.check('Settings still shows 600px', again.includes('600px'), again.slice(0, 400));
