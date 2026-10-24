@@ -108,6 +108,50 @@ function facts(userAgent) {
   return result;
 }
 
+/**
+ * After a failed setup on Linux, compares the engine install under the running
+ * app's own environment with a plain one, so a failure can be pinned on the
+ * host (an AppImage's environment, say) or on the network.
+ */
+function diagnoseSetup(row) {
+  if (process.platform !== 'linux') return;
+  const pid = tryRun('pgrep', ['-n', '-f', options.application]).split('\n')[0];
+  if (!/^\d+$/.test(pid)) {
+    row.note('app environment', `no running process for ${options.application}`);
+    return;
+  }
+  const appEnv = Object.fromEntries(
+    readFileSync(`/proc/${pid}/environ`, 'utf8')
+      .split('\0')
+      .filter(Boolean)
+      .map((entry) => [entry.slice(0, entry.indexOf('=')), entry.slice(entry.indexOf('=') + 1)]),
+  );
+  const differing = Object.keys(appEnv)
+    .filter((key) =>
+      /^(LD_|SSL_|CURL|GIO|GTK|GDK|APPDIR|APPIMAGE|OWD|PATH$|XDG_DATA_DIRS)/.test(key),
+    )
+    .filter((key) => appEnv[key] !== process.env[key])
+    .map((key) => `${key}=${appEnv[key].slice(0, 300)}`);
+  row.note(`app environment that differs from the suite (pid ${pid})`, differing);
+  const install = (env) => {
+    try {
+      return execFileSync(covenCli(), ['engine', 'install'], {
+        encoding: 'utf8',
+        env,
+        timeout: 300_000,
+        stdio: ['ignore', 'pipe', 'pipe'],
+      })
+        .trim()
+        .split('\n')
+        .at(-1);
+    } catch (error) {
+      return `failed (${error.status}): ${`${error.stderr ?? ''}`.trim().split('\n').slice(-3).join(' / ')}`;
+    }
+  };
+  row.note('coven engine install with the app environment', install({ ...appEnv }));
+  row.note('coven engine install with a plain environment', install(process.env));
+}
+
 async function startDriver(env) {
   const args = ['--port', options.port];
   if (options['native-driver']) args.push('--native-driver', options['native-driver']);
@@ -282,6 +326,7 @@ try {
   rows.push(await rightClickRow(session, opened));
 } catch (error) {
   setupRow.error = error.message;
+  if (/^Install Coven/.test(error.message)) diagnoseSetup(setupRow);
 } finally {
   for (const row of rows) {
     row.status = row.error ? 'failed' : row.skipped ? 'not reached' : 'observed';
