@@ -102,6 +102,17 @@ async function closeReview(s) {
 /** Closes whatever review, sheet or menu a failed step left open. */
 async function reset(s) {
   for (let index = 0; index < 3; index += 1) await s.press(Key.Escape).catch(() => undefined);
+  // Escape reaches only the focused flow; close whatever is still open by its own control.
+  for (let index = 0; index < 3; index += 1) {
+    const open = await s.all('dialog').catch(() => []);
+    if (!open.length) break;
+    const within = open.at(-1);
+    const control =
+      (await s.all('button', 'Close', { within }).catch(() => []))[0] ??
+      (await s.all('button', 'Cancel', { within }).catch(() => []))[0];
+    if (!control) break;
+    await control.click().catch(() => undefined);
+  }
   await s.execute('getSelection()?.removeAllRanges();').catch(() => undefined);
 }
 

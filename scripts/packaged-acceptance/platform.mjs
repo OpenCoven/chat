@@ -22,7 +22,8 @@ export function readClipboard() {
       ],
       { encoding: 'utf8', timeout: 10_000 },
     );
-    return out;
+    // Windows keeps clipboard text with CRLF line ends; compare the text itself.
+    return out.replace(/\r\n/g, '\n');
   }
   try {
     return execFileSync('xclip', ['-o', '-selection', 'clipboard'], {
