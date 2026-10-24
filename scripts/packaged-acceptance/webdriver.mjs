@@ -215,13 +215,23 @@ export class Session {
    * a pointer that moves onto them first is what a person does.
    */
   async click(element, { button = 0, modifier } = {}) {
-    await element.evaluate("node.scrollIntoView({ block: 'center', inline: 'nearest' });");
+    // Aim at the centre in viewport coordinates, and refuse rather than click
+    // whatever covers the target: WebKitWebDriver's element origin rejects a
+    // covered element without saying what covers it.
+    const aim = await element.evaluate(`node.scrollIntoView({ block: 'center', inline: 'nearest' });
+      const box = node.getBoundingClientRect();
+      const x = box.left + box.width / 2;
+      const y = box.top + box.height / 2;
+      const hit = document.elementFromPoint(x, y);
+      const describe = (el) => el ? el.tagName.toLowerCase() + (el.className && typeof el.className === 'string' ? '.' + el.className.trim().split(/\\s+/).join('.') : '') : 'nothing';
+      return { x, y, reachable: Boolean(hit) && (node === hit || node.contains(hit)), cover: describe(hit) };`);
+    if (!aim.reachable) throw new Error(`The target is covered by ${aim.cover}`);
     const pointer = {
       type: 'pointer',
       id: 'mouse',
       parameters: { pointerType: 'mouse' },
       actions: [
-        { type: 'pointerMove', origin: { [ELEMENT]: element.ref }, x: 0, y: 0 },
+        { type: 'pointerMove', origin: 'viewport', x: Math.round(aim.x), y: Math.round(aim.y) },
         { type: 'pointerDown', button },
         { type: 'pointerUp', button },
       ],
@@ -245,6 +255,23 @@ export class Session {
       pointer.actions.unshift({ type: 'pause' });
       await this.actions([keys, pointer]);
     }
+    await this.release();
+  }
+
+  /** A primary click at viewport coordinates, on whatever is there. */
+  async clickPoint(x, y) {
+    await this.actions([
+      {
+        type: 'pointer',
+        id: 'mouse',
+        parameters: { pointerType: 'mouse' },
+        actions: [
+          { type: 'pointerMove', origin: 'viewport', x: Math.round(x), y: Math.round(y) },
+          { type: 'pointerDown', button: 0 },
+          { type: 'pointerUp', button: 0 },
+        ],
+      },
+    ]);
     await this.release();
   }
 

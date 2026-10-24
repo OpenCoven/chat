@@ -35,6 +35,8 @@ const { values: options } = parseArgs({
     'tauri-driver': { type: 'string', default: 'tauri-driver' },
     'native-driver': { type: 'string' },
     port: { type: 'string', default: '4444' },
+    // Windows test builds carry --remote-debugging-port in their WebView2 arguments.
+    'debug-port': { type: 'string' },
   },
 });
 if (!options.application || !options.out) {
@@ -108,7 +110,10 @@ function facts(userAgent) {
   return result;
 }
 
-const DEBUG_PORT = 9333;
+/** A lane that cannot run here, for a reason outside the app's behaviour. */
+class Blocked extends Error {}
+
+const DEBUG_PORT = Number(options['debug-port'] ?? 9333);
 
 /** True once the app's WebView2 answers on the remote debugging port. */
 async function debuggerUp(timeout) {
@@ -130,18 +135,29 @@ async function debuggerUp(timeout) {
  * per-user AdditionalBrowserArguments policy -- and attach by debuggerAddress,
  * which Microsoft documents for WebView2 apps. Which path worked is recorded.
  */
-async function attachWindows(env, row) {
+async function attachWindows(env, row, { builtIn = false } = {}) {
   const flag = `--remote-debugging-port=${DEBUG_PORT}`;
   const exe = options.application.split('\\').at(-1);
   const policy = 'HKCU\\Software\\Policies\\Microsoft\\Edge\\WebView2\\AdditionalBrowserArguments';
   const launch = (extra) =>
     spawn(options.application, [], { env: { ...env, ...extra }, stdio: 'ignore' });
-  // A WebView2 browser process left from msedgedriver's attempt would be reused
-  // with its own switches; give it time to exit with the app it served.
-  await sleep(5_000);
-  let app = launch({ WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: flag });
-  let how = 'WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS';
-  if (!(await debuggerUp(45_000))) {
+  let app;
+  let how;
+  if (builtIn) {
+    app = launch({});
+    how = 'the WebView2 arguments of this test build';
+    if (!(await debuggerUp(60_000))) {
+      app.kill();
+      throw new Error(`This test build did not open a WebView2 debugging port on ${DEBUG_PORT}.`);
+    }
+  } else {
+    // A WebView2 browser process left from msedgedriver's attempt would be reused
+    // with its own switches; give it time to exit with the app it served.
+    await sleep(5_000);
+    app = launch({ WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: flag });
+    how = 'WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS';
+  }
+  if (!builtIn && !(await debuggerUp(45_000))) {
     row.note(
       'debugging port through WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS',
       'did not open in 45 s',
@@ -153,8 +169,8 @@ async function attachWindows(env, row) {
     how = `per-user WebView2 policy ${policy}\\${exe}`;
     if (!(await debuggerUp(45_000))) {
       app.kill();
-      throw new Error(
-        'The WebView2 debugging port opened through neither the environment nor the policy.',
+      throw new Blocked(
+        'WebView2 ignored the debugging switch from both WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS and its per-user policy. wry sets AdditionalBrowserArguments for every Tauri 2 app, and this WebView2 lets that win, so a shipped Windows build cannot be attached to from outside.',
       );
     }
   }
@@ -183,6 +199,26 @@ async function attachWindows(env, row) {
       }
     },
   };
+}
+
+/**
+ * Starts a session on the installed app: through tauri-driver, or on Windows by
+ * attaching to the app's WebView2 when msedgedriver cannot launch it.
+ */
+async function openSession(env, row) {
+  if (options['debug-port']) return attachWindows(env, row, { builtIn: true });
+  driver = await startDriver(env);
+  try {
+    const session = await Session.start(driver.base, {
+      'tauri:options': { application: options.application },
+    });
+    row.note('session', 'tauri-driver launched the app');
+    return { session, close: () => undefined };
+  } catch (error) {
+    if (process.platform !== 'win32' || !/DevToolsActivePort/.test(error.message)) throw error;
+    row.note('tauri-driver session', error.message);
+    return attachWindows(env, row);
+  }
 }
 
 /**
@@ -376,6 +412,7 @@ const requests = () =>
 const opened = registerRecorder(join(out, 'opened.jsonl'));
 const env = {
   ...process.env,
+  ...opened.env,
   ANTHROPIC_BASE_URL: `http://127.0.0.1:${fixture.port}`,
   ANTHROPIC_API_KEY: 'sk-ant-packaged-acceptance-fixture',
 };
@@ -390,18 +427,8 @@ setupRow.note('system browser registration', `${opened.handler} via ${opened.ope
 rows.push(setupRow);
 
 try {
-  driver = await startDriver(env);
-  try {
-    session = await Session.start(driver.base, {
-      'tauri:options': { application: options.application },
-    });
-    setupRow.note('session', 'tauri-driver launched the app');
-  } catch (error) {
-    if (process.platform !== 'win32' || !/DevToolsActivePort/.test(error.message)) throw error;
-    setupRow.note('tauri-driver session', error.message);
-    attached = await attachWindows(env, setupRow);
-    session = attached.session;
-  }
+  attached = await openSession(env, setupRow);
+  session = attached.session;
   userAgent = await session.execute('return navigator.userAgent;');
   await setUp(session, setupRow);
   rows.push(...(await linkRows(session, FIRST, opened, requests)));
@@ -428,10 +455,17 @@ try {
   rows.push(await rightClickRow(session, opened));
 } catch (error) {
   setupRow.error = error.message;
+  if (error instanceof Blocked) setupRow.blocked = true;
   if (/^Install Coven/.test(error.message)) diagnoseSetup(setupRow);
 } finally {
   for (const row of rows) {
-    row.status = row.error ? 'failed' : row.skipped ? 'not reached' : 'observed';
+    row.status = row.blocked
+      ? 'blocked'
+      : row.error
+        ? 'failed'
+        : row.skipped
+          ? 'not reached'
+          : 'observed';
   }
   if (session) {
     try {

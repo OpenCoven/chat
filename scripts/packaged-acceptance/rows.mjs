@@ -40,6 +40,13 @@ export async function composerOf(s, familiar) {
   return s.one('textbox', `Message ${familiar}`, { timeout: 30_000 });
 }
 
+/** Empties the draft as a person would. WebDriver's clear() bypasses React's state. */
+async function clearComposer(s, composer) {
+  await composer.focus();
+  await s.press([Key.Control, 'a'], Key.Backspace);
+  await until('an empty draft', async () => (await composer.property('value')) === '', 5_000);
+}
+
 /** Sends through the real composer and waits for the reply's marker to render. */
 export async function send(s, familiar, text, role, name) {
   const composer = await composerOf(s, familiar);
@@ -254,9 +261,15 @@ async function openOnce(s, row, opened, address) {
   const { review } = await reviewParts(s);
   const open = await s.one('button', 'Open', { within: review });
   await open.click();
-  await until('the Open status', async () =>
-    ((await review.text()) ?? '').includes('Sent the address to your browser.'),
-  );
+  try {
+    await until('the Open status', async () =>
+      ((await review.text()) ?? '').includes('Sent the address to your browser.'),
+    );
+  } catch {
+    row.note('review text after Open', ((await review.text()) ?? '').replace(/\s+/g, ' ').trim());
+    row.note('browser launches recorded', opened.received().length - before);
+    throw new Error('The review never said "Sent the address to your browser."');
+  }
   row.note('Open status', 'Sent the address to your browser.');
   const received = await until(
     'the recorder to receive the address',
@@ -284,7 +297,7 @@ export async function quoteRow(s, familiar, requests) {
   const row = new Row('504-3', 'Quote selection, held Enter (keyboard part)');
   try {
     const composer = await composerOf(s, familiar);
-    await composer.clear();
+    await clearComposer(s, composer);
     const selected = await selectText(
       s,
       `const bubble = [...document.querySelectorAll('.fr-bubble--familiar')]
@@ -354,7 +367,7 @@ export async function quoteRow(s, familiar, requests) {
     row.expect('model requests after holding Enter (no send)', requests(), sent);
     row.expect('composer focused after quoting', await s.isActive(composer), true);
 
-    await composer.clear();
+    await clearComposer(s, composer);
     const cell = await selectText(
       s,
       `const cell = [...document.querySelectorAll('.fr-bubble--familiar td')]
@@ -365,7 +378,7 @@ export async function quoteRow(s, familiar, requests) {
     await (await s.one('button', 'Quote selection')).click();
     row.expect('a table cell quotes', await composer.property('value'), '> a | b\n\n');
 
-    await composer.clear();
+    await clearComposer(s, composer);
     const across = await selectText(
       s,
       `const bubbles = document.querySelectorAll('.fr-bubble');
@@ -380,7 +393,7 @@ export async function quoteRow(s, familiar, requests) {
       0,
     );
     await s.execute('getSelection().removeAllRanges();');
-    await composer.clear();
+    await clearComposer(s, composer);
   } catch (error) {
     row.error = error.message;
   }
@@ -549,10 +562,11 @@ export async function inspectorRow(s, familiar) {
 
     await s.press(Key.Home);
     const min = await width();
-    const box = await handle.rect();
-    const x = box.x + box.width / 2;
-    const y = box.y + 300;
-    await s.drag({ x, y }, { x: x - 100, y });
+    const box = await handle.evaluate(
+      'const b = node.getBoundingClientRect(); return { x: b.left + b.width / 2, y: b.top + b.height / 2 };',
+    );
+    await s.execute('getSelection()?.removeAllRanges();');
+    await s.drag(box, { x: box.x - 100, y: box.y });
     row.note('in-window synthetic drag of 100px (not real pointer capture)', {
       before: min,
       after: await width(),
@@ -589,10 +603,27 @@ export async function inspectorRow(s, familiar) {
       ),
     );
     await resize(s, 1400, 800);
-    await until(
+    const returned = await until(
       'the rail to return',
       async () => (await s.all('separator', 'Resize inspector')).length === 1,
-    );
+      10_000,
+    ).catch(() => false);
+    if (!returned) {
+      row.note(
+        'inspector after widening to 1400px',
+        await s.execute(`const rail = document.querySelector('.fr-inspector');
+          const box = rail?.getBoundingClientRect();
+          const named = (label) => [...document.querySelectorAll('button')].some((b) => b.getAttribute('aria-label') === label && b.getClientRects().length);
+          return {
+            present: Boolean(rail), width: box?.width ?? 0, left: box?.left ?? null, view: innerWidth,
+            showInspector: named('Show inspector'), closeInspector: named('Close inspector'),
+            chat: document.querySelector('.coven-chat')?.getAttribute('data-inspector') ?? null,
+          };`),
+      );
+      throw new Error(
+        'The inspector did not return as a resizable rail within 10 s of widening to 1400px.',
+      );
+    }
     row.expect('600px returns after widening again', await width(), 600);
     settings = await openSettingsGeneral(s);
     const again = await settings.evaluate('return node.textContent.replace(/\\s+/g, " ");');
@@ -632,37 +663,15 @@ export async function conversationLoaded(s, row, text, timeout = 90_000) {
   return Date.now() - started;
 }
 
-async function clickAt(s, element) {
-  const box = await element.rect();
-  await s.actions([
-    {
-      type: 'pointer',
-      id: 'mouse',
-      parameters: { pointerType: 'mouse' },
-      actions: [
-        {
-          type: 'pointerMove',
-          origin: 'viewport',
-          x: Math.round(box.x + box.width / 2),
-          y: Math.round(box.y + box.height / 2),
-        },
-        { type: 'pointerDown', button: 0 },
-        { type: 'pointerUp', button: 0 },
-      ],
-    },
-  ]);
-  await s.release();
-}
-
 /** Row 4: switching familiars with a passage, a sheet and a review open. */
 export async function switchRow(s, first, second) {
   const row = new Row('504-4', 'Chat-switch isolation');
   try {
-    await (await s.one('button', second)).click();
+    await s.click(await s.one('button', second));
     const other = await composerOf(s, second);
     await other.click();
     await other.type('Draft kept for later');
-    await (await s.one('button', first)).click();
+    await s.click(await s.one('button', first));
     await composerOf(s, first);
     row.note(
       `${first}'s conversation loaded after switching back (ms)`,
@@ -680,7 +689,7 @@ export async function switchRow(s, first, second) {
       (await s.all('button', 'Quote selection')).length,
       1,
     );
-    await (await s.all('button', 'Expand table')).at(-1).click();
+    await s.click((await s.all('button', 'Expand table')).at(-1));
     const sheet = await s.one('dialog', 'Expanded table');
     const link = await s.one('link', 'Guide', { within: sheet });
     await link.focus();
@@ -688,41 +697,43 @@ export async function switchRow(s, first, second) {
     await s.one('dialog', REVIEW);
     row.note('open before the switch', 'passage, expanded table and link review');
 
-    const rail = await s.one('button', second);
-    const hit = await rail.evaluate(`const box = node.getBoundingClientRect();
-      return node.contains(document.elementFromPoint(box.x + box.width / 2, box.y + box.height / 2));`);
-    row.note('the familiar rail takes the pointer while the review is open', hit);
-    await clickAt(s, rail);
-    const switched = await until(
-      'the switch to settle',
-      async () => ((await s.all('textbox', `Message ${second}`)).length === 1 ? 'switched' : null),
-      5_000,
-    ).catch(() => 'not switched');
-    row.note('pointer click on the other familiar', switched);
-    if (switched !== 'switched') {
-      throw new Error(
-        'With the review open, a pointer click on the familiar rail does not switch familiars; no keyboard path was driven.',
-      );
-    }
-    row.expect('review after the switch', (await s.all('dialog', REVIEW)).length, 0);
-    row.expect('sheet after the switch', (await s.all('dialog', 'Expanded table')).length, 0);
-    row.expect(
-      'waiting quote after the switch',
-      (await s.all('button', 'Quote selection')).length,
-      0,
+    // Click the other familiar in the rail as a person would, and record what
+    // each click does: an open review or sheet takes a click outside to close.
+    const state = async () => ({
+      review: (await s.all('dialog', REVIEW)).length,
+      sheet: (await s.all('dialog', 'Expanded table')).length,
+      quote: (await s.all('button', 'Quote selection')).length,
+      chat: (await s.all('textbox', `Message ${second}`)).length ? second : first,
+    });
+    const target = await s.execute(
+      `const row = [...document.querySelectorAll('button.coven-agent-row')].find((b) => b.getAttribute('aria-label') === arguments[0]);
+      const box = row.getBoundingClientRect();
+      return { x: box.left + box.width / 2, y: box.top + box.height / 2 };`,
+      second,
     );
+    let now = await state();
+    for (let click = 1; click <= 3 && now.chat !== second; click += 1) {
+      await s.clickPoint(target.x, target.y);
+      await sleep(800);
+      now = await state();
+      row.note(`after click ${click} on ${second} in the rail`, now);
+    }
+    row.expect('the switch happened', now.chat, second);
+    row.expect('review after the switch', now.review, 0);
+    row.expect('sheet after the switch', now.sheet, 0);
+    row.expect('waiting quote after the switch', now.quote, 0);
     row.expect(
       'the new chat keeps its draft',
       await (await composerOf(s, second)).property('value'),
       'Draft kept for later',
     );
     row.note('focus after the switch', await focusedName(s));
-    await (await composerOf(s, second)).clear();
-    await (await s.one('button', first)).click();
+    await clearComposer(s, await composerOf(s, second));
+    await s.click(await s.one('button', first));
     await composerOf(s, first);
   } catch (error) {
     row.error = error.message;
-    for (let index = 0; index < 3; index += 1) await s.press(Key.Escape).catch(() => undefined);
+    await reset(s);
   }
   return row;
 }
@@ -787,8 +798,13 @@ export async function rightClickRow(s, opened) {
     const before = opened.received().length;
     await conversationLoaded(s, row, 'three steps');
     const link = (await s.all('link', 'Handoff check')).at(-1);
+    await link.evaluate(`window.__linkEvents = [];
+      for (const type of ['mousedown', 'mouseup', 'click', 'auxclick', 'contextmenu']) {
+        node.addEventListener(type, (event) => window.__linkEvents.push(type + ':' + event.button), true);
+      }`);
     await s.click(link, { button: 2 });
     await sleep(1_500);
+    row.note('events the link received', await s.execute('return window.__linkEvents;'));
     row.expect('right-click opens the review', (await s.all('dialog', REVIEW)).length, 0);
     row.expect('right-click reaches the browser', opened.received().length - before, 0);
     row.note('native menu contents', 'not observable through WebDriver; hand-run');

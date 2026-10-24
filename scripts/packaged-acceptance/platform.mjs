@@ -43,21 +43,25 @@ function registerLinux(log) {
   const name = 'chat-acceptance-browser.desktop';
   mkdirSync(join(data, 'applications'), { recursive: true });
   mkdirSync(config, { recursive: true });
+  // One executable is both the desktop entry's command and, if needed, BROWSER.
+  const browser = join(dirname(log), 'chat-acceptance-browser');
+  writeFileSync(browser, `#!/bin/sh\nexec "${process.execPath}" "${RECORDER}" "${log}" "$@"\n`, {
+    mode: 0o755,
+  });
   writeFileSync(
     join(data, 'applications', name),
     [
       '[Desktop Entry]',
       'Type=Application',
       'Name=Chat acceptance browser',
-      `Exec="${process.execPath}" "${RECORDER}" "${log}" %u`,
+      `Exec=${browser} %u`,
       'MimeType=x-scheme-handler/http;x-scheme-handler/https;',
       'NoDisplay=true',
       '',
     ].join('\n'),
   );
-  const list = join(config, 'mimeapps.list');
   writeFileSync(
-    list,
+    join(config, 'mimeapps.list'),
     [
       '[Default Applications]',
       `x-scheme-handler/http=${name}`,
@@ -69,7 +73,29 @@ function registerLinux(log) {
     encoding: 'utf8',
   }).trim();
   if (chosen !== name) throw new Error(`xdg-mime chose ${chosen || 'nothing'}, not ${name}`);
-  return { handler: name, opener: 'xdg-open' };
+
+  // Check that xdg-open reaches the recorder before any app depends on it.
+  const probe = 'https://example.invalid/opener-self-check';
+  const reaches = (env) => {
+    writeFileSync(log, '');
+    try {
+      execFileSync('xdg-open', [probe], { env, timeout: 20_000, stdio: 'ignore' });
+    } catch {
+      // Judged by what the recorder received, below.
+    }
+    return readFileSync(log, 'utf8').includes(probe);
+  };
+  let env = {};
+  let via = `xdg-open through ${name} (mimeapps.list)`;
+  if (!reaches(process.env)) {
+    env = { BROWSER: browser };
+    via = 'xdg-open through BROWSER';
+    if (!reaches({ ...process.env, ...env })) {
+      throw new Error('xdg-open reached the recorder neither through mimeapps.list nor BROWSER.');
+    }
+  }
+  writeFileSync(log, '');
+  return { handler: via, opener: 'xdg-open', env };
 }
 
 function regQuery(key, value) {
@@ -109,7 +135,27 @@ function registerWindows(log) {
     }
     handlers.push(`${scheme}: ${chosen.length ? chosen.join(', ') : 'no user choice'}`);
   }
-  return { handler: handlers.join('; '), opener: 'rundll32 url.dll,FileProtocolHandler' };
+  // Check that the system's opener reaches the recorder before any app depends on it.
+  const probe = 'https://example.invalid/opener-self-check';
+  writeFileSync(log, '');
+  try {
+    execFileSync(
+      join(process.env.SystemRoot ?? 'C:\\Windows', 'System32', 'rundll32.exe'),
+      ['url.dll,FileProtocolHandler', probe],
+      { timeout: 20_000, stdio: 'ignore' },
+    );
+  } catch {
+    // Judged by what the recorder received, below.
+  }
+  const deadline = Date.now() + 15_000;
+  while (!readFileSync(log, 'utf8').includes(probe)) {
+    if (Date.now() > deadline) {
+      throw new Error(`rundll32 did not reach the recorder (${handlers.join('; ')}).`);
+    }
+    execFileSync(process.execPath, ['-e', 'setTimeout(() => {}, 250)']);
+  }
+  writeFileSync(log, '');
+  return { handler: handlers.join('; '), opener: 'rundll32 url.dll,FileProtocolHandler', env: {} };
 }
 
 /** Makes the recorder the default browser and returns how to read what it received. */
