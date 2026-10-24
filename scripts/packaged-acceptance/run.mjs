@@ -66,9 +66,9 @@ const KNOWN = [
 
 // Rows a person still has to run, whatever this lane observes.
 const HAND_RUN = [
-  ['504-1', 'Native context menu contents on right-click'],
+  ['504-1', 'Native context menu contents on right-click; right-click at all on WebKitGTK'],
   ['504-2', 'Screen reader announces the link when focus returns (Narrator, Orca, VoiceOver)'],
-  ['504-3', 'IME composition after a quote; a real drag-selection'],
+  ['504-3', 'IME composition after a quote; a real drag-selection; Enter held on the action'],
   ['504-6', 'Real pointer capture through a drag that leaves the window; separator read aloud'],
   ['504-7', 'Quote kept through a real cancelled run'],
   ['515', "The browser's own address bar, with the browser closed and with it running"],

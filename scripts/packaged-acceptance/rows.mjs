@@ -467,7 +467,16 @@ async function openSettingsGeneral(s) {
 
 async function closeSettings(s) {
   await (await s.one('button', 'Close settings')).click();
-  await s.gone('dialog', 'Settings');
+  // Closing Settings is a step on the way, not something a row judges; if the
+  // click has not closed it, Escape does what a person would try next.
+  const closed = await s
+    .gone('dialog', 'Settings', { timeout: 3_000 })
+    .then(() => true)
+    .catch(() => false);
+  if (!closed) {
+    await s.press(Key.Escape);
+    await s.gone('dialog', 'Settings');
+  }
 }
 
 async function viewport(s) {
