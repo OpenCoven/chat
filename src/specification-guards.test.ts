@@ -1111,15 +1111,25 @@ describe('Phase 1 specification guards', () => {
     // GitHub's default is six hours, which is not a timeout but a limit on the
     // damage. Desktop build had no ceiling and sat on a single step for
     // forty-seven minutes before it was killed by hand.
-    const workflow = readText('.github/workflows/ci.yml');
-    const jobsBlock = workflow.slice(workflow.indexOf('\njobs:'));
-    const jobNames = [...jobsBlock.matchAll(/^ {2}([a-z][a-z0-9-]*):$/gm)].map((match) => match[1]);
-    const timeouts = jobsBlock.match(/^ {4}timeout-minutes: \d+$/gm) ?? [];
-
-    expect(jobNames.length, 'no jobs were found').toBeGreaterThan(0);
-    expect(timeouts, `every job needs a ceiling: ${jobNames.join(', ')}`).toHaveLength(
-      jobNames.length,
-    );
+    // A job that calls a reusable workflow cannot carry a ceiling of its own,
+    // so the jobs of the workflow it calls must.
+    const called: string[] = [];
+    for (const file of ['.github/workflows/ci.yml', '.github/workflows/packaged-acceptance.yml']) {
+      const jobs = workflowJobs(readText(file));
+      expect(jobs.size, `no jobs were found in ${file}`).toBeGreaterThan(0);
+      for (const [name, job] of jobs) {
+        const uses = /^ {4}uses: \.\/(\.github\/workflows\/[a-z-]+\.yml)$/m.exec(job)?.[1];
+        if (uses) {
+          called.push(uses);
+          continue;
+        }
+        expect(job, `${file} job ${name} needs a ceiling`).toMatch(/^ {4}timeout-minutes: \d+$/m);
+      }
+    }
+    expect(called).toEqual([
+      '.github/workflows/packaged-acceptance.yml',
+      '.github/workflows/packaged-acceptance.yml',
+    ]);
   });
 
   it('allows the isolated Phase 1 build and secure cleanup to finish on a cold runner', () => {
@@ -1191,6 +1201,8 @@ describe('Phase 1 specification guards', () => {
       'e2e',
       'phase1-conformance',
       'desktop',
+      'packaged-acceptance',
+      'packaged-acceptance-windows',
       'rust',
       'windows-profile-residual',
       'windows-supervisor-behavior',

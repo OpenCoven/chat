@@ -1,0 +1,314 @@
+# Drives the installed OpenCoven Chat app through tauri-driver -- Linux on
+# WebKitGTK, Windows on WebView2 -- and records what each #504/#515 row it can
+# prove actually observed. CI calls it with the bundle its desktop job built;
+# anyone can dispatch it against a published release's installers.
+#
+# Everything the window shows comes from real runs: packaged Chat installs the
+# pinned Coven through its own setup screen, Coven starts coven-code, and the
+# reply streams back through Chat's capture. The one stand-in is the model: the
+# engine is pointed at a local, deterministic Anthropic-compatible endpoint
+# (scripts/packaged-acceptance/model-fixture.mjs), so no key or account is used
+# and model-provider behaviour is not covered. Results are "automated packaged"
+# evidence, never hand-run results; see docs/packaged-acceptance.md for which
+# rows stay with a person.
+name: Packaged acceptance
+
+on:
+  workflow_call:
+    inputs:
+      release:
+        description: Published tag whose installers to drive; empty drives this run's build.
+        type: string
+        default: ''
+      linux:
+        description: Drive the Linux .deb and AppImage (this run's linux-bundle artifact).
+        type: boolean
+        default: true
+      windows:
+        description: Drive the Windows MSI.
+        type: boolean
+        default: false
+  workflow_dispatch:
+    inputs:
+      release:
+        description: Published tag whose installers to drive, for example v0.0.6.
+        required: true
+        type: string
+      windows:
+        description: Also drive the Windows MSI.
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+  packages: read
+
+env:
+  TAURI_DRIVER_VERSION: 2.1.0
+  RELEASE: ${{ inputs.release }}
+
+jobs:
+  # The CI image is pinned once, in ci.yml, where the image workflow proposes
+  # each new digest. Reading it from there keeps this workflow on the same image.
+  image:
+    name: CI image
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      reference: ${{ steps.pin.outputs.reference }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+          sparse-checkout: .github/workflows/ci.yml
+          sparse-checkout-cone-mode: false
+      - id: pin
+        run: |
+          set -euo pipefail
+          reference=$(grep -oE 'ghcr\.io/opencoven/chat-ci@sha256:[0-9a-f]{64}' .github/workflows/ci.yml | sort -u)
+          if [ "$(printf '%s\n' "${reference}" | wc -l)" -ne 1 ] || [ -z "${reference}" ]; then
+            echo "::error::ci.yml must pin exactly one CI image."
+            exit 1
+          fi
+          echo "reference=${reference}" >> "$GITHUB_OUTPUT"
+
+  linux:
+    name: Linux (${{ matrix.package }})
+    needs: image
+    # Only a caller passing linux: false skips it; a dispatch has no such input.
+    if: format('{0}', inputs.linux) != 'false'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        package: [deb, appimage]
+    container:
+      image: ${{ needs.image.outputs.reference }}
+      credentials:
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version-file: .node-version
+      - uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c # stable
+        with:
+          toolchain: 1.95.0
+      - name: Install tauri-driver
+        run: cargo install tauri-driver --locked --version "${TAURI_DRIVER_VERSION}"
+      - name: Fetch this run's bundle
+        if: env.RELEASE == ''
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: linux-bundle
+          path: ${{ runner.temp }}/package
+      - name: Fetch and verify the release's installer
+        if: env.RELEASE != ''
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="${RELEASE#v}"
+          case "${{ matrix.package }}" in
+            deb) asset="OpenCoven.Chat_${version}_amd64.deb" ;;
+            appimage) asset="OpenCoven.Chat_${version}_amd64.AppImage" ;;
+          esac
+          mkdir -p "$RUNNER_TEMP/package"
+          cd "$RUNNER_TEMP/package"
+          base="https://github.com/OpenCoven/chat/releases/download/${RELEASE}"
+          curl --proto '=https' --tlsv1.2 --fail --location --retry 3 -o SHA256SUMS "$base/SHA256SUMS"
+          curl --proto '=https' --tlsv1.2 --fail --location --retry 3 -o "$asset" "$base/$asset"
+          grep -F "  ${asset}" SHA256SUMS | sha256sum -c -
+      - name: Install the package
+        id: install
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$RUNNER_TEMP/package"
+          case "${{ matrix.package }}" in
+            deb)
+              package=$(find . -name '*.deb' | head -1)
+              dpkg -i "$package"
+              application=$(dpkg -L "$(dpkg-deb -f "$package" Package)" | grep -E '^/usr/bin/' | head -1)
+              ;;
+            appimage)
+              package=$(find . -name '*.AppImage' | head -1)
+              chmod +x "$package"
+              application=$(realpath "$package")
+              ;;
+          esac
+          echo "package=$(realpath "$package")" >> "$GITHUB_OUTPUT"
+          echo "application=${application}" >> "$GITHUB_OUTPUT"
+          echo "Installed ${package} as ${application}"
+      - name: Drive the installed app
+        shell: bash
+        env:
+          # A container offers neither FUSE for the AppImage runtime nor the
+          # user namespaces WebKit's web-process sandbox needs. These change how
+          # the app is hosted here, not what its window does, and are recorded.
+          APPIMAGE_EXTRACT_AND_RUN: '1'
+          WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS: '1'
+          NO_AT_BRIDGE: '1'
+        run: |
+          set -euo pipefail
+          dbus-run-session -- xvfb-run -a --server-args="-screen 0 1600x1000x24" \
+            node scripts/packaged-acceptance/run.mjs \
+              --application "${{ steps.install.outputs.application }}" \
+              --package "${{ steps.install.outputs.package }}" \
+              --lane "Linux WebKitGTK (${{ matrix.package }}${RELEASE:+, ${RELEASE}})" \
+              --tauri-driver "$HOME/.cargo/bin/tauri-driver" \
+              --out "$RUNNER_TEMP/packaged-acceptance"
+      - name: Upload the observations
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: packaged-acceptance-linux-${{ matrix.package }}
+          path: ${{ runner.temp }}/packaged-acceptance
+          if-no-files-found: warn
+
+  windows:
+    name: Windows (msi)
+    if: inputs.windows
+    runs-on: windows-2025
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4.4.0
+        if: env.RELEASE == ''
+        with:
+          version: 10.34.0
+          run_install: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version-file: .node-version
+      - uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c # stable
+        with:
+          toolchain: 1.95.0
+      # wry sets WebView2's AdditionalBrowserArguments for every Tauri 2 app,
+      # and WebView2 lets that win over msedgedriver's own switches, so a
+      # shipped build cannot be attached to from outside. This test build is
+      # the shipped configuration with one switch appended to exactly the
+      # arguments a shipped build runs with: a fixed remote debugging port.
+      - name: Build the MSI from this tree (test build with a debugging port)
+        if: env.RELEASE == ''
+        shell: bash
+        run: |
+          set -euo pipefail
+          corepack pnpm install --frozen-lockfile
+          node --input-type=module -e "
+            import { readFileSync, writeFileSync } from 'node:fs';
+            const config = JSON.parse(readFileSync('src-tauri/tauri.conf.json', 'utf8'));
+            const windows = config.app.windows.map((window) => ({
+              ...window,
+              additionalBrowserArgs:
+                '--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection --autoplay-policy=no-user-gesture-required --remote-debugging-port=9333',
+            }));
+            writeFileSync(process.env.RUNNER_TEMP + '/webdriver-overlay.json', JSON.stringify({ app: { windows } }));
+          "
+          corepack pnpm exec tauri build --bundles msi --config "$RUNNER_TEMP/webdriver-overlay.json"
+          mkdir -p "$RUNNER_TEMP/package"
+          cp src-tauri/target/release/bundle/msi/*.msi "$RUNNER_TEMP/package/"
+      - name: Fetch and verify the release's installer
+        if: env.RELEASE != ''
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="${RELEASE#v}"
+          asset="OpenCoven.Chat_${version}_x64_en-US.msi"
+          mkdir -p "$RUNNER_TEMP/package"
+          cd "$RUNNER_TEMP/package"
+          base="https://github.com/OpenCoven/chat/releases/download/${RELEASE}"
+          curl --proto '=https' --tlsv1.2 --fail --location --retry 3 -o SHA256SUMS "$base/SHA256SUMS"
+          curl --proto '=https' --tlsv1.2 --fail --location --retry 3 -o "$asset" "$base/$asset"
+          grep -F "  ${asset}" SHA256SUMS | sha256sum -c -
+      - name: Install tauri-driver
+        shell: bash
+        run: cargo install tauri-driver --locked --version "${TAURI_DRIVER_VERSION}"
+      # msedgedriver must match the WebView2 runtime the app will load.
+      - name: Fetch the matching msedgedriver
+        id: edge
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $key = 'HKLM:\SOFTWARE\WOW6432Node\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}'
+          $version = (Get-ItemProperty -Path $key).pv
+          Write-Output "WebView2 runtime $version"
+          $zip = Join-Path $env:RUNNER_TEMP 'edgedriver.zip'
+          Invoke-WebRequest -Uri "https://msedgedriver.microsoft.com/$version/edgedriver_win64.zip" -OutFile $zip
+          $dir = Join-Path $env:RUNNER_TEMP 'edgedriver'
+          Expand-Archive -Path $zip -DestinationPath $dir -Force
+          # tauri-driver passes the port; the wrapper adds a verbose log beside the results.
+          $out = Join-Path $env:RUNNER_TEMP 'packaged-acceptance'
+          New-Item -ItemType Directory -Force -Path $out | Out-Null
+          $wrapper = Join-Path $dir 'msedgedriver-logged.cmd'
+          Set-Content -Path $wrapper -Encoding ascii -Value "@`"%~dp0msedgedriver.exe`" %* --verbose `"--log-path=$out\msedgedriver.log`""
+          "path=$wrapper" >> $env:GITHUB_OUTPUT
+      - name: Install the MSI
+        id: install
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $msi = Get-ChildItem (Join-Path $env:RUNNER_TEMP 'package') -Filter *.msi | Select-Object -First 1
+          $log = Join-Path $env:RUNNER_TEMP 'msi-install.log'
+          $process = Start-Process msiexec.exe -ArgumentList '/i', "`"$($msi.FullName)`"", '/qn', '/norestart', '/l*v', "`"$log`"" -Wait -PassThru
+          if ($process.ExitCode -ne 0) { Get-Content $log -Tail 50; throw "msiexec exited $($process.ExitCode)" }
+          $exe = Get-ChildItem -Path $env:ProgramFiles, ${env:ProgramFiles(x86)}, (Join-Path $env:LOCALAPPDATA 'Programs') -Filter 'opencoven-chat.exe' -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
+          if (-not $exe) { throw 'The installed opencoven-chat.exe was not found.' }
+          "package=$($msi.FullName)" >> $env:GITHUB_OUTPUT
+          "application=$($exe.FullName)" >> $env:GITHUB_OUTPUT
+          Write-Output "Installed $($msi.Name) as $($exe.FullName)"
+      - name: Drive the installed app
+        shell: pwsh
+        run: |
+          $debug = if ($env:RELEASE) { @() } else { @('--debug-port', '9333') }
+          node scripts/packaged-acceptance/run.mjs @debug `
+            --application "${{ steps.install.outputs.application }}" `
+            --package "${{ steps.install.outputs.package }}" `
+            --lane "Windows WebView2 (msi$(if ($env:RELEASE) { ", $env:RELEASE" } else { ', test build with a debugging port' }))" `
+            --tauri-driver (Join-Path $env:USERPROFILE '.cargo\bin\tauri-driver.exe') `
+            --native-driver "${{ steps.edge.outputs.path }}" `
+            --out (Join-Path $env:RUNNER_TEMP 'packaged-acceptance')
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Describe the app after a failure
+        if: failure() && steps.install.outputs.application != ''
+        shell: pwsh
+        run: |
+          $out = Join-Path $env:RUNNER_TEMP 'packaged-acceptance'
+          New-Item -ItemType Directory -Force -Path $out | Out-Null
+          & {
+            'Processes named opencoven-chat or msedgewebview2 still running:'
+            Get-Process -Name opencoven-chat, msedgewebview2 -ErrorAction SilentlyContinue | Format-Table Id, ProcessName, StartTime, MainWindowTitle -AutoSize | Out-String
+            'Application errors in the last 30 minutes:'
+            Get-WinEvent -FilterHashtable @{ LogName = 'Application'; Level = 1, 2; StartTime = (Get-Date).AddMinutes(-30) } -ErrorAction SilentlyContinue | Select-Object -First 20 TimeCreated, ProviderName, Message | Format-List | Out-String
+            'Launching the app directly for 25 seconds, asking WebView2 for a debugging port:'
+            $env:WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS = '--remote-debugging-port=9334'
+            $app = Start-Process -FilePath "${{ steps.install.outputs.application }}" -PassThru
+            Start-Sleep -Seconds 25
+            $app.Refresh()
+            "exited: $($app.HasExited) exit code: $(if ($app.HasExited) { $app.ExitCode } else { 'n/a' }) window: '$($app.MainWindowTitle)'"
+            'WebView2 processes and their command lines:'
+            Get-CimInstance Win32_Process -Filter "Name='msedgewebview2.exe'" | ForEach-Object { "$($_.ProcessId) <- $($_.ParentProcessId): $($_.CommandLine)".Substring(0, [Math]::Min(700, "$($_.ProcessId) <- $($_.ParentProcessId): $($_.CommandLine)".Length)) }
+            'Listening on 9334:'
+            Get-NetTCPConnection -LocalPort 9334 -State Listen -ErrorAction SilentlyContinue | Format-Table LocalAddress, LocalPort, OwningProcess -AutoSize | Out-String
+            'App data folders:'
+            Get-ChildItem (Join-Path $env:LOCALAPPDATA 'ai.opencoven.chat') -Recurse -Depth 2 -ErrorAction SilentlyContinue | Select-Object -First 40 FullName | Out-String
+            Get-ChildItem $env:LOCALAPPDATA -Filter DevToolsActivePort -Recurse -Depth 5 -ErrorAction SilentlyContinue | Select-Object FullName | Out-String
+            Add-Type -AssemblyName System.Windows.Forms, System.Drawing
+            $bounds = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
+            $bitmap = New-Object System.Drawing.Bitmap $bounds.Width, $bounds.Height
+            [System.Drawing.Graphics]::FromImage($bitmap).CopyFromScreen($bounds.Location, [System.Drawing.Point]::Empty, $bounds.Size)
+            $bitmap.Save((Join-Path $out 'desktop.png'))
+            if (-not $app.HasExited) { Stop-Process -Id $app.Id -Force }
+          } *>&1 | Tee-Object -FilePath (Join-Path $out 'windows-diagnostics.txt')
+      - name: Upload the observations
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: packaged-acceptance-windows-msi
+          path: ${{ runner.temp }}/packaged-acceptance
+          if-no-files-found: warn
