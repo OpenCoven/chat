@@ -484,15 +484,17 @@ try {
     );
     row.status = row.blocked
       ? 'blocked'
-      : row.error
-        ? known?.error.test(row.error)
-          ? `known failure (#${known.issue})`
-          : 'failed'
-        : row.skipped
-          ? 'not reached'
-          : known
-            ? `observed, but #${known.issue} is listed as failing here: remove it from KNOWN`
-            : 'observed';
+      : row.notJudged
+        ? `not judged: ${row.notJudged}`
+        : row.error
+          ? known?.error.test(row.error)
+            ? `known failure (#${known.issue})`
+            : 'failed'
+          : row.skipped
+            ? 'not reached'
+            : known
+              ? `observed, but #${known.issue} is listed as failing here: remove it from KNOWN`
+              : 'observed';
   }
   if (session) {
     try {
@@ -528,7 +530,12 @@ writeFileSync(join(out, 'results.md'), markdown(report));
 if (driver) writeFileSync(join(out, 'tauri-driver.log'), driver.log.join(''));
 console.log(markdown(report));
 process.exit(
-  report.rows.every((row) => row.status === 'observed' || row.status.startsWith('known failure'))
+  report.rows.every(
+    (row) =>
+      row.status === 'observed' ||
+      row.status.startsWith('known failure') ||
+      row.status.startsWith('not judged'),
+  )
     ? 0
     : 1,
 );

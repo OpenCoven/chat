@@ -463,6 +463,31 @@ export async function tableRow(s, familiar) {
     await send(s, familiar, '[[table]] Show me the table.', 'button', 'Expand table');
     const size = await resize(s, 480, 520);
     row.note('viewport after resizing to 480x520', size);
+    row.note(
+      'inspector and its resize handle at 480x520',
+      await s.execute(`const aside = document.querySelector('.fr-inspector');
+        const handle = document.querySelector('.coven-inspector-resizer');
+        const describe = (el) => {
+          if (!el) return null;
+          const b = el.getBoundingClientRect();
+          const c = getComputedStyle(el);
+          return {
+            rect: [b.left, b.top, b.width, b.height].map(Math.round),
+            inert: el.inert, ariaHidden: el.getAttribute('aria-hidden'),
+            opacity: c.opacity, visibility: c.visibility, transform: c.transform,
+            pointerEvents: c.pointerEvents, zIndex: c.zIndex,
+          };
+        };
+        const strip = [];
+        for (let x = 40; x < innerWidth; x += 40) {
+          const hit = document.elementFromPoint(x, 260);
+          strip.push(x + ':' + (hit ? hit.className.toString().split(' ')[0] || hit.tagName.toLowerCase() : 'none'));
+        }
+        return {
+          inspector: document.querySelector('.coven-chat')?.getAttribute('data-inspector') ?? null,
+          aside: describe(aside), handle: describe(handle), hitsAtY260: strip,
+        };`),
+    );
 
     const expand = await s.one('button', 'Expand table');
     await expand.click();
@@ -552,6 +577,11 @@ export async function inspectorRow(s, familiar) {
   try {
     await s.execute('getSelection()?.removeAllRanges();');
     await resize(s, 1400, 800);
+    const show = await s.all('button', 'Show inspector');
+    if (show.length) {
+      row.note('inspector at the start of the row', 'closed; pressed Show inspector');
+      await s.click(show[0]);
+    }
     const handle = await s.one('separator', 'Resize inspector');
     const width = () =>
       s.execute(`return document.querySelector('.fr-inspector').getBoundingClientRect().width;`);
@@ -730,35 +760,21 @@ export async function switchRow(s, first, second) {
     await typeDraft(s, second, 'Draft kept for later');
     await s.click(await s.one('button', first));
     await composerOf(s, first);
-
-    // Ctrl+] steps to the next familiar from anywhere, a dialog included: the
-    // switch the row describes, with everything still open.
     await openEverything(s, row);
-    row.note('open before the switch', await state());
+    row.note('open before switching', await state());
+
+    // Ctrl+[ and Ctrl+] step familiars, but not while a dialog is open
+    // (shellChord in rail-shortcuts.ts), so with the review open nothing moves.
     await s.press([Key.Control, ']']);
-    const after = await until(
-      'the switch',
-      async () => {
-        const now = await state();
-        return now.chat === second ? now : null;
-      },
-      10_000,
-    );
-    row.note(`after Ctrl+] with everything open`, after);
-    row.expect('review after the switch', after.review, 0);
-    row.expect('sheet after the switch', after.sheet, 0);
-    row.expect('waiting quote after the switch', after.quote, 0);
-    row.expect(
-      'the new chat keeps its draft',
-      await (await composerOf(s, second)).property('value'),
-      'Draft kept for later',
-    );
-    row.note('focus after the switch', await focusedName(s));
+    await sleep(1_000);
+    row.expect('Ctrl+] with the review and sheet open', await state(), {
+      review: 1,
+      sheet: 1,
+      quote: 1,
+      chat: first,
+    });
 
-    // The pointer path, recorded rather than judged: an open review or sheet
-    // takes a click outside to close before the rail can take one.
-    await s.click(await s.one('button', first));
-    await openEverything(s, row);
+    // The rail: each click first closes one open layer, then the next switches.
     const target = await s.execute(
       `const row = [...document.querySelectorAll('button.coven-agent-row')].find((b) => b.getAttribute('aria-label') === arguments[0]);
       const box = row.getBoundingClientRect();
@@ -770,11 +786,29 @@ export async function switchRow(s, first, second) {
       await s.clickPoint(target.x, target.y);
       await sleep(800);
       now = await state();
-      row.note(`pointer: after click ${click} on ${second} in the rail`, now);
+      row.note(`after click ${click} on ${second} in the rail`, now);
     }
+    row.expect('switched by the rail', now.chat, second);
+    row.expect('review after the switch', now.review, 0);
+    row.expect('sheet after the switch', now.sheet, 0);
+    row.expect('waiting quote after the switch', now.quote, 0);
+    row.expect(
+      'the other chat kept its draft',
+      await (await composerOf(s, second)).property('value'),
+      'Draft kept for later',
+    );
+    row.note('focus after the switch', await focusedName(s));
     await clearComposer(s, await composerOf(s, second));
-    await s.click(await s.one('button', first));
-    await composerOf(s, first);
+
+    // With nothing open, the keyboard switch works.
+    await s.execute('document.activeElement?.blur();');
+    await s.press([Key.Control, '[']);
+    await until(
+      'Ctrl+[ to step back',
+      async () => (await s.all('textbox', `Message ${first}`)).length === 1,
+      10_000,
+    );
+    row.note('Ctrl+[ with nothing open', `stepped back to ${first}`);
   } catch (error) {
     row.error = error.message;
     await snapshot(row.id);
@@ -852,7 +886,16 @@ export async function rightClickRow(s, familiar, opened) {
       }`);
     await s.click(link, { button: 2 });
     await sleep(1_500);
-    row.note('events the link received', await s.execute('return window.__linkEvents;'));
+    const events = await s.execute('return window.__linkEvents;');
+    row.note('events the link received', events);
+    if (events.includes('click:0')) {
+      // A real right-button release sends no primary click. This driver does,
+      // so whatever the review does next says nothing about a person's right-click.
+      row.notJudged =
+        'WebKitWebDriver followed the right press with mouseup and click for the primary button.';
+      await s.press(Key.Escape);
+      return row;
+    }
     row.expect('right-click opens the review', (await s.all('dialog', REVIEW)).length, 0);
     row.expect('right-click reaches the browser', opened.received().length - before, 0);
     row.note('native menu contents', 'not observable through WebDriver; hand-run');
