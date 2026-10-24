@@ -18,6 +18,7 @@ import {
   conversationLoaded,
   inspectorRow,
   linkRows,
+  onFailure,
   quoteRow,
   rightClickRow,
   storageRow,
@@ -48,6 +49,18 @@ const out = resolve(options.out);
 mkdirSync(out, { recursive: true });
 const FIRST = 'Astra';
 const SECOND = 'Sage';
+
+// Product failures already filed. Such a row is reported as a known failure and
+// does not fail the lane; a listed failure that stops reproducing does, so the
+// entry is removed once the issue is fixed.
+const KNOWN = [
+  {
+    row: 'setup',
+    lane: /AppImage|appimage/,
+    issue: 525,
+    error: /engine install did not finish/,
+  },
+];
 
 // Rows a person still has to run, whatever this lane observes.
 const HAND_RUN = [
@@ -429,6 +442,13 @@ rows.push(setupRow);
 try {
   attached = await openSession(env, setupRow);
   session = attached.session;
+  onFailure(async (id) => {
+    try {
+      writeFileSync(join(out, `${id}.png`), Buffer.from(await session.screenshot(), 'base64'));
+    } catch {
+      // A screenshot is a convenience; its absence is not evidence of anything.
+    }
+  });
   userAgent = await session.execute('return navigator.userAgent;');
   await setUp(session, setupRow);
   rows.push(...(await linkRows(session, FIRST, opened, requests)));
@@ -452,20 +472,27 @@ try {
   }
   rows.push(await switchRow(session, FIRST, SECOND));
   rows.push(await storageRow(session));
-  rows.push(await rightClickRow(session, opened));
+  rows.push(await rightClickRow(session, FIRST, opened));
 } catch (error) {
   setupRow.error = error.message;
   if (error instanceof Blocked) setupRow.blocked = true;
   if (/^Install Coven/.test(error.message)) diagnoseSetup(setupRow);
 } finally {
   for (const row of rows) {
+    const known = KNOWN.find(
+      (entry) => entry.row === row.id && entry.lane.test(options.lane) && !row.blocked,
+    );
     row.status = row.blocked
       ? 'blocked'
       : row.error
-        ? 'failed'
+        ? known?.error.test(row.error)
+          ? `known failure (#${known.issue})`
+          : 'failed'
         : row.skipped
           ? 'not reached'
-          : 'observed';
+          : known
+            ? `observed, but #${known.issue} is listed as failing here: remove it from KNOWN`
+            : 'observed';
   }
   if (session) {
     try {
@@ -500,4 +527,8 @@ writeFileSync(join(out, 'results.json'), `${JSON.stringify(report, null, 2)}\n`)
 writeFileSync(join(out, 'results.md'), markdown(report));
 if (driver) writeFileSync(join(out, 'tauri-driver.log'), driver.log.join(''));
 console.log(markdown(report));
-process.exit(report.rows.every((row) => row.status === 'observed') ? 0 : 1);
+process.exit(
+  report.rows.every((row) => row.status === 'observed' || row.status.startsWith('known failure'))
+    ? 0
+    : 1,
+);

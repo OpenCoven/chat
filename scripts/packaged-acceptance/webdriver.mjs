@@ -224,8 +224,13 @@ export class Session {
       const y = box.top + box.height / 2;
       const hit = document.elementFromPoint(x, y);
       const describe = (el) => el ? el.tagName.toLowerCase() + (el.className && typeof el.className === 'string' ? '.' + el.className.trim().split(/\\s+/).join('.') : '') : 'nothing';
-      return { x, y, reachable: Boolean(hit) && (node === hit || node.contains(hit)), cover: describe(hit) };`);
-    if (!aim.reachable) throw new Error(`The target is covered by ${aim.cover}`);
+      const rect = (el) => { const b = el.getBoundingClientRect(); return [b.left, b.top, b.width, b.height].map(Math.round).join(','); };
+      return { x, y, reachable: Boolean(hit) && (node === hit || node.contains(hit)), cover: describe(hit), target: rect(node), covering: hit ? rect(hit) : '' };`);
+    if (!aim.reachable) {
+      throw new Error(
+        `The target (${aim.target}) is covered at its centre by ${aim.cover} (${aim.covering})`,
+      );
+    }
     const pointer = {
       type: 'pointer',
       id: 'mouse',

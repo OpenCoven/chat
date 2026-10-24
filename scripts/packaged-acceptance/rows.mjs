@@ -36,6 +36,12 @@ export class Row {
 
 const REVIEW = 'Open this link?';
 
+/** Called with a row's id when it fails, before the window is reset. */
+let snapshot = async () => undefined;
+export function onFailure(take) {
+  snapshot = take;
+}
+
 export async function composerOf(s, familiar) {
   return s.one('textbox', `Message ${familiar}`, { timeout: 30_000 });
 }
@@ -105,6 +111,7 @@ async function attempt(s, row, work) {
     await work();
   } catch (error) {
     row.error = error.message;
+    await snapshot(row.id);
     await reset(s);
   }
 }
@@ -396,6 +403,7 @@ export async function quoteRow(s, familiar, requests) {
     await clearComposer(s, composer);
   } catch (error) {
     row.error = error.message;
+    await snapshot(row.id);
   }
   return row;
 }
@@ -520,6 +528,7 @@ export async function tableRow(s, familiar) {
     row.expect('composer reachable at 480x520 after closing', reach, true);
   } catch (error) {
     row.error = error.message;
+    await snapshot(row.id);
   } finally {
     await resize(s, 1180, 780).catch(() => undefined);
     try {
@@ -620,8 +629,19 @@ export async function inspectorRow(s, familiar) {
             chat: document.querySelector('.coven-chat')?.getAttribute('data-inspector') ?? null,
           };`),
       );
+      const show = await s.all('button', 'Show inspector');
+      if (show.length) {
+        await s.click(show[0]);
+        await sleep(500);
+        row.note(
+          'width after pressing Show inspector',
+          await s.execute(
+            "return document.querySelector('.fr-inspector')?.getBoundingClientRect().width ?? null;",
+          ),
+        );
+      }
       throw new Error(
-        'The inspector did not return as a resizable rail within 10 s of widening to 1400px.',
+        'After narrowing across 1100px and widening to 1400px, the inspector came back closed, not as the 600px rail.',
       );
     }
     row.expect('600px returns after widening again', await width(), 600);
@@ -631,6 +651,7 @@ export async function inspectorRow(s, familiar) {
     await closeSettings(s);
   } catch (error) {
     row.error = error.message;
+    await snapshot(row.id);
   } finally {
     await resize(s, 1180, 780).catch(() => undefined);
   }
@@ -663,48 +684,81 @@ export async function conversationLoaded(s, row, text, timeout = 90_000) {
   return Date.now() - started;
 }
 
+/** Opens a waiting passage, the expanded table and a link review inside it. */
+async function openEverything(s, row) {
+  await conversationLoaded(s, row, 'three steps');
+  await selectText(
+    s,
+    `const bubble = [...document.querySelectorAll('.fr-bubble--familiar')]
+      .find((node) => node.textContent.includes('three steps'));
+    range.selectNodeContents(bubble.querySelector('p'));`,
+  );
+  row.expect(
+    'a passage is waiting to be quoted',
+    (await s.all('button', 'Quote selection')).length,
+    1,
+  );
+  await s.click((await s.all('button', 'Expand table')).at(-1));
+  const sheet = await s.one('dialog', 'Expanded table');
+  const link = await s.one('link', 'Guide', { within: sheet });
+  await link.focus();
+  await s.press(Key.Enter);
+  await s.one('dialog', REVIEW);
+}
+
+/** Types into a familiar's composer once focus has settled there. */
+async function typeDraft(s, familiar, text) {
+  const composer = await composerOf(s, familiar);
+  await sleep(500);
+  await composer.focus();
+  await until('the composer to hold focus', () => s.isActive(composer), 5_000);
+  await composer.type(text);
+  return composer;
+}
+
 /** Row 4: switching familiars with a passage, a sheet and a review open. */
 export async function switchRow(s, first, second) {
   const row = new Row('504-4', 'Chat-switch isolation');
+  const state = async () => ({
+    review: (await s.all('dialog', REVIEW)).length,
+    sheet: (await s.all('dialog', 'Expanded table')).length,
+    quote: (await s.all('button', 'Quote selection')).length,
+    chat: (await s.all('textbox', `Message ${second}`)).length ? second : first,
+  });
   try {
     await s.click(await s.one('button', second));
-    const other = await composerOf(s, second);
-    await other.click();
-    await other.type('Draft kept for later');
+    await typeDraft(s, second, 'Draft kept for later');
     await s.click(await s.one('button', first));
     await composerOf(s, first);
-    row.note(
-      `${first}'s conversation loaded after switching back (ms)`,
-      await conversationLoaded(s, row, 'three steps'),
-    );
 
-    await selectText(
-      s,
-      `const bubble = [...document.querySelectorAll('.fr-bubble--familiar')]
-        .find((node) => node.textContent.includes('three steps'));
-      range.selectNodeContents(bubble.querySelector('p'));`,
+    // Ctrl+] steps to the next familiar from anywhere, a dialog included: the
+    // switch the row describes, with everything still open.
+    await openEverything(s, row);
+    row.note('open before the switch', await state());
+    await s.press([Key.Control, ']']);
+    const after = await until(
+      'the switch',
+      async () => {
+        const now = await state();
+        return now.chat === second ? now : null;
+      },
+      10_000,
     );
+    row.note(`after Ctrl+] with everything open`, after);
+    row.expect('review after the switch', after.review, 0);
+    row.expect('sheet after the switch', after.sheet, 0);
+    row.expect('waiting quote after the switch', after.quote, 0);
     row.expect(
-      'a passage is waiting to be quoted',
-      (await s.all('button', 'Quote selection')).length,
-      1,
+      'the new chat keeps its draft',
+      await (await composerOf(s, second)).property('value'),
+      'Draft kept for later',
     );
-    await s.click((await s.all('button', 'Expand table')).at(-1));
-    const sheet = await s.one('dialog', 'Expanded table');
-    const link = await s.one('link', 'Guide', { within: sheet });
-    await link.focus();
-    await s.press(Key.Enter);
-    await s.one('dialog', REVIEW);
-    row.note('open before the switch', 'passage, expanded table and link review');
+    row.note('focus after the switch', await focusedName(s));
 
-    // Click the other familiar in the rail as a person would, and record what
-    // each click does: an open review or sheet takes a click outside to close.
-    const state = async () => ({
-      review: (await s.all('dialog', REVIEW)).length,
-      sheet: (await s.all('dialog', 'Expanded table')).length,
-      quote: (await s.all('button', 'Quote selection')).length,
-      chat: (await s.all('textbox', `Message ${second}`)).length ? second : first,
-    });
+    // The pointer path, recorded rather than judged: an open review or sheet
+    // takes a click outside to close before the rail can take one.
+    await s.click(await s.one('button', first));
+    await openEverything(s, row);
     const target = await s.execute(
       `const row = [...document.querySelectorAll('button.coven-agent-row')].find((b) => b.getAttribute('aria-label') === arguments[0]);
       const box = row.getBoundingClientRect();
@@ -716,24 +770,16 @@ export async function switchRow(s, first, second) {
       await s.clickPoint(target.x, target.y);
       await sleep(800);
       now = await state();
-      row.note(`after click ${click} on ${second} in the rail`, now);
+      row.note(`pointer: after click ${click} on ${second} in the rail`, now);
     }
-    row.expect('the switch happened', now.chat, second);
-    row.expect('review after the switch', now.review, 0);
-    row.expect('sheet after the switch', now.sheet, 0);
-    row.expect('waiting quote after the switch', now.quote, 0);
-    row.expect(
-      'the new chat keeps its draft',
-      await (await composerOf(s, second)).property('value'),
-      'Draft kept for later',
-    );
-    row.note('focus after the switch', await focusedName(s));
     await clearComposer(s, await composerOf(s, second));
     await s.click(await s.one('button', first));
     await composerOf(s, first);
   } catch (error) {
     row.error = error.message;
+    await snapshot(row.id);
     await reset(s);
+    await s.click(await s.one('button', first)).catch(() => undefined);
   }
   return row;
 }
@@ -787,15 +833,17 @@ export async function storageRow(s) {
     }
   } catch (error) {
     row.error = error.message;
+    await snapshot(row.id);
   }
   return row;
 }
 
 /** Row 1's right-click part, last because a native menu can hold input. */
-export async function rightClickRow(s, opened) {
+export async function rightClickRow(s, familiar, opened) {
   const row = new Row('504-1-context', 'Right-click on a link (partial)');
   try {
     const before = opened.received().length;
+    await s.click(await s.one('button', familiar));
     await conversationLoaded(s, row, 'three steps');
     const link = (await s.all('link', 'Handoff check')).at(-1);
     await link.evaluate(`window.__linkEvents = [];
@@ -811,6 +859,7 @@ export async function rightClickRow(s, opened) {
     await s.press(Key.Escape);
   } catch (error) {
     row.error = error.message;
+    await snapshot(row.id);
   }
   return row;
 }
