@@ -158,12 +158,18 @@ async function setUp(s, setupRow) {
     ).catch((error) => {
       throw new Error(`${what}: ${error.message}`);
     });
+  // Install Coven carries straight on to the engine; only a failure needs another click.
   await (await s.one('button', 'Install Coven')).click();
-  await next('Install Coven', 'button', 'Install the engine', 10 * 60_000);
-  setupRow.note('Install Coven', 'done; the engine step is offered');
-  await (await s.one('button', 'Install the engine')).click();
-  const name = await next('Install the engine', 'textbox', 'Familiar name', 20 * 60_000);
-  setupRow.note('Install the engine', 'done; the familiar step is offered');
+  const name = await next(
+    'Install Coven, then its engine',
+    'textbox',
+    'Familiar name',
+    20 * 60_000,
+  );
+  setupRow.note(
+    'Install Coven',
+    'Coven and then its engine installed; the familiar step is offered',
+  );
   await name.click();
   await name.type(FIRST);
   await (await s.one('button', 'Create familiar')).click();
