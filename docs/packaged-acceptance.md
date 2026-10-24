@@ -10,15 +10,43 @@ is the only automated check that runs the shipped binary.
 
 ## When it runs
 
-- **CI** calls it after *Desktop build*, with the Linux bundles that job just built. The Windows
-  lane builds its own MSI, so it runs on `main` and on pull requests labelled `ci:full`, like the
-  other Windows jobs.
+- **CI** calls it twice. *Packaged acceptance* runs after *Desktop build* and installs the `.deb`
+  and AppImage that job built. *Packaged acceptance (Windows)* builds its own test MSI (see
+  below), so it doesn't wait for Desktop build; it runs on `main` and on pull requests labelled
+  `ci:full`, like the other Windows jobs.
 - **By hand**, from the Actions tab: *Packaged acceptance* → *Run workflow*, with a published tag
   such as `v0.0.6`. The workflow downloads that release's installers and checks them against its
   `SHA256SUMS` before installing anything.
 
 Each lane uploads `results.md`, `results.json`, the system browser's log (`opened.jsonl`), the
-model endpoint's request log, `tauri-driver.log` and a final screenshot.
+model endpoint's request log, `tauri-driver.log`, a screenshot of every failed row and a final
+screenshot.
+
+## Windows: a test build, and shipped builds stay blocked
+
+On `windows-2025`, the app's WebView2 runs with exactly the switches wry gives it through
+`AdditionalBrowserArguments`, which every Tauri 2 app sets. It ignores
+`WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS`, the route msedgedriver uses to ask for a debugging port,
+and also ignores WebView2's per-user `AdditionalBrowserArguments` policy. A shipped MSI therefore
+can't be attached to from outside.
+
+So CI's Windows lane builds a **test MSI** from the tree: the shipped window configuration, with
+`--remote-debugging-port=9333` appended to exactly the switches a shipped build runs with. The
+suite launches it and attaches msedgedriver by `debuggerAddress`. Its results say "test build".
+A dispatch against a published tag still tries the shipped MSI and reports its Windows lane as
+**blocked**, not failed. Driving shipped Windows builds needs wry to keep WebView2's own
+switches, or a product decision to let Chat accept them.
+
+## Known failures
+
+A row that fails because of a filed product bug is listed in `KNOWN` in
+`scripts/packaged-acceptance/run.mjs`. It is reported as "known failure (#issue)" and doesn't
+fail the lane. If a listed failure stops reproducing, the lane fails, so the entry is removed once
+the bug is fixed. Currently listed:
+
+- [#525](https://github.com/OpenCoven/chat/issues/525): on the AppImage, the setup screen's engine
+  install fails. The AppImage's `LD_LIBRARY_PATH` reaches the system `curl`, which then can't
+  load. No other row runs on the AppImage until it's fixed.
 
 ## What is real, and the one stand-in
 
@@ -51,11 +79,11 @@ are built on `ubuntu-22.04`. Dispatch against a tag to drive the released bytes.
 | 1 Link gestures, copy, review | Click, middle-click and Ctrl-click each open *Open this link?*; no live `http` anchor in the transcript; **Copy address** puts the exact address on the system clipboard; right-click opens neither the review nor the browser | Which items the native context menu offers |
 | 2 Modality, focus | Focus starts on **Cancel**; Tab cycles the three controls; a click on the composer behind the review does nothing; Escape returns focus to the link | The screen reader's announcement |
 | 3 Quote selection | Quote across a paragraph break and a list, and from one table cell; Tab reaches the action; held Enter quotes once and sends nothing (the model endpoint sees no request); nothing offered across two messages | A real drag-selection; IME |
-| 4 Chat-switch isolation | A pointer click on another familiar with a passage, the sheet and a review open; all three close and the other chat's draft is kept | |
+| 4 Chat-switch isolation | With a passage, the sheet and a review open, **Ctrl+]** switches familiars. All three close, and the other chat's draft is kept. The pointer path is recorded: each click on the rail first closes one open layer | |
 | 5 Tables at 480×520, Larger text | The sheet fits and scrolls across; both **Copy table Markdown** buttons put the exact source on the clipboard; the review opens above the sheet; Escape closes the review, then the sheet; focus returns to the link, then **Expand table** | |
-| 6 Inspector resize | Arrow keys step 16px; Home and End reach the ends; Settings → General shows the width and **Reset**; 600px survives a trip to 1000px wide; an in-window drag | Pointer capture through a drag that leaves the window; the separator read aloud |
+| 6 Inspector resize | Arrow keys step 16px; Home and End reach the ends; Settings → General shows the width and **Reset**; 600px comes back after a trip to 1000px wide; an in-window drag (recorded, not judged) | Pointer capture through a drag that leaves the window; the separator read aloud |
 | 7 Quote through a cancelled run | | All of it |
-| 8 Preference-only storage | Local storage holds only `opencoven.chat.preferences.v1` with a numeric `inspectorWidth`; nothing in session storage or IndexedDB; no address, table or passage text anywhere | |
+| 8 Preference-only storage | Judged against `SECURITY.md`: local storage holds only `opencoven.chat.preferences.v1` (with a numeric `inspectorWidth`) and `opencoven.chat.navigation.v1` (`familiarId` and `sessionId`). Nothing is in session storage or IndexedDB, and no address, table, passage or draft text is stored anywhere | |
 | 9 IPv6 | `https://[::1]:8080/x` shows site `[::1]:8080`; Copy and Open use exactly that address | |
 | #515 handoff | **Open** hands the operating system exactly the reviewed address, once, for a query string, a plain address and IPv6 | The browser's own address bar, with the browser closed and with it running |
 
