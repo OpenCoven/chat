@@ -1118,9 +1118,9 @@ describe('Phase 1 specification guards', () => {
       const jobs = workflowJobs(readText(file));
       expect(jobs.size, `no jobs were found in ${file}`).toBeGreaterThan(0);
       for (const [name, job] of jobs) {
-        const uses = /^ {4}uses: \.\/(\.github\/workflows\/[a-z-]+\.yml)$/m.exec(job);
+        const uses = /^ {4}uses: \.\/(\.github\/workflows\/[a-z-]+\.yml)$/m.exec(job)?.[1];
         if (uses) {
-          called.push(uses[1]);
+          called.push(uses);
           continue;
         }
         expect(job, `${file} job ${name} needs a ceiling`).toMatch(/^ {4}timeout-minutes: \d+$/m);
