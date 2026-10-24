@@ -20,8 +20,12 @@ on:
         description: Published tag whose installers to drive; empty drives this run's build.
         type: string
         default: ''
+      linux:
+        description: Drive the Linux .deb and AppImage (this run's linux-bundle artifact).
+        type: boolean
+        default: true
       windows:
-        description: Also drive the Windows MSI.
+        description: Drive the Windows MSI.
         type: boolean
         default: false
   workflow_dispatch:
@@ -48,8 +52,8 @@ permissions:
 
 env:
   TAURI_DRIVER_VERSION: 2.1.0
-  RELEASE: ${{ inputs.release || (github.event_name == 'push' && 'v0.0.6') || '' }}
-  WINDOWS: ${{ inputs.windows || github.event_name == 'push' }}
+  # SPIKE: github.workflow names this file only when it runs on its own push trigger.
+  RELEASE: ${{ inputs.release || (github.workflow == 'Packaged acceptance' && github.event_name == 'push' && 'v0.0.6') || '' }}
 
 jobs:
   # The CI image is pinned once, in ci.yml, where the image workflow proposes
@@ -79,6 +83,8 @@ jobs:
   linux:
     name: Linux (${{ matrix.package }})
     needs: image
+    # Only a caller passing linux: false skips it; a dispatch has no such input.
+    if: format('{0}', inputs.linux) != 'false'
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -173,7 +179,7 @@ jobs:
 
   windows:
     name: Windows (msi)
-    if: inputs.windows || github.event_name == 'push'
+    if: inputs.windows || (github.workflow == 'Packaged acceptance' && github.event_name == 'push')
     runs-on: windows-2025
     timeout-minutes: 60
     steps:

@@ -563,15 +563,32 @@ jobs:
     needs: [changes, desktop]
     if: needs.changes.outputs.docs_only != 'true'
     # Installs the bundles the desktop job built and drives them through
-    # tauri-driver; see docs/packaged-acceptance.md. Windows builds its own
-    # MSI, which is long enough to run only on main and under `ci:full`, like
-    # the other Windows jobs.
+    # tauri-driver; see docs/packaged-acceptance.md.
     uses: ./.github/workflows/packaged-acceptance.yml
     permissions:
       contents: read
       packages: read
     with:
-      windows: ${{ (github.event_name == 'push' && github.ref == 'refs/heads/main') || contains(github.event.pull_request.labels.*.name, 'ci:full') }}
+      linux: true
+      windows: false
+
+  packaged-acceptance-windows:
+    name: Packaged acceptance (Windows)
+    needs: changes
+    # Builds its own test MSI, so it does not wait for Desktop build. That build
+    # is long enough to run only on main and under `ci:full`, like the other
+    # Windows jobs.
+    if: >-
+      needs.changes.outputs.docs_only != 'true'
+      && ((github.event_name == 'push' && github.ref == 'refs/heads/main')
+      || contains(github.event.pull_request.labels.*.name, 'ci:full'))
+    uses: ./.github/workflows/packaged-acceptance.yml
+    permissions:
+      contents: read
+      packages: read
+    with:
+      linux: false
+      windows: true
 
   rust:
     name: Rust

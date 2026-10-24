@@ -1126,7 +1126,10 @@ describe('Phase 1 specification guards', () => {
         expect(job, `${file} job ${name} needs a ceiling`).toMatch(/^ {4}timeout-minutes: \d+$/m);
       }
     }
-    expect(called).toEqual(['.github/workflows/packaged-acceptance.yml']);
+    expect(called).toEqual([
+      '.github/workflows/packaged-acceptance.yml',
+      '.github/workflows/packaged-acceptance.yml',
+    ]);
   });
 
   it('allows the isolated Phase 1 build and secure cleanup to finish on a cold runner', () => {
@@ -1199,6 +1202,7 @@ describe('Phase 1 specification guards', () => {
       'phase1-conformance',
       'desktop',
       'packaged-acceptance',
+      'packaged-acceptance-windows',
       'rust',
       'windows-profile-residual',
       'windows-supervisor-behavior',
