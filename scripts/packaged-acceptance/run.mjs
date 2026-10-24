@@ -192,9 +192,10 @@ async function attachWindows(env, row) {
  */
 function diagnoseSetup(row) {
   if (process.platform !== 'linux') return;
-  const pid = tryRun('pgrep', ['-n', '-f', options.application]).split('\n')[0];
+  // The AppImage runtime starts the app as a child; read the app binary itself.
+  const pid = tryRun('pgrep', ['-n', '-x', 'opencoven-chat']).split('\n')[0];
   if (!/^\d+$/.test(pid)) {
-    row.note('app environment', `no running process for ${options.application}`);
+    row.note('app environment', 'no running opencoven-chat process');
     return;
   }
   const appEnv = Object.fromEntries(
@@ -203,16 +204,20 @@ function diagnoseSetup(row) {
       .filter(Boolean)
       .map((entry) => [entry.slice(0, entry.indexOf('=')), entry.slice(entry.indexOf('=') + 1)]),
   );
-  const differing = Object.keys(appEnv)
-    .filter((key) =>
-      /^(LD_|SSL_|CURL|GIO|GTK|GDK|APPDIR|APPIMAGE|OWD|PATH$|XDG_DATA_DIRS)/.test(key),
-    )
+  row.note('app process', tryRun('readlink', [`/proc/${pid}/exe`]));
+  const keys = new Set([...Object.keys(appEnv), ...Object.keys(process.env)]);
+  const differing = [...keys]
     .filter((key) => appEnv[key] !== process.env[key])
-    .map((key) => `${key}=${appEnv[key].slice(0, 300)}`);
+    .sort()
+    .map((key) =>
+      /KEY|TOKEN|SECRET|PASSWORD/i.test(key)
+        ? `${key}=<redacted>`
+        : `${key}=${appEnv[key] === undefined ? '<unset>' : appEnv[key].slice(0, 300)}`,
+    );
   row.note(`app environment that differs from the suite (pid ${pid})`, differing);
   const install = (env) => {
     try {
-      return execFileSync(covenCli(), ['engine', 'install'], {
+      return execFileSync(covenCli(), ['engine', 'install', '--force'], {
         encoding: 'utf8',
         env,
         timeout: 300_000,
@@ -265,10 +270,16 @@ async function setUp(s, setupRow) {
   if (phase === 'chat') throw new Error('The scratch profile already had Coven set up.');
 
   // A failed step shows "Try again" with an alert; report its words rather than time out.
+  // Progress lines are kept, since the alert carries only the last one.
+  const progress = [];
   const next = (what, role, label, timeout) =>
     until(
       what,
       async () => {
+        for (const status of await s.css('.coven-onboarding-run-status')) {
+          const line = (await status.text()).trim();
+          if (line && progress.at(-1) !== line) progress.push(line);
+        }
         const alerts = await s.all('alert');
         if (alerts.length) throw new Stop(`Setup reported: ${await alerts[0].text()}`);
         const found = await s.all(role, label);
@@ -277,6 +288,7 @@ async function setUp(s, setupRow) {
       timeout,
       500,
     ).catch((error) => {
+      setupRow.note('setup progress lines', progress.slice(-40));
       throw new Error(`${what}: ${error.message}`);
     });
   // Install Coven carries straight on to the engine; only a failure needs another click.
