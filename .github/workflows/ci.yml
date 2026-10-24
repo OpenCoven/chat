@@ -542,11 +542,36 @@ jobs:
           console.log('Linux graph: one maintained glib 0.18.5; sys/macro siblings remain registry packages.');
           EOF
       - run: pnpm app:build
+      # Packaged acceptance installs and drives exactly these bundles.
+      - name: Upload the Linux bundles
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: linux-bundle
+          path: |
+            src-tauri/target/release/bundle/deb/*.deb
+            src-tauri/target/release/bundle/appimage/*.AppImage
+          if-no-files-found: error
+          retention-days: 3
       - name: Run optimized Linux native regressions
         run: >-
           cargo test --manifest-path src-tauri/Cargo.toml --locked --release
           --features phase1-conformance --lib
           --test coven_health_process_boundary --test phase1_native_rpc
+
+  packaged-acceptance:
+    name: Packaged acceptance
+    needs: [changes, desktop]
+    if: needs.changes.outputs.docs_only != 'true'
+    # Installs the bundles the desktop job built and drives them through
+    # tauri-driver; see docs/packaged-acceptance.md. Windows builds its own
+    # MSI, which is long enough to run only on main and under `ci:full`, like
+    # the other Windows jobs.
+    uses: ./.github/workflows/packaged-acceptance.yml
+    permissions:
+      contents: read
+      packages: read
+    with:
+      windows: ${{ (github.event_name == 'push' && github.ref == 'refs/heads/main') || contains(github.event.pull_request.labels.*.name, 'ci:full') }}
 
   rust:
     name: Rust

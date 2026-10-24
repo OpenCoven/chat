@@ -52,15 +52,40 @@ env:
   WINDOWS: ${{ inputs.windows || github.event_name == 'push' }}
 
 jobs:
+  # The CI image is pinned once, in ci.yml, where the image workflow proposes
+  # each new digest. Reading it from there keeps this workflow on the same image.
+  image:
+    name: CI image
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      reference: ${{ steps.pin.outputs.reference }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+          sparse-checkout: .github/workflows/ci.yml
+          sparse-checkout-cone-mode: false
+      - id: pin
+        run: |
+          set -euo pipefail
+          reference=$(grep -oE 'ghcr\.io/opencoven/chat-ci@sha256:[0-9a-f]{64}' .github/workflows/ci.yml | sort -u)
+          if [ "$(printf '%s\n' "${reference}" | wc -l)" -ne 1 ] || [ -z "${reference}" ]; then
+            echo "::error::ci.yml must pin exactly one CI image."
+            exit 1
+          fi
+          echo "reference=${reference}" >> "$GITHUB_OUTPUT"
+
   linux:
     name: Linux (${{ matrix.package }})
+    needs: image
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
         package: [deb, appimage]
     container:
-      image: ghcr.io/opencoven/chat-ci@sha256:3d9166df31ae84286f0e50b137912b8984c34b8eaf759916d8985bbf47d487a3
+      image: ${{ needs.image.outputs.reference }}
       credentials:
         username: ${{ github.actor }}
         password: ${{ secrets.GITHUB_TOKEN }}
