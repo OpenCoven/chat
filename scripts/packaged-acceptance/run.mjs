@@ -9,7 +9,7 @@ import { execFileSync, spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { homedir, release } from 'node:os';
-import { join, resolve } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { parseArgs } from 'node:util';
 import { startModelFixture } from './model-fixture.mjs';
 import { registerRecorder } from './platform.mjs';
@@ -190,7 +190,14 @@ async function attachWindows(env, row, { builtIn = false } = {}) {
     }
   }
   row.note('debugging port opened through', how);
-  const native = spawn(options['native-driver'], ['--port=4446'], { stdio: 'ignore' });
+  // Node will not spawn a .cmd without a shell, so start the driver itself
+  // beside the logging wrapper tauri-driver uses, and ask it for the same log.
+  const driverExe = join(dirname(options['native-driver']), 'msedgedriver.exe');
+  const native = spawn(
+    driverExe,
+    ['--port=4446', '--verbose', `--log-path=${join(out, 'msedgedriver-attach.log')}`],
+    { stdio: 'ignore' },
+  );
   await until(
     'msedgedriver to listen',
     async () => (await fetch('http://127.0.0.1:4446/status')).ok,
