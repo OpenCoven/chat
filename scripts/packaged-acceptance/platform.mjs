@@ -38,6 +38,14 @@ export function readClipboard() {
   }
 }
 
+/** True once the recorder logged exactly `address` as a delivered argument. */
+function delivered(log, address) {
+  return readFileSync(log, 'utf8')
+    .split('\n')
+    .filter(Boolean)
+    .some((line) => JSON.parse(line).address === address);
+}
+
 function registerLinux(log) {
   const data = process.env.XDG_DATA_HOME || join(homedir(), '.local', 'share');
   const config = process.env.XDG_CONFIG_HOME || join(homedir(), '.config');
@@ -84,7 +92,7 @@ function registerLinux(log) {
     } catch {
       // Judged by what the recorder received, below.
     }
-    return readFileSync(log, 'utf8').includes(probe);
+    return delivered(log, probe);
   };
   let env = {};
   let via = `xdg-open through ${name} (mimeapps.list)`;
@@ -149,7 +157,7 @@ function registerWindows(log) {
     // Judged by what the recorder received, below.
   }
   const deadline = Date.now() + 15_000;
-  while (!readFileSync(log, 'utf8').includes(probe)) {
+  while (!delivered(log, probe)) {
     if (Date.now() > deadline) {
       throw new Error(`rundll32 did not reach the recorder (${handlers.join('; ')}).`);
     }
