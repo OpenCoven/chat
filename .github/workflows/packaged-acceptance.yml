@@ -38,13 +38,6 @@ on:
         description: Also drive the Windows MSI.
         type: boolean
         default: true
-  # SPIKE: drives published v0.0.6 while this branch is iterated. Remove before merge.
-  push:
-    branches:
-      - ci/packaged-webdriver
-    paths:
-      - .github/workflows/packaged-acceptance.yml
-      - scripts/packaged-acceptance/**
 
 permissions:
   contents: read
@@ -52,8 +45,7 @@ permissions:
 
 env:
   TAURI_DRIVER_VERSION: 2.1.0
-  # SPIKE: github.workflow names this file only when it runs on its own push trigger.
-  RELEASE: ${{ inputs.release || (github.workflow == 'Packaged acceptance' && github.event_name == 'push' && 'v0.0.6') || '' }}
+  RELEASE: ${{ inputs.release }}
 
 jobs:
   # The CI image is pinned once, in ci.yml, where the image workflow proposes
@@ -179,7 +171,7 @@ jobs:
 
   windows:
     name: Windows (msi)
-    if: inputs.windows || (github.workflow == 'Packaged acceptance' && github.event_name == 'push')
+    if: inputs.windows
     runs-on: windows-2025
     timeout-minutes: 60
     steps:
