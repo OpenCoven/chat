@@ -55,8 +55,10 @@ const SECOND = 'Sage';
 // entry is removed once the issue is fixed.
 const KNOWN = [
   {
+    // Release AppImages are built on ubuntu-22.04; their bundled libraries break
+    // the newer system curl. One built in the CI image (24.04) does not show it.
     row: 'setup',
-    lane: /AppImage|appimage/,
+    lane: /appimage, v\d/,
     issue: 525,
     error: /engine install did not finish/,
   },

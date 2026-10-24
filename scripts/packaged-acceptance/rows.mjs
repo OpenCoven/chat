@@ -463,6 +463,23 @@ export async function tableRow(s, familiar) {
     await send(s, familiar, '[[table]] Show me the table.', 'button', 'Expand table');
     const size = await resize(s, 480, 520);
     row.note('viewport after resizing to 480x520', size);
+    // The rails collapse with a transition; judge the layout once it holds still.
+    let last = '';
+    let steady = 0;
+    const settled = Date.now();
+    await until(
+      'the layout to settle at 480x520',
+      async () => {
+        const now = await s.execute(
+          "return [...document.querySelectorAll('.fr-inspector, .coven-inspector-resizer, .fr-thread')].map((el) => { const b = el.getBoundingClientRect(); return [b.left, b.width].map(Math.round).join(','); }).join(';');",
+        );
+        steady = now === last ? steady + 1 : 0;
+        last = now;
+        return steady >= 5 && Date.now() - settled >= 1_000;
+      },
+      10_000,
+      200,
+    );
     row.note(
       'inspector and its resize handle at 480x520',
       await s.execute(`const aside = document.querySelector('.fr-inspector');
