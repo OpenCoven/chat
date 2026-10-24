@@ -89,22 +89,25 @@ function registerWindows(log) {
   const command = `"${process.execPath}" "${RECORDER}" "${log}" "%1"`;
   const handlers = [];
   for (const scheme of ['http', 'https']) {
-    const choice = regQuery(
-      `HKCU\\Software\\Microsoft\\Windows\\Shell\\Associations\\UrlAssociations\\${scheme}\\UserChoice`,
-      'ProgId',
-    );
-    // A per-user class shadows the machine's, so this redirects whichever
-    // handler the system would pick without editing the protected choice.
-    const progId = choice ?? scheme;
-    execFileSync('reg.exe', [
-      'add',
-      `HKCU\\Software\\Classes\\${progId}\\shell\\open\\command`,
-      '/ve',
-      '/d',
-      command,
-      '/f',
-    ]);
-    handlers.push(`${scheme}: ${progId}${choice ? ' (user choice)' : ' (no user choice)'}`);
+    const associations = `HKCU\\Software\\Microsoft\\Windows\\Shell\\Associations\\UrlAssociations\\${scheme}`;
+    // Newer Windows records the choice under UserChoiceLatest; either may name
+    // the handler, and with neither the scheme's own class is used. A per-user
+    // class shadows the machine's, so overriding each redirects whichever the
+    // system picks without editing the protected choice itself.
+    const chosen = ['UserChoice', 'UserChoiceLatest']
+      .map((key) => regQuery(`${associations}\\${key}`, 'ProgId'))
+      .filter(Boolean);
+    for (const progId of new Set([...chosen, scheme])) {
+      execFileSync('reg.exe', [
+        'add',
+        `HKCU\\Software\\Classes\\${progId}\\shell\\open\\command`,
+        '/ve',
+        '/d',
+        command,
+        '/f',
+      ]);
+    }
+    handlers.push(`${scheme}: ${chosen.length ? chosen.join(', ') : 'no user choice'}`);
   }
   return { handler: handlers.join('; '), opener: 'rundll32 url.dll,FileProtocolHandler' };
 }
