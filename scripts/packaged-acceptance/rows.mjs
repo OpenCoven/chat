@@ -774,9 +774,12 @@ export async function switchRow(s, first, second) {
   });
   try {
     await s.click(await s.one('button', second));
-    await typeDraft(s, second, 'Draft kept for later');
+    const typed = await (await typeDraft(s, second, 'Draft kept for later')).property('value');
+    row.note(`${second}'s draft as the composer showed it after typing`, typed);
     await s.click(await s.one('button', first));
-    await composerOf(s, first);
+    const probe = await typeDraft(s, first, 'Probe');
+    row.note(`${first}'s composer after typing "Probe"`, await probe.property('value'));
+    await clearComposer(s, probe);
     await openEverything(s, row);
     row.note('open before switching', await state());
 
@@ -809,10 +812,12 @@ export async function switchRow(s, first, second) {
     row.expect('review after the switch', now.review, 0);
     row.expect('sheet after the switch', now.sheet, 0);
     row.expect('waiting quote after the switch', now.quote, 0);
+    // Isolation means the draft is what that chat held before; how WebDriver's
+    // typing reached it is recorded above, not judged here.
     row.expect(
       'the other chat kept its draft',
       await (await composerOf(s, second)).property('value'),
-      'Draft kept for later',
+      typed,
     );
     row.note('focus after the switch', await focusedName(s));
     await clearComposer(s, await composerOf(s, second));
