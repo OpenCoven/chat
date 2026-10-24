@@ -23,7 +23,7 @@ import {
   switchRow,
   tableRow,
 } from './rows.mjs';
-import { Session, sleep, until } from './webdriver.mjs';
+import { Session, Stop, sleep, until } from './webdriver.mjs';
 
 const { values: options } = parseArgs({
   options: {
@@ -142,11 +142,26 @@ async function setUp(s, setupRow) {
   setupRow.note('first screen', phase);
   if (phase === 'chat') throw new Error('The scratch profile already had Coven set up.');
 
+  // A failed step shows "Try again" with an alert; report its words rather than time out.
+  const next = (what, role, label, timeout) =>
+    until(
+      what,
+      async () => {
+        const alerts = await s.all('alert');
+        if (alerts.length) throw new Stop(`Setup reported: ${await alerts[0].text()}`);
+        const found = await s.all(role, label);
+        return found.length === 1 ? found[0] : null;
+      },
+      timeout,
+      500,
+    ).catch((error) => {
+      throw new Error(`${what}: ${error.message}`);
+    });
   await (await s.one('button', 'Install Coven')).click();
-  await s.one('button', 'Install the engine', { timeout: 10 * 60_000 });
+  await next('Install Coven', 'button', 'Install the engine', 10 * 60_000);
   setupRow.note('Install Coven', 'done; the engine step is offered');
   await (await s.one('button', 'Install the engine')).click();
-  const name = await s.one('textbox', 'Familiar name', { timeout: 20 * 60_000 });
+  const name = await next('Install the engine', 'textbox', 'Familiar name', 20 * 60_000);
   setupRow.note('Install the engine', 'done; the familiar step is offered');
   await name.click();
   await name.type(FIRST);

@@ -39,6 +39,9 @@ async function request(base, method, path, body) {
 
 export const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
+/** Thrown from an `until` probe to fail at once instead of polling on. */
+export class Stop extends Error {}
+
 /** Polls `probe` until it returns a truthy value, or fails naming `what`. */
 export async function until(what, probe, timeout = 15_000, interval = 100) {
   const deadline = Date.now() + timeout;
@@ -48,6 +51,7 @@ export async function until(what, probe, timeout = 15_000, interval = 100) {
       const value = await probe();
       if (value) return value;
     } catch (error) {
+      if (error instanceof Stop) throw error;
       last = error;
     }
     if (Date.now() >= deadline) {

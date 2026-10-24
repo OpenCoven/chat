@@ -4,7 +4,7 @@
 
 import { ADDRESSES, TABLE } from './model-fixture.mjs';
 import { readClipboard } from './platform.mjs';
-import { Key, sleep, until } from './webdriver.mjs';
+import { Key, Stop, sleep, until } from './webdriver.mjs';
 
 export class Row {
   constructor(id, title) {
@@ -41,13 +41,23 @@ export async function composerOf(s, familiar) {
 }
 
 /** Sends through the real composer and waits for the reply's marker to render. */
-export async function send(s, familiar, text, marker) {
+export async function send(s, familiar, text, role, name) {
   const composer = await composerOf(s, familiar);
   await until('the composer to accept input', () => composer.property('disabled').then((d) => !d));
   await composer.click();
   await composer.type(text);
   await (await s.one('button', 'Send')).click();
-  await marker();
+  // A failed run shows its error; report those words rather than time out.
+  await until(
+    `the reply's ${role} "${name}"`,
+    async () => {
+      const errors = await s.css('.coven-error-text');
+      if (errors.length) throw new Stop(`The run failed: ${await errors[0].text()}`);
+      return (await s.all(role, name)).length > 0;
+    },
+    120_000,
+    250,
+  );
   // The reply is on screen; wait for the run to settle so the next send is not a follow-up.
   await until(
     'the run to finish',
@@ -87,7 +97,7 @@ export async function linkRows(s, familiar, opened) {
 
   let current = row1;
   try {
-    await send(s, familiar, '[[links]] Where are the docs?', () => s.one('link', 'Handoff check'));
+    await send(s, familiar, '[[links]] Where are the docs?', 'link', 'Handoff check');
     const link = await s.one('link', 'Handoff check');
     row1.expect(
       'transcript anchors with a live http(s) href',
@@ -371,7 +381,7 @@ export async function tableRow(s, familiar) {
     );
     await closeSettings(s);
 
-    await send(s, familiar, '[[table]] Show me the table.', () => s.one('button', 'Expand table'));
+    await send(s, familiar, '[[table]] Show me the table.', 'button', 'Expand table');
     const size = await resize(s, 480, 520);
     row.note('viewport after resizing to 480x520', size);
 
