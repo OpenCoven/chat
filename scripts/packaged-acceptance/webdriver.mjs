@@ -39,6 +39,18 @@ async function request(base, method, path, body) {
 
 export const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
+/** Reruns `work` when the page re-rendered an element it was holding. */
+export async function freshly(work, attempts = 3) {
+  for (let attempt = 1; ; attempt += 1) {
+    try {
+      return await work();
+    } catch (error) {
+      if (error?.code !== 'stale element reference' || attempt >= attempts) throw error;
+      await sleep(250);
+    }
+  }
+}
+
 /** Thrown from an `until` probe to fail at once instead of polling on. */
 export class Stop extends Error {}
 

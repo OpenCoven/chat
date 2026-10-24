@@ -4,7 +4,7 @@
 
 import { ADDRESSES, TABLE } from './model-fixture.mjs';
 import { readClipboard } from './platform.mjs';
-import { Key, Stop, sleep, until } from './webdriver.mjs';
+import { freshly, Key, Stop, sleep, until } from './webdriver.mjs';
 
 export class Row {
   constructor(id, title) {
@@ -334,27 +334,31 @@ export async function quoteRow(s, familiar, requests) {
     );
     const sent = requests();
     // The action follows the conversation in the tab order: Tab from whatever precedes it.
-    const previous = await s.execute(
-      `const focusable = [...document.querySelectorAll('a[href], button, textarea, input, select, [tabindex]')]
-        .filter((node) => !node.disabled && node.tabIndex >= 0 && node.getClientRects().length > 0);
-      const index = focusable.indexOf(arguments[0]);
-      return index > 0 ? focusable[index - 1] : null;`,
-      quote,
-    );
-    row.check('a control precedes the action in the tab order', Boolean(previous));
-    row.note(
-      'the control before the action',
-      await previous.evaluate(
-        "return (node.getAttribute('aria-label') || node.textContent || node.tagName).trim().slice(0, 60);",
-      ),
-    );
-    await previous.focus();
-    await s.press(Key.Tab);
-    row.expect(
-      'Tab reaches the action with the passage still captured',
-      await s.isActive(quote),
-      true,
-    );
+    // React may re-render the controls between the lookup and the key press.
+    await freshly(async () => {
+      const action = await s.one('button', 'Quote selection');
+      const previous = await s.execute(
+        `const focusable = [...document.querySelectorAll('a[href], button, textarea, input, select, [tabindex]')]
+          .filter((node) => !node.disabled && node.tabIndex >= 0 && node.getClientRects().length > 0);
+        const index = focusable.indexOf(arguments[0]);
+        return index > 0 ? focusable[index - 1] : null;`,
+        action,
+      );
+      row.check('a control precedes the action in the tab order', Boolean(previous));
+      row.note(
+        'the control before the action',
+        await previous.evaluate(
+          "return (node.getAttribute('aria-label') || node.textContent || node.tagName).trim().slice(0, 60);",
+        ),
+      );
+      await previous.focus();
+      await s.press(Key.Tab);
+      row.expect(
+        'Tab reaches the action with the passage still captured',
+        await s.isActive(action),
+        true,
+      );
+    });
     // One Enter on the action quotes once, puts the caret in the draft, sends nothing.
     await s.press(Key.Enter);
     await sleep(1_000);
