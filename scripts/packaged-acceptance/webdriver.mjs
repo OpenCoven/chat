@@ -115,10 +115,28 @@ return [...root.querySelectorAll(implicit[role] ?? '[role="' + role + '"]')].fil
 });
 `;
 
+/**
+ * A press this soon after one on the same spot counts as a double-click, which
+ * selects a word. GTK's default is 400 ms and 5 px; a person's separate clicks
+ * are further apart.
+ */
+const DOUBLE_CLICK = { ms: 600, px: 8 };
+
 export class Session {
   constructor(base, id) {
     this.base = base;
     this.id = id;
+    this.lastPress = null;
+  }
+
+  /** Waits until a press at (x, y) is a click of its own, then records it. */
+  async separately(x, y) {
+    const last = this.lastPress;
+    if (last && Math.hypot(x - last.x, y - last.y) <= DOUBLE_CLICK.px) {
+      const wait = last.at + DOUBLE_CLICK.ms - Date.now();
+      if (wait > 0) await sleep(wait);
+    }
+    this.lastPress = { x, y, at: Date.now() };
   }
 
   static async start(base, capabilities) {
@@ -243,6 +261,7 @@ export class Session {
         `The target (${aim.target}) is covered at its centre by ${aim.cover} (${aim.covering})`,
       );
     }
+    await this.separately(aim.x, aim.y);
     const pointer = {
       type: 'pointer',
       id: 'mouse',
@@ -277,6 +296,7 @@ export class Session {
 
   /** A primary click at viewport coordinates, on whatever is there. */
   async clickPoint(x, y) {
+    await this.separately(x, y);
     await this.actions([
       {
         type: 'pointer',

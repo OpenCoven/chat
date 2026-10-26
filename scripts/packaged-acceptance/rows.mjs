@@ -483,6 +483,22 @@ async function closeSettings(s) {
   }
 }
 
+/**
+ * Focuses `element` and waits until focus stays there: a dialog that just
+ * closed returns focus to its opener a moment later.
+ */
+async function focusSteadily(s, element) {
+  await until(
+    'focus to stay on the control',
+    async () => {
+      await element.focus();
+      await sleep(150);
+      return s.isActive(element);
+    },
+    5_000,
+  );
+}
+
 async function viewport(s) {
   return s.execute(`return {
     width: innerWidth, height: innerHeight,
@@ -706,7 +722,7 @@ export async function inspectorRow(s, familiar) {
     await closeSettings(s);
     row.expect('Reset restores 360px', await width(), 360);
 
-    await (await s.one('separator', 'Resize inspector')).focus();
+    await focusSteadily(s, await s.one('separator', 'Resize inspector'));
     await s.press(Key.End);
     row.expect('stored width before narrowing', await width(), 600);
     // Narrowing folds the rail away, and widening never forces it back open
