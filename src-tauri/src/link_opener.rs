@@ -6,7 +6,7 @@
 //! as one argument, never through a shell. Nothing else in Chat opens an
 //! address: the webview's own `target="_blank"` requests are still dropped.
 
-use std::process::{Command, Stdio};
+use std::process::Stdio;
 use std::time::{Duration, Instant};
 
 /// The review's `REVIEW_ADDRESS_LIMIT`: the longest address, in bytes, Chat opens.
@@ -85,7 +85,7 @@ fn launcher(
 /// Runs the launcher and reports whether the system took the address. Exit 0
 /// means it did, not that a page rendered.
 fn hand_off(program: &str, args: &[String]) -> Result<(), String> {
-    let mut child = Command::new(program)
+    let mut child = crate::coven_runtime::child_env::command(program)
         .args(args)
         .stdin(Stdio::null())
         .stdout(Stdio::null())

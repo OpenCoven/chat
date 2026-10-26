@@ -7,7 +7,7 @@ use std::{
     fs::{self, File},
     io::Write,
     path::{Path, PathBuf},
-    process::{Command, Stdio},
+    process::Stdio,
     sync::atomic::{AtomicBool, Ordering},
     time::Duration,
 };
@@ -171,7 +171,7 @@ fn tar_program(windows: bool) -> Option<PathBuf> {
 }
 
 fn run_tar(tar: &Path, args: &[&std::ffi::OsStr]) -> Result<String, String> {
-    let output = Command::new(tar)
+    let output = crate::coven_runtime::child_env::command(tar)
         .args(args)
         .stdin(Stdio::null())
         .output()
@@ -315,6 +315,7 @@ pub(crate) async fn install(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::process::Command;
 
     fn temp(name: &str) -> PathBuf {
         let path = std::env::temp_dir().join(format!("opencoven-{name}-{}", uuid::Uuid::new_v4()));
