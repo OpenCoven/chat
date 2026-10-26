@@ -28,6 +28,13 @@
       "csp": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: asset: http://asset.localhost; connect-src 'self' ipc: http://ipc.localhost; font-src 'self' data:; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"
     }
   },
+  "plugins": {
+    "updater": {
+      "pubkey": "PENDING-VAL-UPDATER-PUBLIC-KEY",
+      "endpoints": ["https://github.com/OpenCoven/chat/releases/download/updater/latest.json"],
+      "windows": { "installMode": "passive" }
+    }
+  },
   "bundle": {
     "active": true,
     "targets": ["app", "dmg", "msi", "nsis", "appimage", "deb"],
