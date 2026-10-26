@@ -483,6 +483,22 @@ async function closeSettings(s) {
   }
 }
 
+/**
+ * Focuses `element` and waits until focus stays there: a dialog that just
+ * closed returns focus to its opener a moment later.
+ */
+async function focusSteadily(s, element) {
+  await until(
+    'focus to stay on the control',
+    async () => {
+      await element.focus();
+      await sleep(150);
+      return s.isActive(element);
+    },
+    5_000,
+  );
+}
+
 async function viewport(s) {
   return s.execute(`return {
     width: innerWidth, height: innerHeight,
@@ -706,7 +722,7 @@ export async function inspectorRow(s, familiar) {
     await closeSettings(s);
     row.expect('Reset restores 360px', await width(), 360);
 
-    await (await s.one('separator', 'Resize inspector')).focus();
+    await focusSteadily(s, await s.one('separator', 'Resize inspector'));
     await s.press(Key.End);
     row.expect('stored width before narrowing', await width(), 600);
     // Narrowing folds the rail away, and widening never forces it back open
@@ -974,6 +990,45 @@ export async function rightClickRow(s, familiar, opened) {
   } catch (error) {
     row.error = error.message;
     await snapshot(row.id);
+  }
+  return row;
+}
+
+/** Set by the AppImage runtime to describe the image Chat runs from. */
+const IMAGE_RUNTIME = ['APPDIR', 'APPIMAGE', 'ARGV0', 'OWD'];
+
+/**
+ * #525: an AppImage points library, plugin and data paths into its image so
+ * Chat finds what it bundles. The programs Chat starts are the user's own and
+ * must get the environment Chat was launched with. The browser **Open** started
+ * is the one the suite can see; Coven and its installers go through the same
+ * native helper. Linux only. `app` is Chat's own environment, `launch` the one
+ * the suite started it with.
+ */
+export function launchEnvironmentRow(opened, app, launch) {
+  const row = new Row('525', 'Programs Chat starts get the environment it was launched with');
+  try {
+    const image = app?.APPDIR;
+    row.note('Chat runs from', image ? `an AppImage at ${image}` : 'its installed files');
+    const received = opened.received().at(-1)?.env;
+    row.check('the browser Chat started recorded what it received', Boolean(received));
+    row.expect(
+      "the AppImage runtime's variables the browser received",
+      IMAGE_RUNTIME.filter((key) => key in received),
+      [],
+    );
+    const inside = (entry) => entry === image || entry.startsWith(`${image}/`);
+    row.expect(
+      'variables pointing into the image',
+      image ? Object.keys(received).filter((key) => received[key].split(':').some(inside)) : [],
+      [],
+    );
+    for (const key of ['LD_LIBRARY_PATH', 'GDK_BACKEND', 'GTK_THEME']) {
+      row.expect(`${key} as Chat was launched with it`, received[key] ?? null, launch[key] ?? null);
+    }
+    row.note('PATH as Chat was launched with it', received.PATH === launch.PATH);
+  } catch (error) {
+    row.error = error.message;
   }
   return row;
 }

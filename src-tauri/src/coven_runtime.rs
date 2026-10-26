@@ -21,6 +21,9 @@ use crate::coven::{CovenHealth, NativeCovenHealth};
 #[path = "chat_attachments.rs"]
 pub(crate) mod attachments;
 
+#[path = "child_env.rs"]
+pub(crate) mod child_env;
+
 #[path = "familiar_projects.rs"]
 mod familiar_projects;
 
@@ -437,7 +440,7 @@ pub(crate) fn resolve_cli() -> Result<PathBuf, String> {
     let local_app_data = std::env::var_os("LOCALAPPDATA")
         .map(PathBuf::from)
         .filter(|path| path.is_absolute());
-    let path = std::env::var_os("PATH");
+    let path = child_env::var_os("PATH");
     cli_candidates(
         cfg!(windows),
         platform_package(),
@@ -574,7 +577,7 @@ pub(crate) fn tool_search_path() -> Result<std::ffi::OsString, String> {
         PathBuf::from("/opt/homebrew/bin"),
         PathBuf::from("/usr/local/bin"),
     ]);
-    if let Some(inherited) = std::env::var_os("PATH") {
+    if let Some(inherited) = child_env::var_os("PATH") {
         path.extend(std::env::split_paths(&inherited).filter(|p| p.is_absolute()));
     }
     std::env::join_paths(path).map_err(|_| "Invalid executable search path.".to_owned())
@@ -599,7 +602,7 @@ fn run_process_input(
     input_file: Option<File>,
     diagnostics: Option<&mut String>,
 ) -> Result<Vec<u8>, String> {
-    let mut command = Command::new(resolve_cli()?);
+    let mut command = child_env::command(resolve_cli()?);
     command
         .args(args)
         .stdin(input_file.map_or_else(Stdio::null, Stdio::from))

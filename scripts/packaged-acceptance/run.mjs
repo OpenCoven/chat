@@ -17,6 +17,7 @@ import {
   composerOf,
   conversationLoaded,
   inspectorRow,
+  launchEnvironmentRow,
   linkRows,
   onFailure,
   quoteRow,
@@ -55,10 +56,10 @@ const SECOND = 'Sage';
 // entry is removed once the issue is fixed.
 const KNOWN = [
   {
-    // Release AppImages are built on ubuntu-22.04; their bundled libraries break
-    // the newer system curl. One built in the CI image (24.04) does not show it.
+    // AppImages up to v0.0.7 hand their bundled libraries to the programs Chat
+    // starts; on a newer host the system curl then can't load. Fixed after v0.0.7.
     row: 'setup',
-    lane: /appimage, v\d/,
+    lane: /appimage, v0\.0\.[0-7]\)/,
     issue: 525,
     error: /engine install did not finish/,
   },
@@ -243,6 +244,20 @@ async function openSession(env, row) {
   }
 }
 
+/** The running app's pid and its own environment, on Linux. */
+function appProcess() {
+  // The AppImage runtime starts the app as a child; read the app binary itself.
+  const pid = tryRun('pgrep', ['-n', '-x', 'opencoven-chat']).split('\n')[0];
+  if (!/^\d+$/.test(pid)) return null;
+  const env = Object.fromEntries(
+    readFileSync(`/proc/${pid}/environ`, 'utf8')
+      .split('\0')
+      .filter(Boolean)
+      .map((entry) => [entry.slice(0, entry.indexOf('=')), entry.slice(entry.indexOf('=') + 1)]),
+  );
+  return { pid, env };
+}
+
 /**
  * After a failed setup on Linux, compares the engine install under the running
  * app's own environment with a plain one, so a failure can be pinned on the
@@ -250,18 +265,12 @@ async function openSession(env, row) {
  */
 function diagnoseSetup(row) {
   if (process.platform !== 'linux') return;
-  // The AppImage runtime starts the app as a child; read the app binary itself.
-  const pid = tryRun('pgrep', ['-n', '-x', 'opencoven-chat']).split('\n')[0];
-  if (!/^\d+$/.test(pid)) {
+  const app = appProcess();
+  if (!app) {
     row.note('app environment', 'no running opencoven-chat process');
     return;
   }
-  const appEnv = Object.fromEntries(
-    readFileSync(`/proc/${pid}/environ`, 'utf8')
-      .split('\0')
-      .filter(Boolean)
-      .map((entry) => [entry.slice(0, entry.indexOf('=')), entry.slice(entry.indexOf('=') + 1)]),
-  );
+  const { pid, env: appEnv } = app;
   row.note('app process', tryRun('readlink', [`/proc/${pid}/exe`]));
   const keys = new Set([...Object.keys(appEnv), ...Object.keys(process.env)]);
   const differing = [...keys]
@@ -461,6 +470,9 @@ try {
   userAgent = await session.execute('return navigator.userAgent;');
   await setUp(session, setupRow);
   rows.push(...(await linkRows(session, FIRST, opened, requests)));
+  if (process.platform === 'linux') {
+    rows.push(launchEnvironmentRow(opened, appProcess()?.env, env));
+  }
   rows.push(await tableRow(session, FIRST));
   rows.push(await quoteRow(session, FIRST, requests));
   rows.push(await inspectorRow(session, FIRST));

@@ -72,11 +72,63 @@ jobs:
           fi
           echo "reference=${reference}" >> "$GITHUB_OUTPUT"
 
+  # A release builds its AppImage on ubuntu-22.04 (release.yml), so the image
+  # bundles libraries older than a newer host's. One built in the CI image
+  # (24.04) bundles the host's own and hid #525. The tree's AppImage lane drives
+  # one built the way a release builds it, with the same packages and command.
+  appimage:
+    name: AppImage (built as a release builds it)
+    if: inputs.release == '' && format('{0}', inputs.linux) != 'false'
+    runs-on: ubuntu-22.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4.4.0
+        with:
+          version: 10.34.0
+          run_install: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version-file: .node-version
+          cache: pnpm
+      - uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c # stable
+        with:
+          toolchain: 1.95.0
+          targets: x86_64-unknown-linux-gnu
+      - name: Install Linux build dependencies (as release.yml)
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential \
+            libayatana-appindicator3-dev \
+            libgtk-3-dev \
+            libssl-dev \
+            libwebkit2gtk-4.1-dev \
+            librsvg2-dev \
+            patchelf \
+            libfuse2 \
+            file
+      - run: corepack pnpm install --frozen-lockfile
+      - run: corepack pnpm exec tauri build --target x86_64-unknown-linux-gnu --bundles appimage
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: linux-appimage-release-build
+          path: src-tauri/target/x86_64-unknown-linux-gnu/release/bundle/appimage/*.AppImage
+          if-no-files-found: error
+          retention-days: 3
+
   linux:
     name: Linux (${{ matrix.package }})
-    needs: image
+    needs: [image, appimage]
     # Only a caller passing linux: false skips it; a dispatch has no such input.
-    if: format('{0}', inputs.linux) != 'false'
+    # The AppImage build is skipped for a release, and its failure fails only
+    # the AppImage lane, at its download.
+    if: >-
+      !cancelled() && needs.image.result == 'success'
+      && format('{0}', inputs.linux) != 'false'
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -104,7 +156,7 @@ jobs:
         if: env.RELEASE == ''
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
-          name: linux-bundle
+          name: ${{ matrix.package == 'appimage' && 'linux-appimage-release-build' || 'linux-bundle' }}
           path: ${{ runner.temp }}/package
       - name: Fetch and verify the release's installer
         if: env.RELEASE != ''
@@ -154,11 +206,17 @@ jobs:
           NO_AT_BRIDGE: '1'
         run: |
           set -euo pipefail
+          label="${{ matrix.package }}"
+          if [ -n "${RELEASE}" ]; then
+            label="${label}, ${RELEASE}"
+          elif [ "${label}" = appimage ]; then
+            label="${label}, built on ubuntu-22.04"
+          fi
           dbus-run-session -- xvfb-run -a --server-args="-screen 0 1600x1000x24" \
             node scripts/packaged-acceptance/run.mjs \
               --application "${{ steps.install.outputs.application }}" \
               --package "${{ steps.install.outputs.package }}" \
-              --lane "Linux WebKitGTK (${{ matrix.package }}${RELEASE:+, ${RELEASE}})" \
+              --lane "Linux WebKitGTK (${label})" \
               --tauri-driver "$HOME/.cargo/bin/tauri-driver" \
               --out "$RUNNER_TEMP/packaged-acceptance"
       - name: Upload the observations

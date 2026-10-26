@@ -34,8 +34,8 @@ use sha2::{Digest, Sha256};
 use tauri::{ipc::Channel, AppHandle, Manager, State};
 
 use super::{
-    blocking, home, pipe_reader, resolve_cli, stderr_text, tool_search_path, validate_id,
-    OwnedChild, PipeData, ERROR_LIMIT,
+    blocking, child_env, home, pipe_reader, resolve_cli, stderr_text, tool_search_path,
+    validate_id, OwnedChild, PipeData, ERROR_LIMIT,
 };
 
 /// The only envelope Chat offers: Coven's read-only R0 launch.
@@ -132,7 +132,7 @@ fn coven(
     input: Option<&[u8]>,
     cancel: &AtomicBool,
 ) -> Result<CliOutput, RunFailure> {
-    let mut command = Command::new(resolve_cli().map_err(RunFailure::NotStarted)?);
+    let mut command = child_env::command(resolve_cli().map_err(RunFailure::NotStarted)?);
     command
         .args(args)
         .env("NO_COLOR", "1")

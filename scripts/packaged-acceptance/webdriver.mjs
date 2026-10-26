@@ -115,10 +115,37 @@ return [...root.querySelectorAll(implicit[role] ?? '[role="' + role + '"]')].fil
 });
 `;
 
+/**
+ * A press this soon after one on the same spot counts as a double-click, which
+ * selects a word. GTK's default is 400 ms and 5 px; a person's separate clicks
+ * are further apart.
+ */
+const DOUBLE_CLICK = { ms: 600, px: 8 };
+
+/** An element's centre in viewport coordinates, and what a press there would hit. */
+const AIM = `const box = node.getBoundingClientRect();
+const x = box.left + box.width / 2;
+const y = box.top + box.height / 2;
+const hit = document.elementFromPoint(x, y);
+const describe = (el) => el ? el.tagName.toLowerCase() + (el.className && typeof el.className === 'string' ? '.' + el.className.trim().split(/\\s+/).join('.') : '') : 'nothing';
+const rect = (el) => { const b = el.getBoundingClientRect(); return [b.left, b.top, b.width, b.height].map(Math.round).join(','); };
+return { x, y, reachable: Boolean(hit) && (node === hit || node.contains(hit)), cover: describe(hit), target: rect(node), covering: hit ? rect(hit) : '' };`;
+
 export class Session {
   constructor(base, id) {
     this.base = base;
     this.id = id;
+    this.lastPress = null;
+  }
+
+  /** Waits until a press at (x, y) would be a click of its own; true if it waited. */
+  async separately(x, y) {
+    const last = this.lastPress;
+    if (!last || Math.hypot(x - last.x, y - last.y) > DOUBLE_CLICK.px) return false;
+    const wait = last.at + DOUBLE_CLICK.ms - Date.now();
+    if (wait <= 0) return false;
+    await sleep(wait);
+    return true;
   }
 
   static async start(base, capabilities) {
@@ -230,14 +257,9 @@ export class Session {
     // Aim at the centre in viewport coordinates, and refuse rather than click
     // whatever covers the target: WebKitWebDriver's element origin rejects a
     // covered element without saying what covers it.
-    const aim = await element.evaluate(`node.scrollIntoView({ block: 'center', inline: 'nearest' });
-      const box = node.getBoundingClientRect();
-      const x = box.left + box.width / 2;
-      const y = box.top + box.height / 2;
-      const hit = document.elementFromPoint(x, y);
-      const describe = (el) => el ? el.tagName.toLowerCase() + (el.className && typeof el.className === 'string' ? '.' + el.className.trim().split(/\\s+/).join('.') : '') : 'nothing';
-      const rect = (el) => { const b = el.getBoundingClientRect(); return [b.left, b.top, b.width, b.height].map(Math.round).join(','); };
-      return { x, y, reachable: Boolean(hit) && (node === hit || node.contains(hit)), cover: describe(hit), target: rect(node), covering: hit ? rect(hit) : '' };`);
+    await element.evaluate(`node.scrollIntoView({ block: 'center', inline: 'nearest' });`);
+    let aim = await this.steady(element);
+    if (await this.separately(aim.x, aim.y)) aim = await this.steady(element);
     if (!aim.reachable) {
       throw new Error(
         `The target (${aim.target}) is covered at its centre by ${aim.cover} (${aim.covering})`,
@@ -272,11 +294,30 @@ export class Session {
       pointer.actions.unshift({ type: 'pause' });
       await this.actions([keys, pointer]);
     }
+    this.lastPress = { x: aim.x, y: aim.y, at: Date.now() };
     await this.release();
+  }
+
+  /**
+   * Where `click` aims, once two looks 100 ms apart agree. Chat pins the
+   * transcript to its newest message a frame after a run ends; a press aimed
+   * before that lands on the line below the target.
+   */
+  async steady(element) {
+    let aim = await element.evaluate(AIM);
+    for (const deadline = Date.now() + 5_000; ; ) {
+      await sleep(100);
+      const again = await element.evaluate(AIM);
+      if (Math.hypot(again.x - aim.x, again.y - aim.y) < 1) return again;
+      if (Date.now() >= deadline)
+        throw new Error(`The target kept moving (last at ${again.target})`);
+      aim = again;
+    }
   }
 
   /** A primary click at viewport coordinates, on whatever is there. */
   async clickPoint(x, y) {
+    await this.separately(x, y);
     await this.actions([
       {
         type: 'pointer',
@@ -289,6 +330,7 @@ export class Session {
         ],
       },
     ]);
+    this.lastPress = { x, y, at: Date.now() };
     await this.release();
   }
 
