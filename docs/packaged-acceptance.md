@@ -11,9 +11,11 @@ is the only automated check that runs the shipped binary.
 ## When it runs
 
 - **CI** calls it twice. *Packaged acceptance* runs after *Desktop build* and installs the `.deb`
-  and AppImage that job built. *Packaged acceptance (Windows)* builds its own test MSI (see
-  below), so it doesn't wait for Desktop build; it runs on `main` and on pull requests labelled
-  `ci:full`, like the other Windows jobs.
+  that job built. Its AppImage lane drives an AppImage built from the same tree on `ubuntu-22.04`,
+  with the packages and `tauri build` command `release.yml` uses, because a release's bundled
+  libraries are older than a newer host's (see #525 below). *Packaged acceptance (Windows)* builds
+  its own test MSI (see below), so it doesn't wait for Desktop build; it runs on `main` and on pull
+  requests labelled `ci:full`, like the other Windows jobs.
 - **By hand**, from the Actions tab: *Packaged acceptance* → *Run workflow*, with a published tag
   such as `v0.0.6`. The workflow downloads that release's installers and checks them against its
   `SHA256SUMS` before installing anything.
@@ -44,9 +46,10 @@ A row that fails because of a filed product bug is listed in `KNOWN` in
 fail the lane. If a listed failure stops reproducing, the lane fails, so the entry is removed once
 the bug is fixed. Currently listed:
 
-- [#525](https://github.com/OpenCoven/chat/issues/525): on the AppImage, the setup screen's engine
-  install fails. The AppImage's `LD_LIBRARY_PATH` reaches the system `curl`, which then can't
-  load. No other row runs on the AppImage until it's fixed.
+- [#525](https://github.com/OpenCoven/chat/issues/525), for published AppImages up to v0.0.7: the
+  setup screen's engine install fails. Those releases pass the AppImage's `LD_LIBRARY_PATH` to the
+  system `curl`, which then can't load, so no other row runs on them. Later builds start the
+  programs Chat runs with the environment it was launched with, which the *#525* row checks.
 
 ## What is real, and the one stand-in
 
@@ -69,8 +72,8 @@ resolves. The recorder logs the exact address the operating system handed it.
 On Linux the app runs in the CI container under Xvfb with `APPIMAGE_EXTRACT_AND_RUN=1`, since a
 container has no FUSE, and `WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS=1`, since it has no user
 namespaces for WebKit's web-process sandbox. These settings change how the app is hosted, not
-what its window does. CI's bundles are built in the CI image (Ubuntu 24.04), but release bundles
-are built on `ubuntu-22.04`. Dispatch against a tag to drive the released bytes.
+what its window does. CI's `.deb` is built in the CI image (Ubuntu 24.04) and its AppImage on
+`ubuntu-22.04`, as a release builds it. Dispatch against a tag to drive the released bytes.
 
 ## Rows
 
@@ -86,6 +89,7 @@ are built on `ubuntu-22.04`. Dispatch against a tag to drive the released bytes.
 | 8 Preference-only storage | Judged against `SECURITY.md`: local storage holds only `opencoven.chat.preferences.v1` (with a numeric `inspectorWidth`) and `opencoven.chat.navigation.v1` (`familiarId` and `sessionId`). Nothing is in session storage or IndexedDB, and no address, table, passage or draft text is stored anywhere | |
 | 9 IPv6 | `https://[::1]:8080/x` shows site `[::1]:8080`; Copy and Open use exactly that address | |
 | #515 handoff | **Open** hands the operating system exactly the reviewed address, once, for a query string, a plain address and IPv6 | The browser's own address bar, with the browser closed and with it running |
+| #525 launch environment (Linux) | The browser **Open** started received none of the AppImage runtime's variables (`APPDIR`, `APPIMAGE`, `ARGV0`, `OWD`), no variable pointing into the image, and `LD_LIBRARY_PATH`, `GDK_BACKEND` and `GTK_THEME` as Chat was launched with them | |
 
 macOS stays entirely hand-run: WKWebView has no WebDriver.
 
