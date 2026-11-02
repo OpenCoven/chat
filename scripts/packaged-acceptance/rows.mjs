@@ -316,14 +316,12 @@ export async function quoteRow(s, familiar, requests) {
   try {
     const composer = await composerOf(s, familiar);
     await clearComposer(s, composer);
-    const selected = await selectText(
-      s,
-      `const bubble = [...document.querySelectorAll('.fr-bubble--familiar')]
+    const passage = `const bubble = [...document.querySelectorAll('.fr-bubble--familiar')]
         .find((node) => node.textContent.includes('three steps'));
       const items = bubble.querySelectorAll('li');
       range.setStart(bubble.querySelector('p'), 0);
-      range.setEnd(items[0], items[0].childNodes.length);`,
-    );
+      range.setEnd(items[0], items[0].childNodes.length);`;
+    const selected = await selectText(s, passage);
     row.note('selection across a paragraph break and a list item', selected);
     const quote = await s.one('button', 'Quote selection');
     row.check('Quote selection offered', Boolean(quote));
@@ -336,13 +334,15 @@ export async function quoteRow(s, familiar, requests) {
     // The action follows the conversation in the tab order: Tab from whatever precedes it.
     // React may re-render the controls between the lookup and the key press.
     await freshly(async () => {
-      const action = await s.one('button', 'Quote selection');
+      // A retry starts over: the attempt before it may have let the passage go.
+      if ((await s.all('button', 'Quote selection')).length === 0) await selectText(s, passage);
+      const first = await s.one('button', 'Quote selection');
       const previous = await s.execute(
         `const focusable = [...document.querySelectorAll('a[href], button, textarea, input, select, [tabindex]')]
           .filter((node) => !node.disabled && node.tabIndex >= 0 && node.getClientRects().length > 0);
         const index = focusable.indexOf(arguments[0]);
         return index > 0 ? focusable[index - 1] : null;`,
-        action,
+        first,
       );
       row.check('a control precedes the action in the tab order', Boolean(previous));
       row.note(
@@ -352,6 +352,16 @@ export async function quoteRow(s, familiar, requests) {
         ),
       );
       await previous.focus();
+      // The control before the action is a link inside the reply. Focusing it can
+      // collapse the selection, and WebKitGTK may deliver that selectionchange
+      // before or after the Tab below: before, the action rightly lets the passage
+      // go (focus is not in it). Select the passage again once focus has settled,
+      // so Tab always starts from the link with the passage selected, as it
+      // does for a reader who selects and then tabs from there.
+      await sleep(250);
+      await selectText(s, passage);
+      const action = await s.one('button', 'Quote selection');
+      row.expect('focus stays on the control before the action', await s.isActive(previous), true);
       await s.press(Key.Tab);
       row.expect(
         'Tab reaches the action with the passage still captured',
