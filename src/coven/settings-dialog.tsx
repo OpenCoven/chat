@@ -122,6 +122,8 @@ export type SettingsDialogProps = Readonly<{
   refreshDisabled: boolean;
   /** The iPhone companion's opener, which owns its own dialog. */
   companion?: ReactNode;
+  /** About › Updates, which owns its own state (#356). */
+  updates?: ReactNode;
 }>;
 
 /**
@@ -660,7 +662,13 @@ function ShortcutsSection() {
   );
 }
 
-function AboutSection({ status, connected, onRefresh, refreshDisabled }: SettingsDialogProps) {
+function AboutSection({
+  status,
+  connected,
+  onRefresh,
+  refreshDisabled,
+  updates,
+}: SettingsDialogProps) {
   return (
     <>
       <div className="coven-about-hero">
@@ -670,6 +678,12 @@ function AboutSection({ status, connected, onRefresh, refreshDisabled }: Setting
           <span className="coven-about-version">Version {packageJson.version}</span>
         </div>
       </div>
+      {updates ? (
+        <div className="coven-settings-group">
+          <h3 className="coven-settings-group-title">Updates</h3>
+          <div className="coven-settings-card">{updates}</div>
+        </div>
+      ) : null}
       <Group title="Coven CLI">
         <Row
           label={connected ? 'Connected' : 'Not connected'}

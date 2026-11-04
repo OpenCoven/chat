@@ -2,10 +2,10 @@
 // Verifies the packaged app's declared contract before a release build.
 //
 // It enforces what tauri.conf.json, the capability, Cargo.toml and README.md
-// declare, and the v0.0.1 decisions recorded on issue #356 (2026-09-26):
-// the 480x520 minimum window, no updater, and no deep-link protocol. When a
-// later release enables the updater or a protocol, change the decision here
-// in the same change that configures it.
+// declare, and the decisions recorded on issue #356: the 480x520 minimum
+// window and no deep-link protocol (2026-09-26), and the updater, which
+// decision 3 turned on (amended 2026-10-18). When a later release changes one
+// of these, change the decision here in the same change that configures it.
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -57,8 +57,27 @@ export const ALLOWED_PERMISSIONS = [
   'allow-setup-cancel',
   'allow-setup-create-familiar',
   'allow-open-reviewed-link',
+  'allow-updater-check',
+  'allow-updater-install',
   'core:window:allow-set-title',
 ];
+/** The pointer release's feed, the only place installed copies look for updates (#356). */
+export const UPDATER_ENDPOINT =
+  'https://github.com/OpenCoven/chat/releases/download/updater/latest.json';
+
+/**
+ * Tauri takes the updater key as base64 of the minisign `.pub` file: an
+ * untrusted comment, then the key line, which is "RW" and 54 base64 characters.
+ */
+export function isMinisignPublicKey(value) {
+  if (typeof value !== 'string' || !/^[A-Za-z0-9+/]+={0,2}$/.test(value)) return false;
+  const lines = Buffer.from(value, 'base64').toString('utf8').trim().split('\n');
+  return (
+    lines.length === 2 &&
+    lines[0].startsWith('untrusted comment:') &&
+    /^RW[A-Za-z0-9+/]{54}$/.test(lines[1].trim())
+  );
+}
 const FORBIDDEN_PERMISSION =
   /^(shell|fs|filesystem|opener|http|https|network|process|os|dialog)(:|-)/;
 const FORBIDDEN_PLUGIN = /tauri-plugin-(shell|fs|http|opener|process)\b/;
@@ -184,13 +203,29 @@ export function verifyPackage({ conf, capabilities, cargo, exists }) {
   const plugin = cargo.match(FORBIDDEN_PLUGIN);
   if (plugin) fail(`Cargo.toml depends on ${plugin[0]}.`);
 
-  // Issue #356, decision 3: no updater for v0.0.1 (docs/releasing.md section 4).
-  if (bundle.createUpdaterArtifacts !== false || conf.plugins?.updater)
+  // Issue #356, decision 3 as amended on 2026-10-18: the updater is on. The
+  // base config names the public key and the pointer release's feed. Updater
+  // artifacts stay off here, because a build without the private key (CI's
+  // desktop build, a local app:build) would fail; the release build turns
+  // them on through its own overlay.
+  if (bundle.createUpdaterArtifacts !== false)
     fail(
-      'v0.0.1 ships without the updater: createUpdaterArtifacts must be false, with no updater plugin config (issue #356).',
+      'createUpdaterArtifacts must stay false in tauri.conf.json; the release build turns it on (issue #356).',
     );
-  if (/tauri-plugin-updater\b/.test(cargo))
-    fail('Cargo.toml depends on tauri-plugin-updater; v0.0.1 has no updater (issue #356).');
+  const updater = conf.plugins?.updater;
+  if (!updater) fail('The updater is on (issue #356), but plugins.updater is missing.');
+  else {
+    if (!isMinisignPublicKey(updater.pubkey))
+      fail('plugins.updater.pubkey is not a minisign public key (issue #356).');
+    if (JSON.stringify(updater.endpoints) !== JSON.stringify([UPDATER_ENDPOINT]))
+      fail(`plugins.updater.endpoints must be exactly [${UPDATER_ENDPOINT}] (issue #356).`);
+    if (updater.dangerousInsecureTransportProtocol)
+      fail('The updater must not allow insecure transport.');
+    if (updater.windows?.installMode !== 'passive')
+      fail('plugins.updater.windows.installMode must be passive (issue #356).');
+  }
+  if (!/^tauri-plugin-updater = \{ version = "=\d+\.\d+\.\d+"/m.test(cargo))
+    fail('Cargo.toml must pin tauri-plugin-updater to one exact version (issue #356).');
   // Issue #356, decision 2: no deep-link protocol for v0.0.1; nothing handles links yet.
   if (conf.plugins?.['deep-link'] || /tauri-plugin-deep-link\b/.test(cargo))
     fail('v0.0.1 registers no deep-link protocol (issue #356).');

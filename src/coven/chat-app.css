@@ -1070,6 +1070,21 @@
 .coven-sidebar-settings {
   margin-right: 8px;
 }
+/* An update is ready: a dot on the gear, which opens About › Updates (#356). */
+.coven-sidebar-settings--update {
+  position: relative;
+}
+.coven-sidebar-settings--update::after {
+  content: "";
+  position: absolute;
+  top: 3px;
+  right: 3px;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--accent-presence);
+  box-shadow: 0 0 0 2px var(--bg-panel);
+}
 
 /* ------------------------------------------------------------- composer */
 

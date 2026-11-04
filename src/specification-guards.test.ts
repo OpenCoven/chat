@@ -97,6 +97,10 @@ const setupCommands = ['setup_check', 'setup_run', 'setup_cancel', 'setup_create
 // and hands it to the system's default handler as one argument, never through
 // a shell. See src-tauri/src/link_opener.rs.
 const linkOpenerCommands = ['open_reviewed_link'];
+// App updates (#356): whether a newer release exists, and "install it and
+// restart". The plugin's own commands are not granted; the feed and the
+// signing key are fixed in tauri.conf.json, and no argument names either.
+const updaterCommands = ['updater_check', 'updater_install'];
 
 function readText(relativePath: string) {
   return readFileSync(resolve(projectRoot, relativePath), 'utf8');
@@ -278,6 +282,7 @@ describe('Phase 1 specification guards', () => {
         ...screenRelayCommands,
         ...setupCommands,
         ...linkOpenerCommands,
+        ...updaterCommands,
       ].map((command) => `allow-${command.replaceAll('_', '-')}`),
       'core:window:allow-set-title',
     ]);
@@ -757,6 +762,7 @@ describe('Phase 1 specification guards', () => {
       ...screenRelayCommands,
       ...setupCommands,
       ...linkOpenerCommands,
+      ...updaterCommands,
       'app_identity',
       'app_installation_id',
       'cave_read_discovery',
@@ -826,6 +832,7 @@ describe('Phase 1 specification guards', () => {
       ...screenRelayCommands.map((command) => `screen_relay::${command}`),
       ...setupCommands.map((command) => `setup::${command}`),
       ...linkOpenerCommands.map((command) => `link_opener::${command}`),
+      ...updaterCommands.map((command) => `updater::${command}`),
       ...expected,
     ]);
     const setup = readText('src-tauri/src/setup.rs');

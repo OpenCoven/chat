@@ -164,6 +164,35 @@ impl CovenRuntimeState {
         ))
     }
 
+    /// Holds new runs back while an update downloads and installs (#356). It
+    /// refuses while a run is active, under the same lock `register_run` takes,
+    /// so no run can start between the check and the hold.
+    pub(crate) fn begin_update(&self) -> Result<(), String> {
+        let runs = self
+            .runs
+            .lock()
+            .map_err(|_| "Coven runtime state is unavailable.")?;
+        if !runs.is_empty() {
+            return Err("Finish or stop the current reply first, then restart to update.".into());
+        }
+        if self.shutting_down.swap(true, Ordering::SeqCst) {
+            return Err("Chat is already closing or updating.".into());
+        }
+        Ok(())
+    }
+
+    /// Lets the restart that applies an update through: no run is active, so the
+    /// exit handler has nothing to wait for.
+    pub(crate) fn ready_to_restart(&self) {
+        self.exit_ready.store(true, Ordering::SeqCst);
+    }
+
+    /// Undoes `begin_update` after a failed update, so runs can start again.
+    pub(crate) fn end_update(&self) {
+        self.exit_ready.store(false, Ordering::SeqCst);
+        self.shutting_down.store(false, Ordering::SeqCst);
+    }
+
     fn begin_shutdown(&self) -> Result<bool, String> {
         let runs = self
             .runs
@@ -2291,6 +2320,31 @@ mod tests {
             state.companion_run("desktop-run").unwrap().value()["status"],
             "completed"
         );
+    }
+
+    #[test]
+    fn an_update_waits_for_the_active_run_and_then_holds_new_runs_back() {
+        let state = CovenRuntimeState::default();
+        let (_cancel, registration) = state.register_run("desktop-run").unwrap();
+        assert_eq!(
+            state.begin_update().unwrap_err(),
+            "Finish or stop the current reply first, then restart to update."
+        );
+        drop(registration);
+        state.begin_update().unwrap();
+        assert!(state
+            .register_run("during-update")
+            .err()
+            .is_some_and(|error| error.contains("new runs are disabled")));
+        assert_eq!(
+            state.begin_update().unwrap_err(),
+            "Chat is already closing or updating."
+        );
+        state.ready_to_restart();
+        assert!(state.exit_ready.load(Ordering::SeqCst));
+        state.end_update();
+        assert!(!state.exit_ready.load(Ordering::SeqCst));
+        state.register_run("after-failed-update").unwrap();
     }
 
     #[cfg(unix)]

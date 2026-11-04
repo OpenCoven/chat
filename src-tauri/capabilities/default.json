@@ -34,6 +34,8 @@
     "allow-setup-cancel",
     "allow-setup-create-familiar",
     "allow-open-reviewed-link",
+    "allow-updater-check",
+    "allow-updater-install",
     "core:window:allow-set-title"
   ]
 }
