@@ -1,7 +1,10 @@
 # Drives the published OpenCoven Chat installers with native input -- real HID
 # events on macOS, SendInput on Windows, XTEST on Linux -- and reads the window
 # back through each platform's accessibility tree and screen reader (#504, #515).
-# No WebDriver is attached, so the bytes driven are exactly the ones published.
+# No WebDriver is attached and nothing runs in the page, so the bytes driven are
+# exactly the ones published, checked against the release's SHA256SUMS first.
+# Each lane is a fresh runner user, so the app starts with an empty profile.
+# Results are native OS-level automation, never hand-run results.
 name: Native acceptance
 
 on:
@@ -16,6 +19,7 @@ on:
     paths:
       - .github/workflows/native-acceptance.yml
       - scripts/native-acceptance/**
+      - scripts/packaged-acceptance/model-fixture.mjs
 
 permissions:
   contents: read
@@ -24,61 +28,84 @@ env:
   RELEASE: ${{ inputs.release || 'v0.0.8' }}
 
 jobs:
-  probe-macos:
-    name: Probe (macOS)
-    runs-on: macos-15
-    timeout-minutes: 20
+  macos:
+    name: macOS (${{ matrix.arch }} DMG)
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-15
+            arch: aarch64
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           persist-credentials: false
-      - name: Probe
-        run: bash scripts/native-acceptance/probe-mac.sh "$RELEASE" "$RUNNER_TEMP/probe"
-      - name: Show
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version-file: .node-version
+      - name: Drive the published DMG
+        run: bash scripts/native-acceptance/lane-mac.sh "$RELEASE" "$RUNNER_TEMP/native" "${{ matrix.arch }}"
+      - name: Results
         if: always()
-        run: cat "$RUNNER_TEMP/probe/probe.txt"
+        run: cat "$RUNNER_TEMP/native/environment.txt" "$RUNNER_TEMP/native/results.md" 2>/dev/null || true
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         if: always()
         with:
-          name: probe-macos
-          path: ${{ runner.temp }}/probe
+          name: native-macos-${{ matrix.arch }}
+          path: ${{ runner.temp }}/native
 
-  probe-windows:
-    name: Probe (Windows)
+  windows:
+    name: Windows (${{ matrix.installer }})
     runs-on: windows-2025
-    timeout-minutes: 20
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        installer: [msi]
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           persist-credentials: false
-      - name: Probe
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version-file: .node-version
+      - name: Drive the published installer
         shell: powershell
-        run: scripts/native-acceptance/probe-windows.ps1 -Release $env:RELEASE -Out "$env:RUNNER_TEMP\probe"
-      - name: Show
+        run: scripts/native-acceptance/lane-windows.ps1 -Release $env:RELEASE -Out "$env:RUNNER_TEMP\native" -Installer ${{ matrix.installer }}
+      - name: Results
         if: always()
         shell: powershell
-        run: Get-Content "$env:RUNNER_TEMP\probe\probe.txt"
+        run: Get-Content "$env:RUNNER_TEMP\native\environment.txt", "$env:RUNNER_TEMP\native\results.md" -ErrorAction SilentlyContinue
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         if: always()
         with:
-          name: probe-windows
-          path: ${{ runner.temp }}/probe
+          name: native-windows-${{ matrix.installer }}
+          path: ${{ runner.temp }}/native
 
-  probe-linux:
-    name: Probe (Linux)
+  linux:
+    name: Linux (${{ matrix.kind }})
     runs-on: ubuntu-24.04
-    timeout-minutes: 20
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        kind: [deb]
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           persist-credentials: false
-      - name: Probe
-        run: bash scripts/native-acceptance/probe-linux.sh "$RELEASE" "$RUNNER_TEMP/probe"
-      - name: Show
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version-file: .node-version
+      - name: Drive the published package
+        run: bash scripts/native-acceptance/lane-linux.sh "$RELEASE" "$RUNNER_TEMP/native" "${{ matrix.kind }}"
+      - name: Results
         if: always()
-        run: cat "$RUNNER_TEMP/probe/probe.txt"
+        run: cat "$RUNNER_TEMP/native/environment.txt" "$RUNNER_TEMP/native/results.md" 2>/dev/null || true
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         if: always()
         with:
-          name: probe-linux
-          path: ${{ runner.temp }}/probe
+          name: native-linux-${{ matrix.kind }}
+          path: ${{ runner.temp }}/native

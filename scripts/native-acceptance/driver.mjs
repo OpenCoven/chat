@@ -1,0 +1,502 @@
+// The native lane's view of the app: one helper process per platform that sends
+// real input (CGEvent, SendInput, XTEST) and reads the accessibility tree back.
+// Roles and names are normalised here so the rows read the same on every
+// platform. Nothing in this file evaluates script in the page or reads its DOM.
+
+import { execFileSync, spawn } from 'node:child_process';
+import { createInterface } from 'node:readline';
+
+export const sleep = (ms) => new Promise((done) => setTimeout(done, ms));
+export const PLATFORM =
+  process.platform === 'darwin' ? 'mac' : process.platform === 'win32' ? 'windows' : 'linux';
+/** Cmd on macOS, Ctrl elsewhere: the app's shell chord (rail-shortcuts.ts). */
+export const MOD = PLATFORM === 'mac' ? 'cmd' : 'ctrl';
+
+export async function until(what, probe, timeout = 15_000, interval = 250) {
+  const deadline = Date.now() + timeout;
+  let last;
+  for (;;) {
+    last = await probe();
+    if (last) return last;
+    if (Date.now() > deadline) throw new Error(`Timed out waiting for ${what}`);
+    await sleep(interval);
+  }
+}
+
+// ---- Role normalisation
+
+const MAC_ROLES = {
+  AXButton: 'button',
+  AXPopUpButton: 'button',
+  AXMenuButton: 'button',
+  AXDisclosureTriangle: 'button',
+  AXLink: 'link',
+  AXTextArea: 'textbox',
+  AXTextField: 'textbox',
+  AXComboBox: 'combobox',
+  AXHeading: 'heading',
+  AXSplitter: 'separator',
+  AXTable: 'table',
+  AXGrid: 'table',
+  AXCell: 'cell',
+  AXRow: 'row',
+  AXStaticText: 'text',
+  AXRadioButton: 'radio',
+  AXRadioGroup: 'radiogroup',
+  AXCheckBox: 'checkbox',
+  AXMenu: 'menu',
+  AXMenuItem: 'menuitem',
+  AXList: 'list',
+  AXWebArea: 'document',
+  AXImage: 'img',
+  AXTabGroup: 'tablist',
+  AXGroup: 'group',
+  AXWindow: 'window',
+};
+const MAC_SUBROLES = {
+  AXApplicationDialog: 'dialog',
+  AXApplicationAlertDialog: 'alertdialog',
+  AXApplicationStatus: 'status',
+  AXApplicationAlert: 'alert',
+  AXApplicationLog: 'log',
+  AXLandmarkRegion: 'region',
+  AXLandmarkNavigation: 'navigation',
+  AXLandmarkMain: 'main',
+  AXLandmarkComplementary: 'complementary',
+  AXLandmarkSearch: 'search',
+  AXSwitch: 'switch',
+  AXSearchField: 'textbox',
+  AXTabButton: 'tab',
+};
+const WINDOWS_LOCALIZED = {
+  dialog: 'dialog',
+  'alert dialog': 'alertdialog',
+  heading: 'heading',
+  status: 'status',
+  region: 'region',
+  complementary: 'complementary',
+  alert: 'alert',
+  splitter: 'separator',
+  separator: 'separator',
+  link: 'link',
+  button: 'button',
+  'toggle button': 'button',
+  'menu button': 'button',
+  edit: 'textbox',
+  'radio button': 'radio',
+  'check box': 'checkbox',
+  switch: 'switch',
+  table: 'table',
+  cell: 'cell',
+  menu: 'menu',
+  'menu item': 'menuitem',
+  document: 'document',
+};
+const WINDOWS_TYPES = {
+  Button: 'button',
+  Hyperlink: 'link',
+  Edit: 'textbox',
+  Text: 'text',
+  Document: 'document',
+  Table: 'table',
+  DataItem: 'cell',
+  RadioButton: 'radio',
+  CheckBox: 'checkbox',
+  Menu: 'menu',
+  MenuItem: 'menuitem',
+  List: 'list',
+  Separator: 'separator',
+  Thumb: 'separator',
+  Window: 'window',
+  Group: 'group',
+  StatusBar: 'status',
+};
+const LINUX_ROLES = {
+  'push button': 'button',
+  'toggle button': 'button',
+  link: 'link',
+  entry: 'textbox',
+  'password text': 'textbox',
+  heading: 'heading',
+  dialog: 'dialog',
+  'alert dialog': 'alertdialog',
+  separator: 'separator',
+  splitter: 'separator',
+  table: 'table',
+  'table cell': 'cell',
+  'status bar': 'status',
+  notification: 'alert',
+  alert: 'alert',
+  'radio button': 'radio',
+  'check box': 'checkbox',
+  switch: 'switch',
+  menu: 'menu',
+  'popup menu': 'menu',
+  'menu item': 'menuitem',
+  'document web': 'document',
+  frame: 'window',
+  label: 'text',
+  static: 'text',
+};
+
+const NAMED_BY_CONTENT = new Set(['heading', 'link', 'button', 'cell', 'menuitem', 'radio']);
+const clean = (text) => (typeof text === 'string' ? text.replace(/\s+/g, ' ').trim() : '');
+
+function textOf(node) {
+  if (!node) return '';
+  const own = node.role === 'text' ? clean(String(node.value ?? node.name ?? '')) : '';
+  return [own, ...(node.children ?? []).map(textOf)].filter(Boolean).join(' ');
+}
+
+function roleOf(raw) {
+  if (PLATFORM === 'mac') return MAC_SUBROLES[raw.subrole] ?? MAC_ROLES[raw.role] ?? raw.role;
+  if (PLATFORM === 'windows') {
+    return (
+      WINDOWS_LOCALIZED[(raw.localized ?? '').toLowerCase()] ?? WINDOWS_TYPES[raw.role] ?? raw.role
+    );
+  }
+  const xml = (raw['xml-roles'] ?? '').split(/\s+/)[0];
+  if (
+    xml &&
+    ['dialog', 'alertdialog', 'status', 'region', 'complementary', 'separator', 'switch'].includes(
+      xml,
+    )
+  ) {
+    return xml;
+  }
+  return LINUX_ROLES[raw.role] ?? raw.role;
+}
+
+/** One platform node as { role, name, value, focused, frame, children, raw }. */
+export function normalize(raw, parent = null) {
+  if (!raw || typeof raw !== 'object') return null;
+  const node = {
+    role: roleOf(raw),
+    name: '',
+    value: raw.value,
+    focused: Boolean(raw.focused),
+    enabled: raw.enabled !== false,
+    expanded: raw.expanded,
+    selected: raw.selected,
+    frame: raw.frame ?? null,
+    url: raw.url,
+    raw,
+    parent,
+    children: [],
+  };
+  node.children = (raw.children ?? []).map((child) => normalize(child, node)).filter(Boolean);
+  if (PLATFORM === 'mac') {
+    node.name = clean(raw.desc) || clean(raw.title);
+    node.description = clean(raw.help);
+    node.roleDescription = raw.roleDescription;
+  } else if (PLATFORM === 'windows') {
+    node.name = clean(raw.name);
+    node.description = clean(raw.help);
+    node.roleDescription = raw.localized;
+  } else {
+    node.name = clean(raw.name);
+    node.description = clean(raw.desc);
+    node.roleDescription = raw.role;
+  }
+  if (!node.name && NAMED_BY_CONTENT.has(node.role)) node.name = clean(textOf(node));
+  return node;
+}
+
+export function* walk(node) {
+  if (!node) return;
+  yield node;
+  for (const child of node.children) yield* walk(child);
+}
+
+export function matches(node, role, name, { exact = true } = {}) {
+  if (role && node.role !== role) return false;
+  if (name === undefined) return true;
+  if (name instanceof RegExp) return name.test(node.name);
+  return exact ? node.name === name : node.name.includes(name);
+}
+
+export function center(node) {
+  const f = node?.frame;
+  if (!f || !(f.w > 0) || !(f.h > 0))
+    throw new Error(`${node?.role} "${node?.name}" has no on-screen frame`);
+  return [Math.round(f.x + f.w / 2), Math.round(f.y + f.h / 2)];
+}
+
+/** A compact outline of a tree, for failure notes and for learning a platform's tree. */
+export function outline(node, depth = 0, lines = [], max = 400) {
+  if (!node || lines.length >= max) return lines;
+  const value =
+    node.value === undefined || node.value === ''
+      ? ''
+      : ` = ${JSON.stringify(String(node.value).slice(0, 60))}`;
+  if (node.role !== 'group' || node.name || depth < 2) {
+    lines.push(
+      `${'  '.repeat(Math.min(depth, 20))}${node.role}${node.name ? ` "${node.name.slice(0, 80)}"` : ''}${value}${node.focused ? ' [focused]' : ''}`,
+    );
+  }
+  for (const child of node.children) outline(child, depth + 1, lines, max);
+  return lines;
+}
+
+// ---- The helper process
+
+const KEYS_LINUX = {
+  tab: 'Tab',
+  return: 'Return',
+  enter: 'Return',
+  escape: 'Escape',
+  space: 'space',
+  left: 'Left',
+  right: 'Right',
+  up: 'Up',
+  down: 'Down',
+  home: 'Home',
+  end: 'End',
+  delete: 'BackSpace',
+  forwarddelete: 'Delete',
+  pageup: 'Prior',
+  pagedown: 'Next',
+  '[': 'bracketleft',
+  ']': 'bracketright',
+  f10: 'F10',
+  apps: 'Menu',
+};
+
+export class Native {
+  constructor(command, args, { log } = {}) {
+    this.child = spawn(command, args, { stdio: ['pipe', 'pipe', 'pipe'] });
+    this.pending = new Map();
+    this.next = 1;
+    this.log = log;
+    this.stderr = [];
+    createInterface({ input: this.child.stdout }).on('line', (line) => {
+      let answer;
+      try {
+        answer = JSON.parse(line);
+      } catch {
+        this.stderr.push(`unparsed: ${line.slice(0, 200)}`);
+        return;
+      }
+      const waiting = this.pending.get(answer.id);
+      if (waiting) {
+        this.pending.delete(answer.id);
+        waiting(answer);
+      }
+    });
+    this.child.stderr.on('data', (chunk) => this.stderr.push(String(chunk)));
+    this.child.on('exit', (code) => {
+      for (const waiting of this.pending.values())
+        waiting({ ok: false, error: `helper exited ${code}` });
+      this.pending.clear();
+    });
+  }
+
+  call(command, timeout = 60_000) {
+    const id = this.next++;
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => {
+        this.pending.delete(id);
+        reject(new Error(`helper did not answer ${command.cmd} in ${timeout}ms`));
+      }, timeout);
+      this.pending.set(id, (answer) => {
+        clearTimeout(timer);
+        resolve(answer);
+      });
+      this.child.stdin.write(`${JSON.stringify({ ...command, id })}\n`);
+    });
+  }
+
+  async must(command, timeout) {
+    const answer = await this.call(command, timeout);
+    if (!answer.ok) throw new Error(`${command.cmd}: ${answer.error ?? 'failed'}`);
+    return answer;
+  }
+
+  close() {
+    this.child.stdin.end();
+    setTimeout(() => this.child.kill(), 2_000).unref();
+  }
+}
+
+/** The app as a person sees it: snapshots of its tree, and real input. */
+export class App {
+  constructor(native, pid) {
+    this.native = native;
+    this.pid = pid;
+  }
+
+  async snapshot() {
+    const command =
+      PLATFORM === 'mac'
+        ? { cmd: 'web', depth: 90, budget: 9000 }
+        : { cmd: 'tree', depth: 90, budget: 9000 };
+    const answer = await this.native.call(command);
+    if (!answer.ok) return null;
+    return normalize(answer.tree);
+  }
+
+  async all(role, name, options = {}) {
+    const root = await this.snapshot();
+    let scope = root ? [root] : [];
+    if (options.within) {
+      const [withinRole, withinName] = options.within;
+      scope = [...walk(root)].filter((node) => matches(node, withinRole, withinName));
+    }
+    const found = [];
+    for (const top of scope)
+      for (const node of walk(top)) if (matches(node, role, name, options)) found.push(node);
+    return found;
+  }
+
+  async one(role, name, options = {}) {
+    let seen = [];
+    try {
+      return await until(
+        `one ${role} "${name}"`,
+        async () => {
+          seen = await this.all(role, name, options);
+          return seen.length === 1 ? seen[0] : seen.length > 1 && options.first ? seen[0] : null;
+        },
+        options.timeout ?? 15_000,
+      );
+    } catch (error) {
+      throw new Error(`${error.message} (found ${seen.length})`);
+    }
+  }
+
+  async gone(role, name, options = {}) {
+    await until(
+      `${role} "${name}" to close`,
+      async () => (await this.all(role, name, options)).length === 0,
+      options.timeout ?? 10_000,
+    );
+  }
+
+  async count(role, name, options) {
+    return (await this.all(role, name, options)).length;
+  }
+
+  async focused() {
+    const answer = await this.native.call({ cmd: 'focused' });
+    return answer.ok && answer.focused ? normalize(answer.focused) : null;
+  }
+
+  async focusedName() {
+    const node = await this.focused();
+    return node ? node.name || `(${node.role})` : null;
+  }
+
+  async selection() {
+    const answer = await this.native.call({ cmd: 'selection' });
+    return answer.ok ? (answer.text ?? '') : null;
+  }
+
+  async click(nodeOrPoint, { button = 'left', mods = [], count = 1 } = {}) {
+    const at = Array.isArray(nodeOrPoint) ? nodeOrPoint : center(nodeOrPoint);
+    await this.native.must({ cmd: 'click', at, button, mods, count });
+    await sleep(250);
+  }
+
+  async move(at) {
+    await this.native.must({ cmd: 'move', at });
+  }
+
+  async drag(path, holdMs = 150) {
+    await this.native.must({ cmd: 'drag', path, holdMs }, 120_000);
+    await sleep(250);
+  }
+
+  async key(name, mods = [], { repeats = 0, intervalMs = 35 } = {}) {
+    const key = PLATFORM === 'linux' ? (KEYS_LINUX[name.toLowerCase()] ?? name) : name;
+    await this.native.must({ cmd: 'key', key, mods, repeats, intervalMs });
+    await sleep(200);
+  }
+
+  async type(text) {
+    await this.native.must({ cmd: 'type', text }, 120_000);
+    await sleep(200);
+  }
+
+  async activate() {
+    return (await this.native.call({ cmd: 'activate' })).ok;
+  }
+
+  async window() {
+    const answer = await this.native.call({ cmd: 'windows' });
+    return answer.ok ? normalize(answer.windows?.[0]) : null;
+  }
+
+  async setFrame(frame) {
+    return this.native.must({ cmd: 'setFrame', ...frame });
+  }
+}
+
+// ---- Clipboard, read and reset by separate processes, never by the page
+
+export function readClipboard() {
+  if (PLATFORM === 'mac') return execFileSync('pbpaste', [], { encoding: 'utf8', timeout: 10_000 });
+  if (PLATFORM === 'windows') {
+    const out = execFileSync(
+      'powershell.exe',
+      [
+        '-NoProfile',
+        '-NonInteractive',
+        '-Command',
+        '[Console]::OutputEncoding = [Text.Encoding]::UTF8; [Console]::Out.Write((Get-Clipboard -Raw))',
+      ],
+      { encoding: 'utf8', timeout: 15_000 },
+    );
+    return out.replace(/\r\n/g, '\n');
+  }
+  try {
+    return execFileSync('xclip', ['-o', '-selection', 'clipboard'], {
+      encoding: 'utf8',
+      timeout: 10_000,
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+  } catch (error) {
+    if (error.status === 1) return '';
+    throw error;
+  }
+}
+
+/** Puts a marker on the clipboard so a later read proves the app wrote it. */
+export function markClipboard(text = 'clipboard-marker') {
+  if (PLATFORM === 'mac') execFileSync('pbcopy', [], { input: text });
+  else if (PLATFORM === 'windows') {
+    execFileSync('powershell.exe', [
+      '-NoProfile',
+      '-NonInteractive',
+      '-Command',
+      `Set-Clipboard -Value '${text}'`,
+    ]);
+  } else {
+    const child = spawn('xclip', ['-selection', 'clipboard'], {
+      stdio: ['pipe', 'ignore', 'ignore'],
+      detached: true,
+    });
+    child.stdin.end(text);
+    child.unref();
+  }
+  return text;
+}
+
+export function screenshot(path) {
+  try {
+    if (PLATFORM === 'mac') execFileSync('screencapture', ['-x', path], { timeout: 20_000 });
+    else if (PLATFORM === 'windows') {
+      execFileSync(
+        'powershell.exe',
+        [
+          '-NoProfile',
+          '-Command',
+          `Add-Type -AssemblyName System.Windows.Forms,System.Drawing; $b=[Windows.Forms.SystemInformation]::VirtualScreen; $i=New-Object Drawing.Bitmap $b.Width,$b.Height; $g=[Drawing.Graphics]::FromImage($i); $g.CopyFromScreen($b.Left,$b.Top,0,0,$i.Size); $i.Save('${path}')`,
+        ],
+        { timeout: 30_000 },
+      );
+    } else execFileSync('import', ['-window', 'root', path], { timeout: 20_000 });
+    return true;
+  } catch {
+    return false;
+  }
+}

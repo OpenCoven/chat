@@ -22,16 +22,30 @@ def xdotool(*args):
     return subprocess.run(["xdotool", *map(str, args)], capture_output=True, text=True, check=False)
 
 
-def application():
+def application(pid=None):
+    wanted = target if pid is None else pid
     desktop = pyatspi.Registry.getDesktop(0)
     for index in range(desktop.childCount):
         app = desktop.getChildAtIndex(index)
         try:
-            if app is not None and app.get_process_id() == target:
+            if app is not None and app.get_process_id() == wanted:
                 return app
         except Exception:
             continue
     return None
+
+
+def applications():
+    desktop = pyatspi.Registry.getDesktop(0)
+    found = []
+    for index in range(desktop.childCount):
+        app = desktop.getChildAtIndex(index)
+        try:
+            if app is not None:
+                found.append({"pid": app.get_process_id(), "name": app.name})
+        except Exception:
+            continue
+    return found
 
 
 def text_of(node):
@@ -55,7 +69,19 @@ def summary(node):
                 item[key] = attributes[key]
     except Exception:
         pass
+    try:
+        value = node.queryValue()
+        item["min"] = value.minimumValue
+        item["max"] = value.maximumValue
+    except Exception:
+        pass
     states = node.getState()
+    if states.contains(pyatspi.STATE_VERTICAL):
+        item["orientation"] = "vertical"
+    elif states.contains(pyatspi.STATE_HORIZONTAL):
+        item["orientation"] = "horizontal"
+    if states.contains(pyatspi.STATE_CHECKED):
+        item["selected"] = True
     for name, state in (
         ("focused", pyatspi.STATE_FOCUSED),
         ("enabled", pyatspi.STATE_ENABLED),
@@ -97,8 +123,8 @@ def tree(node, depth):
     return item
 
 
-def windows():
-    app = application()
+def windows(pid=None):
+    app = application(pid)
     if app is None:
         return []
     return [app.getChildAtIndex(i) for i in range(app.childCount) if app.getChildAtIndex(i) is not None]
@@ -143,6 +169,32 @@ def selection():
     return "".join(found)
 
 
+def menus():
+    """Open menus, such as a context menu, by their items' names."""
+    found = []
+
+    def walk(node, depth):
+        if node is None or depth < 0:
+            return
+        role = node.getRole()
+        if role in (pyatspi.ROLE_MENU, pyatspi.ROLE_POPUP_MENU) and node.getState().contains(pyatspi.STATE_SHOWING):
+            items = []
+            for index in range(node.childCount):
+                child = node.getChildAtIndex(index)
+                if child is not None and child.getRole() in (pyatspi.ROLE_MENU_ITEM, pyatspi.ROLE_CHECK_MENU_ITEM, pyatspi.ROLE_RADIO_MENU_ITEM, pyatspi.ROLE_MENU):
+                    items.append(child.name or "-")
+            if items:
+                found.append(items)
+            return
+        for index in range(node.childCount):
+            walk(node.getChildAtIndex(index), depth - 1)
+
+    app = application()
+    if app is not None:
+        walk(app, 12)
+    return found
+
+
 BUTTONS = {"left": 1, "middle": 2, "right": 3}
 MODS = {"ctrl": "ctrl", "shift": "shift", "alt": "alt", "cmd": "super"}
 
@@ -158,10 +210,21 @@ def run(command):
         return {"ok": True, "windows": [summary(w) for w in windows()]}
     if name == "tree":
         budget = command.get("budget", 6000)
-        found = windows()
+        found = windows(command.get("pid"))
         if not found:
             return {"ok": False, "error": "no window"}
         return {"ok": True, "tree": tree(found[0], command.get("depth", 80))}
+    if name == "selectInputSource":
+        # IBus engines: anthy composes Japanese, xkb:us::eng types Latin.
+        subprocess.run(["ibus", "engine", command.get("id", "")], capture_output=True, text=True, check=False)
+        time.sleep(0.5)
+        current = subprocess.run(["ibus", "engine"], capture_output=True, text=True, check=False).stdout.strip()
+        return {"ok": current == command.get("id"), "current": current}
+    if name == "inputSources":
+        current = subprocess.run(["ibus", "engine"], capture_output=True, text=True, check=False).stdout.strip()
+        return {"ok": True, "current": current}
+    if name == "running":
+        return {"ok": True, "apps": applications()}
     if name == "focused":
         node = focused()
         return {"ok": True, "focused": summary(node) if node is not None else None}
@@ -179,8 +242,24 @@ def run(command):
         return {"ok": True}
     if name == "move":
         x, y = command["at"]
-        xdotool("mousemove", "--sync", int(x), int(y))
+        xdotool("mousemove", int(x), int(y))
         return {"ok": True}
+    if name == "down":
+        x, y = command["at"]
+        xdotool("mousemove", "--sync", int(x), int(y))
+        time.sleep(0.06)
+        xdotool("mousedown", 1)
+        return {"ok": True}
+    if name == "up":
+        x, y = command["at"]
+        xdotool("mousemove", int(x), int(y))
+        xdotool("mouseup", 1)
+        return {"ok": True}
+    if name == "menus":
+        return {"ok": True, "menus": menus()}
+    if name == "screens":
+        geometry = xdotool("getdisplaygeometry").stdout.split()
+        return {"ok": True, "screens": [{"w": int(geometry[0]), "h": int(geometry[1])}] if len(geometry) == 2 else []}
     if name == "drag":
         path = command["path"]
         xdotool("mousemove", "--sync", int(path[0][0]), int(path[0][1]))

@@ -73,6 +73,13 @@ func summary(_ element: AXUIElement) -> [String: Any] {
     if let value = plain(attribute(element, name)) as? String, !value.isEmpty { node[key] = value }
   }
   if let value = plain(attribute(element, kAXValueAttribute)) { node["value"] = value }
+  if let url = plain(attribute(element, kAXURLAttribute)) as? String { node["url"] = url }
+  for (key, name) in [
+    ("orientation", kAXOrientationAttribute), ("min", kAXMinValueAttribute),
+    ("max", kAXMaxValueAttribute),
+  ] {
+    if let value = plain(attribute(element, name)) { node[key] = value }
+  }
   for (key, name) in [
     ("focused", kAXFocusedAttribute), ("enabled", kAXEnabledAttribute),
     ("selected", kAXSelectedAttribute), ("expanded", kAXExpandedAttribute),
@@ -126,9 +133,21 @@ func find(_ element: AXUIElement, role: String, depth: Int = 60) -> AXUIElement?
   return nil
 }
 
+/// The page itself. WebKit fills in its tree only once an assistive client asks
+/// for it, so the walk also starts from the focused element's ancestors.
+func webArea() -> AXUIElement? {
+  if let window = mainWindow(), let web = find(window, role: "AXWebArea") { return web }
+  var cursor = attribute(application(), kAXFocusedUIElementAttribute).map { $0 as! AXUIElement }
+  while let current = cursor {
+    if (attribute(current, kAXRoleAttribute) as? String) == "AXWebArea" { return current }
+    cursor = attribute(current, kAXParentAttribute).map { $0 as! AXUIElement }
+  }
+  return nil
+}
+
 /// The page's selection as text, through WebKit's text markers.
 func selectedText() -> Any {
-  guard let window = mainWindow(), let web = find(window, role: "AXWebArea") else {
+  guard let web = webArea() else {
     return NSNull()
   }
   guard let range = attribute(web, "AXSelectedTextMarkerRange") else { return "" }
@@ -318,6 +337,10 @@ func run(_ command: [String: Any]) -> [String: Any] {
     ]
   case "target":
     target = pid_t(command["pid"] as? Int ?? 0)
+    // What VoiceOver sets when it starts: the app exposes its full tree.
+    let app = application()
+    AXUIElementSetAttributeValue(app, "AXEnhancedUserInterface" as CFString, kCFBooleanTrue)
+    AXUIElementSetAttributeValue(app, "AXManualAccessibility" as CFString, kCFBooleanTrue)
     return ["ok": target > 0]
   case "activate":
     let app = NSRunningApplication(processIdentifier: target)
@@ -331,6 +354,29 @@ func run(_ command: [String: Any]) -> [String: Any] {
     budget = command["budget"] as? Int ?? 6000
     guard let window = mainWindow() else { return ["ok": false, "error": "no window"] }
     return ["ok": true, "tree": tree(window, depth: command["depth"] as? Int ?? 80)]
+  case "web":
+    budget = command["budget"] as? Int ?? 8000
+    guard let web = webArea() else { return ["ok": false, "error": "no web area"] }
+    return ["ok": true, "tree": tree(web, depth: command["depth"] as? Int ?? 80)]
+  case "otherTree":
+    // Another app's front window, such as the browser an Open handed off to.
+    budget = command["budget"] as? Int ?? 3000
+    let other = AXUIElementCreateApplication(pid_t(command["pid"] as? Int ?? 0))
+    let front = attribute(other, kAXFocusedWindowAttribute).map { $0 as! AXUIElement }
+      ?? ((attribute(other, kAXWindowsAttribute) as? [AXUIElement]) ?? []).first
+    guard let window = front else { return ["ok": false, "error": "no window"] }
+    return ["ok": true, "tree": tree(window, depth: command["depth"] as? Int ?? 30)]
+  case "running":
+    // Which apps are running, by bundle identifier: the browser before and after an Open.
+    let apps = NSWorkspace.shared.runningApplications.filter { $0.activationPolicy == .regular }
+    return [
+      "ok": true,
+      "apps": apps.map { ["pid": Int($0.processIdentifier), "bundle": $0.bundleIdentifier ?? ""] },
+      "frontmost": Int(NSWorkspace.shared.frontmostApplication?.processIdentifier ?? 0),
+    ]
+  case "defaultBrowser":
+    let url = NSWorkspace.shared.urlForApplication(toOpen: URL(string: "https://example.com/")!)
+    return ["ok": true, "app": url?.path ?? "", "bundle": url.flatMap { Bundle(url: $0)?.bundleIdentifier } ?? ""]
   case "appTree":
     budget = command["budget"] as? Int ?? 2000
     return ["ok": true, "tree": tree(application(), depth: command["depth"] as? Int ?? 4)]
@@ -370,9 +416,27 @@ func run(_ command: [String: Any]) -> [String: Any] {
       count: command["count"] as? Int ?? 1)
     return ["ok": true]
   case "move":
+    // With held: true the left button is down, so the window server sends drags.
+    guard let at = point(command["at"]) else { return ["ok": false, "error": "no point"] }
+    mouse((command["held"] as? Bool ?? false) ? .leftMouseDragged : .mouseMoved, at, .left, [])
+    return ["ok": true]
+  case "down":
     guard let at = point(command["at"]) else { return ["ok": false, "error": "no point"] }
     mouse(.mouseMoved, at, .left, [])
+    usleep(60_000)
+    mouse(.leftMouseDown, at, .left, [], clicks: 1)
     return ["ok": true]
+  case "up":
+    guard let at = point(command["at"]) else { return ["ok": false, "error": "no point"] }
+    mouse(.leftMouseUp, at, .left, [], clicks: 1)
+    return ["ok": true]
+  case "screens":
+    return [
+      "ok": true,
+      "screens": NSScreen.screens.map {
+        ["w": $0.frame.width, "h": $0.frame.height, "scale": $0.backingScaleFactor]
+      },
+    ]
   case "drag":
     let path = (command["path"] as? [Any] ?? []).compactMap(point)
     guard path.count >= 2 else { return ["ok": false, "error": "a drag needs two points"] }

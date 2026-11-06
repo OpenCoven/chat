@@ -30,6 +30,14 @@ public static class NativeDriver {
     return builder.Append('"').ToString();
   }
 
+  static string Range(AutomationElement element) {
+    object pattern;
+    if (!element.TryGetCurrentPattern(RangeValuePattern.Pattern, out pattern)) return null;
+    var range = ((RangeValuePattern)pattern).Current;
+    return string.Format(System.Globalization.CultureInfo.InvariantCulture,
+      "\"min\":{0},\"max\":{1}", range.Minimum, range.Maximum);
+  }
+
   static string Value(AutomationElement element) {
     object pattern;
     if (element.TryGetCurrentPattern(ValuePattern.Pattern, out pattern))
@@ -49,6 +57,17 @@ public static class NativeDriver {
     if (!string.IsNullOrEmpty(current.LocalizedControlType)) parts.Add("\"localized\":" + Quote(current.LocalizedControlType));
     if (!string.IsNullOrEmpty(current.HelpText)) parts.Add("\"help\":" + Quote(current.HelpText));
     try { var value = Value(element); if (value != null) parts.Add("\"value\":" + Quote(value)); } catch { }
+    try { var range = Range(element); if (range != null) parts.Add(range); } catch { }
+    if (current.Orientation != OrientationType.None) parts.Add("\"orientation\":" + Quote(current.Orientation.ToString()));
+    try {
+      object pattern;
+      if (element.TryGetCurrentPattern(SelectionItemPattern.Pattern, out pattern))
+        parts.Add("\"selected\":" + (((SelectionItemPattern)pattern).Current.IsSelected ? "true" : "false"));
+      else if (element.TryGetCurrentPattern(TogglePattern.Pattern, out pattern))
+        parts.Add("\"selected\":" + (((TogglePattern)pattern).Current.ToggleState == ToggleState.On ? "true" : "false"));
+      if (element.TryGetCurrentPattern(ExpandCollapsePattern.Pattern, out pattern))
+        parts.Add("\"expanded\":" + (((ExpandCollapsePattern)pattern).Current.ExpandCollapseState == ExpandCollapseState.Expanded ? "true" : "false"));
+    } catch { }
     parts.Add("\"focused\":" + (current.HasKeyboardFocus ? "true" : "false"));
     parts.Add("\"enabled\":" + (current.IsEnabled ? "true" : "false"));
     var r = current.BoundingRectangle;
@@ -74,10 +93,37 @@ public static class NativeDriver {
     return node.Substring(0, node.Length - 1) + ",\"children\":[" + string.Join(",", kids) + "]}";
   }
 
+  /// The process's largest top-level window: the app, not a menu or tooltip it has open.
   public static AutomationElement Window(int pid) {
     var condition = new PropertyCondition(AutomationElement.ProcessIdProperty, pid);
-    return AutomationElement.RootElement.FindFirst(TreeScope.Children, condition);
+    AutomationElement best = null;
+    double area = -1;
+    foreach (AutomationElement window in AutomationElement.RootElement.FindAll(TreeScope.Children, condition)) {
+      var r = window.Current.BoundingRectangle;
+      var size = r.IsEmpty ? 0 : r.Width * r.Height;
+      if (size > area) { area = size; best = window; }
+    }
+    return best;
   }
+
+  /// Every open menu on the desktop, by its items' names: a context menu is its own window.
+  public static string Menus() {
+    var menus = new List<string>();
+    foreach (AutomationElement top in AutomationElement.RootElement.FindAll(TreeScope.Children, Condition.TrueCondition)) {
+      AutomationElementCollection found;
+      try { found = top.FindAll(TreeScope.Subtree, new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.Menu)); } catch { continue; }
+      foreach (AutomationElement menu in found) {
+        var items = new List<string>();
+        foreach (AutomationElement item in menu.FindAll(TreeScope.Descendants, new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.MenuItem)))
+          items.Add(Quote(item.Current.Name));
+        if (items.Count > 0) menus.Add("[" + string.Join(",", items) + "]");
+      }
+    }
+    return "[" + string.Join(",", menus) + "]";
+  }
+
+  public static void Down(int x, int y) { Move(x, y); System.Threading.Thread.Sleep(60); Mouse(Down("left")); }
+  public static void Up(int x, int y) { SetCursorPos(x, y); Mouse(0x0001); Mouse(Up("left")); }
 
   public static string Tree(int pid, int depth, int limit) {
     budget = limit;
@@ -179,6 +225,10 @@ public static class NativeDriver {
     for (var index = mods.Length - 1; index >= 0; index--) Key(mods[index], true);
   }
 
+  public static void Hold(ushort[] mods) { foreach (var mod in mods) Key(mod, false); }
+  public static void Release(ushort[] mods) { for (var index = mods.Length - 1; index >= 0; index--) Key(mods[index], true); }
+  public static int VirtualKey(char c) { var scan = VkKeyScan(c); return scan == -1 ? -1 : scan & 0xff; }
+
   [DllImport("user32.dll")] static extern short VkKeyScan(char c);
   /// Types through virtual keys, so an input method composes it as it would typing.
   public static void Type(string text) {
@@ -206,6 +256,33 @@ public static class NativeDriver {
     uint owner;
     GetWindowThreadProcessId(GetForegroundWindow(), out owner);
     return owner == pid;
+  }
+
+  public static void MoveWindow(int pid, double x, double y) {
+    var window = Window(pid);
+    object pattern;
+    if (window != null && window.TryGetCurrentPattern(TransformPattern.Pattern, out pattern))
+      ((TransformPattern)pattern).Move(x, y);
+  }
+
+  // ---- Input language: the keyboard layout of the app's foreground thread.
+  [DllImport("user32.dll")] static extern IntPtr GetKeyboardLayout(uint thread);
+  [DllImport("user32.dll")] static extern IntPtr LoadKeyboardLayout(string id, uint flags);
+  [DllImport("user32.dll")] static extern bool PostMessage(IntPtr hwnd, uint message, IntPtr wParam, IntPtr lParam);
+
+  public static string Layout() {
+    uint pid;
+    var thread = GetWindowThreadProcessId(GetForegroundWindow(), out pid);
+    return GetKeyboardLayout(thread).ToInt64().ToString("x8");
+  }
+
+  /// Asks the foreground window to switch input language, as the language bar does.
+  public static bool SelectLayout(int pid, string klid) {
+    var layout = LoadKeyboardLayout(klid, 1);
+    if (layout == IntPtr.Zero) return false;
+    PostMessage(GetForegroundWindow(), 0x0050, IntPtr.Zero, layout);
+    System.Threading.Thread.Sleep(400);
+    return true;
   }
 
   public static void Resize(int pid, double width, double height) {
