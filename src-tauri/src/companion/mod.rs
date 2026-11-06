@@ -32,8 +32,10 @@ pub(crate) fn project_messages(events: &[Value]) -> Vec<Value> {
         if kind == "tool_start" {
             messages.push(json!({"id":index.to_string(),"role":"status","text":"Working…"}));
         }
-        let notice =
-            kind == "system" && event["subtype"] == "notice" && event["source"] == "chat-replay";
+        let notice = kind == "system"
+            && event["subtype"] == "notice"
+            && (event["source"] == "chat-replay"
+                || event["source"] == crate::chat_approvals::NOTICE_SOURCE);
         if matches!(kind, "user" | "assistant") || notice {
             if let Some(blocks) = event.pointer("/message/content").and_then(Value::as_array) {
                 let text = blocks
@@ -48,6 +50,15 @@ pub(crate) fn project_messages(events: &[Value]) -> Vec<Value> {
             }
         }
     }
+    // A request is answered in a dialog, not read as prose.
+    for message in &mut messages {
+        if message["role"] == "assistant" {
+            let text = message["text"].as_str().unwrap_or("");
+            let stripped = crate::chat_approvals::strip_requests(text);
+            message["text"] = json!(stripped);
+        }
+    }
+    messages.retain(|message| message["role"] != "assistant" || message["text"] != "");
     messages
 }
 

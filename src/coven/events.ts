@@ -21,10 +21,51 @@ export type ChatMessage = {
   role: string;
   text: string;
   /** Set on `role: 'notice'`: which of Chat's own disclosures this line is. */
-  notice?: 'replay' | 'diagnostic';
+  notice?: 'replay' | 'diagnostic' | 'approval';
   attachments?: AttachmentMetadata[];
   tool?: ToolCall;
 };
+
+const REQUEST_FENCE = '```coven-permission-request';
+const CLOSING_FENCE = '\n```';
+
+/**
+ * Nothing follows the fence on its line, which is what separates a block from a
+ * familiar mentioning one in a sentence. It needn't start the line: a stream can
+ * run a tool's line straight into it. `find_fence` in
+ * `src-tauri/src/chat_approvals.rs` is the same rule, so what becomes a request
+ * is what the person doesn't see as text.
+ */
+function requestFence(text: string, from: number): number {
+  let start = text.indexOf(REQUEST_FENCE, from);
+  while (start >= 0) {
+    const after = start + REQUEST_FENCE.length;
+    const lineEnd = text.indexOf('\n', after);
+    if (!text.slice(after, lineEnd < 0 ? undefined : lineEnd).trim()) return start;
+    start = text.indexOf(REQUEST_FENCE, after);
+  }
+  return -1;
+}
+
+/**
+ * A reply as a person reads it. A familiar asks for permission in a fenced block
+ * that the host turns into a dialog, so the block isn't prose. One still arriving
+ * is hidden as soon as it can be recognized. The same rule is `strip_requests` in
+ * `src-tauri/src/chat_approvals.rs`.
+ */
+export function stripPermissionRequests(text: string): string {
+  let out = text;
+  for (let start = requestFence(out, 0); start >= 0; start = requestFence(out, 0)) {
+    const close = out.indexOf(CLOSING_FENCE, start + REQUEST_FENCE.length);
+    out = out.slice(0, start) + (close < 0 ? '' : out.slice(close + CLOSING_FENCE.length));
+  }
+  const tail = out.lastIndexOf('```');
+  if (tail >= 0) {
+    const partial = out.slice(tail);
+    if (partial.length > 3 && REQUEST_FENCE.startsWith(partial)) out = out.slice(0, tail);
+  }
+  return out === text ? text : out.trimEnd();
+}
 
 function record(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -172,7 +213,9 @@ export function projectEvents(events: readonly CovenRunEvent[]): {
           ? 'replay'
           : event.source === 'chat-diagnostic'
             ? 'diagnostic'
-            : undefined
+            : event.source === 'chat-approval'
+              ? 'approval'
+              : undefined
         : undefined;
     if (
       (event.type !== 'user' && event.type !== 'assistant' && !importedSystem && !chatNotice) ||
@@ -256,5 +299,15 @@ export function projectEvents(events: readonly CovenRunEvent[]): {
         ...(attachments.length ? { attachments } : {}),
       });
   }
-  return { sessionId, error, model, messages };
+  return {
+    sessionId,
+    error,
+    model,
+    messages: messages.flatMap((message) => {
+      if (message.role !== 'assistant') return [message];
+      const text = stripPermissionRequests(message.text);
+      if (!text) return [];
+      return [text === message.text ? message : { ...message, text }];
+    }),
+  };
 }

@@ -2,7 +2,10 @@
 // records what it observed. A failed expectation throws, and the row is
 // reported as failed with everything observed up to that point.
 
-import { ADDRESSES, TABLE } from './model-fixture.mjs';
+import { existsSync } from 'node:fs';
+import { join, resolve } from 'node:path';
+
+import { ADDRESSES, APPROVAL_DONE, APPROVAL_SUMMARY, TABLE } from './model-fixture.mjs';
 import { readClipboard } from './platform.mjs';
 import { freshly, Key, Stop, sleep, until } from './webdriver.mjs';
 
@@ -952,6 +955,86 @@ export async function storageRow(s) {
     ]) {
       row.expect(`stored text containing "${needle}"`, text.includes(needle), false);
     }
+  } catch (error) {
+    row.error = error.message;
+    await snapshot(row.id);
+  }
+  return row;
+}
+
+/**
+ * A familiar asks for permission. The engine really is asked to write a real
+ * file on every turn here, so the file itself says what each turn could do.
+ */
+export async function approvalRow(s, familiar, directory) {
+  const row = new Row('approval', 'A familiar asks; one allowed turn writes, and the log says so');
+  const heading = `${familiar} asks for permission`;
+  const allowedProof = resolve(join(directory, 'approval-allowed.txt'));
+  const declinedProof = resolve(join(directory, 'approval-declined.txt'));
+  const bodyHas = (text) =>
+    s.execute('return document.body.innerText.includes(arguments[0]);', text);
+  try {
+    await s.click(await s.one('button', familiar));
+    await composerOf(s, familiar);
+    await send(s, familiar, `[[ask ${allowedProof}]] Write the proof file.`, 'heading', heading);
+    row.expect('the read-only turn wrote the file', existsSync(allowedProof), false);
+    const [summary] = await s.css('.coven-approval-summary');
+    row.expect('the dialog shows the request', await summary.text(), APPROVAL_SUMMARY);
+    row.expect(
+      'the request block reads as prose',
+      await bodyHas('coven-permission-request'),
+      false,
+    );
+
+    await (await s.one('button', 'Allow once')).click();
+    await until(
+      'the allowed turn to report',
+      async () => {
+        const errors = await s.css('.coven-error-text');
+        if (errors.length) throw new Stop(`The run failed: ${await errors[0].text()}`);
+        return bodyHas(APPROVAL_DONE);
+      },
+      120_000,
+      250,
+    );
+    await until(
+      'the allowed turn to finish',
+      async () => (await s.css('.oc-composer[data-running]')).length === 0,
+      60_000,
+    );
+    row.check('the allowed turn wrote the file', existsSync(allowedProof));
+    row.expect('the dialog is gone', (await s.all('button', 'Allow once')).length, 0);
+    row.check(
+      'the thread says the turn had access',
+      await bodyHas('You allowed this turn to change files'),
+    );
+    row.check('the thread shows the click', await bodyHas(`Allowed: ${APPROVAL_SUMMARY}`));
+
+    // Access ended with that turn: the next one is refused and has to ask again.
+    await send(s, familiar, `[[ask ${declinedProof}]] Write another.`, 'heading', heading);
+    row.expect('the next turn wrote the file', existsSync(declinedProof), false);
+    await (await s.one('button', 'Decline')).click();
+    await until('the decline to show in the thread', () =>
+      bodyHas(`You declined this request: ${APPROVAL_SUMMARY}`),
+    );
+    row.expect('declining wrote the file', existsSync(declinedProof), false);
+    row.expect('the dialog is gone after declining', (await s.all('button', 'Decline')).length, 0);
+
+    const settings = await openSettingsGeneral(s);
+    await (await s.one('button', 'Access', { within: settings })).click();
+    const log = await s.one('list', 'Permission log, newest first', { within: settings });
+    const text = await log.text();
+    row.note('permission log', text);
+    for (const line of [
+      `${familiar} asked: ${APPROVAL_SUMMARY}`,
+      `Allowed on this computer for ${familiar}: ${APPROVAL_SUMMARY}`,
+      `${familiar} used Write`,
+      `${familiar}'s allowed turn finished.`,
+      `Declined on this computer for ${familiar}: ${APPROVAL_SUMMARY}`,
+    ]) {
+      row.check(`the log says "${line}"`, text.includes(line), text);
+    }
+    await closeSettings(s);
   } catch (error) {
     row.error = error.message;
     await snapshot(row.id);
