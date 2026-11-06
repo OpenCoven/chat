@@ -12,10 +12,22 @@ here="$(cd "$(dirname "$0")" && pwd)"
 log() { printf '%s\n' "$*" | tee -a "$out/environment.txt"; }
 
 if [ -z "${LANE_INNER:-}" ]; then
-  sudo apt-get update -qq
+  # IBus Anthy is in universe, which the runner's sources may leave out.
+  sudo add-apt-repository -y universe > "$out/apt.txt" 2>&1
+  sudo apt-get update -qq >> "$out/apt.txt" 2>&1
   sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq xvfb openbox xdotool xclip \
-    at-spi2-core python3-pyatspi dbus-x11 orca speech-dispatcher ibus ibus-anthy ibus-gtk3 \
-    imagemagick sqlite3 libfuse2t64 > "$out/apt.txt" 2>&1 || { tail -20 "$out/apt.txt"; exit 1; }
+    at-spi2-core python3-pyatspi dbus-x11 orca speech-dispatcher ibus ibus-gtk3 \
+    imagemagick sqlite3 libfuse2t64 >> "$out/apt.txt" 2>&1 || { tail -20 "$out/apt.txt"; exit 1; }
+  # A Japanese IBus engine: Anthy, or Mozc where this release has no Anthy.
+  japanese=""
+  for candidate in "ibus-anthy anthy" "ibus-mozc mozc-jp"; do
+    set -- $candidate
+    if sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq "$1" >> "$out/apt.txt" 2>&1; then
+      japanese="$2"
+      break
+    fi
+  done
+  log "Japanese IBus engine: ${japanese:-none installable}"
   version="${release#v}"
   if [ "$kind" = appimage ]; then asset="OpenCoven.Chat_${version}_amd64.AppImage"; else asset="OpenCoven.Chat_${version}_amd64.deb"; fi
   work="$(mktemp -d)"
@@ -57,7 +69,7 @@ if [ -z "${LANE_INNER:-}" ]; then
   "profile": "fresh runner user; no prior ai.opencoven.chat data"
 }
 EOF
-  LANE_INNER=1 LANE_APP="$app" exec dbus-run-session -- "$0" "$release" "$out" "$kind"
+  LANE_INNER=1 LANE_APP="$app" LANE_JAPANESE="$japanese" exec dbus-run-session -- "$0" "$release" "$out" "$kind"
 fi
 
 export DISPLAY=:99
@@ -73,11 +85,11 @@ export GNOME_ACCESSIBILITY=1 ACCESSIBILITY_ENABLED=1
 export GTK_IM_MODULE=ibus XMODIFIERS=@im=ibus QT_IM_MODULE=ibus
 ibus-daemon -drx
 sleep 3
-log "ibus engines: $(ibus list-engine 2>/dev/null | grep -E 'anthy|xkb:us::eng' | tr -s ' ' | tr '\n' ';')"
+log "ibus engines: $(ibus list-engine 2>/dev/null | grep -E 'anthy|mozc|xkb:us::eng' | tr -s ' ' | tr '\n' ';')"
 ibus engine xkb:us::eng 2>>"$out/environment.txt"
 log "default browser: $(xdg-settings get default-web-browser 2>&1)"
 
 node "$here/run.mjs" --app "$LANE_APP" --out "$out" \
   --lane "$(. /etc/os-release && echo "$PRETTY_NAME"), published ${kind} ${release}" \
-  --facts "$out/facts.json" --japanese anthy --latin xkb:us::eng
+  --facts "$out/facts.json" ${LANE_JAPANESE:+--japanese "$LANE_JAPANESE"} --latin xkb:us::eng
 exit $?
