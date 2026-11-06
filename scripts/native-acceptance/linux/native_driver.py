@@ -97,6 +97,11 @@ def summary(node):
         text = text_of(node)
         if text and node.getRole() in (pyatspi.ROLE_ENTRY, pyatspi.ROLE_TEXT, pyatspi.ROLE_STATIC, pyatspi.ROLE_LABEL, pyatspi.ROLE_PARAGRAPH):
             item["value"] = text
+    # AT-SPI keeps inline text in its container's Text interface, not in child
+    # objects; embedded children show as U+FFFC, which is dropped here.
+    text = text_of(node)
+    if text:
+        item["text"] = text.replace("\ufffc", "").strip()[:600]
     try:
         box = node.queryComponent().getExtents(pyatspi.DESKTOP_COORDS)
         item["frame"] = {"x": box.x, "y": box.y, "w": box.width, "h": box.height}

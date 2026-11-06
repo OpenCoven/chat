@@ -134,6 +134,11 @@ const LINUX_ROLES = {
   'popup menu': 'menu',
   'menu item': 'menuitem',
   'document web': 'document',
+  paragraph: 'text',
+  'description term': 'text',
+  'description value': 'text',
+  'block quote': 'text',
+  caption: 'text',
   frame: 'window',
   label: 'text',
   static: 'text',
@@ -197,6 +202,9 @@ export function normalize(raw, parent = null) {
     node.name = clean(raw.name);
     node.description = clean(raw.desc);
     node.roleDescription = raw.role;
+    // Inline text lives in its container on AT-SPI (see native_driver.py).
+    if (node.role === 'text' && node.value === undefined && raw.text) node.value = raw.text;
+    if (!node.name && NAMED_BY_CONTENT.has(node.role) && raw.text) node.name = clean(raw.text);
   }
   if (!node.name && NAMED_BY_CONTENT.has(node.role)) node.name = clean(textOf(node));
   return node;
