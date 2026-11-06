@@ -300,6 +300,12 @@ export class Native {
   }
 
   call(command, timeout = 60_000) {
+    if (this.child.exitCode !== null) {
+      return Promise.resolve({
+        ok: false,
+        error: `helper exited ${this.child.exitCode}: ${this.stderr.join('').slice(-400)}`,
+      });
+    }
     const id = this.next++;
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => {

@@ -87,6 +87,12 @@ $facts = [ordered]@{
 }
 [System.IO.File]::WriteAllText((Join-Path $Out 'facts.json'), ($facts | ConvertTo-Json), $utf8)
 
+try {
+  $ErrorActionPreference = 'Continue'
+  $selfTest = '{"cmd":"screens","id":1}' | powershell.exe -NoProfile -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'windows\serve.ps1') 2>&1 | Out-String
+} catch { $selfTest = "self-test threw: $($_.Exception.Message)" } finally { $ErrorActionPreference = 'Stop' }
+Log "helper self-test: $($selfTest.Trim())"
+
 $label = "$((Get-CimInstance Win32_OperatingSystem).Caption), published $Installer $Release"
 node (Join-Path $PSScriptRoot 'run.mjs') --app $exe --out $Out --lane $label --facts (Join-Path $Out 'facts.json') `
   --nvda $nvda --japanese 00000411 --latin 00000409 --ime-on imeon --ime-off imeoff

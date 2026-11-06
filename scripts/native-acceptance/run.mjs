@@ -258,6 +258,7 @@ try {
   reader?.stop?.();
   if (child && child.exitCode === null) child.kill();
   native.close();
+  writeFileSync(join(out, 'helper-stderr.txt'), native.stderr.join(''));
   await fixture.close();
 }
 

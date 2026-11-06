@@ -2,21 +2,24 @@
 # protocol as the macOS and Linux helpers, over NativeDriver.ps1.
 $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'NativeDriver.ps1')
-[Console]::OutputEncoding = [Text.Encoding]::UTF8
-[Console]::InputEncoding = [Text.Encoding]::UTF8
+# Explicit UTF-8 streams: the console encodings cannot be set on piped handles.
+$utf8 = New-Object System.Text.UTF8Encoding $false
+$reader = New-Object System.IO.StreamReader([Console]::OpenStandardInput(), $utf8)
+$writer = New-Object System.IO.StreamWriter([Console]::OpenStandardOutput(), $utf8)
+$writer.AutoFlush = $true
 
 $keys = @{
-  tab = 0x09; return = 0x0D; enter = 0x0D; escape = 0x1B; space = 0x20; delete = 0x08
-  forwarddelete = 0x2E; home = 0x24; end = 0x23; pageup = 0x21; pagedown = 0x22
-  left = 0x25; up = 0x26; right = 0x27; down = 0x28; f4 = 0x73; f5 = 0x74; f10 = 0x79; apps = 0x5D
-  '[' = 0xDB; ']' = 0xDD; imeon = 0x16; imeoff = 0x1A; kanji = 0x19
+  'tab' = 0x09; 'return' = 0x0D; 'enter' = 0x0D; 'escape' = 0x1B; 'space' = 0x20; 'delete' = 0x08
+  'forwarddelete' = 0x2E; 'home' = 0x24; 'end' = 0x23; 'pageup' = 0x21; 'pagedown' = 0x22; 'left' = 0x25
+  'up' = 0x26; 'right' = 0x27; 'down' = 0x28; 'f4' = 0x73; 'f5' = 0x74; 'f10' = 0x79
+  'apps' = 0x5D; '[' = 0xDB; ']' = 0xDD; 'imeon' = 0x16; 'imeoff' = 0x1A; 'kanji' = 0x19
 }
-$mods = @{ ctrl = 0x11; shift = 0x10; alt = 0x12; win = 0x5B; cmd = 0x11 }
+$mods = @{ 'ctrl' = 0x11; 'shift' = 0x10; 'alt' = 0x12; 'win' = 0x5B; 'cmd' = 0x11 }
 $target = 0
 
-function Answer($object) { [Console]::Out.WriteLine(($object | ConvertTo-Json -Compress -Depth 4)); [Console]::Out.Flush() }
+function Answer($object) { $writer.WriteLine(($object | ConvertTo-Json -Compress -Depth 4)) }
 
-while ($null -ne ($line = [Console]::In.ReadLine())) {
+while ($null -ne ($line = $reader.ReadLine())) {
   $raw = $null
   try {
     $command = $line | ConvertFrom-Json
@@ -92,7 +95,7 @@ while ($null -ne ($line = [Console]::In.ReadLine())) {
   }
   if ($raw) {
     if ($null -ne $command.id) { $raw = $raw.Substring(0, $raw.Length - 1) + ',"id":' + [int]$command.id + '}' }
-    [Console]::Out.WriteLine($raw); [Console]::Out.Flush()
+    $writer.WriteLine($raw)
   } else {
     if ($null -ne $command.id) { $answer.id = [int]$command.id }
     Answer $answer
