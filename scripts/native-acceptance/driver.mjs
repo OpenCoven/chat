@@ -400,9 +400,51 @@ export class App {
   }
 
   async click(nodeOrPoint, { button = 'left', mods = [], count = 1 } = {}) {
-    const at = Array.isArray(nodeOrPoint) ? nodeOrPoint : center(nodeOrPoint);
+    const at = Array.isArray(nodeOrPoint) ? nodeOrPoint : center(await this.visible(nodeOrPoint));
     await this.native.must({ cmd: 'click', at, button, mods, count });
     await sleep(250);
+  }
+
+  /**
+   * A control below the window's edge (or under the Dock) is scrolled into view
+   * with the wheel, as a person would, before it is clicked; a click never lands
+   * on whatever happens to cover it.
+   */
+  async visible(node) {
+    if (!node?.frame) return node;
+    let current = node;
+    for (let attempt = 0; attempt < 12; attempt += 1) {
+      const frame = (await this.window())?.frame;
+      const sw = this.screen?.w ?? Number.POSITIVE_INFINITY;
+      const sh = this.screen?.h ?? Number.POSITIVE_INFINITY;
+      const top = Math.max((frame?.y ?? 0) + 30, 30);
+      const bottom = Math.min(frame ? frame.y + frame.h : sh, sh) - 6;
+      const left = Math.max(frame?.x ?? 0, 0);
+      const right = Math.min(frame ? frame.x + frame.w : sw, sw);
+      const [cx, cy] = center(current);
+      if (cy > top && cy < bottom && cx > left && cx < right) return current;
+      if (cx <= left || cx >= right) {
+        throw new Error(
+          `${current.role} "${current.name}" is outside the visible window (at ${cx},${cy}; window ${JSON.stringify(frame)}; screen ${sw}x${sh})`,
+        );
+      }
+      const before = await this.all(current.role, current.name);
+      const index = Math.max(
+        before.findIndex(
+          (each) => each.frame?.y === current.frame.y && each.frame?.x === current.frame.x,
+        ),
+        0,
+      );
+      await this.native.must({
+        cmd: 'scroll',
+        at: [Math.round((left + right) / 2), Math.round((top + bottom) / 2)],
+        dy: cy >= bottom ? -240 : 240,
+      });
+      await sleep(400);
+      const after = await this.all(current.role, current.name);
+      current = after[index] ?? after[0] ?? current;
+    }
+    throw new Error(`${node.role} "${node.name}" could not be scrolled into view`);
   }
 
   async move(at) {

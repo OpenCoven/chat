@@ -52,7 +52,8 @@ const out = resolve(options.out);
 mkdirSync(out, { recursive: true });
 const FIRST = 'Astra';
 const SECOND = 'Sage';
-const FRAMES = { origin: { x: 120, y: 160 }, wide: { x: 120, y: 160, w: 1400, h: 820 } };
+// Window frames, fitted to the runner's screen once it is known (see below).
+const FRAMES = { origin: { x: 40, y: 80 }, wide: { x: 40, y: 80, w: 1400, h: 820 } };
 
 function tryRun(command, args) {
   try {
@@ -112,7 +113,7 @@ const facts = {
   evidence: 'native OS-level automation on a fresh CI runner (not hand-run)',
   os: `${process.platform} ${release()}`,
   node: process.version,
-  ...(options.facts ? JSON.parse(readFileSync(options.facts, 'utf8')) : {}),
+  ...(options.facts ? JSON.parse(readFileSync(options.facts, 'utf8').replace(/^\uFEFF/, '')) : {}),
 };
 const rows = [];
 const setup = new Row('setup', 'First-run setup through the window');
@@ -167,6 +168,11 @@ try {
       throw new Error('The helper is not trusted for accessibility on this runner.');
   }
   facts.screens = (await native.call({ cmd: 'screens' })).screens;
+  const screen = facts.screens?.[0] ?? { w: 1920, h: 1080 };
+  // Room above the window for the inspector drag to leave it, and below for the Dock.
+  FRAMES.wide.w = Math.min(1400, screen.w - 80);
+  FRAMES.wide.h = Math.min(820, screen.h - 120);
+  facts.windowFrame = FRAMES.wide;
   const browser = await defaultBrowser(native);
   facts.defaultBrowser = browser;
   quitBrowsers();
@@ -190,6 +196,7 @@ try {
     1_000,
   );
   const app = new App(native, child.pid);
+  app.screen = screen;
   await app.activate();
   await app.setFrame(FRAMES.wide).catch((error) => setup.note('setFrame', error.message));
   await sleep(2_000);

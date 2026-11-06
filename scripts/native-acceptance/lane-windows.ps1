@@ -7,7 +7,11 @@ param(
 )
 $ErrorActionPreference = 'Stop'
 New-Item -ItemType Directory -Force -Path $Out | Out-Null
-function Log($text) { $text | Tee-Object -FilePath (Join-Path $Out 'environment.txt') -Append }
+$utf8 = New-Object System.Text.UTF8Encoding $false
+function Log($text) {
+  Write-Output $text
+  [System.IO.File]::AppendAllText((Join-Path $Out 'environment.txt'), "$text`n", $utf8)
+}
 
 $version = $Release.TrimStart('v')
 $asset = if ($Installer -eq 'msi') { "OpenCoven.Chat_${version}_x64_en-US.msi" } else { "OpenCoven.Chat_${version}_x64-setup.exe" }
@@ -24,7 +28,7 @@ if (-not $expected -or $sha -ne $expected) { throw "$asset does not match SHA256
 
 Log "prior app data: $(Test-Path "$env:LOCALAPPDATA\ai.opencoven.chat") $(Test-Path "$env:APPDATA\ai.opencoven.chat")"
 # A wide desktop for the 1400px rows, and Edge without its first-run pages.
-try { Set-DisplayResolution -Width 1920 -Height 1080 -Force; Log 'display: 1920x1080' } catch { Log "display: $($_.Exception.Message)" }
+try { Set-DisplayResolution -Width 1920 -Height 1080 -Force | Out-Null; Log 'display: 1920x1080' } catch { Log "display: $($_.Exception.Message)" }
 New-Item -Path 'HKLM:\SOFTWARE\Policies\Microsoft\Edge' -Force | Out-Null
 Set-ItemProperty -Path 'HKLM:\SOFTWARE\Policies\Microsoft\Edge' -Name HideFirstRunExperience -Value 1 -Type DWord
 Set-ItemProperty -Path 'HKLM:\SOFTWARE\Policies\Microsoft\Edge' -Name DefaultBrowserSettingEnabled -Value 0 -Type DWord
@@ -81,7 +85,7 @@ $facts = [ordered]@{
   nvda = "$nvdaVersion portable, installer sha256 $nvdaSha (recorded, not pinned)"
   profile = 'fresh runner user; no prior ai.opencoven.chat data'
 }
-$facts | ConvertTo-Json | Set-Content -Encoding UTF8 (Join-Path $Out 'facts.json')
+[System.IO.File]::WriteAllText((Join-Path $Out 'facts.json'), ($facts | ConvertTo-Json), $utf8)
 
 $label = "$((Get-CimInstance Win32_OperatingSystem).Caption), published $Installer $Release"
 node (Join-Path $PSScriptRoot 'run.mjs') --app $exe --out $Out --lane $label --facts (Join-Path $Out 'facts.json') `

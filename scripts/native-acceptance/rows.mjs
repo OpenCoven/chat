@@ -779,6 +779,14 @@ export async function inspectorRow(lane, familiar, frames) {
     'Inspector resize: pointer capture outside the window, separator, keys, Reset, persisted width',
   );
   return lane.attempt(row, async () => {
+    if (frames.wide.w <= 1180) {
+      // Below 1100px the inspector is a drawer, not a resizable rail.
+      row.block(
+        'inspector rail',
+        `the runner's screen holds a window only ${frames.wide.w}px wide; the rail and its 1100px trip need more`,
+      );
+      return;
+    }
     await app.setFrame(frames.wide);
     await sleep(1_200);
     if (await app.count('button', 'Show inspector')) {
