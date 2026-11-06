@@ -251,6 +251,9 @@ public static class NativeDriver {
     var window = Window(pid);
     if (window == null) return false;
     var handle = new IntPtr(window.Current.NativeWindowHandle);
+    // Windows lets a process take the foreground once it has sent input; an Alt
+    // press and release is the input that changes nothing else.
+    Key(0x12, false); Key(0x12, true);
     SetForegroundWindow(handle);
     System.Threading.Thread.Sleep(200);
     uint owner;

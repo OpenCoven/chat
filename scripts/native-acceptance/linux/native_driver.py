@@ -234,8 +234,8 @@ def run(command):
         x, y = command["at"]
         for mod in mods:
             xdotool("keydown", mod)
-        xdotool("mousemove", "--sync", int(x), int(y))
-        time.sleep(0.06)
+        xdotool("mousemove", int(x), int(y))
+        time.sleep(0.12)
         xdotool("click", "--repeat", command.get("count", 1), BUTTONS[command.get("button", "left")])
         for mod in reversed(mods):
             xdotool("keyup", mod)
@@ -246,7 +246,7 @@ def run(command):
         return {"ok": True}
     if name == "down":
         x, y = command["at"]
-        xdotool("mousemove", "--sync", int(x), int(y))
+        xdotool("mousemove", int(x), int(y))
         time.sleep(0.06)
         xdotool("mousedown", 1)
         return {"ok": True}
@@ -262,7 +262,7 @@ def run(command):
         return {"ok": True, "screens": [{"w": int(geometry[0]), "h": int(geometry[1])}] if len(geometry) == 2 else []}
     if name == "drag":
         path = command["path"]
-        xdotool("mousemove", "--sync", int(path[0][0]), int(path[0][1]))
+        xdotool("mousemove", int(path[0][0]), int(path[0][1]))
         time.sleep(0.08)
         xdotool("mousedown", 1)
         time.sleep(0.12)
@@ -276,7 +276,7 @@ def run(command):
         return {"ok": True}
     if name == "scroll":
         x, y = command["at"]
-        xdotool("mousemove", "--sync", int(x), int(y))
+        xdotool("mousemove", int(x), int(y))
         dy, dx = command.get("dy", 0), command.get("dx", 0)
         for _ in range(abs(dy) // 40 or (1 if dy else 0)):
             xdotool("click", 5 if dy < 0 else 4)
@@ -302,16 +302,17 @@ def run(command):
         result = xdotool("search", "--pid", target, "--onlyvisible", "--name", ".")
         ids = result.stdout.split()
         if ids:
-            xdotool("windowactivate", "--sync", ids[-1])
+            xdotool("windowactivate", ids[-1])
+            time.sleep(0.4)
         return {"ok": bool(ids), "windows": ids}
     if name == "setFrame":
         ids = xdotool("search", "--pid", target, "--onlyvisible", "--name", ".").stdout.split()
         if not ids:
             return {"ok": False, "error": "no window"}
         if "w" in command:
-            xdotool("windowsize", "--sync", ids[-1], int(command["w"]), int(command["h"]))
+            xdotool("windowsize", ids[-1], int(command["w"]), int(command["h"]))
         if "x" in command:
-            xdotool("windowmove", "--sync", ids[-1], int(command["x"]), int(command["y"]))
+            xdotool("windowmove", ids[-1], int(command["x"]), int(command["y"]))
         time.sleep(0.3)
         return {"ok": True}
     return {"ok": False, "error": f"unknown command {name}"}
