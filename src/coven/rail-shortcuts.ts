@@ -73,6 +73,45 @@ export function useTypeToCompose(compose: (key: string) => boolean) {
   }, [compose]);
 }
 
+/**
+ * Escape stops the run in flight from anywhere in the window, as the composer's
+ * "esc · stop" control says. The host passes `enabled` false while a drawer is
+ * open, since Escape closes the drawer first. The key is left alone when
+ * something else has claimed it, while a dialog is open, and while another
+ * text field, a menu or a listbox has focus: those own Escape. The composer's
+ * own field stops the run itself and claims the key.
+ */
+export function useStopShortcut(enabled: boolean, stop: () => void) {
+  useEffect(() => {
+    if (!enabled) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (
+        event.key !== 'Escape' ||
+        event.defaultPrevented ||
+        event.isComposing ||
+        event.metaKey ||
+        event.ctrlKey ||
+        event.altKey ||
+        event.shiftKey ||
+        document.querySelector('dialog[open], [role="dialog"][aria-modal="true"]')
+      )
+        return;
+      const active = document.activeElement;
+      if (
+        active instanceof HTMLElement &&
+        (active.isContentEditable ||
+          ['INPUT', 'TEXTAREA', 'SELECT'].includes(active.tagName) ||
+          active.closest('[role="dialog"], [role="menu"], [role="listbox"]'))
+      )
+        return;
+      event.preventDefault();
+      stop();
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [enabled, stop]);
+}
+
 /** Cmd/Ctrl+[ and Cmd/Ctrl+] step to the previous or next familiar in the list. */
 export function useStepShortcut(step: (direction: -1 | 1) => void) {
   useEffect(() => {

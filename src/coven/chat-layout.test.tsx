@@ -13,6 +13,7 @@ import {
   liveRowText,
   matchesFamiliar,
   PROMPT_LIMIT_BYTES,
+  RUNNING_PLACEHOLDER,
   runStatusText,
   sameBlock,
   toolTurnSummary,
@@ -3086,5 +3087,182 @@ describe('model settings', () => {
       />,
     );
     expect(screen.queryByRole('button', { name: 'Attach file' })).not.toBeInTheDocument();
+  });
+});
+
+describe('composer stop key, running copy and details row', () => {
+  afterEach(() => localStorage.clear());
+
+  function running(overrides: Partial<ChatLayoutProps> = {}): ChatLayoutProps {
+    return {
+      ...layoutProps(),
+      familiars: [{ id: 'f', name: 'Astra', workspace: '/familiars/astra' }],
+      familiarId: 'f',
+      connected: true,
+      ready: true,
+      busy: true,
+      draft: 'Next question',
+      ...overrides,
+    };
+  }
+
+  it('stops the run on Escape from the composer', () => {
+    const props = running();
+    render(<ChatLayout {...props} />);
+    const field = screen.getByRole('textbox', { name: 'Message Astra' });
+    act(() => field.focus());
+    fireEvent.keyDown(field, { key: 'Escape' });
+    expect(props.onCancel).toHaveBeenCalledOnce();
+    // The draft is kept, and the visible control names the key.
+    expect(props.onDraft).not.toHaveBeenCalled();
+    const stop = screen.getByRole('button', { name: 'Stop run' });
+    expect(stop).toHaveAttribute('aria-keyshortcuts', 'Escape');
+    expect(stop).toHaveTextContent('esc · stop');
+  });
+
+  it('stops the run on Escape while nothing editable has focus', () => {
+    const props = running();
+    render(<ChatLayout {...props} />);
+    const log = screen.getByRole('log', { name: 'Messages' });
+    act(() => log.focus());
+    fireEvent.keyDown(log, { key: 'Escape' });
+    expect(props.onCancel).toHaveBeenCalledOnce();
+  });
+
+  it('does not stop on Escape without a run, while stopping, or with a modifier', () => {
+    const idle = running({ busy: false });
+    const { unmount } = render(<ChatLayout {...idle} />);
+    fireEvent.keyDown(document.body, { key: 'Escape' });
+    fireEvent.keyDown(screen.getByRole('textbox', { name: 'Message Astra' }), { key: 'Escape' });
+    expect(idle.onCancel).not.toHaveBeenCalled();
+    unmount();
+
+    const stopping = running({ cancelling: true });
+    const second = render(<ChatLayout {...stopping} />);
+    fireEvent.keyDown(document.body, { key: 'Escape' });
+    expect(stopping.onCancel).not.toHaveBeenCalled();
+    second.unmount();
+
+    const chord = running();
+    render(<ChatLayout {...chord} />);
+    fireEvent.keyDown(document.body, { key: 'Escape', metaKey: true });
+    expect(chord.onCancel).not.toHaveBeenCalled();
+  });
+
+  it('leaves Escape to an open dialog and to another text field', () => {
+    const props = running();
+    render(<ChatLayout {...props} />);
+    const search = screen.getByRole('searchbox');
+    act(() => search.focus());
+    fireEvent.keyDown(search, { key: 'Escape' });
+    expect(props.onCancel).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Open settings' }));
+    const dialog = screen.getByRole('dialog', { name: 'Settings' });
+    expect(dialog).toHaveAttribute('open');
+    fireEvent.keyDown(within(dialog).getAllByRole('button')[0] as HTMLElement, { key: 'Escape' });
+    expect(props.onCancel).not.toHaveBeenCalled();
+  });
+
+  it('leaves Escape to an open drawer', () => {
+    const listeners = new Set<() => void>();
+    Object.defineProperty(window, 'matchMedia', {
+      configurable: true,
+      writable: true,
+      value: (query: string) => {
+        const limit = Number(/max-width:\s*(\d+)px/.exec(query)?.[1] ?? Number.NaN);
+        return {
+          matches: Number.isFinite(limit) && 390 <= limit,
+          media: query,
+          addEventListener: (_: string, listener: () => void) => listeners.add(listener),
+          removeEventListener: (_: string, listener: () => void) => listeners.delete(listener),
+        } as unknown as MediaQueryList;
+      },
+    });
+    try {
+      const props = running();
+      const { container } = render(<ChatLayout {...props} />);
+      const shell = container.querySelector('.coven-chat');
+      fireEvent.click(screen.getByRole('button', { name: 'Show familiars' }));
+      expect(shell).toHaveAttribute('data-sidebar', 'open');
+      fireEvent.keyDown(window, { key: 'Escape' });
+      expect(shell).toHaveAttribute('data-sidebar', 'closed');
+      expect(props.onCancel).not.toHaveBeenCalled();
+      // With the drawer gone, the same key stops the run.
+      fireEvent.keyDown(window, { key: 'Escape' });
+      expect(props.onCancel).toHaveBeenCalledOnce();
+      // From the composer too, the drawer takes Escape before the run does.
+      fireEvent.click(screen.getByRole('button', { name: 'Show familiars' }));
+      fireEvent.keyDown(screen.getByRole('textbox', { name: 'Message Astra' }), {
+        key: 'Escape',
+      });
+      expect(shell).toHaveAttribute('data-sidebar', 'closed');
+      expect(props.onCancel).toHaveBeenCalledOnce();
+    } finally {
+      Reflect.deleteProperty(window, 'matchMedia');
+    }
+  });
+
+  it('says what happens to a message typed during a run', () => {
+    const { rerender } = render(<ChatLayout {...running()} />);
+    const field = screen.getByRole('textbox', { name: 'Message Astra' });
+    // The draft is not queued: Send comes back when the reply ends.
+    expect(field).toHaveAttribute('placeholder', RUNNING_PLACEHOLDER);
+    expect(RUNNING_PLACEHOLDER).toMatch(/send when the reply ends/);
+    expect(RUNNING_PLACEHOLDER).toMatch(/esc to stop/);
+    expect(RUNNING_PLACEHOLDER).not.toMatch(/queue/i);
+    rerender(<ChatLayout {...running({ busy: false })} />);
+    expect(field).toHaveAttribute('placeholder', 'Message Astra · @ familiar · # project');
+  });
+
+  it('shows the real familiar, access, harness, model and workspace under the composer', () => {
+    const { rerender } = render(<ChatLayout {...running({ busy: false })} />);
+    let details = within(screen.getByRole('group', { name: 'Chat details' }));
+    expect(details.getByText('Astra · Read only')).toBeInTheDocument();
+    // A new chat starts on the Settings harness, and no model means the engine's own.
+    expect(details.getByText('Coven Code')).toBeInTheDocument();
+    expect(details.getByText('Engine default')).toBeInTheDocument();
+    expect(details.getByText('Familiar workspace: /familiars/astra')).toBeInTheDocument();
+
+    localStorage.setItem(
+      'opencoven.chat.preferences.v1',
+      JSON.stringify({ model: 'openai/gpt-5.5' }),
+    );
+    rerender(
+      <ChatLayout
+        {...running({ busy: false })}
+        key="with-chat"
+        sessions={[
+          {
+            id: 's',
+            title: 'Astra',
+            familiarId: 'f',
+            harness: 'claude',
+            projectRoot: '/projects/x',
+          },
+        ]}
+        sessionId="s"
+      />,
+    );
+    details = within(screen.getByRole('group', { name: 'Chat details' }));
+    // An existing chat keeps the harness it started on.
+    expect(details.getByText('Claude Code')).toBeInTheDocument();
+    expect(details.getByText('openai/gpt-5.5')).toBeInTheDocument();
+    expect(details.getByText('Chat project: /projects/x')).toBeInTheDocument();
+    expect(details.queryByText(/Create task|Full/)).not.toBeInTheDocument();
+
+    fireEvent.click(details.getByRole('button', { name: 'Model settings' }));
+    expect(
+      within(screen.getByRole('dialog', { name: 'Settings' })).getByRole('region', {
+        name: 'Model',
+      }),
+    ).toBeInTheDocument();
+  });
+
+  it('reports no workspace, and names no familiar when none is selected', () => {
+    render(<ChatLayout {...layoutProps()} connected ready />);
+    const details = within(screen.getByRole('group', { name: 'Chat details' }));
+    expect(details.getByText('No workspace reported')).toBeInTheDocument();
+    expect(details.queryByText(/Read only/)).not.toBeInTheDocument();
   });
 });
