@@ -824,9 +824,12 @@ describe('inspector metadata rows', () => {
         ]}
       />,
     );
-    const value = screen.getByText(
+    const text = screen.getByText(
       '/Users/someone/.coven/workspaces/familiars/astra/very/deep/path',
     );
+    // Isolated left to right, so the box can truncate the start of the path.
+    expect(text.tagName).toBe('BDI');
+    const value = text.parentElement;
     expect(value).toHaveAttribute(
       'title',
       '/Users/someone/.coven/workspaces/familiars/astra/very/deep/path',

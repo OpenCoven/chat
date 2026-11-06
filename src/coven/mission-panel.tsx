@@ -393,13 +393,13 @@ export function MissionPanel({ familiar, name, missions = defaultMissions }: Pro
             <div className="fr-row">
               <span className="fr-row-label">Revision</span>
               <code className="fr-row-value coven-row-value--path" title={preparation.rootId}>
-                {preparation.revisionId}
+                <bdi>{preparation.revisionId}</bdi>
               </code>
             </div>
             <div className="fr-row">
               <span className="fr-row-label">Project</span>
               <code className="fr-row-value coven-row-value--path" title={project.trim()}>
-                {project.trim()}
+                <bdi>{project.trim()}</bdi>
               </code>
             </div>
             <div className="fr-row">
@@ -590,7 +590,7 @@ function MissionCard({
         <div className="fr-row">
           <span className="fr-row-label">Project</span>
           <code className="fr-row-value coven-row-value--path" title={view.projectCwd}>
-            {view.projectCwd}
+            <bdi>{view.projectCwd}</bdi>
           </code>
         </div>
         <div className="fr-row">
