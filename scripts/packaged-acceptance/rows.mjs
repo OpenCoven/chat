@@ -1070,7 +1070,9 @@ export async function approvalRow(s, familiar) {
     const settings = await openSettingsGeneral(s);
     await (await s.one('button', 'Access', { within: settings })).click();
     const log = await s.one('list', 'Permission log, newest first', { within: settings });
-    const text = await log.text();
+    // Not text(): msedgedriver returns only what is on screen, and the oldest
+    // entries sit below the fold of the Settings panel.
+    const text = await log.property('innerText');
     row.note('permission log', text);
     for (const line of [
       `${familiar} asked: ${APPROVAL_SUMMARY}`,
