@@ -1,0 +1,84 @@
+# Drives the published OpenCoven Chat installers with native input -- real HID
+# events on macOS, SendInput on Windows, XTEST on Linux -- and reads the window
+# back through each platform's accessibility tree and screen reader (#504, #515).
+# No WebDriver is attached, so the bytes driven are exactly the ones published.
+name: Native acceptance
+
+on:
+  workflow_dispatch:
+    inputs:
+      release:
+        description: Published tag whose installers to drive, for example v0.0.8.
+        required: true
+        type: string
+  push:
+    branches: [test/504-native-acceptance]
+    paths:
+      - .github/workflows/native-acceptance.yml
+      - scripts/native-acceptance/**
+
+permissions:
+  contents: read
+
+env:
+  RELEASE: ${{ inputs.release || 'v0.0.8' }}
+
+jobs:
+  probe-macos:
+    name: Probe (macOS)
+    runs-on: macos-15
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - name: Probe
+        run: bash scripts/native-acceptance/probe-mac.sh "$RELEASE" "$RUNNER_TEMP/probe"
+      - name: Show
+        if: always()
+        run: cat "$RUNNER_TEMP/probe/probe.txt"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        if: always()
+        with:
+          name: probe-macos
+          path: ${{ runner.temp }}/probe
+
+  probe-windows:
+    name: Probe (Windows)
+    runs-on: windows-2025
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - name: Probe
+        shell: powershell
+        run: scripts/native-acceptance/probe-windows.ps1 -Release $env:RELEASE -Out "$env:RUNNER_TEMP\probe"
+      - name: Show
+        if: always()
+        shell: powershell
+        run: Get-Content "$env:RUNNER_TEMP\probe\probe.txt"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        if: always()
+        with:
+          name: probe-windows
+          path: ${{ runner.temp }}/probe
+
+  probe-linux:
+    name: Probe (Linux)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - name: Probe
+        run: bash scripts/native-acceptance/probe-linux.sh "$RELEASE" "$RUNNER_TEMP/probe"
+      - name: Show
+        if: always()
+        run: cat "$RUNNER_TEMP/probe/probe.txt"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        if: always()
+        with:
+          name: probe-linux
+          path: ${{ runner.temp }}/probe
