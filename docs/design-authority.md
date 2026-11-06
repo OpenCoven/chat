@@ -178,13 +178,20 @@ One surface renders **outside** the shell: the composer's mention completion
 is portalled to `document.body` (`src/coven/mention-completion.tsx:161`).
 Its stylesheet reads `--border-strong`, `--bg-raised`, `--text-primary` and
 `--font-inter` (`src/coven/mention-completion.css:1`). Outside `.fr-shell`,
-only `--text-primary` exists, and with the historical `styles.css` value;
-`--bg-raised` and `--border-strong` are undeclared there, which the cascade
-treats as an invalid value at computed-value time. This is a source-level
-finding, not a verified rendered defect: it needs a look at the panel in the
-running app, and is tracked with the audit's open findings (#533). Until it is
-settled, a new portal should mount inside the shell, or carry a class the
-shell's palette is also applied to.
+only `--text-primary` exists, and with the historical `styles.css` value.
+
+The component bridges the gap itself. When the panel mounts, it copies
+`--bg-raised`, `--text-primary`, `--text-secondary`, `--border-strong`,
+`--accent-presence` and `--font-inter` from the composer's computed style onto
+the panel as inline properties (`src/coven/mention-completion.tsx:66`). The
+rendered pass of 2026-11-05 confirmed that the panel's background, border and
+text resolve to the shell's values in both schemes
+([record](design-audits/2026-11-05-rendered-pass.md#mention-completion-portal)).
+The copy runs once per mount, so a scheme change while the panel is open keeps
+the old colours until it next opens.
+
+A new portal should mount inside the shell, or copy its tokens the same way. A
+token added to the mention panel's stylesheet must also be added to that list.
 
 ## Chat's own tokens
 
