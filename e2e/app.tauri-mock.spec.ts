@@ -813,6 +813,132 @@ test('cancellation retains the submitted draft instead of pretending success', a
   expect(await page.evaluate(() => window.__covenFixture.calls)).toContain('coven_runtime_cancel');
 });
 
+test('Escape stops a run from the page and the composer, but not from a dialog', async ({
+  page,
+}) => {
+  await installRuntimeFixture(page);
+  await page.goto('/');
+  const composer = page.getByRole('textbox', { name: 'Message Local familiar' });
+  const stop = page.getByRole('button', { name: 'Stop run', exact: true });
+  const cancels = async () =>
+    (await page.evaluate(() => window.__covenFixture.calls)).filter(
+      (call) => call === 'coven_runtime_cancel',
+    ).length;
+  await expect(composer).toBeEnabled();
+  await composer.fill('Stop me from the page');
+  await page.getByRole('button', { name: 'Send', exact: true }).click();
+  await expect(stop).toHaveText('esc · stop');
+  await expect(stop).toHaveAttribute('aria-keyshortcuts', 'Escape');
+  await expect(composer).toHaveAttribute('placeholder', /send when the reply ends · esc to stop/);
+
+  // A dialog takes Escape for itself; the run goes on.
+  await page.getByRole('button', { name: 'Open settings' }).click();
+  await expect(page.getByRole('dialog', { name: 'Settings' })).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(page.getByRole('dialog', { name: 'Settings' })).toHaveCount(0);
+  await expect(stop).toBeVisible();
+  expect(await cancels()).toBe(0);
+
+  // Nothing editable has focus: Escape stops the run.
+  await page.getByRole('log', { name: 'Messages' }).focus();
+  await page.keyboard.press('Escape');
+  await expect(stop).toHaveCount(0);
+  expect(await cancels()).toBe(1);
+  await expect(composer).toHaveValue('Stop me from the page');
+
+  // In the composer, Escape stops the run too.
+  await composer.fill('Stop me from the composer');
+  await page.getByRole('button', { name: 'Send', exact: true }).click();
+  await expect(stop).toBeVisible();
+  await composer.focus();
+  await page.keyboard.press('Escape');
+  await expect(stop).toHaveCount(0);
+  expect(await cancels()).toBe(2);
+  await expect(composer).toHaveValue('Stop me from the composer');
+});
+
+for (const colorScheme of ['dark', 'light'] as const) {
+  test(`lays the composer out as field, toolbar and details (${colorScheme})`, async ({
+    page,
+  }, testInfo) => {
+    await page.emulateMedia({ colorScheme });
+    await page.setViewportSize({ width: 1600, height: 900 });
+    await installRuntimeFixture(page);
+    await page.goto('/');
+    const composer = page.getByRole('textbox', { name: 'Message Local familiar' });
+    await expect(composer).toBeEnabled();
+    const frame = page.getByRole('region', { name: 'Message composer' });
+    const details = frame.getByRole('group', { name: 'Chat details' });
+    await expect(details).toContainText('Local familiar · Read only');
+    await expect(details).toContainText('Coven Code');
+    await expect(details).toContainText('Engine default');
+    await expect(details).toContainText('Familiar workspace: /fixture/familiars/0/workspace');
+    const field = await composer.boundingBox();
+    const send = await page.getByRole('button', { name: 'Send', exact: true }).boundingBox();
+    const context = await page
+      .getByRole('button', { name: 'Add context', exact: true })
+      .boundingBox();
+    const row = await details.boundingBox();
+    // The field first, the toolbar under it, then the details row.
+    expect((send?.y ?? 0) + 1).toBeGreaterThan((field?.y ?? 0) + (field?.height ?? 0));
+    expect(
+      Math.abs(
+        (send?.y ?? 0) + (send?.height ?? 0) / 2 - ((context?.y ?? 0) + (context?.height ?? 0) / 2),
+      ),
+    ).toBeLessThan(2);
+    expect((row?.y ?? 0) + 1).toBeGreaterThan((send?.y ?? 0) + (send?.height ?? 0));
+    await page.mouse.move(2, 2);
+    await page.locator('.fr-composer-inner').screenshot({
+      path: testInfo.outputPath(`composer-idle-${colorScheme}.png`),
+      animations: 'disabled',
+    });
+
+    await composer.fill('Show me the running composer');
+    await page.getByRole('button', { name: 'Send', exact: true }).click();
+    await expect(page.getByRole('button', { name: 'Stop run', exact: true })).toBeVisible();
+    await page.mouse.move(2, 2);
+    expect(await contrastFailures(page)).toEqual([]);
+    await page.locator('.fr-composer-inner').screenshot({
+      path: testInfo.outputPath(`composer-running-${colorScheme}.png`),
+      animations: 'disabled',
+    });
+
+    // At the narrowest window the row wraps or cuts; the page never scrolls sideways.
+    await page.setViewportSize({ width: 480, height: 520 });
+    await expect(page.getByRole('button', { name: 'Stop run', exact: true })).toBeInViewport();
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(
+      true,
+    );
+    expect(await frame.evaluate((node) => node.scrollWidth <= node.clientWidth)).toBe(true);
+    await page.locator('.fr-composer-inner').screenshot({
+      path: testInfo.outputPath(`composer-running-narrow-${colorScheme}.png`),
+      animations: 'disabled',
+    });
+    await page.evaluate(() => window.__covenFixture.finish?.());
+    await expect(page.getByRole('button', { name: 'Stop run', exact: true })).toHaveCount(0);
+
+    // A file card and the byte-limit warning fit the narrow box too.
+    const transfer = await page.evaluateHandle(() => {
+      const data = new DataTransfer();
+      data.items.add(new File(['notes'], 'notes.md', { type: 'text/markdown' }));
+      return data;
+    });
+    await page.locator('main.fr-thread').dispatchEvent('drop', { dataTransfer: transfer });
+    await expect(frame.getByText('notes.md')).toBeVisible();
+    await composer.fill('x'.repeat(32_769));
+    await expect(frame.getByText(/Message is 32,769 bytes/)).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Send', exact: true })).toBeInViewport();
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(
+      true,
+    );
+    expect(await frame.evaluate((node) => node.scrollWidth <= node.clientWidth)).toBe(true);
+    await page.locator('.fr-composer-inner').screenshot({
+      path: testInfo.outputPath(`composer-draft-narrow-${colorScheme}.png`),
+      animations: 'disabled',
+    });
+  });
+}
+
 test('keeps cancellation available after switching to another familiar', async ({ page }) => {
   await page.setViewportSize({ width: 820, height: 390 });
   await installRuntimeFixture(page, true, undefined, 2);

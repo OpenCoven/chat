@@ -165,6 +165,83 @@ describe('Composer', () => {
     expect(rowsFor('a\n'.repeat(20), 2, 8)).toBe(8);
   });
 
+  it('stops a run on Escape in the field when the host wires it, and says so on Stop', () => {
+    const { props, rerender } = renderComposer({
+      value: 'Next',
+      running: true,
+      stopOnEscape: true,
+    });
+    const stop = screen.getByRole('button', { name: 'Stop run' });
+    expect(stop).toHaveAttribute('aria-keyshortcuts', 'Escape');
+    expect(stop).toHaveTextContent('esc · stop');
+    const field = screen.getByRole('textbox', { name: 'Message Astra' });
+
+    // A key composing an IME character, or one the host claimed, is not a stop.
+    fireEvent.keyDown(field, { key: 'Escape', isComposing: true });
+    expect(props.onStop).not.toHaveBeenCalled();
+    fireEvent.keyDown(field, { key: 'Escape' });
+    expect(props.onStop).toHaveBeenCalledOnce();
+
+    const claim = vi.fn((event: { key: string; preventDefault: () => void }) => {
+      if (event.key === 'Escape') event.preventDefault();
+    });
+    rerender(<Composer {...props} running stopOnEscape onKeyDown={claim} />);
+    fireEvent.keyDown(screen.getByRole('textbox', { name: 'Message Astra' }), { key: 'Escape' });
+    expect(claim).toHaveBeenCalled();
+    expect(props.onStop).toHaveBeenCalledOnce();
+
+    // No run, no stop.
+    rerender(<Composer {...props} running={false} stopOnEscape />);
+    fireEvent.keyDown(screen.getByRole('textbox', { name: 'Message Astra' }), { key: 'Escape' });
+    expect(props.onStop).toHaveBeenCalledOnce();
+  });
+
+  it('leaves Escape alone, and promises no key, unless the host wires it', () => {
+    const { props } = renderComposer({ value: 'Next', running: true });
+    const stop = screen.getByRole('button', { name: 'Stop run' });
+    expect(stop).not.toHaveAttribute('aria-keyshortcuts');
+    expect(stop).not.toHaveTextContent(/esc/i);
+    fireEvent.keyDown(screen.getByRole('textbox', { name: 'Message Astra' }), { key: 'Escape' });
+    expect(props.onStop).not.toHaveBeenCalled();
+  });
+
+  it('can draw Send as an icon that keeps its name', () => {
+    renderComposer({ value: 'Ready', sendIcon: true });
+    const send = screen.getByRole('button', { name: 'Send' });
+    expect(send.textContent?.trim()).toBe('');
+    expect(send).toHaveAttribute('data-variant', 'presence');
+  });
+
+  it('offers the options caret only when it opens something', () => {
+    renderComposer({ value: 'Ready' });
+    expect(screen.queryByRole('button', { name: 'Send options' })).not.toBeInTheDocument();
+  });
+
+  it('puts the field first, then the toolbar with the host tools, then the details row', () => {
+    renderComposer({
+      value: 'Ready',
+      onAttach: vi.fn(),
+      tools: (
+        <button type="button" aria-label="Add context">
+          Add context
+        </button>
+      ),
+      meta: <span>Runs on Coven Code</span>,
+    });
+    const order = [
+      screen.getByRole('textbox', { name: 'Message Astra' }),
+      screen.getByRole('button', { name: 'Attach file' }),
+      screen.getByRole('button', { name: 'Add context' }),
+      screen.getByRole('button', { name: 'Send' }),
+      screen.getByText('Runs on Coven Code'),
+    ];
+    for (let index = 1; index < order.length; index += 1) {
+      const before = order[index - 1] as HTMLElement;
+      const after = order[index] as HTMLElement;
+      expect(before.compareDocumentPosition(after) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    }
+  });
+
   it('does not submit an Enter key used to compose an IME character', () => {
     const onSend = vi.fn();
     renderComposer({ value: 'Draft', onSend });

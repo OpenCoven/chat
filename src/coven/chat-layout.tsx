@@ -65,6 +65,7 @@ import {
   useSearchShortcut,
   useSettingsShortcut,
   useStepShortcut,
+  useStopShortcut,
   useTypeToCompose,
 } from './rail-shortcuts';
 import {
@@ -245,6 +246,15 @@ export function composerCopy(connected: boolean, familiarName?: string, anyFamil
     placeholder: `Message ${familiarName} · @ familiar · # project`,
   };
 }
+
+/**
+ * The composer's placeholder while a run is active and the field is free. Chat
+ * does not queue a message: Stop takes Send's place and Enter does nothing
+ * until the run ends, so what is typed waits in the field to be sent then.
+ * Escape stops the run, in the field or anywhere a dialog, drawer or other
+ * field does not claim it (`useStopShortcut`).
+ */
+export const RUNNING_PLACEHOLDER = 'Replying… (send when the reply ends · esc to stop)';
 
 /**
  * What the end of the transcript says while a run is active and no prose is
@@ -694,6 +704,8 @@ export function ChatLayout(props: ChatLayoutProps) {
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, [scrim, drawers]);
+  // Escape stops a run, after an open drawer has taken it.
+  useStopShortcut(props.busy && !props.cancelling && !scrim, props.onCancel);
   function openSidebar() {
     sidebarOpener.current = activeControl();
     setSidebar(true);
@@ -1610,9 +1622,6 @@ export function ChatLayout(props: ChatLayoutProps) {
                 </button>
               )}
               {quote.action}
-              <div className="coven-composer-context" title={workspace}>
-                {workspace ? `${workspaceLabel}: ${workspace}` : 'No workspace reported'}
-              </div>
               {props.busy && (
                 <output className="coven-run-status">
                   {runStatusText(name, runName, runHere, props.cancelling, runningTool)}
@@ -1638,14 +1647,20 @@ export function ChatLayout(props: ChatLayoutProps) {
                   onKeyDown={(event) => {
                     quote.onComposerKeyDown(event);
                     if (!event.defaultPrevented) mentionCompletion.onKeyDown(event);
+                    // An open drawer takes Escape before the run does; the run keeps going.
+                    if (event.key === 'Escape' && scrim) event.preventDefault();
                   }}
                   className="coven-compact-composer"
                   minRows={1}
                   attachmentIcon="plus"
+                  sendIcon
+                  stopOnEscape
                   value={props.draft}
                   onValueChange={props.onDraft}
                   label={composer.label}
-                  placeholder={composer.placeholder}
+                  placeholder={
+                    props.busy && !composerDisabled ? RUNNING_PLACEHOLDER : composer.placeholder
+                  }
                   onSend={() => props.onSend(run)}
                   {...(oversize
                     ? {
@@ -1680,17 +1695,79 @@ export function ChatLayout(props: ChatLayoutProps) {
                   {...(!props.busy && props.onRemoveAttachment
                     ? { onRemoveAttachment: props.onRemoveAttachment }
                     : {})}
+                  tools={
+                    <ContextPicker
+                      key={`${props.familiarId}:${props.sessionId}`}
+                      familiars={props.familiars}
+                      familiarId={props.familiarId}
+                      value={props.draft}
+                      onValueChange={props.onDraft}
+                      textareaRef={composerRef}
+                      disabled={composerDisabled || props.busy}
+                    />
+                  }
+                  metaLabel="Chat details"
+                  meta={
+                    <>
+                      {familiar ? (
+                        <span
+                          className="coven-composer-meta-item coven-composer-meta-familiar"
+                          title={`Every run is read only: ${name} can read files but not change them.`}
+                        >
+                          <span className="coven-composer-meta-avatar" aria-hidden="true">
+                            <FamiliarAvatar name={name} avatarUrl={familiar.avatarUrl} size={18} />
+                          </span>
+                          <span className="coven-composer-meta-text">{`${name} · Read only`}</span>
+                        </span>
+                      ) : null}
+                      <span
+                        className="coven-composer-meta-item"
+                        title={
+                          chatHarness
+                            ? `This chat runs on ${harnessLabel(chatHarness)}. A chat keeps what it started on.`
+                            : `A new chat starts on ${harnessLabel(run.harness)}.`
+                        }
+                      >
+                        <Icon name="terminal-window" size={13} />
+                        <span className="coven-sr-only">Runs on </span>
+                        <span className="coven-composer-meta-text">
+                          {harnessLabel(chatHarness ?? run.harness)}
+                        </span>
+                      </span>
+                      <span
+                        className="coven-composer-meta-item"
+                        title={
+                          run.model
+                            ? `Messages ask for ${run.model}.`
+                            : "Messages use the engine's default model."
+                        }
+                      >
+                        <Icon name="brain" size={13} />
+                        <span className="coven-sr-only">Model: </span>
+                        <span className="coven-composer-meta-text">
+                          {run.model || 'Engine default'}
+                        </span>
+                      </span>
+                      <span className="coven-composer-meta-item coven-composer-meta-workspace">
+                        <Icon name="folder-open" size={13} />
+                        <span className="coven-composer-context" title={workspace}>
+                          {workspace ? `${workspaceLabel}: ${workspace}` : 'No workspace reported'}
+                        </span>
+                      </span>
+                      <button
+                        type="button"
+                        className="coven-composer-meta-settings"
+                        aria-label="Model settings"
+                        aria-haspopup="dialog"
+                        title="Settings › Model"
+                        onClick={() => openSettings('model')}
+                      >
+                        <Icon name="sliders-horizontal" size={14} />
+                      </button>
+                    </>
+                  }
                 >
                   {mentionCompletion.suggestions}
-                  <ContextPicker
-                    key={`${props.familiarId}:${props.sessionId}`}
-                    familiars={props.familiars}
-                    familiarId={props.familiarId}
-                    value={props.draft}
-                    onValueChange={props.onDraft}
-                    textareaRef={composerRef}
-                    disabled={composerDisabled || props.busy}
-                  />
                 </Composer>
                 {onAttach ? (
                   <>

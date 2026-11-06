@@ -21,7 +21,15 @@ import { cn, type Density } from './utils';
  *   host can claim keys for its own menus;
  * - a `warning` slot for the moment a draft crosses a boundary;
  * - a `children` slot above the field for the host's inline `/` and `@` menus;
- * - the options caret opening the command palette.
+ * - the options caret opening the command palette;
+ * - `stopOnEscape`: while a run is in flight, Escape in the field stops it, and
+ *   the Stop control shows the key ("esc · stop");
+ * - a `tools` slot in the toolbar for the host's own controls, after attach;
+ * - a `meta` slot under the toolbar, past a hairline, for what the host knows
+ *   about where the message goes.
+ *
+ * The field comes first and the controls follow it, in reading and tab order:
+ * field, attachments, toolbar (attach, tools, then Send or Stop), details.
  *
  * Modes and the model readout are dropped: here the ward, not a mode, decides
  * what a familiar may do.
@@ -83,7 +91,19 @@ export type ComposerProps = Readonly<{
   minRows?: number;
   maxRows?: number;
   children?: ReactNode;
+  /** The host's controls, drawn in the toolbar after attach and commands. */
+  tools?: ReactNode;
+  /** A details row under the toolbar, separated by a hairline. */
+  meta?: ReactNode;
+  /** The details row's accessible name. */
+  metaLabel?: string;
+  /** Escape in the field stops a run in flight; the Stop control names the key. */
+  stopOnEscape?: boolean;
+  /** Draws Send as its arrow alone; its name stays "Send". */
+  sendIcon?: boolean;
 }>;
+
+const ESCAPE_SHORTCUT = { keys: 'Escape', label: 'esc' } as const;
 
 export function Composer({
   value,
@@ -111,6 +131,11 @@ export function Composer({
   minRows = 2,
   maxRows = 8,
   children,
+  tools,
+  meta,
+  metaLabel = 'Details',
+  stopOnEscape = false,
+  sendIcon = false,
 }: ComposerProps) {
   const id = useId();
   const fieldId = `composer-${id}`;
@@ -119,6 +144,11 @@ export function Composer({
   function handleKeyDown(event: ReactKeyboardEvent<HTMLTextAreaElement>) {
     onKeyDown?.(event);
     if (event.defaultPrevented || event.nativeEvent.isComposing || event.keyCode === 229) {
+      return;
+    }
+    if (event.key === 'Escape' && stopOnEscape && running && onStop) {
+      event.preventDefault();
+      onStop();
       return;
     }
     if (event.key === 'Enter' && !event.shiftKey) {
@@ -142,49 +172,9 @@ export function Composer({
       className={cn('oc-composer', className)}
     >
       {children}
-      <div className="oc-composer-bar">
-        {onAttach ? (
-          <Button
-            type="button"
-            variant="ghost"
-            density="compact"
-            size="icon"
-            aria-label="Attach file"
-            title="Attach"
-            onClick={onAttach}
-          >
-            <Icon name={attachmentIcon} size={15} />
-          </Button>
-        ) : null}
-        {onOpenCommands ? (
-          <Button
-            type="button"
-            variant="ghost"
-            density="compact"
-            size="icon"
-            aria-label="Commands"
-            title="Commands  /"
-            onClick={onOpenCommands}
-          >
-            <Icon name="terminal-window" size={15} />
-          </Button>
-        ) : null}
-        <label htmlFor={fieldId} className="oc-composer-label">
-          {label}
-        </label>
-        <span className="oc-composer-spacer" />
-        {warning ? (
-          <button
-            type="button"
-            className="oc-composer-warning"
-            title={warning.title}
-            onClick={warning.onClick}
-          >
-            <span className="oc-composer-warning-dot" aria-hidden="true" />
-            {warning.label}
-          </button>
-        ) : null}
-      </div>
+      <label htmlFor={fieldId} className="oc-composer-label">
+        {label}
+      </label>
       <Textarea
         {...textareaProps}
         id={fieldId}
@@ -221,20 +211,71 @@ export function Composer({
           })}
         </ul>
       ) : null}
-      <footer className="oc-composer-footer">
-        <span className="oc-composer-hint">
-          <kbd className="oc-kbd">⏎</kbd> send · <kbd className="oc-kbd">⇧⏎</kbd> newline
-        </span>
-        <SendControl
-          running={running}
-          density={density}
-          disabled={!running && !ready}
-          onSend={onSend}
-          onStop={onStop}
-          options={commands}
-          onSelectOption={onSelectCommand}
-        />
-      </footer>
+      <div className="oc-composer-toolbar">
+        <div className="oc-composer-bar">
+          {onAttach ? (
+            <Button
+              type="button"
+              variant="ghost"
+              density="compact"
+              size="icon"
+              aria-label="Attach file"
+              title="Attach"
+              onClick={onAttach}
+            >
+              <Icon name={attachmentIcon} size={15} />
+            </Button>
+          ) : null}
+          {onOpenCommands ? (
+            <Button
+              type="button"
+              variant="ghost"
+              density="compact"
+              size="icon"
+              aria-label="Commands"
+              title="Commands  /"
+              onClick={onOpenCommands}
+            >
+              <Icon name="terminal-window" size={15} />
+            </Button>
+          ) : null}
+          {tools}
+        </div>
+        <span className="oc-composer-spacer" />
+        {warning ? (
+          <button
+            type="button"
+            className="oc-composer-warning"
+            title={warning.title}
+            onClick={warning.onClick}
+          >
+            <span className="oc-composer-warning-dot" aria-hidden="true" />
+            {warning.label}
+          </button>
+        ) : null}
+        <div className="oc-composer-footer">
+          <span className="oc-composer-hint">
+            <kbd className="oc-kbd">⏎</kbd> send · <kbd className="oc-kbd">⇧⏎</kbd> newline
+          </span>
+          <SendControl
+            running={running}
+            density={density}
+            disabled={!running && !ready}
+            onSend={onSend}
+            onStop={onStop}
+            options={commands}
+            onSelectOption={onSelectCommand}
+            iconOnly={sendIcon}
+            stopShortcut={stopOnEscape && onStop ? ESCAPE_SHORTCUT : undefined}
+          />
+        </div>
+      </div>
+      {meta ? (
+        // biome-ignore lint/a11y/useSemanticElements: a labelled group of facts, not a form fieldset.
+        <div role="group" aria-label={metaLabel} className="oc-composer-meta">
+          {meta}
+        </div>
+      ) : null}
     </section>
   );
 }
