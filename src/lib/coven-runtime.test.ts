@@ -10,6 +10,45 @@ vi.mock('@tauri-apps/api/core', () => ({
 }));
 
 describe('Coven runtime', () => {
+  it('names only the request when allowing it, leaving the permission and the chat to the host', async () => {
+    const invoke = vi.fn().mockResolvedValue({ runId: 'run', events: [] });
+    const runtime = createCovenRuntime({ available: () => true, invoke });
+    await runtime.allow({ approvalId: 'request-1', runId: 'run', model: 'gpt-5.5' });
+    expect(invoke).toHaveBeenCalledWith('coven_runtime_allow', {
+      input: { approvalId: 'request-1', runId: 'run', model: 'gpt-5.5' },
+      onEvent: expect.any(Channel),
+    });
+    await runtime.decline('request-1');
+    expect(invoke).toHaveBeenLastCalledWith('coven_runtime_decline', { approvalId: 'request-1' });
+  });
+
+  it('lets only well-formed requests and log lines reach the window', async () => {
+    const request = {
+      id: 'request-1',
+      familiarId: 'nova',
+      summary: 'Create probe.txt',
+      requestedAt: 1,
+      expiresAt: 2,
+    };
+    const invoke = vi.fn().mockResolvedValue([request]);
+    const runtime = createCovenRuntime({ available: () => true, invoke });
+    expect(await runtime.pendingApprovals()).toEqual([request]);
+    for (const bad of [{ ...request, summary: 7 }, { ...request, id: null }, 'x']) {
+      invoke.mockResolvedValue([bad]);
+      await expect(runtime.pendingApprovals()).rejects.toThrow('invalid native result');
+    }
+    const line = { at: 1, event: 'allowed', approvalId: 'a', familiarId: 'nova', device: 'iphone' };
+    invoke.mockResolvedValue([line]);
+    expect(await runtime.permissionLog()).toEqual([line]);
+    for (const bad of [
+      { ...line, event: 'forged' },
+      { ...line, device: 'tablet' },
+    ]) {
+      invoke.mockResolvedValue([bad]);
+      await expect(runtime.permissionLog()).rejects.toThrow('invalid native result');
+    }
+  });
+
   it('validates declared read/write project metadata without inferring access', async () => {
     const entry = { id: 'nova', name: 'nova', displayName: 'Nova' };
     const projects = [

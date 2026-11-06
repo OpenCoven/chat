@@ -48,6 +48,18 @@ import XCTest
       messages: [Message(id: "reply", role: "assistant", text: "Hello")])
   }
   func stop(id: String) async throws {}
+  var answers: [ApprovalAnswer] = []
+  var answerFailure: Error?
+  var logEntries: [PermissionLogEntry] = []
+  func answer(_ answer: ApprovalAnswer) async throws -> ApprovalResult {
+    answers.append(answer)
+    if let answerFailure { throw answerFailure }
+    guard answer.decision == "allow" else { return ApprovalResult(status: "declined") }
+    return ApprovalResult(
+      status: "allowed",
+      run: Run(id: answer.requestId, familiarId: "astra", status: "running", messages: []))
+  }
+  func permissionLog() async throws -> PermissionLog { PermissionLog(entries: logEntries) }
   func invalidate() { invalidated = true }
 }
 
@@ -76,6 +88,129 @@ import XCTest
     XCTAssertEqual(api.sent.count, 1)
     XCTAssertEqual(api.sent[0].familiarId, "astra")
     XCTAssertEqual(model.draft, "")
+  }
+  private let request = Approval(
+    id: "request-1", familiarId: "astra", summary: "Create probe.txt", reason: "It needs a file",
+    requestedAt: 1, expiresAt: 2)
+  private func asking(_ api: FakeClient) -> Snapshot {
+    Snapshot(
+      version: 1, familiars: api.snapshotValue.familiars, sessions: [], activeRun: nil,
+      pendingApprovals: [request])
+  }
+  func testAnOpenRequestShowsAndAllowNamesOnlyTheRequest() async {
+    let api = FakeClient()
+    api.snapshotValue = asking(api)
+    let model = model(api)
+    await model.refresh()
+    XCTAssertEqual(model.approval, request)
+    XCTAssertTrue(model.canAllow)
+    model.draft = "still typing"
+    await model.allow(request)
+    XCTAssertEqual(api.answers.count, 1)
+    XCTAssertEqual(api.answers[0].approvalId, "request-1")
+    XCTAssertEqual(api.answers[0].decision, "allow")
+    XCTAssertEqual(model.activeRun?.id, api.answers[0].requestId)
+    XCTAssertTrue(api.sent.isEmpty)
+    XCTAssertEqual(model.draft, "still typing")
+    XCTAssertNil(model.approval)
+    XCTAssertFalse(model.canAllow, "The allowed turn holds the runtime")
+  }
+  func testAMacWithoutApprovalsShowsNone() async {
+    let api = FakeClient()
+    let model = model(api)
+    await model.refresh()
+    XCTAssertNil(model.approval)
+    XCTAssertTrue(model.approvals.isEmpty)
+  }
+  func testAllowWaitsForTheRunningTurn() async {
+    let api = FakeClient()
+    api.snapshotValue = asking(api)
+    let model = model(api)
+    await model.refresh()
+    model.draft = "hello"
+    api.delaySend = true
+    async let sending: Void = model.send()
+    await Task.yield()
+    await model.allow(request)
+    XCTAssertTrue(api.answers.isEmpty)
+    api.sendGate?.resume(
+      returning: Run(id: "run", familiarId: "astra", status: "completed", messages: []))
+    await sending
+  }
+  func testARefusedAllowIsCertainAndStartsNothing() async {
+    let api = FakeClient()
+    api.snapshotValue = asking(api)
+    api.answerFailure = CompanionError.message("This request is no longer open.")
+    let model = model(api)
+    await model.refresh()
+    await model.allow(request)
+    XCTAssertEqual(model.error, "This request is no longer open.")
+    XCTAssertNil(model.pendingRunId)
+    XCTAssertTrue(model.connected)
+    XCTAssertTrue(model.canAllow, "A refusal leaves the phone ready")
+  }
+  func testAnUncertainAllowIsCheckedAndNeverRepeated() async {
+    let api = FakeClient()
+    api.snapshotValue = asking(api)
+    api.answerFailure = URLError(.timedOut)
+    let model = model(api)
+    await model.refresh()
+    await model.allow(request)
+    XCTAssertEqual(api.answers.count, 1)
+    XCTAssertNotNil(model.pendingRunId)
+    XCTAssertTrue(model.error.contains("Delivery is uncertain"))
+    await model.allow(request)
+    XCTAssertEqual(api.answers.count, 1, "An uncertain answer blocks a second one")
+    await model.refresh()
+    XCTAssertNil(model.pendingRunId, "The Mac's receipt settles it")
+    XCTAssertEqual(api.answers.count, 1)
+  }
+  func testDeclineAnswersAndStartsNothing() async {
+    let api = FakeClient()
+    api.snapshotValue = asking(api)
+    let model = model(api)
+    await model.refresh()
+    api.snapshotValue = Snapshot(
+      version: 1, familiars: api.snapshotValue.familiars, sessions: [], activeRun: nil)
+    await model.decline(request)
+    XCTAssertEqual(api.answers.map(\.decision), ["decline"])
+    XCTAssertNil(model.approval)
+    XCTAssertNil(model.activeRun)
+    XCTAssertNil(model.pendingRunId)
+  }
+  func testARequestFromAnotherFamiliarIsOfferedButNotAnswerableHere() async {
+    let api = FakeClient()
+    let other = Approval(
+      id: "request-2", familiarId: "sage", summary: "S", reason: nil, requestedAt: 1, expiresAt: 2)
+    api.snapshotValue = Snapshot(
+      version: 1,
+      familiars: api.snapshotValue.familiars + [
+        Familiar(id: "sage", name: "sage", displayName: "Sage")
+      ],
+      sessions: [], activeRun: nil, pendingApprovals: [other])
+    let model = model(api)
+    await model.refresh()
+    XCTAssertNil(model.approval)
+    XCTAssertEqual(model.otherApproval, other)
+    await model.allow(other)
+    XCTAssertTrue(api.answers.isEmpty)
+  }
+  func testThePermissionLogReadsInPlainWords() async {
+    let api = FakeClient()
+    api.logEntries = [
+      PermissionLogEntry(
+        at: 3, event: "action", approvalId: "a", familiarId: "astra", tool: "Write",
+        detail: "/p.txt"),
+      PermissionLogEntry(
+        at: 2, event: "allowed", approvalId: "a", familiarId: "astra", summary: "S",
+        device: "iphone"),
+    ]
+    let model = model(api)
+    await model.refresh()
+    await model.loadPermissionLog()
+    XCTAssertEqual(model.permissionLog?.count, 2)
+    XCTAssertEqual(model.permissionLog?[0].line(name: "Astra"), "Astra used Write: /p.txt")
+    XCTAssertEqual(model.permissionLog?[1].line(name: "Astra"), "Allowed on iPhone for Astra: S")
   }
   func testUncertainSendIsReconciledWithoutResubmission() async {
     let api = FakeClient()

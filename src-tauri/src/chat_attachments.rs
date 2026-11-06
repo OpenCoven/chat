@@ -7,6 +7,8 @@ use std::{
     path::{Path, PathBuf},
 };
 
+/// A message with files and no words still has to ask for something.
+pub(crate) const ATTACHMENTS_ONLY_PROMPT: &str = "Read the attached text files.";
 const MAX_FILE: usize = 64 * 1024;
 const MAX_FILES: usize = 4;
 const STORAGE_LIMIT: u64 = 64 * 1024 * 1024;
@@ -137,7 +139,7 @@ pub(crate) fn stage(
         .canonicalize()
         .map_err(|_| "Cannot resolve attachment storage.")?;
     let mut blocks = vec![
-        json!({"type": "text", "text": if prompt.trim().is_empty() { "Read the attached text files." } else { prompt }}),
+        json!({"type": "text", "text": if prompt.trim().is_empty() { ATTACHMENTS_ONLY_PROMPT } else { prompt }}),
     ];
     for (index, file) in files.iter().enumerate() {
         let path = directory.join(format!("{index}-{}", file.name));

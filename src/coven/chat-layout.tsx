@@ -21,11 +21,18 @@ import {
   titleCase,
 } from '../design/familiars-ui';
 import { Icon } from '../design/minimal-icons';
-import type { ChatLifecycle, CovenProjectAccess, CovenSetupStep } from '../lib/coven-runtime';
+import type {
+  ChatLifecycle,
+  CovenApproval,
+  CovenProjectAccess,
+  CovenSetupStep,
+  PermissionLogEntry,
+} from '../lib/coven-runtime';
 import type { ScreenRelay } from '../lib/screen-relay';
 import { type SetWindowTitle, windowTitle } from '../lib/window-title';
 import { Composer } from '../ui/composer';
 import { MenuPortalContainer } from '../ui/dropdown-menu';
+import { ApprovalCard } from './approval-card';
 import { AttachmentCard } from './attachment-card';
 import { ATTACHMENT_ACCEPT, type ChatAttachment, formatAttachmentSize } from './attachments';
 import { ChatLifecycleControls } from './chat-lifecycle';
@@ -147,6 +154,14 @@ export type ChatLayoutProps = Readonly<{
    * are opened again. Their rows say so.
    */
   finished?: Readonly<Record<string, 'reply' | 'error'>>;
+  /** Requests familiars are waiting on an answer for, across every chat. */
+  approvals?: readonly CovenApproval[];
+  /** A Decline is on its way to the host. */
+  answeringApproval?: boolean;
+  onAllowApproval?: (approval: CovenApproval, options: RunOptions) => void;
+  onDeclineApproval?: (approval: CovenApproval) => void;
+  /** Reads the permission log for Settings › Access. */
+  onPermissionLog?: () => Promise<PermissionLogEntry[]>;
   loading: boolean;
   cancelling: boolean;
   error: string;
@@ -826,6 +841,15 @@ export function ChatLayout(props: ChatLayoutProps) {
   const workspaceLabel = session?.projectRoot ? 'Chat project' : 'Familiar workspace';
   const composerDisabled =
     !props.ready || props.loading || props.cancelling || props.attaching || props.readOnly;
+  const approval = props.approvals?.find((item) => item.familiarId === props.familiarId);
+  // Allow starts a run, so it waits for the same things a message would.
+  const allowUnavailable = props.readOnly
+    ? 'Restore this archived chat to allow this.'
+    : props.busy
+      ? 'Allow once is available when the current run ends.'
+      : !props.ready || props.loading
+        ? 'Allow once is available when this chat has loaded.'
+        : '';
   // The same gate as the header's refresh control.
   const refreshBlocked = Boolean(props.busy || props.loading || props.lifecycleBusy);
   const transcriptRef = useRef<HTMLDivElement>(null);
@@ -1235,12 +1259,19 @@ export function ChatLayout(props: ChatLayoutProps) {
                   const draft = props.drafts?.[item.id]?.trim() ?? '';
                   const done = live ? undefined : props.finished?.[item.id];
                   const doneLabel = done === 'error' ? 'Run failed' : 'New reply';
+                  const asks = !live && props.approvals?.some((a) => a.familiarId === item.id);
                   return (
                     <button
                       type="button"
                       key={item.id}
                       className="fr-conv coven-agent-row"
-                      aria-label={done ? `${item.name} (${doneLabel.toLowerCase()})` : item.name}
+                      aria-label={
+                        asks
+                          ? `${item.name} (asks for permission)`
+                          : done
+                            ? `${item.name} (${doneLabel.toLowerCase()})`
+                            : item.name
+                      }
                       title={item.description}
                       aria-current={item.id === props.familiarId || undefined}
                       disabled={props.lifecycleBusy}
@@ -1255,6 +1286,8 @@ export function ChatLayout(props: ChatLayoutProps) {
                             <span className="fr-conv-time coven-agent-live">
                               {props.cancelling ? 'Stopping…' : 'Responding…'}
                             </span>
+                          ) : asks ? (
+                            <span className="fr-conv-time coven-agent-asks">Asks permission</span>
                           ) : done ? (
                             <span
                               className={`fr-conv-time coven-agent-done${done === 'error' ? ' coven-agent-done--error' : ''}`}
@@ -1610,6 +1643,17 @@ export function ChatLayout(props: ChatLayoutProps) {
                 </button>
               )}
               {quote.action}
+              {approval ? (
+                <ApprovalCard
+                  approval={approval}
+                  name={name}
+                  answering={Boolean(props.answeringApproval)}
+                  allowDisabled={allowUnavailable !== ''}
+                  allowHint={allowUnavailable || undefined}
+                  onAllow={() => props.onAllowApproval?.(approval, run)}
+                  onDecline={() => props.onDeclineApproval?.(approval)}
+                />
+              ) : null}
               <div className="coven-composer-context" title={workspace}>
                 {workspace ? `${workspaceLabel}: ${workspace}` : 'No workspace reported'}
               </div>
@@ -1982,6 +2026,8 @@ export function ChatLayout(props: ChatLayoutProps) {
             onRefresh={props.onRefresh}
             refreshDisabled={Boolean(props.busy || props.loading || props.lifecycleBusy)}
             companion={<CompanionPanel />}
+            onPermissionLog={props.onPermissionLog}
+            familiarName={(id) => props.familiars.find((item) => item.id === id)?.name ?? id}
           />
         ) : null}
       </div>

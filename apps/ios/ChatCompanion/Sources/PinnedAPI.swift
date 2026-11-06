@@ -72,6 +72,12 @@ final class PinnedAPI: NSObject, CompanionClient, URLSessionDelegate, URLSession
       "stop", body: JSONSerialization.data(withJSONObject: ["runId": id]))
     guard result.ok else { throw CompanionError.message("The Mac could not stop this run.") }
   }
+  func answer(_ value: ApprovalAnswer) async throws -> ApprovalResult {
+    try await request("approval", body: JSONEncoder().encode(value))
+  }
+  func permissionLog() async throws -> PermissionLog {
+    try await request("permission-log")
+  }
   private func request<T: Decodable>(_ path: String, query: [URLQueryItem] = [], body: Data? = nil)
     async throws -> T
   {
@@ -98,8 +104,12 @@ final class PinnedAPI: NSObject, CompanionClient, URLSessionDelegate, URLSession
       // Never echo addresses, credentials or arbitrary server bodies into diagnostics.
       throw CompanionError.message(
         http.statusCode == 409
-          ? "The chat changed or another run is active. Refresh before sending."
-          : "The Mac could not complete this request (\(http.statusCode)).")
+          ? path == "approval"
+            ? "This request is no longer open, or a run is going. Refresh and try again."
+            : "The chat changed or another run is active. Refresh before sending."
+          : http.statusCode == 503 && path == "approval"
+            ? "The Mac couldn't record your answer, so nothing changed. Check its disk, then try again."
+            : "The Mac could not complete this request (\(http.statusCode)).")
     }
     var data = Data()
     for try await byte in bytes {

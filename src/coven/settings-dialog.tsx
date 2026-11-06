@@ -3,7 +3,7 @@ import chatIconUrl from '../../assets/brand/chat-app-icon-rounded.svg';
 import packageJson from '../../package.json';
 import { cx } from '../design/familiars-ui';
 import { Icon, type IconName } from '../design/minimal-icons';
-import type { CovenProjectAccess } from '../lib/coven-runtime';
+import type { CovenProjectAccess, PermissionLogEntry } from '../lib/coven-runtime';
 import { CopyButton } from './copy-button';
 import { FamiliarAvatar } from './familiar-avatar';
 import { INSPECTOR_DEFAULT_WIDTH } from './inspector-width';
@@ -54,7 +54,7 @@ const SECTIONS: readonly Readonly<{
     id: 'access',
     label: 'Access',
     icon: 'folder-open',
-    blurb: 'Projects Coven declares for the selected familiar.',
+    blurb: 'Projects Coven declares, and what familiars were allowed to do.',
   },
   { id: 'devices', label: 'Devices', icon: 'monitor', blurb: 'Your iPhone and remote screens.' },
   {
@@ -122,6 +122,10 @@ export type SettingsDialogProps = Readonly<{
   refreshDisabled: boolean;
   /** The iPhone companion's opener, which owns its own dialog. */
   companion?: ReactNode;
+  /** Reads the permission log, newest first. */
+  onPermissionLog?: (() => Promise<PermissionLogEntry[]>) | undefined;
+  /** The name a familiar goes by, for the log's lines. */
+  familiarName?: ((id: string) => string) | undefined;
 }>;
 
 /**
@@ -501,7 +505,85 @@ function ChatsSection({
   );
 }
 
-function AccessSection({ familiar, onRefresh, refreshDisabled }: SettingsDialogProps) {
+function logLine(entry: PermissionLogEntry, name: string): string {
+  const device = entry.device === 'iphone' ? 'iPhone' : 'this computer';
+  const summary = entry.summary ?? '';
+  switch (entry.event) {
+    case 'requested':
+      return `${name} asked: ${summary}`;
+    case 'allowed':
+      return `Allowed on ${device} for ${name}: ${summary}`;
+    case 'declined':
+      return `Declined on ${device} for ${name}: ${summary}`;
+    case 'superseded':
+      return `A new message replaced ${name}'s request: ${summary}`;
+    case 'action':
+      return `${name} used ${entry.tool ?? 'a tool'}${entry.detail ? `: ${entry.detail}` : ''}`;
+    case 'finished':
+      return `${name}'s allowed turn ${entry.outcome === 'completed' ? 'finished' : (entry.outcome ?? 'ended')}.`;
+  }
+}
+
+function PermissionLog({ onPermissionLog, familiarName }: SettingsDialogProps) {
+  const [log, setLog] = useState<{ entries: PermissionLogEntry[]; error: string } | null>(null);
+  useEffect(() => {
+    if (!onPermissionLog) return;
+    let alive = true;
+    onPermissionLog()
+      .then((entries) => {
+        if (alive) setLog({ entries, error: '' });
+      })
+      .catch((failure: unknown) => {
+        if (alive)
+          setLog({
+            entries: [],
+            error: failure instanceof Error ? failure.message : String(failure),
+          });
+      });
+    return () => {
+      alive = false;
+    };
+  }, [onPermissionLog]);
+  return (
+    <Group title="Permission log">
+      {log === null ? (
+        <p className="coven-settings-footnote">Reading the log…</p>
+      ) : log.error ? (
+        <p className="coven-settings-footnote">{log.error}</p>
+      ) : log.entries.length === 0 ? (
+        <p className="coven-settings-footnote">
+          Nothing yet. When a familiar asks for permission, the request, your answer and each tool
+          call Coven reports from the allowed turn appear here.
+        </p>
+      ) : (
+        <ol className="coven-permission-log" aria-label="Permission log, newest first">
+          {log.entries.map((entry, index) => (
+            <li
+              key={`${entry.approvalId}-${entry.at}-${index}`}
+              className={`coven-permission-log-entry coven-permission-log-entry--${entry.event}`}
+            >
+              <time dateTime={new Date(entry.at).toISOString()}>
+                {new Date(entry.at).toLocaleString()}
+              </time>
+              <span>{logLine(entry, familiarName?.(entry.familiarId) ?? entry.familiarId)}</span>
+            </li>
+          ))}
+        </ol>
+      )}
+    </Group>
+  );
+}
+
+function AccessSection(props: SettingsDialogProps) {
+  return (
+    <>
+      <FamiliarAccess {...props} />
+      <PermissionLog {...props} />
+    </>
+  );
+}
+
+function FamiliarAccess({ familiar, onRefresh, refreshDisabled }: SettingsDialogProps) {
   const [query, setQuery] = useState('');
   if (!familiar) {
     return (
@@ -603,8 +685,7 @@ function AccessSection({ familiar, onRefresh, refreshDisabled }: SettingsDialogP
         </div>
       )}
       <p className="coven-settings-footnote">
-        Chat shows access as Coven declares it and neither enforces nor extends it. Change it in
-        Coven, then{' '}
+        Chat shows access as Coven declares it. Change it in Coven, then{' '}
         <button
           type="button"
           className="coven-settings-link"
@@ -613,7 +694,8 @@ function AccessSection({ familiar, onRefresh, refreshDisabled }: SettingsDialogP
         >
           refresh
         </button>
-        . Tool approval controls are not available in this app.
+        . Every turn runs read-only unless you allow a familiar's request, and an allowed turn isn't
+        limited to these projects.
       </p>
     </>
   );

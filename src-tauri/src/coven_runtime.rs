@@ -32,7 +32,10 @@ pub(crate) mod missions;
 
 #[path = "companion/runtime.rs"]
 mod companion_adapter;
-pub(crate) use companion_adapter::{companion_history, companion_snapshot, companion_start};
+pub(crate) use companion_adapter::{
+    companion_allow, companion_decline, companion_history, companion_open_approval,
+    companion_permission_log, companion_snapshot, companion_start,
+};
 
 const OUTPUT_LIMIT: usize = 4 * 1024 * 1024;
 pub(crate) const TRANSCRIPT_LIMIT: usize = OUTPUT_LIMIT + 256 * 1024;
@@ -43,6 +46,7 @@ pub(crate) const READ_TIMEOUT: Duration = Duration::from_secs(20);
 const RUN_TIMEOUT: Duration = Duration::from_secs(600);
 const SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(25);
 const HISTORY_SESSION_LIMIT: usize = 64;
+pub(crate) const PERMISSION_LOG_LIMIT: usize = 200;
 const HISTORY_PAGE_LIMIT: usize = 16;
 /// How far back "Load earlier turns" may reach: this many times the base
 /// history budget, and no further.
@@ -257,6 +261,10 @@ pub(crate) struct SendInput {
     speed: Option<String>,
     #[serde(default)]
     attachments: Vec<attachments::Attachment>,
+    /// Write access for this one turn. Only the host sets it, from a request the
+    /// person allowed: `deny_unknown_fields` rejects it from the webview or phone.
+    #[serde(skip)]
+    grant: Option<crate::chat_approvals::Grant>,
 }
 
 /// A model id Chat passes as `--model`: 1 to 200 bytes that start with a letter
@@ -942,7 +950,12 @@ fn run_arguments(
         harness.into(),
         "--stream-json".into(),
         "--permission".into(),
-        "read-only".into(),
+        if input.grant.is_some() {
+            "full"
+        } else {
+            "read-only"
+        }
+        .into(),
         "--cwd".into(),
         cwd.to_str().ok_or("Workspace path is not UTF-8.")?.into(),
     ];
@@ -953,6 +966,11 @@ fn run_arguments(
     if let Some(id) = &input.familiar_id {
         validate_id(id)?;
         args.extend(["--familiar".into(), id.clone()]);
+    }
+    // In one word, so that a message starting with a dash stays a value.
+    let title = crate::chat_approvals::session_title(&input.prompt);
+    if !title.is_empty() {
+        args.push(format!("--title={title}"));
     }
     if let Some(model) = &input.model {
         if !valid_model(model) {
@@ -1558,6 +1576,16 @@ fn text_blocks(event: &Value, separator: &str) -> String {
         .unwrap_or_default()
 }
 
+/// What the engine reads as this turn's message, before Chat's note. A message
+/// that is only attachments still has to say something.
+fn turn_text<'a>(prompt: &'a str, has_attachments: bool, replay: Option<&'a str>) -> &'a str {
+    match replay {
+        Some(replay) => replay,
+        None if has_attachments && prompt.trim().is_empty() => attachments::ATTACHMENTS_ONLY_PROMPT,
+        None => prompt,
+    }
+}
+
 /// Collapse a captured Chat history into ordered `(role, text)` turns: the
 /// submitted user prompts (plus attachment names) and the assistant text of
 /// each run. Tool traffic, raw output and runtime frames are not replayed.
@@ -1612,6 +1640,13 @@ fn replay_turns(events: &[Value]) -> Vec<(&'static str, String)> {
             }
         }
     }
+    // A request became a dialog; it isn't part of what the familiar said.
+    for (role, text) in &mut turns {
+        if *role == "assistant" {
+            *text = crate::chat_approvals::strip_requests(text);
+        }
+    }
+    turns.retain(|(_, text)| !text.trim().is_empty());
     turns
 }
 
@@ -1873,8 +1908,19 @@ pub(crate) async fn coven_runtime_send(
         .path()
         .app_local_data_dir()
         .map_err(|_| "Cannot locate local chat storage.")?;
-
     let (cancel, registration) = state.register_run(&input.run_id)?;
+    run_in_window(state, data, input, cancel, registration, on_event).await
+}
+
+/// The window's own run, from admission to its last event.
+async fn run_in_window(
+    state: State<'_, CovenRuntimeState>,
+    data: PathBuf,
+    input: SendInput,
+    cancel: Arc<AtomicBool>,
+    registration: RunRegistration,
+    on_event: Channel<Value>,
+) -> Result<Value, String> {
     let record = crate::companion::backend::RunRecord::new(
         input.run_id.clone(),
         input.familiar_id.clone().unwrap_or_default(),
@@ -1903,6 +1949,154 @@ pub(crate) async fn coven_runtime_send(
     .await
 }
 
+/// The turn a request becomes once the person allows it. Options apply as they
+/// would to a message; the permission, the chat and the words are the host's.
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct AllowInput {
+    approval_id: String,
+    run_id: String,
+    model: Option<String>,
+    #[serde(default)]
+    think: bool,
+    speed: Option<String>,
+}
+
+fn granted_input(
+    grant: crate::chat_approvals::Grant,
+    run_id: String,
+    model: Option<String>,
+    think: bool,
+    speed: Option<String>,
+) -> SendInput {
+    SendInput {
+        run_id,
+        prompt: crate::chat_approvals::allowed_prompt(&grant.summary),
+        session_id: Some(grant.session_id.clone()),
+        familiar_id: Some(grant.familiar_id.clone()),
+        harness: None,
+        model,
+        think,
+        speed,
+        attachments: Vec::new(),
+        grant: Some(grant),
+    }
+}
+
+#[tauri::command]
+pub(crate) async fn coven_runtime_allow(
+    app: AppHandle,
+    state: State<'_, CovenRuntimeState>,
+    input: AllowInput,
+    on_event: Channel<Value>,
+) -> Result<Value, String> {
+    validate_id(&input.approval_id)?;
+    validate_id(&input.run_id)?;
+    let data = app
+        .path()
+        .app_local_data_dir()
+        .map_err(|_| "Cannot locate local chat storage.")?;
+    // Allow spends the request, so the run slot comes first: a busy runtime
+    // leaves the request open for the person to try again.
+    let (cancel, registration) = state.register_run(&input.run_id)?;
+    let grant = {
+        let data = data.clone();
+        let approval = input.approval_id.clone();
+        let run = input.run_id.clone();
+        blocking(move || {
+            crate::chat_approvals::allow(
+                &data,
+                &approval,
+                crate::chat_approvals::Device::Desktop,
+                &run,
+                crate::chat_approvals::now_ms(),
+            )
+        })
+        .await?
+    };
+    let send = granted_input(grant, input.run_id, input.model, input.think, input.speed);
+    run_in_window(state, data, send, cancel, registration, on_event).await
+}
+
+#[tauri::command]
+pub(crate) async fn coven_runtime_decline(
+    app: AppHandle,
+    approval_id: String,
+) -> Result<(), String> {
+    let data = app
+        .path()
+        .app_local_data_dir()
+        .map_err(|_| "Cannot locate local chat storage.")?;
+    blocking(move || decline_request(&data, &approval_id, crate::chat_approvals::Device::Desktop))
+        .await
+}
+
+#[tauri::command]
+pub(crate) async fn coven_runtime_approvals(
+    app: AppHandle,
+) -> Result<Vec<crate::chat_approvals::Approval>, String> {
+    let data = app
+        .path()
+        .app_local_data_dir()
+        .map_err(|_| "Cannot locate local chat storage.")?;
+    blocking(move || crate::chat_approvals::pending(&data, crate::chat_approvals::now_ms())).await
+}
+
+#[tauri::command]
+pub(crate) async fn coven_runtime_permission_log(
+    app: AppHandle,
+) -> Result<Vec<crate::chat_approvals::Entry>, String> {
+    let data = app
+        .path()
+        .app_local_data_dir()
+        .map_err(|_| "Cannot locate local chat storage.")?;
+    blocking(move || crate::chat_approvals::recent(&data, PERMISSION_LOG_LIMIT)).await
+}
+
+/// Declining leaves a line in the chat, so the thread says why nothing happened.
+fn decline_request(
+    data: &Path,
+    id: &str,
+    device: crate::chat_approvals::Device,
+) -> Result<(), String> {
+    let request =
+        crate::chat_approvals::decline(data, id, device, crate::chat_approvals::now_ms())?;
+    let Some(session) = request.session_id else {
+        return Ok(());
+    };
+    // The answer is already in the log, and the familiar learns of it from there,
+    // so a chat line that can't be written doesn't make the answer a failure.
+    let _ = write_decline_notice(
+        data,
+        &session,
+        request.summary.as_deref().unwrap_or_default(),
+    );
+    Ok(())
+}
+
+fn write_decline_notice(data: &Path, session: &str, summary: &str) -> Result<(), String> {
+    validate_id(session)?;
+    let notice = json!({
+        "type": "system", "subtype": "notice", "source": crate::chat_approvals::NOTICE_SOURCE,
+        "session_id": session,
+        "message": {"role": "system", "content": [{"type": "text", "text": format!(
+            "You declined this request: {summary}",
+        )}]},
+    });
+    let _storage = crate::chat_lifecycle::STORAGE_LOCK
+        .lock()
+        .map_err(|_| "Chat's archive and delete records are unavailable.")?;
+    let path = transcripts_dir(data, false)?.join(format!("{session}.jsonl"));
+    // The chat's file may have gone since the familiar asked.
+    if let Ok(mut file) = OpenOptions::new().append(true).open(path) {
+        let mut line = serde_json::to_vec(&notice).map_err(|_| "Cannot save Coven transcript.")?;
+        line.push(b'\n');
+        file.write_all(&line)
+            .map_err(|_| "Cannot save Coven transcript.")?;
+    }
+    Ok(())
+}
+
 /// Chat's record of what you sent, saved straight after the engine's init
 /// event. It also names the session this one continues and, when files were
 /// attached, the folder they were staged in, so Delete chat can remove it.
@@ -1920,6 +2114,32 @@ fn input_record(id: &str, input: &SendInput) -> Value {
 }
 
 fn send_local(
+    data: &Path,
+    input: SendInput,
+    cancel: &AtomicBool,
+    on_event: &mut dyn FnMut(Value) -> Result<(), String>,
+) -> Result<Value, String> {
+    let grant = input.grant.clone();
+    let run_id = input.run_id.clone();
+    let result = send_turn(data, input, cancel, on_event);
+    if let Some(grant) = grant {
+        let outcome = match &result {
+            Ok(_) => "completed",
+            Err(error) if error == RUN_CANCELLED => "stopped",
+            Err(_) => "failed",
+        };
+        crate::chat_approvals::record_finished(
+            data,
+            &grant,
+            &run_id,
+            outcome,
+            crate::chat_approvals::now_ms(),
+        )?;
+    }
+    result
+}
+
+fn send_turn(
     data: &Path,
     input: SendInput,
     cancel: &AtomicBool,
@@ -2006,10 +2226,28 @@ fn send_local(
         }
         _ => None,
     };
-    let sent_prompt = replay
-        .as_ref()
-        .map_or(input.prompt.as_str(), |replay| replay.prompt.as_str())
-        .to_owned();
+    let conversation = turn_text(
+        &input.prompt,
+        !input.attachments.is_empty(),
+        replay.as_ref().map(|replay| replay.prompt.as_str()),
+    );
+    // The engine's copy says what this turn may do; the saved input stays the
+    // person's own words.
+    let sent_prompt = if input.grant.is_some() {
+        format!(
+            "{}\n\n{conversation}",
+            crate::chat_approvals::allowed_note()
+        )
+    } else {
+        let declined = match input.session_id.as_deref() {
+            Some(session) => crate::chat_approvals::declined_summary(data, session)?,
+            None => None,
+        };
+        format!(
+            "{}\n\n{conversation}",
+            crate::chat_approvals::read_only_note(declined.as_deref())
+        )
+    };
     let mut args = run_arguments(&input, &harness, &workspace, &sent_prompt)?;
     let staged = if input.attachments.is_empty() {
         None
@@ -2034,7 +2272,7 @@ fn send_local(
         args.extend([
             "--".into(),
             if input.prompt.trim().is_empty() {
-                "Read the attached text files.".into()
+                attachments::ATTACHMENTS_ONLY_PROMPT.into()
             } else {
                 input.prompt.clone()
             },
@@ -2050,18 +2288,41 @@ fn send_local(
     let mut transcript: Option<File> = None;
     let mut events = Vec::new();
     let mut input_session: Option<String> = None;
+    let mut action_reader = crate::chat_approvals::ActionReader::default();
+    let record_actions = |actions: Vec<(String, String)>| -> Result<(), String> {
+        let Some(grant) = &input.grant else {
+            return Ok(());
+        };
+        for (tool, detail) in actions {
+            crate::chat_approvals::record_action(
+                data,
+                grant,
+                &input.run_id,
+                &tool,
+                &detail,
+                crate::chat_approvals::now_ms(),
+            )?;
+        }
+        Ok(())
+    };
     let mut observe = |event: Value| -> Result<(), String> {
-        if input_session
-            .as_deref()
-            .is_some_and(|id| event.get("session_id").and_then(Value::as_str) == Some(id))
-            && (is_cli_input_echo(&event, echo_prompt)
-                || is_cli_input_echo(&event, &input.prompt)
-                || is_cli_input_echo(&event, &sent_prompt))
+        // Text holding Chat's note can only be the echo, whatever session it names.
+        if is_cli_input_echo(&event, &sent_prompt)
+            || (staged.is_some() && is_cli_input_echo(&event, echo_prompt))
+            || (input_session
+                .as_deref()
+                .is_some_and(|id| event.get("session_id").and_then(Value::as_str) == Some(id))
+                && (is_cli_input_echo(&event, echo_prompt)
+                    || is_cli_input_echo(&event, &input.prompt)))
         {
             return Ok(());
         }
+        if input.grant.is_some() {
+            record_actions(action_reader.read(&event))?;
+        }
         let mut captured_input = None;
         let mut replay_notice_event = None;
+        let mut grant_notice_event = None;
         if transcript.is_none()
             && event.get("type").and_then(Value::as_str) == Some("system")
             && event.get("subtype").and_then(Value::as_str) == Some("init")
@@ -2089,6 +2350,13 @@ fn send_local(
                     "message": {"role": "system", "content": [{"type": "text", "text": replay_notice(replay)}]},
                 })
             });
+            grant_notice_event = input.grant.as_ref().map(|_| {
+                json!({
+                    "type": "system", "subtype": "notice",
+                    "source": crate::chat_approvals::NOTICE_SOURCE, "session_id": id,
+                    "message": {"role": "system", "content": [{"type": "text", "text": crate::chat_approvals::GRANT_NOTICE}]},
+                })
+            });
             input_session = Some(id.to_owned());
         }
         let file = transcript
@@ -2098,6 +2366,7 @@ fn send_local(
         let mut published = Vec::new();
         for event in std::iter::once(event)
             .chain(captured_input)
+            .chain(grant_notice_event)
             .chain(replay_notice_event)
         {
             serde_json::to_writer(&mut *file, &event)
@@ -2125,6 +2394,13 @@ fn send_local(
                     .as_deref()
                     .ok_or("Coven omitted the new session identity.")?,
             )?;
+            drop(_storage);
+            // Whatever this familiar was waiting on belonged to the turn before.
+            let _ = crate::chat_approvals::supersede(
+                data,
+                &selected_familiar,
+                crate::chat_approvals::now_ms(),
+            );
         }
         for event in published {
             events.push(event.clone());
@@ -2142,6 +2418,7 @@ fn send_local(
         input_file,
         Some(&mut stderr_report),
     );
+    record_actions(action_reader.finish())?;
     // Stopping a run is the user's own action; it leaves no report behind.
     if matches!(&run, Err(error) if error == RUN_CANCELLED) {
         return Err(RUN_CANCELLED.into());
@@ -2152,6 +2429,22 @@ fn send_local(
     });
     let failure = match (&run, failed_result) {
         (Ok(_), None) if events.iter().any(is_result) => {
+            // A turn that already has write access has nothing left to ask for.
+            if input.grant.is_none() {
+                if let (Some(session), Some(proposal)) = (
+                    input_session.as_deref(),
+                    crate::chat_approvals::proposal_in(&events),
+                ) {
+                    crate::chat_approvals::submit(
+                        data,
+                        &selected_familiar,
+                        session,
+                        &input.run_id,
+                        proposal,
+                        crate::chat_approvals::now_ms(),
+                    )?;
+                }
+            }
             return Ok(json!({"runId": input.run_id, "events": events}));
         }
         (Ok(_), None) => RunFailure {
@@ -2497,6 +2790,7 @@ mod tests {
                 name: "notes.txt".into(),
                 bytes: b"secret".to_vec(),
             }],
+            grant: None,
         };
         let record = input_record("child", &attached);
         assert_eq!(record["attachment_run_id"], "run-7");
@@ -2895,6 +3189,7 @@ mod tests {
             think: false,
             speed: None,
             attachments: vec![],
+            grant: None,
         };
         let cancel = AtomicBool::new(false);
         let mut no_events = |_| panic!("Rejected inputs must never execute a model");
@@ -2975,6 +3270,7 @@ mod tests {
             think: false,
             speed: None,
             attachments: vec![],
+            grant: None,
         };
         let args = run_arguments(
             &input,
@@ -3005,6 +3301,7 @@ mod tests {
             think: false,
             speed: None,
             attachments: vec![],
+            grant: None,
         };
         assert!(run_arguments(
             &input,
@@ -3523,6 +3820,7 @@ mod tests {
             think: false,
             speed: None,
             attachments: vec![],
+            grant: None,
         };
         let args =
             run_arguments(&input, "coven-code", Path::new("/workspace"), "replayed").unwrap();
@@ -3538,8 +3836,104 @@ mod tests {
     }
 
     #[test]
+    fn the_chat_is_titled_by_the_person_not_by_the_note_sent_with_it() {
+        let input = SendInput {
+            run_id: "run-1".into(),
+            prompt: "-v is the flag\nand more".into(),
+            session_id: None,
+            familiar_id: Some("sage".into()),
+            harness: None,
+            model: None,
+            think: false,
+            speed: None,
+            attachments: vec![],
+            grant: None,
+        };
+        let args =
+            run_arguments(&input, "claude", Path::new("/workspace"), "note\n\nprompt").unwrap();
+        assert!(
+            args.contains(&"--title=-v is the flag".to_string()),
+            "{args:?}"
+        );
+        assert_eq!(args.last().map(String::as_str), Some("note\n\nprompt"));
+    }
+
+    #[test]
+    fn a_message_of_only_attachments_still_says_something_under_the_note() {
+        assert_eq!(
+            turn_text(" ", true, None),
+            attachments::ATTACHMENTS_ONLY_PROMPT
+        );
+        assert_eq!(turn_text("Read this", true, None), "Read this");
+        assert_eq!(turn_text("Hi", false, Some("replayed")), "replayed");
+    }
+
+    #[test]
+    fn only_a_grant_asks_coven_for_full_permission() {
+        let mut input = SendInput {
+            run_id: "run-1".into(),
+            prompt: "Allowed: Create probe.txt".into(),
+            session_id: Some("session-1".into()),
+            familiar_id: Some("sage".into()),
+            harness: None,
+            model: None,
+            think: false,
+            speed: None,
+            attachments: vec![],
+            grant: None,
+        };
+        let permission = |input: &SendInput| {
+            let args = run_arguments(input, "claude", Path::new("/workspace"), "x").unwrap();
+            let at = args.iter().position(|arg| arg == "--permission").unwrap();
+            args[at + 1].clone()
+        };
+        assert_eq!(permission(&input), "read-only");
+        input.grant = Some(crate::chat_approvals::Grant {
+            approval_id: "approval-1".into(),
+            familiar_id: "sage".into(),
+            session_id: "session-1".into(),
+            summary: "Create probe.txt".into(),
+        });
+        assert_eq!(permission(&input), "full");
+    }
+
+    #[test]
+    fn an_allowed_turn_takes_nothing_but_options_from_the_webview() {
+        let allow = json!({"approvalId":"a","runId":"r","model":"m","think":true,"speed":"fast"});
+        assert!(serde_json::from_value::<AllowInput>(allow).is_ok());
+        for field in [
+            "permission",
+            "grant",
+            "prompt",
+            "sessionId",
+            "familiarId",
+            "harness",
+        ] {
+            let mut input = json!({"approvalId":"a","runId":"r"});
+            input[field] = json!("x");
+            assert!(
+                serde_json::from_value::<AllowInput>(input).is_err(),
+                "{field}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_replay_leaves_out_the_request_the_familiar_made() {
+        let block = "```coven-permission-request\n{\"summary\":\"S\"}\n```";
+        let events = [
+            json!({"type":"assistant","message":{"content":[{"type":"text","text":format!("Needs access.\n\n{block}")}]}}),
+            json!({"type":"assistant","message":{"content":[{"type":"text","text":block}]}}),
+        ];
+        assert_eq!(
+            replay_turns(&events),
+            vec![("assistant", "Needs access.".to_owned())]
+        );
+    }
+
+    #[test]
     fn frontend_cannot_supply_paths_permissions_or_arbitrary_arguments() {
-        for field in ["argv", "cwd", "permission", "executable", "url"] {
+        for field in ["argv", "cwd", "permission", "grant", "executable", "url"] {
             let mut input = json!({"runId": "run-1", "prompt": "hello"});
             input[field] = json!("untrusted");
             assert!(serde_json::from_value::<SendInput>(input).is_err());
@@ -3569,6 +3963,10 @@ mod tests {
             "read",
             "send",
             "cancel",
+            "approvals",
+            "allow",
+            "decline",
+            "permission-log",
             "chat-lifecycle",
         ] {
             assert!(permissions.contains(&json!(format!("allow-coven-runtime-{suffix}"))));
@@ -3705,6 +4103,7 @@ mod tests {
                 think: false,
                 speed: None,
                 attachments: vec![],
+                grant: None,
             };
             let mut observed = Vec::new();
             let result = send_local(&data, input, &cancel, &mut |event| {
@@ -3850,6 +4249,7 @@ mod tests {
                 name: "marker.txt".into(),
                 bytes: format!("{marker}\n").into_bytes(),
             }],
+            grant: None,
         };
         let mut observed = Vec::new();
         send_local(&data, input, &AtomicBool::new(false), &mut |event| {
