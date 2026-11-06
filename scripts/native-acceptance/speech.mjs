@@ -4,7 +4,7 @@
 // tree, exactly as it would for a person.
 
 import { execFileSync, spawn } from 'node:child_process';
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { PLATFORM, sleep, until } from './driver.mjs';
 
@@ -110,6 +110,7 @@ class Nvda extends LogReader {
     this.executable = executable;
   }
   async start() {
+    rmSync(this.path, { force: true });
     this.child = spawn(
       this.executable,
       ['--log-file', this.path, '--log-level=12', '--minimal', '--disable-addons'],
@@ -143,6 +144,7 @@ class Orca extends LogReader {
     super(join(out, 'orca.log'), /SPEECH OUTPUT: '(.*)'/);
   }
   async start() {
+    rmSync(this.path, { force: true });
     this.child = spawn('orca', ['--replace', `--debug-file=${this.path}`], {
       detached: true,
       stdio: 'ignore',

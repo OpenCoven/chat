@@ -239,6 +239,38 @@ async function waitForAddress(native, browser, address, timeout = 30_000) {
   }
 }
 
+/**
+ * Starts the platform screen reader, performs `act`, and returns what it said.
+ * The reader runs only around the action, so its browse-mode keys never stand
+ * between the lane's input and the app.
+ */
+async function listen(lane, row, label, act) {
+  const reader = lane.reader;
+  if (!reader) {
+    row.block(label, 'no screen reader is available on this runner');
+    await act();
+    return null;
+  }
+  try {
+    await reader.start();
+  } catch (error) {
+    row.block(label, `${reader.name} did not start: ${error.message}`);
+    await act();
+    return null;
+  }
+  await lane.app.activate();
+  await sleep(1_000);
+  try {
+    const mark = reader.mark();
+    await act();
+    return await reader.since(mark);
+  } finally {
+    reader.stop();
+    await sleep(2_000);
+    await lane.app.activate();
+  }
+}
+
 /** Rows 1, 2 and 9, and #515's browser rows, from one reply with three links. */
 export async function linkRows(lane, familiar, browser) {
   const { app, native } = lane;
@@ -304,10 +336,14 @@ export async function linkRows(lane, familiar, browser) {
   });
 
   await lane.attempt(row2, async () => {
-    if (!(await app.count('dialog', REVIEW)))
-      await app.click(await linkNamed(app, 'Handoff check'));
-    await cancelReview(app);
-    await app.click(await linkNamed(app, 'Handoff check'));
+    if (await app.count('dialog', REVIEW)) await cancelReview(app);
+    // A modal review makes the page behind it inert, which also hides it from
+    // assistive technology, so positions behind it are taken before it opens.
+    const link = await linkNamed(app, 'Handoff check');
+    const linkPoint = center(link);
+    const composerPoint = center(await lane.composer(familiar));
+    await app.click(linkPoint);
+    await app.one('dialog', REVIEW);
     row2.expect('focus when the review opens', await app.focusedName(), 'Cancel');
     for (const name of ['Copy address', 'Open', 'Cancel']) {
       await app.key('tab');
@@ -315,19 +351,17 @@ export async function linkRows(lane, familiar, browser) {
     }
     await app.key('tab', ['shift']);
     row2.expect('Shift+Tab from Cancel', await app.focusedName(), 'Open');
+    row2.expect(
+      'the conversation behind is hidden from assistive technology while the review is open',
+      await app.count('link', 'Handoff check'),
+      0,
+    );
 
     // The conversation behind must not scroll or take clicks.
-    const link = await linkNamed(app, 'Handoff check');
-    const composer = await lane.composer(familiar);
     const sent = lane.requests();
-    await native.must({ cmd: 'scroll', at: center(link), dy: -400 });
+    await native.must({ cmd: 'scroll', at: linkPoint, dy: -400 });
     await sleep(600);
-    row2.expect(
-      'the link behind the review after a wheel over it (y)',
-      (await linkNamed(app, 'Handoff check')).frame?.y,
-      link.frame?.y,
-    );
-    await app.click(center(composer));
+    await app.click(composerPoint);
     await sleep(600);
     const after = await app.focused();
     row2.note(
@@ -341,27 +375,28 @@ export async function linkRows(lane, familiar, browser) {
     );
     row2.note('review after that click', (await app.count('dialog', REVIEW)) ? 'open' : 'closed');
     row2.expect('model requests after that click', lane.requests(), sent);
-    if (!(await app.count('dialog', REVIEW)))
-      await app.click(await linkNamed(app, 'Handoff check'));
+    row2.expect('the composer is still empty', await lane.composerValue(familiar), '');
+    if (!(await app.count('dialog', REVIEW))) await app.click(linkPoint);
+    await app.one('dialog', REVIEW);
 
     // Escape: focus returns to the link, and the screen reader says so.
-    const mark = lane.reader?.started ? lane.reader.mark() : null;
-    await closeReview(app);
+    const said = await listen(lane, row2, 'screen-reader announcement on focus return', () =>
+      closeReview(app),
+    );
     row2.expect('focus after Escape', await app.focusedName(), 'Handoff check');
-    if (lane.reader?.started) {
-      const said = await lane.reader.since(mark);
+    if (said) {
       row2.note(`${lane.reader.name} after Escape`, said);
       row2.check(
         `${lane.reader.name} announces the link`,
         said.some((phrase) => /Handoff check/.test(phrase)),
         said,
       );
-    } else {
-      row2.block(
-        'screen-reader announcement',
-        lane.reader?.why ?? 'no screen reader could be started on this runner',
-      );
     }
+    row2.expect(
+      'the conversation did not scroll under the review (link y)',
+      (await linkNamed(app, 'Handoff check')).frame?.y,
+      link.frame?.y,
+    );
   });
 
   await lane.attempt(handoff, async () => {
@@ -582,7 +617,12 @@ export async function tableRow(lane, familiar, frames) {
     await app.click(await app.one('link', 'Guide', { within: ['dialog', 'Expanded table'] }));
     const facts = await reviewFacts(app);
     row.expect('a link in the sheet opens the review', facts.host, 'docs.example.test');
-    row.expect('the sheet stays under the review', await app.count('dialog', 'Expanded table'), 1);
+    // The sheet under the review is inert, so assistive technology does not see it
+    // until the review closes; "Escape closes the review only" below proves it stayed.
+    row.note(
+      'sheets visible to assistive technology under the review',
+      await app.count('dialog', 'Expanded table'),
+    );
     markClipboard();
     await app.click(await app.one('button', 'Copy address', { within: ['dialog', REVIEW] }));
     row.expect('system clipboard after Copy address in the sheet', readClipboard(), GUIDE);
@@ -756,30 +796,32 @@ export async function inspectorRow(lane, familiar, frames) {
       roleDescription: state.handle.roleDescription,
     });
 
-    // Tab to the handle, and hear what the screen reader says there.
+    // Tab to the handle, step back one, and hear the screen reader on the last Tab.
     await app.click(await lane.composer(familiar));
-    const mark = lane.reader?.started ? lane.reader.mark() : null;
     let tabs = 0;
-    while ((await app.focused())?.role !== 'separator' && tabs < 40) {
+    while ((await app.focused())?.role !== 'separator' && tabs < 80) {
       await app.key('tab');
       tabs += 1;
     }
     row.note('Tab presses from the composer to the separator', tabs);
     row.expect('Tab reaches the separator', (await app.focused())?.name, 'Resize inspector');
-    if (lane.reader?.started) {
-      const said = await lane.reader.since(mark);
+    await app.key('tab', ['shift']);
+    const said = await listen(lane, row, 'separator read aloud', () => app.key('tab'));
+    row.expect('focus on the separator again', (await app.focused())?.name, 'Resize inspector');
+    if (said) {
+      const spoken = said.join(' | ');
       row.note(`${lane.reader.name} at the separator`, said);
       row.check(
-        `${lane.reader.name} reads the separator with its value`,
-        said.some((p) => /Resize inspector/.test(p) && /360/.test(p)),
-        said,
+        `${lane.reader.name} reads the separator's name and value`,
+        /Resize inspector/.test(spoken) && /360/.test(spoken),
+        spoken,
       );
       row.check(
         `${lane.reader.name} names it a separator or splitter`,
-        said.some((p) => /separator|splitter/i.test(p)),
-        said,
+        /separator|splitter/i.test(spoken),
+        spoken,
       );
-    } else row.block('separator read aloud', lane.reader?.why ?? 'no screen reader on this runner');
+    }
 
     await app.key('left');
     row.expect('Left widens by 16px', (await inspectorWidth(app)).value, 376);
@@ -925,32 +967,55 @@ export async function switchRow(lane, first, second) {
     await app.click(await app.one('button', first));
     await lane.composer(first);
 
+    // The rail is inert under a modal, so its position is taken first.
+    const railPoint = center(await app.one('button', second));
     await dragText(app, /^The plan has three steps\.$/, /^First, read the source\.$/);
+    row.expect(
+      'Quote selection offered for the passage',
+      await app.count('button', 'Quote selection'),
+      1,
+    );
     await app.click((await app.all('button', 'Expand table')).at(-1));
     await app.one('dialog', 'Expanded table');
     await app.click(await app.one('link', 'Guide', { within: ['dialog', 'Expanded table'] }));
     await app.one('dialog', REVIEW);
-    row.note('open before switching', await state());
+    row.note('visible to assistive technology before switching', await state());
 
+    // Cmd/Ctrl+[ and ] are off while a dialog is open (rail-shortcuts.ts).
     await app.key(']', [MOD]);
     await sleep(1_000);
-    row.expect(`${MOD}+] with the review and sheet open`, await state(), {
-      review: 1,
-      sheet: 1,
-      quote: 1,
-      chat: first,
-    });
+    row.expect(
+      `${MOD}+] with the review open leaves it open`,
+      await app.count('dialog', REVIEW),
+      1,
+    );
 
-    const target = await app.one('button', second);
-    const point = center(target);
-    let now = await state();
-    for (let click = 1; click <= 3 && now.chat !== second; click += 1) {
-      await app.click(point);
-      await sleep(900);
-      now = await state();
+    // The rail: the first click closes the review, the next the sheet, the third switches.
+    const steps = [];
+    for (let click = 1; click <= 3; click += 1) {
+      await app.click(railPoint);
+      await sleep(1_000);
+      const now = await state();
+      steps.push(now);
       row.note(`after click ${click} on ${second} in the rail`, now);
+      if (now.chat === second) break;
     }
-    row.expect('switched by the rail', now.chat, second);
+    row.expect(
+      'click 1 closes the review only',
+      steps[0] && { review: steps[0].review, sheet: steps[0].sheet },
+      { review: 0, sheet: 1 },
+    );
+    row.expect(
+      'click 2 closes the sheet, still on the first chat',
+      steps[1] && { review: steps[1].review, sheet: steps[1].sheet, chat: steps[1].chat },
+      { review: 0, sheet: 0, chat: first },
+    );
+    const now = steps.at(-1);
+    row.expect(
+      'click 3 switches',
+      { clicks: steps.length, chat: now.chat },
+      { clicks: 3, chat: second },
+    );
     row.expect('review after the switch', now.review, 0);
     row.expect('sheet after the switch', now.sheet, 0);
     row.expect('waiting quote after the switch', now.quote, 0);

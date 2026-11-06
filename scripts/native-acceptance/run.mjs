@@ -196,15 +196,9 @@ try {
   writeFileSync(join(out, 'first-tree.txt'), outline(await app.snapshot()).join('\n'));
   shot('first-screen');
 
+  // Started only around the announcement checks (rows.mjs, listen).
   reader = screenReader({ out, nvda: options.nvda });
-  if (reader) {
-    try {
-      await reader.start();
-    } catch (error) {
-      reader.why = `${reader.name} did not start: ${error.message}`;
-    }
-  }
-  facts.screenReader = reader ? (reader.started ? reader.name : reader.why) : 'none available';
+  facts.screenReader = reader ? reader.name : 'none available';
   await app.activate();
 
   const lane = new Lane({ app, native, requests, tokens, reader, shot, cli: covenCli() });

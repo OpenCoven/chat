@@ -54,6 +54,13 @@ $nvdaSha = (Get-FileHash -Algorithm SHA256 $nvdaSetup).Hash.ToLowerInvariant()
 $nvdaDir = Join-Path $work 'nvda'
 Start-Process $nvdaSetup -ArgumentList @('--create-portable-silent', "--portable-path=$nvdaDir") -Wait
 $nvda = Join-Path $nvdaDir 'nvda.exe'
+# No welcome dialog or update prompt: either would take focus from the app.
+$nvdaConfig = Join-Path $nvdaDir 'userConfig'
+New-Item -ItemType Directory -Force -Path $nvdaConfig | Out-Null
+@(
+  '[general]', 'showWelcomeDialogAtStartup = False',
+  '[update]', 'autoCheck = False', 'askedAllowUsageStats = True', 'allowUsageStats = False'
+) | Set-Content -Encoding ASCII (Join-Path $nvdaConfig 'nvda.ini')
 Log "NVDA $nvdaVersion portable: $(Test-Path $nvda) (installer sha256 $nvdaSha)"
 
 # Japanese: the Microsoft IME, added to the user's languages.
