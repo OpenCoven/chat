@@ -1085,6 +1085,10 @@ export async function approvalRow(s, familiar) {
   } catch (error) {
     row.error = error.message;
     await snapshot(row.id);
+    // Settings left open would cover the next row's targets; that row
+    // should fail on its own merits, not on this one's leftovers.
+    const open = await s.all('dialog', 'Settings').catch(() => []);
+    if (open.length) await closeSettings(s).catch(() => {});
   }
   return row;
 }
