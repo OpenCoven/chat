@@ -5,7 +5,13 @@
 import { existsSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 
-import { ADDRESSES, APPROVAL_DONE, APPROVAL_SUMMARY, TABLE } from './model-fixture.mjs';
+import {
+  ADDRESSES,
+  APPROVAL_DONE,
+  APPROVAL_REFUSED,
+  APPROVAL_SUMMARY,
+  TABLE,
+} from './model-fixture.mjs';
 import { readClipboard } from './platform.mjs';
 import { freshly, Key, Stop, sleep, until } from './webdriver.mjs';
 
@@ -56,12 +62,34 @@ async function clearComposer(s, composer) {
   await until('an empty draft', async () => (await composer.property('value')) === '', 5_000);
 }
 
+/**
+ * The composer is disabled while the chat (re)loads, and a reload can begin just
+ * after a run ends, so wait for both: a ready composer in a loaded chat.
+ */
+async function composerReady(s, composer) {
+  await until('the chat to load and the composer to accept input', async () => {
+    const loading = await s.execute(
+      "return document.body.innerText.includes('Loading conversation');",
+    );
+    return !loading && !(await composer.property('disabled'));
+  });
+}
+
 /** Sends through the real composer and waits for the reply's marker to render. */
 export async function send(s, familiar, text, role, name) {
   const composer = await composerOf(s, familiar);
-  await until('the composer to accept input', () => composer.property('disabled').then((d) => !d));
-  await composer.click();
-  await composer.type(text);
+  await composerReady(s, composer);
+  try {
+    await composer.click();
+    await composer.type(text);
+  } catch (error) {
+    // A reload that started between the check and the keys disables the
+    // composer; nothing was typed, so wait it out and type once more.
+    if (!/not interactable|invalid element state/i.test(error.message)) throw error;
+    await composerReady(s, composer);
+    await clearComposer(s, composer);
+    await composer.type(text);
+  }
   await (await s.one('button', 'Send')).click();
   // A failed run shows its error; report those words rather than time out.
   await until(
@@ -962,20 +990,34 @@ export async function storageRow(s) {
   return row;
 }
 
+/** The folder the familiar's engine works in, as Chat shows it under the thread. */
+async function familiarFolder(s) {
+  const line = await s.execute(
+    "return [...document.querySelectorAll('body *')].find((node) => node.childElementCount === 0 && /^(Chat project|Familiar workspace): /.test(node.textContent))?.textContent ?? '';",
+  );
+  const folder = line.replace(/^(Chat project|Familiar workspace): /, '');
+  if (!folder) throw new Error("Chat did not show the familiar's folder.");
+  return folder;
+}
+
 /**
  * A familiar asks for permission. The engine really is asked to write a real
- * file on every turn here, so the file itself says what each turn could do.
+ * file on every turn here, so the file itself says what each turn could do. The
+ * file goes in the familiar's own folder: an engine may refuse paths outside it
+ * even with access, and that is not what this row is about.
  */
-export async function approvalRow(s, familiar, directory) {
+export async function approvalRow(s, familiar) {
   const row = new Row('approval', 'A familiar asks; one allowed turn writes, and the log says so');
   const heading = `${familiar} asks for permission`;
-  const allowedProof = resolve(join(directory, 'approval-allowed.txt'));
-  const declinedProof = resolve(join(directory, 'approval-declined.txt'));
   const bodyHas = (text) =>
     s.execute('return document.body.innerText.includes(arguments[0]);', text);
   try {
     await s.click(await s.one('button', familiar));
     await composerOf(s, familiar);
+    const folder = await familiarFolder(s);
+    row.note("the familiar's folder", folder);
+    const allowedProof = resolve(join(folder, 'approval-allowed.txt'));
+    const declinedProof = resolve(join(folder, 'approval-declined.txt'));
     await send(s, familiar, `[[ask ${allowedProof}]] Write the proof file.`, 'heading', heading);
     row.expect('the read-only turn wrote the file', existsSync(allowedProof), false);
     const [summary] = await s.css('.coven-approval-summary');
@@ -992,6 +1034,11 @@ export async function approvalRow(s, familiar, directory) {
       async () => {
         const errors = await s.css('.coven-error-text');
         if (errors.length) throw new Stop(`The run failed: ${await errors[0].text()}`);
+        const refused = await s.execute(
+          "return document.body.innerText.split('\\n').find((line) => line.includes(arguments[0])) ?? '';",
+          APPROVAL_REFUSED,
+        );
+        if (refused) throw new Stop(refused);
         return bodyHas(APPROVAL_DONE);
       },
       120_000,

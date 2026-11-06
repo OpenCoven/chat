@@ -494,7 +494,7 @@ try {
   }
   rows.push(await switchRow(session, FIRST, SECOND));
   rows.push(await storageRow(session));
-  rows.push(await approvalRow(session, FIRST, out));
+  rows.push(await approvalRow(session, FIRST));
   rows.push(await rightClickRow(session, FIRST, opened));
 } catch (error) {
   setupRow.error = error.message;

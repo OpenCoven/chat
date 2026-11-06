@@ -56,11 +56,24 @@ export function replyFor(messages) {
 
 export const APPROVAL_SUMMARY = 'Write the proof file';
 export const APPROVAL_DONE = 'The proof file is written.';
+/** The allowed turn's reply when the engine refused the write anyway. */
+export const APPROVAL_REFUSED = 'The engine refused the write:';
 const REQUEST_BLOCK = [
   '```coven-permission-request',
   JSON.stringify({ summary: APPROVAL_SUMMARY, reason: 'The engine refused it read-only.' }),
   '```',
 ].join('\n');
+
+function resultText(result) {
+  const text =
+    typeof result.content === 'string'
+      ? result.content
+      : (result.content ?? [])
+          .filter((block) => block?.type === 'text')
+          .map((block) => block.text)
+          .join(' ');
+  return text.replace(/\s+/g, ' ').trim().slice(0, 300);
+}
 
 /** The newest message a person (or Chat, for them) wrote, past any tool results. */
 function lastPrompt(messages) {
@@ -82,11 +95,15 @@ export function approvalStep(messages) {
   const proof = [...prompt.matchAll(/\[\[ask (\S+)\]\]/g)].at(-1)?.[1];
   if (!proof) return undefined;
   const last = messages.at(-1)?.content;
-  const toolDone = Array.isArray(last) && last.some((block) => block?.type === 'tool_result');
+  const result = Array.isArray(last)
+    ? last.find((block) => block?.type === 'tool_result')
+    : undefined;
   const allowed = prompt.includes('This turn has write access');
-  if (!toolDone) {
+  if (!result) {
     return { tool: { name: 'Write', input: { file_path: proof, content: 'allowed turn\n' } } };
   }
+  // Say what the engine said, so a refused write reads as one, not as success.
+  if (allowed && result.is_error) return { text: `${APPROVAL_REFUSED} ${resultText(result)}` };
   if (allowed) return { text: APPROVAL_DONE };
   return {
     text: prompt.includes('coven-permission-request')
