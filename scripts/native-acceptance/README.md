@@ -26,9 +26,13 @@ drive the app.
 
 ## Status checkpoint
 
-- Branch `test/504-native-acceptance`. The lane is written; its first CI run is
-  waiting on a push that touches `.github/workflows/`, which needs a token with
-  the `workflow` scope.
-- macOS role and name mapping checked against the published v0.0.8 setup
-  screen's real AX tree; Windows and Linux mappings are first guesses until the
-  first run's `first-tree.txt`.
+- Runs are dispatched for a published tag, or triggered by a push to
+  `test/504-native-acceptance`. Each lane uploads `results.md`,
+  `results.json`, its screenshots, the reader's log and the runner facts as an
+  artifact (`native-macos-<arch>`, `native-windows-msi`, `native-linux-deb`).
+- v0.0.8 results and the issues they produced (#544, #545, #546, #547) are
+  recorded in `docs/verification/2026-10-18-rakazo-chat-ux.md`, section
+  "Native OS-level automation on the published v0.0.8 installers".
+- Known limits: no clipboard refusal is staged; Orca runs with no speech
+  server, so its words come from its debug log; WebView2's context menu is
+  read by what UI Automation reports at a point inside it.

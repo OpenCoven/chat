@@ -886,8 +886,10 @@ async function dragText(app, fromPattern, toPattern, { fromIndex = 0, toIndex = 
     Math.round(from.frame.y + from.frame.h / 2),
   ];
   // A press inside an existing selection starts drag-and-drop instead of a new
-  // selection, so a selection left over is collapsed with a click first.
-  const collapsedFirst = Boolean(await app.selection());
+  // selection, so on Windows, where a stray select-all was seen, a selection
+  // left over is collapsed with a click first. On Linux a full selection read
+  // just after row 5's dialogs closed cost the run its accessibility tree.
+  const collapsedFirst = PLATFORM === 'windows' && Boolean(await app.selection());
   if (collapsedFirst) {
     await app.click([
       Math.round(from.frame.x + inset(from.frame)),
