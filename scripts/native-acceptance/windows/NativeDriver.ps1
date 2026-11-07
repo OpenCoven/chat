@@ -261,6 +261,26 @@ public static class NativeDriver {
     return owner == pid;
   }
 
+  /// Minimises every top-level window of a process, such as the browser an Open started.
+  public static bool Minimize(int pid) {
+    var any = false;
+    var condition = new PropertyCondition(AutomationElement.ProcessIdProperty, pid);
+    foreach (AutomationElement window in AutomationElement.RootElement.FindAll(TreeScope.Children, condition)) {
+      object pattern;
+      if (window.TryGetCurrentPattern(WindowPattern.Pattern, out pattern)) {
+        ((WindowPattern)pattern).SetWindowVisualState(WindowVisualState.Minimized);
+        any = true;
+      }
+    }
+    return any;
+  }
+
+  public static int ForegroundPid() {
+    uint pid;
+    GetWindowThreadProcessId(GetForegroundWindow(), out pid);
+    return (int)pid;
+  }
+
   public static void MoveWindow(int pid, double x, double y) {
     var window = Window(pid);
     object pattern;

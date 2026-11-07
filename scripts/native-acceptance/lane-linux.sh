@@ -16,7 +16,7 @@ if [ -z "${LANE_INNER:-}" ]; then
   sudo add-apt-repository -y universe > "$out/apt.txt" 2>&1
   sudo apt-get update -qq >> "$out/apt.txt" 2>&1
   sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq xvfb openbox xdotool xclip \
-    at-spi2-core python3-pyatspi dbus-x11 orca speech-dispatcher ibus ibus-gtk3 \
+    at-spi2-core python3-pyatspi dbus-x11 orca speech-dispatcher speech-dispatcher-espeak-ng espeak-ng ibus ibus-gtk3 \
     imagemagick sqlite3 libfuse2t64 >> "$out/apt.txt" 2>&1 || { tail -20 "$out/apt.txt"; exit 1; }
   # A Japanese IBus engine: Anthy, or Mozc where this release has no Anthy.
   japanese=""
@@ -83,6 +83,9 @@ gsettings set org.gnome.desktop.interface toolkit-accessibility true 2>/dev/null
 gsettings set org.gnome.desktop.a11y.applications screen-reader-enabled true 2>/dev/null
 export GNOME_ACCESSIBILITY=1 ACCESSIBILITY_ENABLED=1
 export GTK_IM_MODULE=ibus XMODIFIERS=@im=ibus QT_IM_MODULE=ibus
+# Orca speaks through speech-dispatcher; with no audio device, espeak-ng still
+# renders, and Orca's debug log records every utterance it sends.
+speech-dispatcher -d -t 0 > "$out/speech-dispatcher.log" 2>&1 || log "speech-dispatcher: did not start"
 ibus-daemon -drx
 sleep 3
 log "ibus engines: $(ibus list-engine 2>/dev/null | grep -E 'anthy|mozc|xkb:us::eng' | tr -s ' ' | tr '\n' ';')"

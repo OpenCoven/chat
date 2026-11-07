@@ -3,13 +3,26 @@
 // reader is started by the lane and reads the app through its accessibility
 // tree, exactly as it would for a person.
 
-import { execFileSync, spawn } from 'node:child_process';
-import { existsSync, readFileSync, rmSync } from 'node:fs';
+import { execFile, execFileSync, spawn } from 'node:child_process';
+import { existsSync, openSync, readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
+import { promisify } from 'node:util';
 import { PLATFORM, sleep, until } from './driver.mjs';
 
-function osascript(script) {
-  return execFileSync('osascript', ['-e', script], { encoding: 'utf8', timeout: 15_000 }).trim();
+const run = promisify(execFile);
+
+async function osascript(script, timeout = 8_000) {
+  const { stdout } = await run('osascript', ['-e', script], { encoding: 'utf8', timeout });
+  return stdout.trim();
+}
+
+function running(name) {
+  try {
+    execFileSync('pgrep', ['-x', name], { stdio: 'ignore' });
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 class VoiceOver {
@@ -27,6 +40,8 @@ class VoiceOver {
     ]) {
       execFileSync('defaults', ['write', domain, key, type, value]);
     }
+    // A VoiceOver that is still quitting from the last check would swallow the start.
+    await until('the last VoiceOver to quit', async () => !running('VoiceOver'), 15_000, 500);
     spawn('/System/Library/CoreServices/VoiceOver.app/Contents/MacOS/VoiceOverStarter', [], {
       detached: true,
       stdio: 'ignore',
@@ -35,7 +50,7 @@ class VoiceOver {
       'VoiceOver to answer AppleScript',
       async () => {
         try {
-          osascript('tell application "VoiceOver" to return bounds of vo cursor');
+          await osascript('tell application "VoiceOver" to return bounds of vo cursor');
           return true;
         } catch {
           return false;
@@ -46,34 +61,58 @@ class VoiceOver {
     );
     this.started = true;
   }
-  mark() {
-    return this.last();
-  }
-  last() {
+  async last() {
     try {
-      return osascript('tell application "VoiceOver" to return content of last phrase');
-    } catch (error) {
-      return `(unreadable: ${error.message.split('\n')[0]})`;
+      return await osascript(
+        'tell application "VoiceOver" to return content of last phrase',
+        5_000,
+      );
+    } catch {
+      return null;
     }
   }
-  /** VoiceOver keeps only its last phrase; wait for it to change, then settle. */
-  async since(previous, wait = 6_000) {
+  /**
+   * VoiceOver keeps only its last phrase, so a watcher polls it from the mark
+   * on and keeps each new phrase, in order.
+   */
+  async mark() {
+    const watch = { phrases: [], done: false, unread: 0 };
+    let previous = await this.last();
+    watch.loop = (async () => {
+      while (!watch.done) {
+        const phrase = await this.last();
+        if (phrase === null) watch.unread += 1;
+        else if (phrase !== previous) {
+          watch.phrases.push(phrase);
+          previous = phrase;
+        }
+        await sleep(100);
+      }
+    })();
+    return watch;
+  }
+  async since(watch, wait = 6_000) {
     const deadline = Date.now() + wait;
-    let phrase = this.last();
-    while (phrase === previous && Date.now() < deadline) {
-      await sleep(250);
-      phrase = this.last();
-    }
-    await sleep(800);
-    const settled = this.last();
-    return settled === previous ? [] : [settled];
+    while (!watch.phrases.length && Date.now() < deadline) await sleep(200);
+    // Name, role and value can arrive as separate phrases.
+    await sleep(2_500);
+    watch.done = true;
+    await watch.loop;
+    return watch.phrases;
   }
-  stop() {
+  async stop() {
     try {
-      osascript('tell application "VoiceOver" to quit');
+      await osascript('tell application "VoiceOver" to quit');
     } catch {
       // Already gone.
     }
+    await until('VoiceOver to quit', async () => !running('VoiceOver'), 15_000, 500).catch(() => {
+      try {
+        execFileSync('killall', ['VoiceOver'], { stdio: 'ignore' });
+      } catch {
+        // Gone.
+      }
+    });
   }
 }
 
@@ -129,7 +168,7 @@ class Nvda extends LogReader {
     await sleep(3_000);
     this.started = true;
   }
-  stop() {
+  async stop() {
     try {
       execFileSync(this.executable, ['-q'], { timeout: 20_000 });
     } catch {
@@ -145,17 +184,27 @@ class Orca extends LogReader {
   }
   async start() {
     rmSync(this.path, { force: true });
+    // Orca's own output is kept: a start that stalls says why there.
+    const output = openSync(`${this.path}.out`, 'a');
     this.child = spawn('orca', ['--replace', `--debug-file=${this.path}`], {
       detached: true,
-      stdio: 'ignore',
+      stdio: ['ignore', output, output],
     });
     this.child.unref();
-    await until('Orca to write its log', async () => existsSync(this.path), 60_000, 1_000);
-    await sleep(5_000);
+    await until(
+      'Orca to finish starting',
+      async () =>
+        existsSync(this.path) &&
+        /main event loop|ORCA: Initialized|SPEECH OUTPUT/i.test(readFileSync(this.path, 'utf8')),
+      60_000,
+      1_000,
+    );
+    await sleep(2_000);
     this.started = true;
   }
-  stop() {
+  async stop() {
     this.child?.kill();
+    await sleep(1_000);
   }
 }
 

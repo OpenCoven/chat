@@ -5,7 +5,18 @@
 
 import { isDeepStrictEqual } from 'node:util';
 import { addressBars, browserProcesses, quitBrowsers } from './browser.mjs';
-import { center, MOD, markClipboard, readClipboard, sleep, until, walk } from './driver.mjs';
+import {
+  center,
+  MOD,
+  markClipboard,
+  normalize,
+  outline,
+  PLATFORM,
+  readClipboard,
+  sleep,
+  until,
+  walk,
+} from './driver.mjs';
 import { ADDRESSES, TABLE, USERINFO } from './fixture.mjs';
 
 export const REVIEW = 'Open this link?';
@@ -47,8 +58,8 @@ export class Row {
 
 /** The lane's shared state: the app, the model log, the screen reader, the output folder. */
 export class Lane {
-  constructor({ app, native, requests, tokens, reader, shot, cli }) {
-    Object.assign(this, { app, native, requests, tokens, reader, shot, cli });
+  constructor({ app, native, requests, tokens, reader, shot, save, cli }) {
+    Object.assign(this, { app, native, requests, tokens, reader, shot, save, cli });
   }
 
   composer(familiar) {
@@ -106,6 +117,7 @@ export class Lane {
 
   /** Closes whatever review, sheet or menu a failed step left open. */
   async reset() {
+    await this.front().catch(() => undefined);
     for (let index = 0; index < 3; index += 1) await this.app.key('escape').catch(() => undefined);
     for (let index = 0; index < 3; index += 1) {
       const open = await this.app.all('dialog').catch(() => []);
@@ -118,6 +130,25 @@ export class Lane {
       if (!control) break;
       await this.app.click(control).catch(() => undefined);
     }
+  }
+
+  /**
+   * Puts any browser an Open started out of the way and brings Chat forward, so
+   * keys and clicks land in Chat and not in the browser window above it.
+   */
+  async front() {
+    // On macOS activating Chat raises it over the browser; the X and Windows
+    // window managers can leave the browser on top, so it is minimised there.
+    if (PLATFORM !== 'mac')
+      for (const each of browserProcesses())
+        await this.native.call({ cmd: 'hideApp', pid: each.pid });
+    for (let attempt = 0; attempt < 4; attempt += 1) {
+      await this.app.activate();
+      await sleep(400);
+      const front = await this.native.call({ cmd: 'frontmost' });
+      if (!front.ok || !front.pid || front.pid === this.app.pid) return true;
+    }
+    return false;
   }
 
   async attempt(row, work) {
@@ -142,13 +173,34 @@ export class Lane {
   }
 }
 
+const CONTROLS = new Set([
+  'button',
+  'link',
+  'textbox',
+  'radio',
+  'checkbox',
+  'separator',
+  'menuitem',
+]);
+
+/**
+ * The text a node shows a person. AT-SPI (WebKitGTK) reports inline elements
+ * such as <code> and <span> as sections holding their own text, so a leaf that
+ * is not a control counts as text too.
+ */
+export function shownText(node) {
+  if (node.role === 'text') return String(node.value ?? node.name ?? node.raw?.text ?? '').trim();
+  if (!node.children.length && !CONTROLS.has(node.role) && typeof node.raw?.text === 'string')
+    return node.raw.text.trim();
+  return '';
+}
+
+function textsIn(node) {
+  return [...walk(node)].map(shownText).filter(Boolean);
+}
+
 function textIn(node) {
-  const parts = [];
-  for (const each of walk(node)) {
-    if (each.role === 'text' && each.value !== undefined) parts.push(String(each.value));
-    else if (each.role === 'text' && each.name) parts.push(each.name);
-  }
-  return parts.join(' ').replace(/\s+/g, ' ').trim();
+  return textsIn(node).join(' ').replace(/\s+/g, ' ').trim();
 }
 
 function outlineOf(root) {
@@ -166,11 +218,7 @@ function outlineOf(root) {
 /** The review's facts as a person reads them: the text after "Site" and "Full address". */
 async function reviewFacts(app) {
   const review = await app.one('dialog', REVIEW);
-  const texts = [];
-  for (const node of walk(review)) {
-    const text = node.role === 'text' ? String(node.value ?? node.name ?? '').trim() : '';
-    if (text) texts.push(text);
-  }
+  const texts = textsIn(review);
   const after = (label) => {
     const index = texts.indexOf(label);
     return index >= 0 ? texts[index + 1] : null;
@@ -182,7 +230,7 @@ async function reviewFacts(app) {
     host: after('Site'),
     address: after('Full address'),
     status: statusNode
-      ? textIn(statusNode)
+      ? textIn(statusNode) || statusNode.name
       : texts.filter((t) => /^(Copied|Sent|Sending|Chat asked|Chat couldn)/.test(t)).join(' '),
     open: [...walk(review)].find((node) => node.role === 'button' && node.name === 'Open') ?? null,
     buttons: [...walk(review)].filter((node) => node.role === 'button').map((node) => node.name),
@@ -200,14 +248,46 @@ async function waitStatus(app, pattern, timeout = 10_000) {
   ).catch(async () => (await reviewFacts(app)).status);
 }
 
-async function closeReview(app) {
-  await app.key('escape');
+/** Escape, with Chat in front; the review's own button, disclosed, if Escape did not close it. */
+async function closeReview(lane, row) {
+  await lane.front();
+  await lane.app.key('escape');
+  await lane.app.gone('dialog', REVIEW, { timeout: 4_000 }).catch(async () => {
+    row?.note('Escape did not close the review; pressed its Cancel or Close button', true);
+    await cancelReview(lane.app);
+  });
+}
+
+/** The review's first button reads Cancel, and Close once Open has been pressed. */
+async function cancelReview(app) {
+  const buttons = await app.all('button', undefined, { within: ['dialog', REVIEW] });
+  const first = buttons.find((node) => node.name === 'Cancel' || node.name === 'Close');
+  if (!first) throw new Error('the review has no Cancel or Close button');
+  await app.click(first);
   await app.gone('dialog', REVIEW);
 }
 
-async function cancelReview(app) {
-  await app.click(await app.one('button', 'Cancel', { within: ['dialog', REVIEW] }));
-  await app.gone('dialog', REVIEW);
+/** A click on the link that opens its review; a second click if the first was absorbed. */
+async function openReview(app, name, row) {
+  await app.click(await linkNamed(app, name));
+  const opened = await app
+    .one('dialog', REVIEW, { timeout: 5_000 })
+    .then(() => true)
+    .catch(() => false);
+  if (opened) return;
+  row?.note(`the first click on "${name}" did not open the review; clicked again`, true);
+  await app.click(await linkNamed(app, name));
+  await app.one('dialog', REVIEW);
+}
+
+/** Escape until the platform reports no open menu. */
+async function dismissMenus(lane) {
+  for (let attempt = 0; attempt < 4; attempt += 1) {
+    const menus = await lane.native.call({ cmd: 'menus' });
+    if (!menus.ok || !(menus.menus ?? []).length) return;
+    await lane.app.key('escape');
+    await sleep(400);
+  }
 }
 
 async function linkNamed(app, name) {
@@ -216,7 +296,7 @@ async function linkNamed(app, name) {
 
 const browserSnapshot = () => browserProcesses().map((row) => `${row.browser}:${row.pid}`);
 
-async function waitForAddress(native, browser, address, timeout = 30_000) {
+async function waitForAddress(native, browser, address, timeout = 30_000, lane = null) {
   let last = [];
   try {
     return await until(
@@ -235,6 +315,18 @@ async function waitForAddress(native, browser, address, timeout = 30_000) {
       1_000,
     );
   } catch {
+    // What the browser exposed, kept so a miss can be told from a reading gap.
+    if (lane?.save) {
+      for (const pid of new Set(browserProcesses().map((row) => row.pid))) {
+        const answer = await native.call(
+          PLATFORM === 'mac'
+            ? { cmd: 'otherTree', pid, depth: 40 }
+            : { cmd: 'tree', pid, depth: 40, budget: 4000 },
+        );
+        if (answer.ok)
+          lane.save(`browser-tree-${pid}.txt`, outline(normalize(answer.tree)).join('\n'));
+      }
+    }
     return last;
   }
 }
@@ -261,11 +353,11 @@ async function listen(lane, row, label, act) {
   await lane.app.activate();
   await sleep(1_000);
   try {
-    const mark = reader.mark();
+    const mark = await reader.mark();
     await act();
     return await reader.since(mark);
   } finally {
-    reader.stop();
+    await reader.stop();
     await sleep(2_000);
     await lane.app.activate();
   }
@@ -315,7 +407,7 @@ export async function linkRows(lane, familiar, browser) {
     );
     row1.expect('right-click opens the review', await app.count('dialog', REVIEW), 0);
     lane.shot('504-1-context-menu');
-    await app.key('escape');
+    await dismissMenus(lane);
     await sleep(500);
     row1.expect(
       'browser processes after click, modified click, middle-click and right-click',
@@ -324,7 +416,7 @@ export async function linkRows(lane, familiar, browser) {
     );
 
     // Copy address, read back from the system clipboard by another process.
-    await app.click(await linkNamed(app, 'Handoff check'));
+    await openReview(app, 'Handoff check', row1);
     markClipboard();
     await app.click(await app.one('button', 'Copy address', { within: ['dialog', REVIEW] }));
     row1.expect(
@@ -381,7 +473,7 @@ export async function linkRows(lane, familiar, browser) {
 
     // Escape: focus returns to the link, and the screen reader says so.
     const said = await listen(lane, row2, 'screen-reader announcement on focus return', () =>
-      closeReview(app),
+      closeReview(lane, row2),
     );
     row2.expect('focus after Escape', await app.focusedName(), 'Handoff check');
     if (said) {
@@ -411,7 +503,7 @@ export async function linkRows(lane, familiar, browser) {
       'status after Open',
       await waitStatus(app, /Sent the address|couldn't|Chat asked/, 15_000),
     );
-    const bars = await waitForAddress(native, browser.key, ADDRESSES.query);
+    const bars = await waitForAddress(native, browser.key, ADDRESSES.query, 30_000, lane);
     handoff.note('browser windows after the first Open (browser was closed)', bars);
     handoff.check(
       'the default browser shows the exact address (browser closed)',
@@ -423,7 +515,7 @@ export async function linkRows(lane, familiar, browser) {
       bars,
     );
     lane.shot('515-first-open');
-    await app.activate();
+    await lane.front();
     await sleep(800);
     const tabsBefore = await addressBars(native, browser.key);
     const again = (await reviewFacts(app)).open;
@@ -431,14 +523,13 @@ export async function linkRows(lane, familiar, browser) {
     if (again) await app.click(again);
     await sleep(4_000);
     const tabsAfter = await addressBars(native, browser.key);
+    await lane.front();
     handoff.expect(
       'browser windows and fields after a second press',
       tabsAfter.map((w) => w.fields.length),
       tabsBefore.map((w) => w.fields.length),
     );
-    await app.activate();
-    await sleep(500);
-    await closeReview(app);
+    await closeReview(lane, handoff);
     handoff.expect(
       'Escape after Open returns focus to the link',
       await app.focusedName(),
@@ -449,7 +540,7 @@ export async function linkRows(lane, familiar, browser) {
     await app.click(await linkNamed(app, 'Plain address'));
     handoff.expect('review address (plain)', (await reviewFacts(app)).address, ADDRESSES.plain);
     await app.click((await reviewFacts(app)).open);
-    const plain = await waitForAddress(native, browser.key, ADDRESSES.plain);
+    const plain = await waitForAddress(native, browser.key, ADDRESSES.plain, 30_000, lane);
     handoff.note('browser windows after Open on the plain address (browser running)', plain);
     const shown = plain.flatMap((w) => w.fields.map((f) => f.value));
     handoff.check(
@@ -459,9 +550,7 @@ export async function linkRows(lane, familiar, browser) {
         shown.some((v) => /^(https:\/\/)?example\.com\/?$/.test(v)),
       shown,
     );
-    await app.activate();
-    await sleep(500);
-    await closeReview(app);
+    await closeReview(lane, handoff);
   });
 
   await lane.attempt(row9, async () => {
@@ -473,7 +562,7 @@ export async function linkRows(lane, familiar, browser) {
     await app.click(await app.one('button', 'Copy address', { within: ['dialog', REVIEW] }));
     row9.expect('system clipboard after Copy address', readClipboard(), ADDRESSES.ipv6);
     await app.click((await reviewFacts(app)).open);
-    const bars = await waitForAddress(native, browser.key, ADDRESSES.ipv6, 20_000);
+    const bars = await waitForAddress(native, browser.key, ADDRESSES.ipv6, 20_000, lane);
     row9.note('browser windows after Open', bars);
     row9.check(
       'the default browser shows the IPv6 address',
@@ -484,9 +573,7 @@ export async function linkRows(lane, familiar, browser) {
       ),
       bars.flatMap((w) => w.fields),
     );
-    await app.activate();
-    await sleep(500);
-    await closeReview(app);
+    await closeReview(lane, row9);
   });
 
   await lane.attempt(handoff, async () => {
@@ -503,7 +590,7 @@ export async function linkRows(lane, familiar, browser) {
     markClipboard();
     await app.click(await app.one('button', 'Copy address', { within: ['dialog', REVIEW] }));
     handoff.expect('system clipboard after Copy address', readClipboard(), USERINFO);
-    await closeReview(app);
+    await closeReview(lane, handoff);
     handoff.expect('browser processes after the sign-in-name review', browserSnapshot(), launches);
     const others = browserProcesses().filter((p) => p.browser !== browser.key);
     handoff.expect(
@@ -614,7 +701,9 @@ export async function tableRow(lane, familiar, frames) {
     await sleep(600);
     row.expect('system clipboard after Copy table Markdown in the sheet', readClipboard(), TABLE);
 
-    await app.click(await app.one('link', 'Guide', { within: ['dialog', 'Expanded table'] }));
+    await app.click(
+      await app.one('link', 'Guide', { within: ['dialog', 'Expanded table'], first: true }),
+    );
     const facts = await reviewFacts(app);
     row.expect('a link in the sheet opens the review', facts.host, 'docs.example.test');
     // The sheet under the review is inert, so assistive technology does not see it
@@ -657,12 +746,26 @@ export async function tableRow(lane, familiar, frames) {
 
 /** A drag across text that a person would make: from the start of one node to the end of another. */
 async function dragText(app, fromPattern, toPattern, { fromIndex = 0, toIndex = -1 } = {}) {
-  const texts = (await app.all('text')).filter((node) => node.frame && node.frame.w > 0);
-  const from = texts
-    .filter((node) => fromPattern.test(String(node.value ?? node.name)))
-    .at(fromIndex);
-  const to = texts.filter((node) => toPattern.test(String(node.value ?? node.name))).at(toIndex);
+  const ends = async () => {
+    const texts = [...walk(await app.snapshot())].filter(
+      (node) => node.frame && node.frame.w > 0 && shownText(node),
+    );
+    return [
+      texts.filter((node) => fromPattern.test(shownText(node))).at(fromIndex),
+      texts.filter((node) => toPattern.test(shownText(node))).at(toIndex),
+    ];
+  };
+  let [from, to] = await ends();
   if (!from || !to) throw new Error(`no text to drag across (${fromPattern} to ${toPattern})`);
+  // A person scrolls the passage into view before dragging across it.
+  await app.visible(to);
+  [from, to] = await ends();
+  if (!(await app.onScreen(from))) {
+    await app.visible(from);
+    [from, to] = await ends();
+  }
+  if (!from || !to || !(await app.onScreen(from)) || !(await app.onScreen(to)))
+    throw new Error(`the passage (${fromPattern} to ${toPattern}) does not fit in the window`);
   const start = [Math.round(from.frame.x + 1), Math.round(from.frame.y + from.frame.h / 2)];
   const end = [Math.round(to.frame.x + to.frame.w - 1), Math.round(to.frame.y + to.frame.h / 2)];
   await app.drag(
@@ -693,7 +796,7 @@ export async function quoteRow(lane, familiar, ime) {
     row.expect('Quote selection offered once', await app.count('button', 'Quote selection'), 1);
 
     let tabs = 0;
-    while ((await app.focusedName()) !== 'Quote selection' && tabs < 40) {
+    while ((await app.focusedName()) !== 'Quote selection' && tabs < 80) {
       await app.key('tab');
       tabs += 1;
     }
@@ -716,7 +819,7 @@ export async function quoteRow(lane, familiar, ime) {
 
     // IME: compose Japanese after the quote; committing must not send.
     if (ime) {
-      const chosen = await native.call({ cmd: 'selectInputSource', id: ime.japanese });
+      const chosen = await native.call({ cmd: 'selectInputSource', source: ime.japanese });
       row.note('input source for Japanese', chosen);
       if (ime.on) await app.key(ime.on);
       await app.type('nihon');
@@ -725,7 +828,7 @@ export async function quoteRow(lane, familiar, ime) {
       await app.key('return');
       await sleep(800);
       const composed = await lane.composerValue(familiar);
-      await native.call({ cmd: 'selectInputSource', id: ime.latin });
+      await native.call({ cmd: 'selectInputSource', source: ime.latin });
       if (ime.off) await app.key(ime.off);
       row.note('composer after composing "nihon", Space, Enter', composed);
       row.check(
@@ -771,6 +874,17 @@ async function inspectorWidth(app) {
   };
 }
 
+/** A press on the handle starts a drag and does not focus it, so focus arrives by Tab. */
+async function tabToSeparator(lane, familiar) {
+  await lane.app.click(await lane.composer(familiar));
+  let tabs = 0;
+  while ((await lane.app.focused())?.role !== 'separator' && tabs < 80) {
+    await lane.app.key('tab');
+    tabs += 1;
+  }
+  return tabs;
+}
+
 /** Row 6: the separator through a real pointer that leaves the window, the keys, Settings, Reset, 1100px. */
 export async function inspectorRow(lane, familiar, frames) {
   const { app, native } = lane;
@@ -805,12 +919,7 @@ export async function inspectorRow(lane, familiar, frames) {
     });
 
     // Tab to the handle, step back one, and hear the screen reader on the last Tab.
-    await app.click(await lane.composer(familiar));
-    let tabs = 0;
-    while ((await app.focused())?.role !== 'separator' && tabs < 80) {
-      await app.key('tab');
-      tabs += 1;
-    }
+    const tabs = await tabToSeparator(lane, familiar);
     row.note('Tab presses from the composer to the separator', tabs);
     row.expect('Tab reaches the separator', (await app.focused())?.name, 'Resize inspector');
     await app.key('tab', ['shift']);
@@ -916,7 +1025,7 @@ export async function inspectorRow(lane, familiar, frames) {
     await closeSettings(app);
     row.expect('Reset restores 360px', (await inspectorWidth(app)).value, 360);
 
-    await app.click((await inspectorWidth(app)).handle);
+    await tabToSeparator(lane, familiar);
     await app.key('end');
     row.expect('stored width before narrowing', (await inspectorWidth(app)).value, 600);
     await app.setFrame({ ...frames.wide, w: 1000 });
@@ -955,6 +1064,20 @@ export async function inspectorRow(lane, familiar, frames) {
   });
 }
 
+/** Unfolds the familiars rail if a narrow window left it folded. */
+export async function showFamiliars(lane, row) {
+  const show = (await lane.app.all('button')).find((node) => /^Show familiars/.test(node.name));
+  if (!show) return false;
+  await lane.app.click(show);
+  await until(
+    'the familiars rail',
+    async () => (await lane.app.count('complementary', 'Familiars sidebar')) > 0,
+    5_000,
+  ).catch(() => undefined);
+  row?.note('familiars rail', `folded; pressed "${show.name}"`);
+  return true;
+}
+
 /** Row 4: a passage, a sheet and a review open, then switch familiars. */
 export async function switchRow(lane, first, second) {
   const { app } = lane;
@@ -966,6 +1089,7 @@ export async function switchRow(lane, first, second) {
     chat: (await app.count('textbox', `Message ${second}`)) ? second : first,
   });
   return lane.attempt(row, async () => {
+    await showFamiliars(lane, row);
     await app.click(await app.one('button', second));
     await lane.composer(second);
     await app.click(await lane.composer(second));
@@ -985,7 +1109,9 @@ export async function switchRow(lane, first, second) {
     );
     await app.click((await app.all('button', 'Expand table')).at(-1));
     await app.one('dialog', 'Expanded table');
-    await app.click(await app.one('link', 'Guide', { within: ['dialog', 'Expanded table'] }));
+    await app.click(
+      await app.one('link', 'Guide', { within: ['dialog', 'Expanded table'], first: true }),
+    );
     await app.one('dialog', REVIEW);
     row.note('visible to assistive technology before switching', await state());
 

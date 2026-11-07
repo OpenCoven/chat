@@ -81,13 +81,15 @@ while ($null -ne ($line = $reader.ReadLine())) {
       'windows' {
         $raw = '{"ok":true,"windows":[' + [NativeDriver]::Summary([NativeDriver]::Window($target)) + ']}'
       }
+      'hideApp' { $answer = @{ ok = [NativeDriver]::Minimize([int]$command.pid) } }
+      'frontmost' { $answer = @{ ok = $true; pid = [NativeDriver]::ForegroundPid() } }
       'running' {
         $apps = Get-Process | Where-Object { $_.MainWindowHandle -ne 0 } |
           ForEach-Object { @{ pid = $_.Id; name = $_.ProcessName; title = $_.MainWindowTitle } }
         $answer = @{ ok = $true; apps = @($apps) }
       }
       'inputSources' { $answer = @{ ok = $true; current = [NativeDriver]::Layout(); enabled = @((Get-WinUserLanguageList).InputMethodTips) } }
-      'selectInputSource' { $answer = @{ ok = [NativeDriver]::SelectLayout($target, "$($command.id)"); current = [NativeDriver]::Layout() } }
+      'selectInputSource' { $answer = @{ ok = [NativeDriver]::SelectLayout($target, "$($command.source)"); current = [NativeDriver]::Layout() } }
       default { $answer = @{ ok = $false; error = "unknown command $($command.cmd)" } }
     }
   } catch {

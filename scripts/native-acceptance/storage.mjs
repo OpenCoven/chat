@@ -51,6 +51,24 @@ function roots() {
   };
 }
 
+// On Linux the web view's storage and Chat's own files share one folder; these
+// top-level entries are Chat's (src-tauri/src), not the web view's.
+const APP_OWNED_LINUX = new Set([
+  'coven-transcripts',
+  'coven-attachments',
+  'coven-missions',
+  'cave-imports',
+  'iphone-companion',
+  'avatars',
+]);
+
+function appOwned(root, path) {
+  if (PLATFORM !== 'linux' || !root.endsWith(join('.local', 'share', 'ai.opencoven.chat')))
+    return false;
+  const [top, ...rest] = path.slice(root.length + 1).split('/');
+  return APP_OWNED_LINUX.has(top) || (!rest.length && /\.jsonl?$/.test(top));
+}
+
 function files(root, found = []) {
   if (!existsSync(root)) return found;
   for (const entry of readdirSync(root, { withFileTypes: true })) {
@@ -110,8 +128,19 @@ export function storageRow() {
       'browser storage folders',
       browser.map((root) => `${root}${existsSync(root) ? '' : ' (absent)'}`),
     );
-    const all = browser.flatMap((root) => files(root));
-    row.note('browser storage files', all.length);
+    const listed = browser.flatMap((root) => files(root).map((path) => ({ root, path })));
+    const all = listed.filter(({ root, path }) => !appOwned(root, path)).map(({ path }) => path);
+    const shared = listed.filter(({ root, path }) => appOwned(root, path)).map(({ path }) => path);
+    const home = homedir();
+    row.note(
+      'browser storage files',
+      all.map((path) => path.replace(home, '~')),
+    );
+    if (shared.length)
+      row.note(
+        "Chat's own files in the same folder (not browser storage)",
+        shared.map((path) => path.replace(home, '~')),
+      );
     const keys = new Map();
     let preferences;
     let navigation;
@@ -201,7 +230,7 @@ export function storageRow() {
     const appFiles = app.flatMap((root) => files(root));
     row.note(
       'app data files (not browser storage)',
-      appFiles.map((path) => path.replace(homedir(), '~')),
+      appFiles.map((path) => path.replace(home, '~')),
     );
   } catch (error) {
     row.error = error.message;

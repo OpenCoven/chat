@@ -23,6 +23,7 @@ import {
   linkRows,
   quoteRow,
   Row,
+  showFamiliars,
   switchRow,
   tableRow,
 } from './rows.mjs';
@@ -208,7 +209,8 @@ try {
   facts.screenReader = reader ? reader.name : 'none available';
   await app.activate();
 
-  const lane = new Lane({ app, native, requests, tokens, reader, shot, cli: covenCli() });
+  const save = (name, text) => writeFileSync(join(out, name), text);
+  const lane = new Lane({ app, native, requests, tokens, reader, shot, save, cli: covenCli() });
   await setUp(app);
   shot('chat-open');
   rows.push(...(await linkRows(lane, FIRST, browser)));
@@ -224,18 +226,37 @@ try {
   rows.push(await quoteRow(lane, FIRST, ime));
   rows.push(await inspectorRow(lane, FIRST, FRAMES));
 
-  setup.note(
-    `${SECOND} created with the installed CLI`,
-    tryRun(covenCli(), ['familiars', 'create', '--json', '--', SECOND]),
-  );
-  await app.click(await app.one('button', 'Refresh Coven'));
-  await app.one('button', SECOND, { timeout: 30_000 });
-  rows.push(await switchRow(lane, FIRST, SECOND));
+  // A second familiar for row 4. If it never reaches the rail, row 4 is not
+  // run and says why; rows 7 and 8 still run.
+  let second = false;
+  try {
+    setup.note(
+      `${SECOND} created with the installed CLI`,
+      tryRun(covenCli(), ['familiars', 'create', '--json', '--', SECOND]),
+    );
+    await lane.front();
+    await lane.reset();
+    await showFamiliars(lane, setup);
+    await app.click(await app.one('button', 'Refresh Coven'));
+    await app.one('button', SECOND, { timeout: 30_000 });
+    second = true;
+  } catch (error) {
+    setup.note(`${SECOND} did not reach the rail`, error.message);
+    shot('second-familiar-failure');
+  }
+  if (second) rows.push(await switchRow(lane, FIRST, SECOND));
+  else {
+    const skipped = new Row('504-4', 'Chat-switch isolation');
+    skipped.error = `not run: ${SECOND} did not reach the familiars rail`;
+    rows.push(skipped);
+  }
+  await lane.front();
+  await lane.reset();
   rows.push(await cancelledRunRow(lane, FIRST));
   shot('before-quit');
 
   // Quit as a person would, so the web view writes its storage out.
-  await app.activate();
+  await lane.front();
   if (PLATFORM === 'mac') await app.key('q', ['cmd']);
   else await app.key('f4', ['alt']).catch(async () => app.key('F4', ['alt']));
   const exited = await until(
@@ -255,7 +276,7 @@ try {
   setup.note('error', error.message);
   shot('setup-failure');
 } finally {
-  reader?.stop?.();
+  await reader?.stop?.();
   if (child && child.exitCode === null) child.kill();
   native.close();
   writeFileSync(join(out, 'helper-stderr.txt'), native.stderr.join(''));

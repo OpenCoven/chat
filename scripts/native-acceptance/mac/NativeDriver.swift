@@ -170,7 +170,11 @@ func openMenus() -> [[String]] {
       return
     }
     guard depth > 0 else { return }
-    for child in children(element) { walk(child, depth: depth - 1) }
+    for child in children(element) {
+      // The menu bar's menus exist while closed; only a menu that is open counts.
+      if (attribute(child, kAXRoleAttribute) as? String) == kAXMenuBarRole { continue }
+      walk(child, depth: depth - 1)
+    }
   }
   walk(application(), depth: 3)
   return menus
@@ -374,6 +378,10 @@ func run(_ command: [String: Any]) -> [String: Any] {
       "apps": apps.map { ["pid": Int($0.processIdentifier), "bundle": $0.bundleIdentifier ?? ""] },
       "frontmost": Int(NSWorkspace.shared.frontmostApplication?.processIdentifier ?? 0),
     ]
+  case "hideApp":
+    // Puts another app (the browser an Open started) out of the way, as Cmd-H would.
+    let app = NSRunningApplication(processIdentifier: pid_t(command["pid"] as? Int ?? 0))
+    return ["ok": app?.hide() ?? false]
   case "defaultBrowser":
     let url = NSWorkspace.shared.urlForApplication(toOpen: URL(string: "https://example.com/")!)
     return ["ok": true, "app": url?.path ?? "", "bundle": url.flatMap { Bundle(url: $0)?.bundleIdentifier } ?? ""]
@@ -473,7 +481,7 @@ func run(_ command: [String: Any]) -> [String: Any] {
       "current": current.map(sourceID) ?? "",
     ]
   case "selectInputSource":
-    let id = command["id"] as? String ?? ""
+    let id = command["source"] as? String ?? ""
     guard let found = inputSource(id) else { return ["ok": false, "error": "no input source \(id)"] }
     let enabled = TISEnableInputSource(found)
     let selected = TISSelectInputSource(found)

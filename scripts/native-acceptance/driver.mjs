@@ -406,9 +406,34 @@ export class App {
   }
 
   async click(nodeOrPoint, { button = 'left', mods = [], count = 1 } = {}) {
+    if (!nodeOrPoint) throw new Error('nothing to click: the control was not found');
     const at = Array.isArray(nodeOrPoint) ? nodeOrPoint : center(await this.visible(nodeOrPoint));
     await this.native.must({ cmd: 'click', at, button, mods, count });
     await sleep(250);
+  }
+
+  /** The part of the screen where the window's content can be seen. */
+  async viewport() {
+    const frame = (await this.window())?.frame;
+    const sw = this.screen?.w ?? Number.POSITIVE_INFINITY;
+    const sh = this.screen?.h ?? Number.POSITIVE_INFINITY;
+    return {
+      frame,
+      top: Math.max((frame?.y ?? 0) + 30, 30),
+      bottom: Math.min(frame ? frame.y + frame.h : sh, sh) - 6,
+      left: Math.max(frame?.x ?? 0, 0),
+      right: Math.min(frame ? frame.x + frame.w : sw, sw),
+      sw,
+      sh,
+    };
+  }
+
+  /** Whether a node's whole height and its centre are inside the visible window. */
+  async onScreen(node) {
+    if (!node?.frame) return false;
+    const { top, bottom, left, right } = await this.viewport();
+    const [cx] = center(node);
+    return node.frame.y >= top && node.frame.y + node.frame.h <= bottom && cx > left && cx < right;
   }
 
   /**
@@ -420,13 +445,7 @@ export class App {
     if (!node?.frame) return node;
     let current = node;
     for (let attempt = 0; attempt < 12; attempt += 1) {
-      const frame = (await this.window())?.frame;
-      const sw = this.screen?.w ?? Number.POSITIVE_INFINITY;
-      const sh = this.screen?.h ?? Number.POSITIVE_INFINITY;
-      const top = Math.max((frame?.y ?? 0) + 30, 30);
-      const bottom = Math.min(frame ? frame.y + frame.h : sh, sh) - 6;
-      const left = Math.max(frame?.x ?? 0, 0);
-      const right = Math.min(frame ? frame.x + frame.w : sw, sw);
+      const { frame, top, bottom, left, right, sw, sh } = await this.viewport();
       const [cx, cy] = center(current);
       if (cy > top && cy < bottom && cx > left && cx < right) return current;
       if (cx <= left || cx >= right) {

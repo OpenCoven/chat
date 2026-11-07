@@ -75,6 +75,11 @@ def summary(node):
         item["max"] = value.maximumValue
     except Exception:
         pass
+    if node.getRole() == pyatspi.ROLE_DOCUMENT_WEB:
+        try:
+            item["url"] = node.queryDocument().getAttributeValue("DocURL")
+        except Exception:
+            pass
     states = node.getState()
     if states.contains(pyatspi.STATE_VERTICAL):
         item["orientation"] = "vertical"
@@ -140,15 +145,18 @@ def focused():
     if app is None:
         return None
 
+    # The web view itself carries the focused state too; the control that has
+    # focus is the deepest focused node.
     def walk(node, depth):
         if node is None or depth < 0:
             return None
+        deeper = None
+        for index in range(node.childCount):
+            deeper = walk(node.getChildAtIndex(index), depth - 1)
+            if deeper is not None:
+                return deeper
         if node.getState().contains(pyatspi.STATE_FOCUSED):
             return node
-        for index in range(node.childCount):
-            found = walk(node.getChildAtIndex(index), depth - 1)
-            if found is not None:
-                return found
         return None
 
     return walk(app, 80)
@@ -221,13 +229,22 @@ def run(command):
         return {"ok": True, "tree": tree(found[0], command.get("depth", 80))}
     if name == "selectInputSource":
         # IBus engines: anthy composes Japanese, xkb:us::eng types Latin.
-        subprocess.run(["ibus", "engine", command.get("id", "")], capture_output=True, text=True, check=False)
+        subprocess.run(["ibus", "engine", command.get("source", "")], capture_output=True, text=True, check=False)
         time.sleep(0.5)
         current = subprocess.run(["ibus", "engine"], capture_output=True, text=True, check=False).stdout.strip()
-        return {"ok": current == command.get("id"), "current": current}
+        return {"ok": current == command.get("source"), "current": current}
     if name == "inputSources":
         current = subprocess.run(["ibus", "engine"], capture_output=True, text=True, check=False).stdout.strip()
         return {"ok": True, "current": current}
+    if name == "hideApp":
+        ids = xdotool("search", "--pid", int(command.get("pid", 0)), "--onlyvisible", "--name", ".").stdout.split()
+        for window in ids:
+            xdotool("windowminimize", window)
+        time.sleep(0.4)
+        return {"ok": bool(ids), "windows": ids}
+    if name == "frontmost":
+        active = xdotool("getactivewindow", "getwindowpid").stdout.strip()
+        return {"ok": True, "pid": int(active) if active.isdigit() else 0}
     if name == "running":
         return {"ok": True, "apps": applications()}
     if name == "focused":
