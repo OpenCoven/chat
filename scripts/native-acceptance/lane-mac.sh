@@ -92,11 +92,23 @@ cat > "$out/facts.json" <<EOF
 }
 EOF
 
+# Kotoeri's input method runs as its own app; on some runners selecting it
+# through TIS leaves keys Latin until that app is running, so it is started.
+log "input methods: $(ls '/System/Library/Input Methods' 2>&1 | tr '\n' ';')"
+for im in JapaneseIM-RomajiTyping JapaneseIM; do
+  if [ -d "/System/Library/Input Methods/$im.app" ]; then
+    open -g "/System/Library/Input Methods/$im.app" 2>>"$out/environment.txt" && log "started $im" && break
+  fi
+done
+sleep 2
+log "Japanese input method processes: $(pgrep -fl JapaneseIM 2>&1 | tr '\n' ';')"
+
 node "$here/run.mjs" --app "$app/Contents/MacOS/opencoven-chat" --out "$out" \
   --lane "macOS $(sw_vers -productVersion) $(uname -m), published ${arch} DMG ${release}" \
   --helper "$out/native-mac" --facts "$out/facts.json" \
   --japanese com.apple.inputmethod.Kotoeri.RomajiTyping.Japanese --latin com.apple.keylayout.ABC \
   --ime-on kana --ime-off eisu
 status=$?
+log "Japanese input method processes after the run: $(pgrep -fl JapaneseIM 2>&1 | tr '\n' ';')"
 log "TCC rows: $(sudo sqlite3 '/Library/Application Support/com.apple.TCC/TCC.db' "select service, client, indirect_object_identifier from access where service in ('kTCCServiceAccessibility','kTCCServiceScreenCapture','kTCCServiceAppleEvents','kTCCServicePostEvent')" 2>&1 | tr '\n' ';' | cut -c1-2000)"
 exit $status
