@@ -172,9 +172,9 @@ below is the macOS hand-run version of them for this candidate.
 
 | Lane | State | Why, and what exists instead |
 | --- | --- | --- |
-| Packaged macOS (WKWebView) | **Built locally; launch smoke passed; in-engine probe in the real WKWebView passed the rows it can drive (see below); hand-driven rows unverified** | A release `.app` of the exact tree was built here once the volume had 16 GB free (see "macOS build provenance"). It was not launched: this terminal has no Accessibility or Screen Recording grant, by Val's standing decision, so window steps are Val's to run by hand, and the built app is the one to run. The checklist below is written for that. |
-| Packaged Windows (WebView2) | **Unverified** | No Windows machine in this session. Cross-compilation would not be runtime evidence. |
-| Packaged Linux (WebKitGTK) | **Built, not run; unverified at runtime** | The exact tree bundled on `ubuntu-latest` in CI run 39194949333 (`pnpm app:build`, *Desktop build* job, success). No Linux machine in this session to launch the bundle, and CI keeps no artifact. |
+| Packaged macOS (WKWebView) | **Built locally; launch smoke passed; in-engine probe in the real WKWebView passed the rows it can drive (see below); hand-driven rows unverified**<br>*2026-11-06: the published v0.0.8 DMGs (arm64 and x64) were run by native OS-level automation, not by hand; see [below](#native-os-level-automation-on-the-published-v008-installers-504-2026-11-06).* | A release `.app` of the exact tree was built here once the volume had 16 GB free (see "macOS build provenance"). It was not launched: this terminal has no Accessibility or Screen Recording grant, by Val's standing decision, so window steps are Val's to run by hand, and the built app is the one to run. The checklist below is written for that. |
+| Packaged Windows (WebView2) | **Unverified** on this candidate<br>*2026-11-06: the published v0.0.8 MSI was run by native OS-level automation, not by hand; see [below](#native-os-level-automation-on-the-published-v008-installers-504-2026-11-06).* | No Windows machine in this session. Cross-compilation would not be runtime evidence. |
+| Packaged Linux (WebKitGTK) | **Built, not run; unverified at runtime**<br>*2026-11-06: the published v0.0.8 `.deb` was run by native OS-level automation, not by hand; see [below](#native-os-level-automation-on-the-published-v008-installers-504-2026-11-06).* | The exact tree bundled on `ubuntu-latest` in CI run 39194949333 (`pnpm app:build`, *Desktop build* job, success). No Linux machine in this session to launch the bundle, and CI keeps no artifact. |
 
 ### macOS build provenance
 
@@ -253,6 +253,8 @@ keyboard, the native context menu, VoiceOver, or a real Coven run do; those are 
 
 ### Hand-run checklist for the packaged macOS candidate (for Val)
 
+*2026-11-06: these eight rows, with #504's IPv6 row, have since been run by native OS-level automation on the published v0.0.8 installers on all three platforms, not by hand; see the next section. The rows below are kept as written.*
+
 Run the built app above (`open "src-tauri/target/release/bundle/macos/OpenCoven Chat.app"` from
 `.worktrees/candidate-480`; it is ad-hoc signed, so Gatekeeper lets a local build run), or rebuild
 from `review/candidate-480` with the pinned toolchain
@@ -291,6 +293,152 @@ app; quit the installed Chat first.
 8. **Storage.** After all of the above, the app's WebKit local storage must hold only the preferences
    key with a numeric `inspectorWidth`; no passage, address or table text.
 
+## Native OS-level automation on the published v0.0.8 installers (#504, 2026-11-06)
+
+These are **native OS-level automation** results from fresh GitHub-hosted runners. They are **not hand-run**. They were taken on the published **v0.0.8** release (tag `v0.0.8` → `a8c76390`), not on the candidate above. v0.0.8 contains all four children and #492.
+
+How the lane works (`scripts/native-acceptance/`, added on `test/504-native-acceptance`):
+
+- It downloads each published installer and checks it against the release's `SHA256SUMS` (sha256 `80ab3bd83f0cd203c9fd9eb331fb8ec095426a7bee9e05af6d58ebfc04b8bd28`).
+- It installs the app for a runner user that has no prior `ai.opencoven.chat` data, then completes first-run setup through the window. That setup installs the real Coven CLI and engine.
+- Input is the platform's own:
+  - CGEvent at the HID tap on macOS
+  - SendInput on Windows
+  - XTEST on Linux
+- The window is read back through AX, UI Automation and AT-SPI, and through VoiceOver, NVDA and Orca.
+- No WebDriver is attached and no script runs in the page.
+- Every word in the chats comes from a local model fixture. The addresses are `example.com`, `example.test` and `[::1]`.
+
+A row is:
+
+- **observed** when every check in it held;
+- **failed** when a check did not hold. Each failure has a focused issue, and the row's other checks are listed;
+- **blocked** when the lane could not stage that part.
+
+Nothing blocked or unrun is counted as passed.
+
+| Lane | Runner | Installer | Signature | Engine | Screen reader | IME |
+| --- | --- | --- | --- | --- | --- | --- |
+| macOS arm64 | macOS 15.8.2 (24H232), `macos-15` | `OpenCoven.Chat_0.0.8_aarch64.dmg` `494dad0cb3b9454ca5219c778bedb6ba654d9281f62f80fca97677de4638fc98` | CDHash `798014d38e256731b334bbf8cc20a216594244c7`, team `9LR8Z8UQ9X`; Gatekeeper: accepted, Notarized Developer ID | WebKit 20621.3.11.11.3 | VoiceOver | Kotoeri (Romaji) |
+| macOS x64 | macOS 15.7.9 (24G830), `macos-15-intel` | `OpenCoven.Chat_0.0.8_x64.dmg` `51c8734d7445c6aefbffcfd7bd77e259862bed714f5fac3a9f2ae7d0292dcc82` | CDHash `8a281302a153a80b91715801f7142038eb337f74`, team `9LR8Z8UQ9X`; Gatekeeper: accepted, Notarized Developer ID | WebKit 20621.3.11.11.3 | VoiceOver | Kotoeri (Romaji) |
+| Windows | Windows Server 2025 Datacenter 10.0.26100, `windows-2025` | `OpenCoven.Chat_0.0.8_x64_en-US.msi` `3e77b955ac6f1d8cf75f9215ff40081b63a56cf4ae5489b5fee24c54bc4f5b0e`; installed `opencoven-chat.exe` `87a4fc112b06b709aa345587ec7febc105c251546832aff7e273a3fe0227f9e3` | Authenticode: `NotSigned` (installer rows stay with #520) | WebView2 156.0.4314.58 | NVDA 2025.3.2 portable | Microsoft IME (ja-JP) |
+| Linux | Ubuntu 24.04.5, `ubuntu-24.04` | `OpenCoven.Chat_0.0.8_amd64.deb` `2d168c7df7b400d02d05b2413186a280ff8c61564a7d4f59145c589edb400368` | (none) | WebKitGTK 2.52.6-0ubuntu0.24.04.1 | Orca 46.1 (no audio device: utterances read from its debug log) | Mozc through IBus |
+
+**Runs.** The final harness is `test/504-native-acceptance` @ `2688e14`. Its run is [42327181444](https://github.com/OpenCoven/chat/actions/runs/42327181444), started 2026-11-07 02:02Z, with one job per lane:
+
+- Windows: job [128265055376](https://github.com/OpenCoven/chat/actions/runs/42327181444/job/128265055376)
+- Linux: job [128265055594](https://github.com/OpenCoven/chat/actions/runs/42327181444/job/128265055594)
+- macOS x64: job [128265055686](https://github.com/OpenCoven/chat/actions/runs/42327181444/job/128265055686)
+- macOS arm64: job [128265055555](https://github.com/OpenCoven/chat/actions/runs/42327181444/job/128265055555), and job [128268345612](https://github.com/OpenCoven/chat/actions/runs/42327181444/job/128268345612). That second job is the same commit rerun as attempt 2, because in attempt 1 Kotoeri's process never started and the keys stayed Latin. In attempt 2 it started and composed あ on the first try. Every other row came out the same in both attempts.
+
+Runs 11–13 reproduced every finding below on earlier harness commits:
+
+- [42325051126](https://github.com/OpenCoven/chat/actions/runs/42325051126) @ `a744096`
+- [42325850882](https://github.com/OpenCoven/chat/actions/runs/42325850882) @ `09ab3e9`
+- [42326508590](https://github.com/OpenCoven/chat/actions/runs/42326508590) @ `28cab9b`
+
+Runs 1–9 built the lane, and runs 6, 10 and 14 were cancelled when a newer commit replaced them. Each job uploads its `results.md`, `results.json`, screenshots, the screen reader's log and the runner facts as `native-<lane>` artifacts.
+
+### Results by row
+
+| Row | macOS arm64 | macOS x64 | Windows | Linux |
+| --- | --- | --- | --- | --- |
+| Setup: first run through the window | observed | observed | observed | observed |
+| 1. Link gestures, context menu, exact clipboard | observed | observed | **failed** (#547): page menu on right-click; gestures, no-open menu and exact clipboard observed | **failed** (#547): page menu on right-click; gestures, no-open menu and exact clipboard observed |
+| 2. Dialog modality, focus return, screen-reader announcement | observed (VoiceOver) | observed (VoiceOver) | observed (NVDA) | observed (Orca) |
+| 3. Quote selection: drag, Tab, held Enter, IME, cell, two messages | **failed** (#544): Tab from the dragged passage; the rest observed, IME included (attempt 2) | **failed** (#544): Tab from the dragged passage; IME **blocked** (runner, see below); the rest observed | observed | **failed** (#544): Tab from the dragged passage; the rest observed, IME included |
+| 4. Chat-switch isolation | observed | observed | observed | observed |
+| 5. Tables at 480×520 with Larger text | observed | observed | observed | observed |
+| 6. Inspector: pointer capture, separator, keys, Reset, persisted width | **failed** (#545): no value spoken on focus; the rest observed | **failed** (#545): no value spoken on focus; the rest observed | observed (NVDA reads "360") | **failed** (#545, #548): no value spoken on focus; Settings' width is drawn but not exposed to AT-SPI; the rest observed |
+| 7. Quote kept through a real cancelled run | observed | observed | observed | observed |
+| 8. Preference-only browser storage | observed | observed | **failed** (#546): composer text in WebView2 autofill | observed |
+| 9. IPv6 `https://[::1]:8080/x` | observed | observed | observed | observed |
+| #515 Open hands the exact address to the default browser (plain `http`: landing only, see below) | observed (Safari) | observed (Safari) | observed (Edge) | observed (Firefox) |
+
+### What each row observed
+
+- **Setup.** On every lane the first screen was setup. **Install Coven** installed Coven, then its engine, and **Create familiar** opened Astra's chat. A second familiar, Sage, was created with the installed CLI. The rail started folded and **Show familiars** opened it.
+- **1. Link gestures** (all lanes):
+  - Primary click, Cmd/Ctrl-click and middle-click each opened *Open this link?* with site `example.com` and the exact address. No browser process started.
+  - Right-click opened neither the review nor a browser. The native menu, read through the platform's accessibility API, offered no way to open the link.
+  - **Copy address** reported "Copied the address." Another process then read the exact address from the system clipboard.
+  - The menu's items match README only on macOS. Windows and Linux show the web view's page menu (#547).
+- **2. Modality** (all lanes):
+  - Focus started on **Cancel**. Tab went to **Copy address**, **Open** and **Cancel**, and Shift+Tab went back.
+  - While the review was open, the conversation behind it was absent from the accessibility tree, and the thread did not move under it (link y unchanged).
+  - A click on the composer behind the review closed the review. The click took nothing and sent nothing.
+  - Escape returned focus to the link. Each screen reader announced it:
+    - VoiceOver: "dialog pop up link Handoff check list 3 items"
+    - NVDA: "… list, with 3 items, Handoff check, opens dialog, link"
+    - Orca: "Handoff check link." "opens popup"
+- **3. Quote selection.**
+  - A real pointer drag from "The plan has three steps." to the list item **Handoff check** selected the two paragraphs and the item. **Quote selection** appeared once. Pressing it inserted `> ` lines with the paragraph break kept.
+  - **Tab from the dragged passage:** WebView2 reached the action in 23 presses with the capture kept. On WebKit (both Macs and Linux), the first Tab landed on the link inside the selection and the action went away (#544).
+  - **Held Enter** on the action (held about 0.6 s, with key repeats as the keyboard sends them) inserted one quote, sent nothing (model requests unchanged) and left focus in the composer. On Windows this was the dragged passage. On WebKit it was a passage with no control after it ("Done."), which Tab reaches in one press.
+  - **IME:** composing "nihonn", Space, Enter after the quote committed Japanese with no romaji left and sent nothing:
+    - Kotoeri on arm64: 🇯🇵, its live-conversion candidate for にほん, in run 15's attempt 2 (日本 or 🇯🇵 in runs 11 and 12). In run 15's attempt 1, Kotoeri's process never started and the keys stayed Latin. In run 13, the lane started the process by hand, and the keys still stayed Latin. Both report IME as **blocked**, not judged.
+    - Microsoft IME: 日本
+    - Mozc: 日本
+    - macOS x64: **blocked**. On the `macos-15-intel` runner TIS reports Kotoeri as selected, but its かな key arrives in the composer as a control character (U+0010) and the probe key as Latin, on up to five tries in each of runs 9, 11, 12, 13 and 15. The keys never reach the input method, so nothing about Chat is judged there.
+  - **Table cell:** a drag inside one cell (`a | b`) quoted as `> a | b`.
+  - **Across messages:** a drag from "[[table]] Show me the table." to the reply "Here it is." offered no action.
+- **4. Chat switch** (all lanes):
+  - With a passage selected and a link review open above the expanded table, `Cmd/Ctrl+]` left the review where it was.
+  - Rail clicks on Sage: the first closed the review, the second closed the sheet, and the third switched.
+  - After the switch, no review, sheet or quote action remained. Sage's draft, "Draft kept for later", was unchanged.
+- **5. Tables** (all lanes):
+  - **Copy table Markdown** put the exact source on the system clipboard, both in the reply and in the sheet.
+  - A link in the sheet opened the review above it, with the sheet hidden from assistive technology. Escape closed the review only, then the sheet. Focus returned to **Guide**, then to **Expand table**.
+  - At 480×520 inner (WebView2's frame measures 496×559 outside) with **Larger** text (message text grew, e.g. 21→25px on macOS):
+    - focus opened on **Close**, and the sheet fit inside the window
+    - it scrolled across
+    - the composer stayed inside the window and took focus
+  - A downward wheel moved the sheet on macOS and Linux. On Windows the rows fit and nothing moved; that was recorded, not judged.
+- **6. Inspector resize.**
+  - **Pointer drag** of the handle: the width followed the pointer, kept following with the pointer outside the window (360→400px), and stopped on release outside the window. No text was selected.
+  - **Keys:** Tab from the composer reached **Resize inspector** in one press. Left/Right stepped 16px (376/360). Home/End reached 280/600, the maximum the separator reports.
+  - **Settings and Reset:** Settings → General showed the width on macOS and Windows. On Linux the screenshot shows it drawn ("400px"), but AT-SPI exposes none of the row's text: at that point there is only an empty `filler` (#548). **Reset** restored 360px everywhere.
+  - **Persisted width:** with 600px stored, narrowing to 1000px folded the inspector away, and the composer stayed inside the window. Widening again left the rail folded, and **Show inspector** opened it at 600px.
+  - **Screen readers:** NVDA read "360, Resize inspector, separator". VoiceOver and Orca read the role and name with no value (#545).
+- **7. Quote through a cancelled run** (all lanes): during a slow streaming reply, a passage was quoted. After **Stop run**, the quote stayed in the draft. Exactly one slow run reached the model, and nothing more was sent.
+- **8. Storage** (read from disk after the app quit):
+  - **macOS and Linux:** the web view's local storage held only `opencoven.chat.preferences.v1` (numeric `inspectorWidth`, 600) and `opencoven.chat.navigation.v1` (ids only). There was no IndexedDB, and no passage, address or table text in any web-view file.
+  - **Windows:** the same two keys, but composer text in `Web Data` (#546).
+- **9. IPv6** (all lanes): the review showed site `[::1]:8080` and address `https://[::1]:8080/x`. **Copy address** put exactly that on the clipboard, and **Open** gave the default browser exactly that address. The connection error page is expected.
+- **#515** (all lanes; default browsers Safari, Edge and Firefox):
+  - With the browser closed, **Open** started the default browser at exactly `https://example.com/handoff-check?x=1`, read from its address field or page. The review then said "Sent the address to your browser. If no page opened, use Copy address."
+  - On Windows, the screenshot after that first **Open** shows Edge at the address, with no SmartScreen or "How do you want to open this?" prompt. The lane did not search for such a prompt by name.
+  - **Open** was then disabled. A second press added no window and no page.
+  - Escape returned focus to the link.
+  - With the browser running, **Open** on the plain `http://example.com/` brought the browser to `https://example.com/`. Safari, Edge and Firefox upgrade to HTTPS on their own, so the `http://` form Chat handed over can't be read back. The landing is observed; the exact scheme is not.
+  - `https://name@example.com/` offered only **Cancel** and **Copy address**, and copied exactly.
+  - The lane watched Safari, Chrome, Edge and Firefox processes. None but the default ran at any point.
+
+### Findings filed (owning feature in brackets)
+
+- **#544** [#482]. On WebKit (both Macs and Linux), Tab from a dragged passage that ends on a link moves focus onto that link. WebKit clears the selection, and **Quote selection** goes away after one press. WebView2 keeps the capture and reaches the action in 23 presses. A passage with no control after it ("Done.") reaches the action in one press on every lane.
+- **#545** [#484]. VoiceOver and Orca read the **Resize inspector** handle's name and role on focus, but no value. NVDA reads "360". VoiceOver speaks "30%" when the width changes.
+- **#546** [storage, `SECURITY.md`]. On Windows, text typed into the composer is stored by Edge's general autofill in the WebView2 profile's `Web Data` (`autofill_edge_field_values.value`). This reproduced in every Windows run that reached row 8. macOS and Linux store only the two allowed keys.
+- **#547** [#481]. On Windows and Linux, right-clicking a link shows the web view's page menu:
+  - Windows: Back, Refresh, Save as, Print, More tools
+  - Linux: Back, Forward, Stop, Reload
+
+  It offers no text actions. On every lane the menu offers no way to open the link.
+- **#548** [#484]. On Linux, Settings → General draws **Inspector width**, its hint and the width, but AT-SPI exposes none of that text. At the width's position there is only an empty `filler`. macOS and Windows expose it.
+
+### Not staged by this lane
+
+- A clipboard refusal for **Copy address** (row 1). Recorded as "not staged", as the checklist allows.
+- #515's `xdg-open`-missing case. Windows SmartScreen and other installer prompts belong to #520.
+
+### Wording notes from 2026-10-24, still current
+
+The lane checks against these notes as written:
+
+- Row 4: with a review or sheet open, the rail's first clicks close the review, then the sheet; the third click switches. `Cmd/Ctrl+]` leaves an open review where it is.
+- Row 6: after the 1100px trip the rail stays folded, and **Show inspector** reopens at the stored 600px.
+- Row 8: `opencoven.chat.navigation.v1` (ids only) sits beside the preferences key, which `SECURITY.md` allows.
+
 ## Disposition
 
 | Child | Proposed | Implemented on a branch | Merged | Independently verified | Packaged |
@@ -306,3 +454,11 @@ Green checks and this record are not merge or release authorization. All four ch
 `review/candidate-480` now differs from `main` by this record and the new test only, so PR #490 reduces
 to those two files on rebase. Source completion is not "shipped": nothing here is release-approved,
 and the desktop runtime rows above are still open.
+
+**2026-11-06.** The *Packaged* column above describes the 2026-10-19 candidate. Since then, the published v0.0.8 installers have been run on macOS (arm64 and x64), Windows and Linux by native OS-level automation, not by hand; the results are in the section above.
+
+- Rows 2, 4, 5, 7 and 9, and #515's hand-off, were observed on every lane.
+- Rows 1, 3, 6 and 8 each failed on at least one lane, and each failure has a focused issue, #544–#548, against the owning feature.
+- One part is **blocked**, not judged: Japanese input on the macOS x64 runner, where the keys never reached Kotoeri. On arm64 it was observed.
+
+These results do not authorize a merge or a release. A fix for any of the five issues needs the failed row run again.
