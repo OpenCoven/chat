@@ -1161,6 +1161,23 @@ async function settingsShowWidth(lane, row, label, width) {
   const found = shown.match(/\d+\s*px/g) ?? [];
   const ok = new RegExp(`\\b${width}\\s*px`).test(shown);
   row.check(label, ok, { widthsShown: found, text: shown.slice(0, 200) });
+  if (!ok && PLATFORM === 'linux') {
+    // The width is drawn just before Reset: what AT-SPI reports there, beside a
+    // screenshot of the same dialog, tells a value it does not expose from one
+    // the lane misread.
+    const reset = await lane.app.one('button', 'Reset inspector width', {
+      within: ['dialog', 'Settings'],
+    });
+    if (reset?.frame) {
+      const at = [Math.round(reset.frame.x - 24), Math.round(reset.frame.y + reset.frame.h / 2)];
+      const probe = await lane.native.call({ cmd: 'at', at });
+      row.note(
+        `AT-SPI at ${at.join(',')}, just before Reset`,
+        probe.ok ? probe.chain : probe.error,
+      );
+    }
+    lane.shot(`settings-width-${width}`);
+  }
   if (!ok)
     lane.save(
       `settings-tree-${width}.txt`,

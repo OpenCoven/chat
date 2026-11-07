@@ -279,6 +279,35 @@ def run(command):
         return {"ok": True}
     if name == "menus":
         return {"ok": True, "menus": menus()}
+    if name == "at":
+        # The deepest accessible AT-SPI reports at a point on screen, with the
+        # chain above it: what a screen reader can find where something is drawn.
+        x, y = command["at"]
+        windows_ = windows(command.get("pid"))
+        chain = []
+        node = None
+        for window in windows_:
+            try:
+                node = window.queryComponent().getAccessibleAtPoint(int(x), int(y), pyatspi.DESKTOP_COORDS)
+            except Exception:
+                node = None
+            if node is not None:
+                break
+        while node is not None and len(chain) < 12:
+            entry = {"role": node.getRoleName(), "name": node.name or ""}
+            text = text_of(node)
+            if text:
+                entry["text"] = " ".join(text.replace("\ufffc", " ").split())[:200]
+            chain.append(entry)
+            deeper = None
+            try:
+                deeper = node.queryComponent().getAccessibleAtPoint(int(x), int(y), pyatspi.DESKTOP_COORDS)
+            except Exception:
+                deeper = None
+            if deeper is None or deeper == node:
+                break
+            node = deeper
+        return {"ok": True, "chain": chain}
     if name == "screens":
         geometry = xdotool("getdisplaygeometry").stdout.split()
         return {"ok": True, "screens": [{"w": int(geometry[0]), "h": int(geometry[1])}] if len(geometry) == 2 else []}
