@@ -421,11 +421,18 @@ export async function linkRows(lane, familiar, browser) {
     const menus = await native.call({ cmd: 'menus' });
     row1.note('native context menu on the link', menus.ok ? menus.menus : menus.error);
     const items = (menus.menus ?? []).flat();
-    row1.check(
-      'the context menu offers no way to open the link',
-      !items.some((item) => /open link|open in|new tab|new window/i.test(item)),
-      items,
-    );
+    // A menu that could not be read proves nothing either way.
+    if (items.length)
+      row1.check(
+        'the context menu offers no way to open the link',
+        !items.some((item) => /open link|open in|new tab|new window/i.test(item)),
+        items,
+      );
+    else
+      row1.block(
+        'context menu items',
+        'no open menu could be read through accessibility (see the screenshot)',
+      );
     row1.expect('right-click opens the review', await app.count('dialog', REVIEW), 0);
     lane.shot('504-1-context-menu');
     await dismissMenus(lane);
@@ -777,24 +784,23 @@ async function tableSteps(lane, familiar, frames, row) {
 
 /** A drag across text that a person would make: from the start of one node to the end of another. */
 async function dragText(app, fromPattern, toPattern, { fromIndex = 0, toIndex = -1 } = {}) {
+  // UI Automation exposes a link's words only as the link, with no text child.
+  const words = (node) => shownText(node) || (node.role === 'link' ? node.name : '');
   const ends = async () => {
     const texts = [...walk(await app.snapshot())].filter(
-      (node) => node.frame && node.frame.w > 0 && shownText(node),
+      (node) => node.frame && node.frame.w > 0 && words(node),
     );
     return [
-      texts.filter((node) => fromPattern.test(shownText(node))).at(fromIndex),
-      texts.filter((node) => toPattern.test(shownText(node))).at(toIndex),
+      texts.filter((node) => fromPattern.test(words(node))).at(fromIndex),
+      texts.filter((node) => toPattern.test(words(node))).at(toIndex),
     ];
   };
   let [from, to] = await ends();
   if (!from || !to) throw new Error(`no text to drag across (${fromPattern} to ${toPattern})`);
-  // A person scrolls the passage into view before dragging across it.
-  await app.visible(to);
+  // A person scrolls the passage to the middle of the window before dragging
+  // across it; its edges are under the header and the composer.
+  await app.middle(from, async () => (await ends())[0]);
   [from, to] = await ends();
-  if (!(await app.onScreen(from))) {
-    await app.visible(from);
-    [from, to] = await ends();
-  }
   if (!from || !to || !(await app.onScreen(from)) || !(await app.onScreen(to))) {
     const { top, bottom, left, right } = await app.viewport();
     throw new Error(
@@ -812,6 +818,34 @@ async function dragText(app, fromPattern, toPattern, { fromIndex = 0, toIndex = 
 
 const count = (text, needle) => text.split(needle).length - 1;
 
+/**
+ * Tabs forward toward Quote selection, checking after every press that the
+ * action is still offered; stops once focus reaches it or it is gone.
+ */
+async function tabToAction(app, max) {
+  const path = [];
+  for (let press = 1; press <= max; press += 1) {
+    await app.key('tab');
+    const focus = await app.focusedName();
+    path.push(focus);
+    if (focus === 'Quote selection') return { reached: true, presses: press, path };
+    if (!(await app.count('button', 'Quote selection')))
+      return { reached: false, presses: press, path, goneAfter: { press, focus } };
+  }
+  return { reached: false, presses: max, path };
+}
+
+/** Puts the caret at the end of the draft, by keyboard. */
+async function caretToEnd(lane, familiar) {
+  const { app } = lane;
+  if ((await app.focused())?.name !== `Message ${familiar}`)
+    await app.click(await lane.composer(familiar));
+  if (PLATFORM === 'mac') await app.key('down', ['cmd']);
+  else await app.key('end', ['ctrl']);
+}
+
+const PASSAGE = [/^The plan has three steps\.$/, /^Handoff check$/];
+
 /** Row 3: a real drag-selection, Tab to the action, held Enter, IME, a cell, two messages. */
 export async function quoteRow(lane, familiar, ime) {
   const { app, native } = lane;
@@ -821,7 +855,7 @@ export async function quoteRow(lane, familiar, ime) {
   );
   return lane.attempt(row, async () => {
     await lane.clearComposer(familiar);
-    const selected = await dragText(app, /^The plan has three steps\.$/, /^Handoff check$/);
+    const selected = await dragText(app, ...PASSAGE);
     row.note('selection from a real drag across a paragraph break and a list', selected);
     await until(
       'Quote selection',
@@ -830,36 +864,63 @@ export async function quoteRow(lane, familiar, ime) {
     ).catch(() => undefined);
     row.expect('Quote selection offered once', await app.count('button', 'Quote selection'), 1);
 
-    let tabs = 0;
-    const path = [];
-    let vanishedAt = null;
-    while ((await app.focusedName()) !== 'Quote selection' && tabs < 120) {
-      await app.key('tab');
-      tabs += 1;
-      path.push(await app.focusedName());
-      if (vanishedAt === null && tabs % 5 === 0 && !(await app.count('button', 'Quote selection')))
-        vanishedAt = tabs;
+    // The checklist's path: Tab from the passage to the action.
+    const fromPassage = await tabToAction(app, 60);
+    row.note('Tab from the dragged passage toward the action', fromPassage);
+    row.expect('focus reaches Quote selection by Tab from the passage', fromPassage.reached, true);
+
+    let held = fromPassage.reached ? '> The plan has three steps.' : null;
+    if (!fromPassage.reached) {
+      // The quote's lines, through the action pressed with the pointer.
+      await dragText(app, ...PASSAGE);
+      await app.click(await app.one('button', 'Quote selection'));
+      await sleep(600);
+      const pointed = await lane.composerValue(familiar);
+      row.note('composer after pressing Quote selection with the pointer', pointed);
+      row.expect(
+        'one quote from the pointer press',
+        count(pointed, '> The plan has three steps.'),
+        1,
+      );
+      row.check('line breaks kept', pointed.includes('>\n> First, read the source.'), pointed);
+      await lane.clearComposer(familiar);
+      // Held Enter needs focus on the action: a passage after the conversation's
+      // last control leaves the action as the next Tab stop.
+      await dragText(app, /^Done\.$/, /^Done\.$/, { fromIndex: -1, toIndex: -1 });
+      const fromEnd = await tabToAction(app, 8);
+      row.note('Tab from a passage at the end of the last reply ("Done.")', fromEnd);
+      if (fromEnd.reached) held = '> Done.';
+      else
+        row.block(
+          'held Enter on the action',
+          'focus could not reach Quote selection by Tab from either passage',
+        );
     }
-    row.note('Tab presses from the conversation to the action', tabs);
-    row.note('focus at each Tab', path);
-    if (vanishedAt !== null) row.note('Quote selection was gone by Tab press', vanishedAt);
-    row.expect('focus reaches Quote selection by Tab', await app.focusedName(), 'Quote selection');
 
     const sent = lane.requests();
-    await app.key('return', [], { repeats: 14, intervalMs: 40 });
-    await sleep(1_000);
-    const value = await lane.composerValue(familiar);
-    row.note('composer after holding Enter on the action', value);
-    row.expect('one quote after holding Enter', count(value, '> The plan has three steps.'), 1);
-    row.check('line breaks kept', value.includes('>\n> First, read the source.'), value);
-    row.expect('model requests after holding Enter (no send)', lane.requests(), sent);
-    row.expect(
-      'composer focused after quoting',
-      (await app.focused())?.name,
-      `Message ${familiar}`,
-    );
+    if (held) {
+      await app.key('return', [], { repeats: 14, intervalMs: 40 });
+      await sleep(1_000);
+      const value = await lane.composerValue(familiar);
+      row.note('composer after holding Enter on the action', value);
+      row.expect(`one quote after holding Enter (${held})`, count(value, held), 1);
+      if (held.includes('three steps'))
+        row.check('line breaks kept', value.includes('>\n> First, read the source.'), value);
+      row.expect('model requests after holding Enter (no send)', lane.requests(), sent);
+      row.expect(
+        'composer focused after quoting',
+        (await app.focused())?.name,
+        `Message ${familiar}`,
+      );
+    }
 
-    // IME: compose Japanese after the quote; committing must not send.
+    // IME: compose Japanese after a quote; committing must not send.
+    if (!(await lane.composerValue(familiar)).startsWith('> ')) {
+      await dragText(app, ...PASSAGE);
+      await app.click(await app.one('button', 'Quote selection'));
+      await sleep(600);
+    }
+    const quoted = await lane.composerValue(familiar);
     const chosen = ime
       ? await native.call({ cmd: 'selectInputSource', source: ime.japanese })
       : null;
@@ -871,24 +932,27 @@ export async function quoteRow(lane, familiar, ime) {
         `the Japanese input source could not be selected: ${JSON.stringify(chosen)}`,
       );
     } else if (ime) {
+      await caretToEnd(lane, familiar);
       if (ime.on) await app.key(ime.on);
-      await app.type('nihon');
+      await sleep(1_000);
+      await app.type('nihonn');
+      await sleep(400);
       await app.key('space');
-      await sleep(600);
+      await sleep(800);
       await app.key('return');
       await sleep(800);
       const composed = await lane.composerValue(familiar);
       await native.call({ cmd: 'selectInputSource', source: ime.latin });
       if (ime.off) await app.key(ime.off);
-      row.note('composer after composing "nihon", Space, Enter', composed);
+      row.note('composer after composing "nihonn", Space, Enter', composed);
       row.check(
         'Japanese text composed after the quote',
-        /[぀-ヿ一-鿿]/.test(composed.slice(value.length)),
-        composed.slice(value.length),
+        /[぀-ヿ一-鿿]/.test(composed.slice(quoted.length)),
+        composed.slice(quoted.length),
       );
       row.check(
         'the quote is intact after composing',
-        composed.startsWith(value.replace(/\s+$/, '')),
+        composed.startsWith(quoted.replace(/\s+$/, '')),
         composed.slice(0, 80),
       );
       row.expect('model requests after the IME commit (no send)', lane.requests(), sent);
@@ -902,7 +966,7 @@ export async function quoteRow(lane, familiar, ime) {
     row.expect('a table cell quotes', await lane.composerValue(familiar), '> a | b\n\n');
     await lane.clearComposer(familiar);
 
-    const across = await dragText(app, /^First, read the source\.$/, /^Here it is\.$/);
+    const across = await dragText(app, /^One more address\.$/, /^Here it is\.$/);
     row.note('selection across two messages', String(across).slice(0, 120));
     await sleep(800);
     row.expect(
@@ -978,9 +1042,10 @@ export async function inspectorRow(lane, familiar, frames) {
     if (said) {
       const spoken = said.join(' | ');
       row.note(`${lane.reader.name} at the separator`, said);
+      // 360px is 25% of the 280-600 range; VoiceOver speaks a splitter's value as a percentage.
       row.check(
-        `${lane.reader.name} reads the separator's name and value`,
-        /Resize inspector/.test(spoken) && /360/.test(spoken),
+        `${lane.reader.name} reads the separator's name and value (360, or 25% of its range)`,
+        /Resize inspector/.test(spoken) && (/360/.test(spoken) || /\b25\s?%/.test(spoken)),
         spoken,
       );
       row.check(

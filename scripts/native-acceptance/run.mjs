@@ -294,6 +294,7 @@ try {
 }
 
 facts.modelRequests = requests();
+facts.helperRestarts = native.restarts;
 const report = {
   facts,
   rows: rows.map((row) => ({

@@ -272,11 +272,18 @@ const KEYS_LINUX = {
 
 export class Native {
   constructor(command, args, { log } = {}) {
-    this.child = spawn(command, args, { stdio: ['pipe', 'pipe', 'pipe'] });
-    this.pending = new Map();
-    this.next = 1;
+    this.command = command;
+    this.args = args;
     this.log = log;
+    this.next = 1;
     this.stderr = [];
+    this.restarts = [];
+    this.start();
+  }
+
+  start() {
+    this.child = spawn(this.command, this.args, { stdio: ['pipe', 'pipe', 'pipe'] });
+    this.pending = new Map();
     createInterface({ input: this.child.stdout }).on('line', (line) => {
       let answer;
       try {
@@ -299,7 +306,25 @@ export class Native {
     });
   }
 
+  /**
+   * A platform call that never returns (UI Automation can block on a busy
+   * window) would wedge every later call, so the helper is replaced and told
+   * its target again; each replacement is kept for the record.
+   */
+  restart(reason) {
+    this.restarts.push(reason);
+    const old = this.child;
+    old.removeAllListeners('exit');
+    for (const waiting of this.pending.values())
+      waiting({ ok: false, error: `helper restarted: ${reason}` });
+    old.kill();
+    this.start();
+    if (this.target)
+      this.child.stdin.write(`${JSON.stringify({ ...this.target, id: this.next++ })}\n`);
+  }
+
   call(command, timeout = 60_000) {
+    if (command.cmd === 'target') this.target = command;
     if (this.child.exitCode !== null) {
       return Promise.resolve({
         ok: false,
@@ -310,6 +335,7 @@ export class Native {
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
         this.pending.delete(id);
+        this.restart(`${command.cmd} unanswered after ${timeout}ms`);
         reject(new Error(`helper did not answer ${command.cmd} in ${timeout}ms`));
       }, timeout);
       this.pending.set(id, (answer) => {
@@ -437,6 +463,28 @@ export class App {
   }
 
   /**
+   * Scrolls until a node sits in the middle of the window, clear of the header
+   * and the composer that cover the transcript's top and bottom edges.
+   */
+  async middle(node, find) {
+    let current = node;
+    for (let attempt = 0; attempt < 20 && current?.frame; attempt += 1) {
+      const { top, bottom, left, right } = await this.viewport();
+      const band = [top + (bottom - top) * 0.25, top + (bottom - top) * 0.6];
+      const [, cy] = center(current);
+      if (cy >= band[0] && cy <= band[1]) return current;
+      await this.native.must({
+        cmd: 'scroll',
+        at: [Math.round((left + right) / 2), Math.round((top + bottom) / 2)],
+        dy: cy > band[1] ? -120 : 120,
+      });
+      await sleep(350);
+      current = (await find()) ?? current;
+    }
+    return current;
+  }
+
+  /**
    * A control below the window's edge (or under the Dock) is scrolled into view
    * with the wheel, as a person would, before it is clicked; a click never lands
    * on whatever happens to cover it.
@@ -507,9 +555,13 @@ export class App {
     return (await this.native.call({ cmd: 'activate' })).ok;
   }
 
+  /** The app's main window: the largest, never a candidate or tooltip panel. */
   async window() {
     const answer = await this.native.call({ cmd: 'windows' });
-    return answer.ok ? normalize(answer.windows?.[0]) : null;
+    if (!answer.ok) return null;
+    const area = (each) => (each?.frame ? each.frame.w * each.frame.h : 0);
+    const largest = [...(answer.windows ?? [])].sort((a, b) => area(b) - area(a))[0];
+    return normalize(largest);
   }
 
   async setFrame(frame) {

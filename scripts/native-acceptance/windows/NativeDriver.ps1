@@ -112,17 +112,23 @@ public static class NativeDriver {
   }
 
   /// Every open menu on the desktop, by its items' names: a context menu is its own window.
+  /// Open context menus: WebView2 draws its menu in a Chromium popup window
+  /// (Chrome_WidgetWin_*) of its own process, and Win32 menus use #32768. Their
+  /// menu items are read wherever they sit under such a window.
   public static string Menus() {
     var menus = new List<string>();
+    var isItem = new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.MenuItem);
     foreach (AutomationElement top in AutomationElement.RootElement.FindAll(TreeScope.Children, Condition.TrueCondition)) {
+      string cls;
+      try { cls = top.Current.ClassName ?? ""; } catch { continue; }
+      if (!cls.StartsWith("Chrome_WidgetWin") && cls != "#32768") continue;
       AutomationElementCollection found;
-      try { found = top.FindAll(TreeScope.Subtree, new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.Menu)); } catch { continue; }
-      foreach (AutomationElement menu in found) {
-        var items = new List<string>();
-        foreach (AutomationElement item in menu.FindAll(TreeScope.Descendants, new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.MenuItem)))
-          items.Add(Quote(item.Current.Name));
-        if (items.Count > 0) menus.Add("[" + string.Join(",", items) + "]");
+      try { found = top.FindAll(TreeScope.Subtree, isItem); } catch { continue; }
+      var items = new List<string>();
+      foreach (AutomationElement item in found) {
+        try { items.Add(Quote(item.Current.Name)); } catch { }
       }
+      if (items.Count > 0) menus.Add("[" + string.Join(",", items) + "]");
     }
     return "[" + string.Join(",", menus) + "]";
   }
@@ -256,9 +262,13 @@ public static class NativeDriver {
     var window = Window(pid);
     if (window == null) return false;
     var handle = new IntPtr(window.Current.NativeWindowHandle);
-    // Windows lets a process take the foreground once it has sent input; an Alt
-    // press and release is the input that changes nothing else.
-    Key(0x12, false); Key(0x12, true);
+    uint current;
+    GetWindowThreadProcessId(GetForegroundWindow(), out current);
+    if (current == pid) return true;
+    // Windows lets a process take the foreground once it has sent input. A
+    // pointer move of zero is that input; an Alt tap would open the window's
+    // System menu and leave the app in menu mode.
+    Mouse(0x0001);
     SetForegroundWindow(handle);
     System.Threading.Thread.Sleep(200);
     uint owner;
