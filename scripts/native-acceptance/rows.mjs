@@ -186,14 +186,13 @@ const CONTROLS = new Set([
 ]);
 
 /**
- * The text a node shows a person. AT-SPI (WebKitGTK) reports inline elements
- * such as <code> and <span> as sections holding their own text, so a leaf that
- * is not a control counts as text too.
+ * The text a node shows a person. AT-SPI (WebKitGTK) keeps inline words in
+ * their container's own text, beside its child objects (a "360px" next to a
+ * Reset button), so any node that is not a control counts its own text.
  */
 export function shownText(node) {
   if (node.role === 'text') return String(node.value ?? node.name ?? node.raw?.text ?? '').trim();
-  if (!node.children.length && !CONTROLS.has(node.role) && typeof node.raw?.text === 'string')
-    return node.raw.text.trim();
+  if (!CONTROLS.has(node.role) && typeof node.raw?.text === 'string') return node.raw.text.trim();
   return '';
 }
 
@@ -422,7 +421,8 @@ export async function linkRows(lane, familiar, browser) {
     await cancelReview(app);
 
     // The native context menu: what the platform shows, read through accessibility.
-    await app.click(await linkNamed(app, 'Handoff check'), { button: 'right' });
+    const pressed = center(await app.visible(await linkNamed(app, 'Handoff check')));
+    await app.click(pressed, { button: 'right' });
     await sleep(1_200);
     // The menu can reach accessibility a moment after it is drawn.
     let menus = await native.call({ cmd: 'menus' });
@@ -431,12 +431,31 @@ export async function linkRows(lane, familiar, browser) {
       menus = await native.call({ cmd: 'menus' });
     }
     row1.note('native context menu on the link', menus.ok ? menus.menus : menus.error);
-    const items = (menus.menus ?? []).flat();
+    let items = (menus.menus ?? []).flat();
+    if (!items.length && PLATFORM === 'windows') {
+      // WebView2's menu opens below and right of the press; what accessibility
+      // reports at a point inside it names the menu's own items.
+      const probe = await native.call({ cmd: 'menuAt', at: [pressed[0] + 40, pressed[1] + 50] });
+      row1.note('accessibility at a point inside the menu', probe.ok ? probe.at : probe.error);
+      items = probe.at?.items ?? [];
+    }
     // A menu that could not be read proves nothing either way.
     if (items.length)
       row1.check(
         'the context menu offers no way to open the link',
         !items.some((item) => /open link|open in|new tab|new window/i.test(item)),
+        items,
+      );
+    // README: links carry no address of their own, so the menu offers only text
+    // actions. Page actions such as Reload would reload Chat's whole window.
+    if (items.length)
+      row1.check(
+        'the context menu offers only text actions (no page actions such as Reload)',
+        !items.some((item) =>
+          /^(back|forward|stop|reload|refresh|save as|print|more tools|inspect|view page source)\b/i.test(
+            String(item).trim(),
+          ),
+        ),
         items,
       );
     else {
@@ -836,17 +855,15 @@ async function dragText(app, fromPattern, toPattern, { fromIndex = 0, toIndex = 
       `the passage (${fromPattern} to ${toPattern}) does not fit in the window: from ${JSON.stringify(from?.frame)}, to ${JSON.stringify(to?.frame)}, visible ${JSON.stringify({ top, bottom, left, right })}`,
     );
   }
-  // A few pixels inside the first and last glyphs: a press in a bubble's padding
-  // can start the selection at the top of the page.
+  // A few pixels inside the first glyph: a press in a bubble's padding can
+  // start the selection at the top of the page.
   const inset = (frame) => Math.min(4, Math.max(1, Math.floor(frame.w / 4)));
   const start = [
     Math.round(from.frame.x + inset(from.frame)),
     Math.round(from.frame.y + from.frame.h / 2),
   ];
-  const end = [
-    Math.round(to.frame.x + to.frame.w - inset(to.frame)),
-    Math.round(to.frame.y + to.frame.h / 2),
-  ];
+  // The end stays one pixel inside: a final "." is narrower than the inset.
+  const end = [Math.round(to.frame.x + to.frame.w - 1), Math.round(to.frame.y + to.frame.h / 2)];
   await app.drag(
     [start, [Math.round((start[0] + end[0]) / 2), Math.round((start[1] + end[1]) / 2)], end],
     200,
@@ -881,6 +898,33 @@ async function caretToEnd(lane, familiar) {
     await app.click(await lane.composer(familiar));
   if (PLATFORM === 'mac') await app.key('down', ['cmd']);
   else await app.key('end', ['ctrl']);
+}
+
+/**
+ * A freshly selected input method can take a moment to own the window's text
+ * input, and the keys meanwhile arrive as Latin. One probe key shows which:
+ * Japanese input turns "a" into composing kana, which Delete then cancels.
+ */
+async function imeReady(lane, familiar, ime, quoted) {
+  const { app, native } = lane;
+  const tries = [];
+  for (let attempt = 1; attempt <= 4; attempt += 1) {
+    await lane.front();
+    const chosen = await native.call({ cmd: 'selectInputSource', source: ime.japanese });
+    await caretToEnd(lane, familiar);
+    if (ime.on) await app.key(ime.on);
+    await sleep(1_000 * attempt);
+    await app.type('a');
+    await sleep(600);
+    const probe = (await lane.composerValue(familiar)).slice(quoted.length);
+    await app.key('delete');
+    await sleep(500);
+    const after = await lane.composerValue(familiar);
+    tries.push({ attempt, current: chosen.current, probe, restored: after === quoted });
+    if (after !== quoted) break;
+    if (probe && !/[a-z]/i.test(probe)) return { composing: true, tries };
+  }
+  return { composing: false, tries };
 }
 
 const PASSAGE = [/^The plan has three steps\.$/, /^Handoff check$/];
@@ -972,9 +1016,9 @@ export async function quoteRow(lane, familiar, ime) {
         `the Japanese input source could not be selected: ${JSON.stringify(chosen)}`,
       );
     } else if (ime) {
+      const ready = await imeReady(lane, familiar, ime, quoted);
+      row.note('Japanese input composing before typing', ready);
       await caretToEnd(lane, familiar);
-      if (ime.on) await app.key(ime.on);
-      await sleep(1_000);
       await app.type('nihonn');
       await sleep(400);
       await app.key('space');

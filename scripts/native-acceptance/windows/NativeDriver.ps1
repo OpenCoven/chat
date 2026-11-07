@@ -152,6 +152,34 @@ public static class NativeDriver {
   }
 
   /// Top-level windows, for the record when no menu could be read.
+  /** What accessibility reports at a point on screen: the element, its ancestors, and any menu's items. */
+  public static string MenuAt(double x, double y) {
+    AutomationElement found = null;
+    try { found = AutomationElement.FromPoint(new System.Windows.Point(x, y)); } catch { }
+    if (found == null) return "{\"chain\":[],\"items\":[]}";
+    var chain = new List<string>();
+    var items = new List<string>();
+    var isItem = new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.MenuItem);
+    AutomationElement current = found;
+    AutomationElement menu = null;
+    for (int depth = 0; depth < 10 && current != null; depth += 1) {
+      try {
+        var info = current.Current;
+        chain.Add(Quote(info.ControlType.ProgrammaticName + " | " + info.Name + " | " + info.ClassName + " | pid " + info.ProcessId));
+        if (menu == null && (info.ControlType == ControlType.Menu || info.ControlType == ControlType.List)) menu = current;
+      } catch { break; }
+      try { current = TreeWalker.ControlViewWalker.GetParent(current); } catch { break; }
+    }
+    if (menu != null) {
+      try {
+        foreach (AutomationElement item in menu.FindAll(TreeScope.Descendants, isItem)) {
+          try { items.Add(Quote(item.Current.Name)); } catch { }
+        }
+      } catch { }
+    }
+    return "{\"chain\":[" + string.Join(",", chain) + "],\"items\":[" + string.Join(",", items) + "]}";
+  }
+
   public static string TopWindows() {
     var tops = new List<string>();
     foreach (AutomationElement top in AutomationElement.RootElement.FindAll(TreeScope.Children, Condition.TrueCondition)) {

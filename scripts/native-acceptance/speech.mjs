@@ -260,9 +260,24 @@ class Orca extends LogReader {
     await sleep(2_000);
     this.started = true;
   }
+  /** Orca writes its buffered log as it exits, so the read waits for the exit. */
   async stop() {
-    this.child?.kill();
-    await sleep(1_000);
+    const child = this.child;
+    if (!child) return;
+    const exited = new Promise((resolve) => {
+      if (child.exitCode !== null || child.signalCode !== null) resolve(true);
+      else child.once('exit', () => resolve(true));
+    });
+    child.kill();
+    const done = await Promise.race([exited, sleep(15_000).then(() => false)]);
+    if (!done) child.kill('SIGKILL');
+    await until(
+      'Orca to write its log',
+      async () => /SPEECH OUTPUT: 'Screen reader off/.test(readFileSync(this.path, 'utf8')),
+      5_000,
+      250,
+    ).catch(() => undefined);
+    this.child = null;
   }
 }
 

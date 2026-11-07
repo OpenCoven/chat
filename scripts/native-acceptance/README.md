@@ -7,9 +7,9 @@ the ones published (this is also why the lane is not blocked by #532).
 
 | Platform | Input | Reading | Screen reader | IME |
 | --- | --- | --- | --- | --- |
-| macOS (`mac/NativeDriver.swift`) | CGEvent at the HID tap | AX API (WKWebView tree) | VoiceOver, `content of last phrase` | Kotoeri Romaji via TIS |
-| Windows (`windows/serve.ps1`) | SendInput | UI Automation | NVDA portable, IO-level speech log | Microsoft IME (ja-JP) |
-| Linux (`linux/native_driver.py`) | XTEST (xdotool) | AT-SPI (pyatspi) | Orca debug log | IBus Anthy |
+| macOS (`mac/NativeDriver.swift`) | CGEvent at the HID tap | AX API (WKWebView tree) | VoiceOver, `content of last phrase` | Kotoeri Romaji via TIS, then the かな / 英数 keys |
+| Windows (`windows/serve.ps1`) | SendInput | UI Automation | NVDA portable, IO-level speech log | Microsoft IME (ja-JP), IME on/off keys |
+| Linux (`linux/native_driver.py`) | XTEST (xdotool) | AT-SPI (pyatspi) | Orca debug log, no speech server | IBus Anthy, or Mozc started in Hiragana |
 
 `lane-*.sh` / `lane-windows.ps1` verify the asset against the release's
 `SHA256SUMS`, install it on a fresh runner user (an empty profile), record the
