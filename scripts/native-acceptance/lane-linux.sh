@@ -93,6 +93,9 @@ import orca.speech
 orca.speech.init = lambda *args, **kwargs: None
 PY
 log "Orca: no speech server on this runner (no audio device); utterances read from its debug log"
+# Mozc starts in direct (Latin) input unless told to start in Japanese.
+mkdir -p "$HOME/.config/mozc"
+printf '%s\n' 'engines {' '  name: "mozc-jp"' '  longname: "Mozc"' '  layout: "default"' '  rank: 80' '}' 'active_on_launch: True' > "$HOME/.config/mozc/ibus_config.textproto"
 ibus-daemon -drx
 sleep 3
 log "ibus engines: $(ibus list-engine 2>/dev/null | grep -E 'anthy|mozc|xkb:us::eng' | tr -s ' ' | tr '\n' ';')"
@@ -101,5 +104,5 @@ log "default browser: $(xdg-settings get default-web-browser 2>&1)"
 
 node "$here/run.mjs" --app "$LANE_APP" --out "$out" \
   --lane "$(. /etc/os-release && echo "$PRETTY_NAME"), published ${kind} ${release}" \
-  --facts "$out/facts.json" ${LANE_JAPANESE:+--japanese "$LANE_JAPANESE"} --latin xkb:us::eng
+  --facts "$out/facts.json" ${LANE_JAPANESE:+--japanese "$LANE_JAPANESE" --ime-on Hiragana} --latin xkb:us::eng
 exit $?

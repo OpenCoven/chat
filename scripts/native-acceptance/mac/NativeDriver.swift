@@ -262,6 +262,8 @@ let keyCodes: [String: CGKeyCode] = [
   "return": 36, "tab": 48, "space": 49, "delete": 51, "escape": 53, "forwarddelete": 117,
   "home": 115, "end": 119, "pageup": 116, "pagedown": 121, "left": 123, "right": 124,
   "down": 125, "up": 126, "f5": 96,
+  // JIS かな and 英数: switch the frontmost app's input to Japanese and back.
+  "kana": 104, "eisu": 102,
 ]
 let shifted: [Character: Character] = [
   "!": "1", "@": "2", "#": "3", "$": "4", "%": "5", "^": "6", "&": "7", "*": "8", "(": "9",

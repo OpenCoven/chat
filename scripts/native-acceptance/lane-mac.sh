@@ -95,7 +95,8 @@ EOF
 node "$here/run.mjs" --app "$app/Contents/MacOS/opencoven-chat" --out "$out" \
   --lane "macOS $(sw_vers -productVersion) $(uname -m), published ${arch} DMG ${release}" \
   --helper "$out/native-mac" --facts "$out/facts.json" \
-  --japanese com.apple.inputmethod.Kotoeri.RomajiTyping.Japanese --latin com.apple.keylayout.ABC
+  --japanese com.apple.inputmethod.Kotoeri.RomajiTyping.Japanese --latin com.apple.keylayout.ABC \
+  --ime-on kana --ime-off eisu
 status=$?
 log "TCC rows: $(sudo sqlite3 '/Library/Application Support/com.apple.TCC/TCC.db' "select service, client, indirect_object_identifier from access where service in ('kTCCServiceAccessibility','kTCCServiceScreenCapture','kTCCServiceAppleEvents','kTCCServicePostEvent')" 2>&1 | tr '\n' ';' | cut -c1-2000)"
 exit $status

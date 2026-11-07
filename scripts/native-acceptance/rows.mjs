@@ -370,18 +370,22 @@ async function listen(lane, row, label, act) {
   // The reader's own start-up speech finishes before the action is taken.
   if (reader.settle) await reader.settle();
   else await sleep(1_000);
+  let mark;
+  let said = [];
   try {
-    const mark = await reader.mark();
+    mark = await reader.mark();
     await act();
-    const said = await reader.since(mark);
-    if (!said.length && reader.diagnostics)
-      row.note(`${reader.name} diagnostics`, reader.diagnostics);
-    return said;
+    said = await reader.since(mark);
   } finally {
     await reader.stop();
     await sleep(2_000);
     await lane.app.activate();
   }
+  // A log is complete only once its reader has quit and flushed it.
+  if (reader.settled) said = reader.settled(mark);
+  if (!said.length && reader.diagnostics)
+    row.note(`${reader.name} diagnostics`, reader.diagnostics);
+  return said;
 }
 
 /** Rows 1, 2 and 9, and #515's browser rows, from one reply with three links. */
@@ -1157,9 +1161,7 @@ export async function inspectorRow(lane, familiar, frames) {
 
     await settingsGeneral(app);
     const settings = await app.one('dialog', 'Settings');
-    const shown = [...walk(settings)]
-      .map((node) => String(node.value ?? node.name ?? ''))
-      .join(' ');
+    const shown = `${[...walk(settings)].map((node) => String(node.value ?? node.name ?? '')).join(' ')} ${textIn(settings)}`;
     row.check(
       'Settings > General shows the width',
       new RegExp(`${released.value}\\s*px`).test(shown),
@@ -1203,9 +1205,8 @@ export async function inspectorRow(lane, familiar, frames) {
       600,
     );
     await settingsGeneral(app);
-    const again = [...walk(await app.one('dialog', 'Settings'))]
-      .map((node) => String(node.value ?? node.name ?? ''))
-      .join(' ');
+    const reopened = await app.one('dialog', 'Settings');
+    const again = `${[...walk(reopened)].map((node) => String(node.value ?? node.name ?? '')).join(' ')} ${textIn(reopened)}`;
     row.check('Settings still shows 600px', /600\s*px/.test(again), again.slice(0, 300));
     await closeSettings(app);
   });

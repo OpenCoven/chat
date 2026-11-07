@@ -3,10 +3,10 @@
 // local storage in SQLite; WebView2 keeps it, and session storage, in LevelDB.
 
 import { execFileSync } from 'node:child_process';
-import { DatabaseSync } from 'node:sqlite';
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
+import { DatabaseSync } from 'node:sqlite';
 import { PLATFORM } from './driver.mjs';
 import { Row } from './rows.mjs';
 

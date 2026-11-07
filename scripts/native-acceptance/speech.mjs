@@ -199,6 +199,44 @@ class Orca extends LogReader {
     super(join(out, 'orca-0.log'), /SPEECH OUTPUT: '(.*?)'(?: \{.*)?$/);
     this.out = out;
   }
+  /**
+   * Orca buffers its debug log, so lines reach the file in chunks; each line
+   * carries the time it was spoken, which is what the mark compares.
+   */
+  entries() {
+    if (!existsSync(this.path)) return [];
+    const found = [];
+    for (const line of readFileSync(this.path, 'utf8').split(/\r?\n/)) {
+      const match = /^(\d\d):(\d\d):(\d\d(?:\.\d+)?) - SPEECH OUTPUT: '(.*?)'(?: \{.*)?$/.exec(
+        line,
+      );
+      if (match)
+        found.push({
+          at: Number(match[1]) * 3600 + Number(match[2]) * 60 + Number(match[3]),
+          text: match[4],
+        });
+    }
+    return found;
+  }
+  mark() {
+    const now = new Date();
+    return (
+      now.getHours() * 3600 +
+      now.getMinutes() * 60 +
+      now.getSeconds() +
+      now.getMilliseconds() / 1000
+    );
+  }
+  async since(mark, wait = 4_000) {
+    await sleep(wait);
+    return this.settled(mark);
+  }
+  /** Everything spoken from the mark on, read again once Orca has quit and flushed. */
+  settled(mark) {
+    return this.entries()
+      .filter((entry) => entry.at >= mark && !/^Screen reader (on|off)/.test(entry.text))
+      .map((entry) => entry.text);
+  }
   async start() {
     // One log per session, so each check's events stay on record.
     this.sessions += 1;
