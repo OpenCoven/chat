@@ -46,7 +46,7 @@ while ($null -ne ($line = $reader.ReadLine())) {
       'move' { [NativeDriver]::Move([int]$command.at[0], [int]$command.at[1]); $answer = @{ ok = $true } }
       'down' { [NativeDriver]::Down([int]$command.at[0], [int]$command.at[1]); $answer = @{ ok = $true } }
       'up' { [NativeDriver]::Up([int]$command.at[0], [int]$command.at[1]); $answer = @{ ok = $true } }
-      'menus' { $raw = '{"ok":true,"menus":' + [NativeDriver]::Menus() + '}' }
+      'menus' { $raw = '{"ok":true,"menus":' + [NativeDriver]::Menus($target) + '}' }
       'topWindows' { $raw = '{"ok":true,"windows":' + [NativeDriver]::TopWindows() + '}' }
       'screens' {
         Add-Type -AssemblyName System.Windows.Forms

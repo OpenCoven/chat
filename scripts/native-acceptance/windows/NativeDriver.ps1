@@ -115,9 +115,27 @@ public static class NativeDriver {
   /// Open context menus: WebView2 draws its menu in a Chromium popup window
   /// (Chrome_WidgetWin_*) of its own process, and Win32 menus use #32768. Their
   /// menu items are read wherever they sit under such a window.
-  public static string Menus() {
+  public static string Menus(int pid) {
     var menus = new List<string>();
     var isItem = new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.MenuItem);
+    // WebView2 can host its menu inside the app's own window: its items are
+    // read there, leaving out the title bar's System menu.
+    var own = Window(pid);
+    if (own != null) {
+      var items = new List<string>();
+      AutomationElementCollection found = null;
+      try { found = own.FindAll(TreeScope.Descendants, isItem); } catch { }
+      if (found != null) {
+        foreach (AutomationElement item in found) {
+          try {
+            var parent = TreeWalker.ControlViewWalker.GetParent(item);
+            if (parent != null && parent.Current.ControlType == ControlType.MenuBar) continue;
+            items.Add(Quote(item.Current.Name));
+          } catch { }
+        }
+      }
+      if (items.Count > 0) menus.Add("[" + string.Join(",", items) + "]");
+    }
     foreach (AutomationElement top in AutomationElement.RootElement.FindAll(TreeScope.Children, Condition.TrueCondition)) {
       string cls;
       try { cls = top.Current.ClassName ?? ""; } catch { continue; }

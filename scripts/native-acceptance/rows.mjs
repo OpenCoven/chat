@@ -284,15 +284,17 @@ async function openReview(app, name, row) {
 
 /** Clicks a control that opens a dialog; a second click, disclosed, if the first was absorbed. */
 async function openDialog(app, control, dialog, row) {
-  await app.click(control);
+  // Inside the window is not enough: a control under the composer or the
+  // header is covered, so it is brought to the middle of the thread first.
+  const find = async () => (await app.all(control.role, control.name)).at(-1);
+  await app.click(await app.middle(control, find));
   const opened = await app
     .one('dialog', dialog, { timeout: 5_000 })
     .then(() => true)
     .catch(() => false);
   if (opened) return;
   row?.note(`the first click on "${control.name}" did not open "${dialog}"; clicked again`, true);
-  const again = (await app.all(control.role, control.name)).at(-1);
-  await app.click(again);
+  await app.click(await app.middle(await find(), find));
   await app.one('dialog', dialog);
 }
 
@@ -422,7 +424,12 @@ export async function linkRows(lane, familiar, browser) {
     // The native context menu: what the platform shows, read through accessibility.
     await app.click(await linkNamed(app, 'Handoff check'), { button: 'right' });
     await sleep(1_200);
-    const menus = await native.call({ cmd: 'menus' });
+    // The menu can reach accessibility a moment after it is drawn.
+    let menus = await native.call({ cmd: 'menus' });
+    for (let read = 0; read < 6 && menus.ok && !(menus.menus ?? []).length; read += 1) {
+      await sleep(500);
+      menus = await native.call({ cmd: 'menus' });
+    }
     row1.note('native context menu on the link', menus.ok ? menus.menus : menus.error);
     const items = (menus.menus ?? []).flat();
     // A menu that could not be read proves nothing either way.
@@ -813,19 +820,38 @@ async function dragText(app, fromPattern, toPattern, { fromIndex = 0, toIndex = 
   // A person scrolls the passage to the middle of the window before dragging
   // across it; its edges are under the header and the composer.
   await app.middle(from, async () => (await ends())[0]);
-  [from, to] = await ends();
+  // Chromium updates its reported bounds a moment after a scroll: the press
+  // waits until two reads agree, or it lands where the text used to be.
+  let previous = '';
+  for (let read = 0; read < 10; read += 1) {
+    [from, to] = await ends();
+    const where = JSON.stringify([from?.frame, to?.frame]);
+    if (where === previous) break;
+    previous = where;
+    await sleep(300);
+  }
   if (!from || !to || !(await app.onScreen(from)) || !(await app.onScreen(to))) {
     const { top, bottom, left, right } = await app.viewport();
     throw new Error(
       `the passage (${fromPattern} to ${toPattern}) does not fit in the window: from ${JSON.stringify(from?.frame)}, to ${JSON.stringify(to?.frame)}, visible ${JSON.stringify({ top, bottom, left, right })}`,
     );
   }
-  const start = [Math.round(from.frame.x + 1), Math.round(from.frame.y + from.frame.h / 2)];
-  const end = [Math.round(to.frame.x + to.frame.w - 1), Math.round(to.frame.y + to.frame.h / 2)];
+  // A few pixels inside the first and last glyphs: a press in a bubble's padding
+  // can start the selection at the top of the page.
+  const inset = (frame) => Math.min(4, Math.max(1, Math.floor(frame.w / 4)));
+  const start = [
+    Math.round(from.frame.x + inset(from.frame)),
+    Math.round(from.frame.y + from.frame.h / 2),
+  ];
+  const end = [
+    Math.round(to.frame.x + to.frame.w - inset(to.frame)),
+    Math.round(to.frame.y + to.frame.h / 2),
+  ];
   await app.drag(
     [start, [Math.round((start[0] + end[0]) / 2), Math.round((start[1] + end[1]) / 2)], end],
     200,
   );
+  app.lastDrag = { start, end, from: from.frame, to: to.frame };
   return app.selection();
 }
 
@@ -870,6 +896,7 @@ export async function quoteRow(lane, familiar, ime) {
     await lane.clearComposer(familiar);
     const selected = await dragText(app, ...PASSAGE);
     row.note('selection from a real drag across a paragraph break and a list', selected);
+    row.note('drag points and the passage as the platform placed it', app.lastDrag);
     await until(
       'Quote selection',
       async () => (await app.count('button', 'Quote selection')) === 1,
