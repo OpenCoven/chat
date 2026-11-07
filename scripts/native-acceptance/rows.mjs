@@ -948,7 +948,16 @@ export async function quoteRow(lane, familiar, ime) {
       await sleep(400);
       await app.key('space');
       await sleep(800);
-      await app.key('return');
+      // Enter commits a composition; on Latin input it would send the draft.
+      // So Enter is pressed only once the draft shows the IME composing.
+      const composing = (await lane.composerValue(familiar)).slice(quoted.length);
+      row.note('draft after "nihonn" and Space, before Enter', composing);
+      const imeActive = composing.length > 0 && !/nihonn?/i.test(composing);
+      if (imeActive) await app.key('return');
+      else {
+        row.block('IME', 'the input source reported Japanese, but the keys arrived as Latin text');
+        for (let index = 0; index < composing.length; index += 1) await app.key('delete');
+      }
       await sleep(800);
       const composed = await lane.composerValue(familiar);
       await native.call({ cmd: 'selectInputSource', source: ime.latin });
@@ -957,11 +966,12 @@ export async function quoteRow(lane, familiar, ime) {
       // What the IME commits depends on its candidates (Kotoeri's live conversion
       // can land on 🇯🇵); what matters is a commit with no romaji left over.
       const committed = composed.slice(quoted.length);
-      row.check(
-        'Japanese input committed after the quote (no romaji left)',
-        committed.trim().length > 0 && !/[A-Za-z]/.test(committed),
-        committed,
-      );
+      if (imeActive)
+        row.check(
+          'Japanese input committed after the quote (no romaji left)',
+          committed.trim().length > 0 && !/[A-Za-z]/.test(committed),
+          committed,
+        );
       row.check(
         'the quote is intact after composing',
         composed.startsWith(quoted.replace(/\s+$/, '')),
@@ -978,7 +988,8 @@ export async function quoteRow(lane, familiar, ime) {
     row.expect('a table cell quotes', await lane.composerValue(familiar), '> a | b\n\n');
     await lane.clearComposer(familiar);
 
-    const across = await dragText(app, /^One more address\.$/, /^Here it is\.$/);
+    // The table request and its reply: two messages a short drag apart.
+    const across = await dragText(app, /^\[\[table\]\] Show me the table\.$/, /^Here it is\.$/);
     row.note('selection across two messages', String(across).slice(0, 120));
     await sleep(800);
     row.expect(
