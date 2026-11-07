@@ -324,12 +324,16 @@ Nothing blocked or unrun is counted as passed.
 | Windows | Windows Server 2025 Datacenter 10.0.26100, `windows-2025` | `OpenCoven.Chat_0.0.8_x64_en-US.msi` `3e77b955ac6f1d8cf75f9215ff40081b63a56cf4ae5489b5fee24c54bc4f5b0e`; installed `opencoven-chat.exe` `87a4fc112b06b709aa345587ec7febc105c251546832aff7e273a3fe0227f9e3` | Authenticode: `NotSigned` (installer rows stay with #520) | WebView2 156.0.4314.58 | NVDA 2025.3.2 portable | Microsoft IME (ja-JP) |
 | Linux | Ubuntu 24.04.5, `ubuntu-24.04` | `OpenCoven.Chat_0.0.8_amd64.deb` `2d168c7df7b400d02d05b2413186a280ff8c61564a7d4f59145c589edb400368` | (none) | WebKitGTK 2.52.6-0ubuntu0.24.04.1 | Orca 46.1 (no audio device: utterances read from its debug log) | Mozc through IBus |
 
-**Runs.** The final harness is `test/504-native-acceptance` @ `2688e14`. Its run is [42327181444](https://github.com/OpenCoven/chat/actions/runs/42327181444), started 2026-11-07 02:02Z, with one job per lane:
+**Runs.**
 
-- Windows: job [128265055376](https://github.com/OpenCoven/chat/actions/runs/42327181444/job/128265055376)
-- Linux: job [128265055594](https://github.com/OpenCoven/chat/actions/runs/42327181444/job/128265055594)
-- macOS x64: job [128265055686](https://github.com/OpenCoven/chat/actions/runs/42327181444/job/128265055686)
-- macOS arm64: job [128265055555](https://github.com/OpenCoven/chat/actions/runs/42327181444/job/128265055555), and job [128268345612](https://github.com/OpenCoven/chat/actions/runs/42327181444/job/128268345612). That second job is the same commit rerun as attempt 2, because in attempt 1 Kotoeri's process never started and the keys stayed Latin. In attempt 2 it started and composed あ on the first try. Every other row came out the same in both attempts.
+- **macOS, final harness `e61025e`:** run [42331426944](https://github.com/OpenCoven/chat/actions/runs/42331426944), started 2026-11-07 02:53Z. The jobs are arm64 [128278587577](https://github.com/OpenCoven/chat/actions/runs/42331426944/job/128278587577) and x64 [128278587816](https://github.com/OpenCoven/chat/actions/runs/42331426944/job/128278587816).
+  - It ran from the scratch branch `test/504-ime-probe` @ `e973675`, because the lane's own workflow is dispatch-only until it reaches `main`. That commit's `scripts/native-acceptance/` is byte-identical to the lane's `e61025e` (tree `2eaa6b5`), and it only adds a push trigger for the macOS jobs.
+  - `e61025e` chooses Kotoeri afresh on later IME attempts, as described under row 3. Every row came out as in run 15, and Japanese input composed on both Macs.
+- **Windows and Linux, harness `2688e14`:** run [42327181444](https://github.com/OpenCoven/chat/actions/runs/42327181444), started 2026-11-07 02:02Z. The jobs are Windows [128265055376](https://github.com/OpenCoven/chat/actions/runs/42327181444/job/128265055376) and Linux [128265055594](https://github.com/OpenCoven/chat/actions/runs/42327181444/job/128265055594). `e61025e` changes only the macOS input-method retries, so these results stand for it.
+- **The same run's macOS jobs at `2688e14`:**
+  - x64 [128265055686](https://github.com/OpenCoven/chat/actions/runs/42327181444/job/128265055686): every row the same as above except IME, which was blocked.
+  - arm64 [128265055555](https://github.com/OpenCoven/chat/actions/runs/42327181444/job/128265055555), blocked in its first attempt.
+  - The arm64 rerun as attempt 2, [128268345612](https://github.com/OpenCoven/chat/actions/runs/42327181444/job/128268345612), composed.
 
 Runs 11–13 reproduced every finding below on earlier harness commits:
 
@@ -346,7 +350,7 @@ Runs 1–9 built the lane, and runs 6, 10 and 14 were cancelled when a newer com
 | Setup: first run through the window | observed | observed | observed | observed |
 | 1. Link gestures, context menu, exact clipboard | observed | observed | **failed** (#547): page menu on right-click; gestures, no-open menu and exact clipboard observed | **failed** (#547): page menu on right-click; gestures, no-open menu and exact clipboard observed |
 | 2. Dialog modality, focus return, screen-reader announcement | observed (VoiceOver) | observed (VoiceOver) | observed (NVDA) | observed (Orca) |
-| 3. Quote selection: drag, Tab, held Enter, IME, cell, two messages | **failed** (#544): Tab from the dragged passage; the rest observed, IME included (attempt 2) | **failed** (#544): Tab from the dragged passage; IME **blocked** (runner, see below); the rest observed | observed | **failed** (#544): Tab from the dragged passage; the rest observed, IME included |
+| 3. Quote selection: drag, Tab, held Enter, IME, cell, two messages | **failed** (#544): Tab from the dragged passage; the rest observed, IME included | **failed** (#544): Tab from the dragged passage; the rest observed, IME included | observed | **failed** (#544): Tab from the dragged passage; the rest observed, IME included |
 | 4. Chat-switch isolation | observed | observed | observed | observed |
 | 5. Tables at 480×520 with Larger text | observed | observed | observed | observed |
 | 6. Inspector: pointer capture, separator, keys, Reset, persisted width | **failed** (#545): no value spoken on focus; the rest observed | **failed** (#545): no value spoken on focus; the rest observed | observed (NVDA reads "360") | **failed** (#545, #548): no value spoken on focus; Settings' width is drawn but not exposed to AT-SPI; the rest observed |
@@ -376,10 +380,14 @@ Runs 1–9 built the lane, and runs 6, 10 and 14 were cancelled when a newer com
   - **Tab from the dragged passage:** WebView2 reached the action in 23 presses with the capture kept. On WebKit (both Macs and Linux), the first Tab landed on the link inside the selection and the action went away (#544).
   - **Held Enter** on the action (held about 0.6 s, with key repeats as the keyboard sends them) inserted one quote, sent nothing (model requests unchanged) and left focus in the composer. On Windows this was the dragged passage. On WebKit it was a passage with no control after it ("Done."), which Tab reaches in one press.
   - **IME:** composing "nihonn", Space, Enter after the quote committed Japanese with no romaji left and sent nothing:
-    - Kotoeri on arm64: 🇯🇵, its live-conversion candidate for にほん, in run 15's attempt 2 (日本 or 🇯🇵 in runs 11 and 12). In run 15's attempt 1, Kotoeri's process never started and the keys stayed Latin. In run 13, the lane started the process by hand, and the keys still stayed Latin. Both report IME as **blocked**, not judged.
+    - Kotoeri on macOS x64: 日本 (run 42331426944)
+    - Kotoeri on macOS arm64: 🇯🇵, its live-conversion candidate for にほん (run 42331426944; also in runs 11, 12 and 15's attempt 2)
     - Microsoft IME: 日本
     - Mozc: 日本
-    - macOS x64: **blocked**. On the `macos-15-intel` runner TIS reports Kotoeri as selected, but its かな key arrives in the composer as a control character (U+0010) and the probe key as Latin, on up to five tries in each of runs 9, 11, 12, 13 and 15. The keys never reach the input method, so nothing about Chat is judged there.
+  - **How Kotoeri was made to compose on macOS.** Choosing Kotoeri through Text Input Sources reports it as current, but on these runners the first choice often leaves its input method unstarted. The keys then arrive Latin, with the かな key as a control character (U+0010). This was seen in every x64 run up to run 15, and on arm64 in run 13 and run 15's first attempt; each reported IME as **blocked**, not judged.
+    - A probe on both runners ([run 42331071948](https://github.com/OpenCoven/chat/actions/runs/42331071948)) typed one key into TextEdit after each way of choosing. A fresh choice started the input method: Latin and back with the app in front (Intel, both copies), or an app becoming active with Japanese already chosen (all four copies).
+    - From its second attempt, the lane now chooses afresh that way and records which way ran. On x64 the second attempt, "Latin, then Japanese again", composed あ. On arm64 the first attempt did.
+    - The probe key decides, as before. Nothing is judged until the composer shows Japanese.
   - **Table cell:** a drag inside one cell (`a | b`) quoted as `> a | b`.
   - **Across messages:** a drag from "[[table]] Show me the table." to the reply "Here it is." offered no action.
 - **4. Chat switch** (all lanes):
@@ -459,6 +467,6 @@ and the desktop runtime rows above are still open.
 
 - Rows 2, 4, 5, 7 and 9, and #515's hand-off, were observed on every lane.
 - Rows 1, 3, 6 and 8 each failed on at least one lane, and each failure has a focused issue, #544–#548, against the owning feature.
-- One part is **blocked**, not judged: Japanese input on the macOS x64 runner, where the keys never reached Kotoeri. On arm64 it was observed.
+- Japanese input was observed on every lane, after the lane learned to start Kotoeri on the macOS runners (row 3).
 
 These results do not authorize a merge or a release. A fix for any of the five issues needs the failed row run again.
