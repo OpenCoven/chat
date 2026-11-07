@@ -3,6 +3,7 @@
 // not met fails the row, and anything the lane could not stage is recorded as
 // blocked, never as passed.
 
+import { spawnSync } from 'node:child_process';
 import { isDeepStrictEqual } from 'node:util';
 import { addressBars, browserProcesses, quitBrowsers } from './browser.mjs';
 import {
@@ -940,10 +941,45 @@ async function caretToEnd(lane, familiar) {
  * input, and the keys meanwhile arrive as Latin. One probe key shows which:
  * Japanese input turns "a" into composing kana, which Delete then cancels.
  */
+/**
+ * Choosing Kotoeri while it is already the current source changes nothing, and
+ * on the macOS runners its first choice often leaves the input method
+ * unstarted, so the keys stay Latin. A probe on both runners (TextEdit, one key
+ * after each way of choosing) found it starts on a fresh choice: away to Latin
+ * and back with the app in front composed on the Intel runner, and an app
+ * becoming active with Japanese already chosen composed on both. Later attempts
+ * try those in turn; whether the keys compose is still judged by the probe key.
+ */
+async function rechooseKotoeri(lane, ime, attempt) {
+  const { native } = lane;
+  await native.call({ cmd: 'selectInputSource', source: ime.latin });
+  await sleep(1_000);
+  if (attempt === 4)
+    spawnSync('pluginkit', ['-e', 'use', '-i', ime.japanese.replace(/\.Japanese$/, '')], {
+      stdio: 'ignore',
+    });
+  if (attempt % 2 === 1) {
+    // Another app in front while Japanese is chosen, then Chat again.
+    spawnSync('open', ['-a', 'Finder'], { stdio: 'ignore' });
+    await sleep(1_500);
+    await native.call({ cmd: 'selectInputSource', source: ime.japanese });
+    await sleep(1_500);
+    return 'Latin, then Japanese with Finder in front, then Chat';
+  }
+  await lane.front();
+  await native.call({ cmd: 'selectInputSource', source: ime.japanese });
+  await sleep(3_000);
+  return attempt === 4
+    ? 'pluginkit use, then Latin and Japanese again'
+    : 'Latin, then Japanese again';
+}
+
 async function imeReady(lane, familiar, ime, quoted) {
   const { app, native } = lane;
   const tries = [];
   for (let attempt = 1; attempt <= 5; attempt += 1) {
+    const how =
+      attempt > 1 && PLATFORM === 'mac' ? await rechooseKotoeri(lane, ime, attempt) : 'chosen';
     await lane.front();
     const chosen = await native.call({ cmd: 'selectInputSource', source: ime.japanese });
     await caretToEnd(lane, familiar);
@@ -967,7 +1003,7 @@ async function imeReady(lane, familiar, ime, quoted) {
       await sleep(150);
       after = await lane.composerValue(familiar);
     }
-    tries.push({ attempt, current: chosen.current, probe, focus, restored: after === quoted });
+    tries.push({ attempt, how, current: chosen.current, probe, focus, restored: after === quoted });
     if (after !== quoted) break;
     if (probe && !/[a-z]/i.test(probe)) return { composing: true, tries };
     // WebKitGTK keeps IBus's uncommitted text out of the field's accessible
