@@ -428,11 +428,17 @@ export async function linkRows(lane, familiar, browser) {
         !items.some((item) => /open link|open in|new tab|new window/i.test(item)),
         items,
       );
-    else
+    else {
       row1.block(
         'context menu items',
         'no open menu could be read through accessibility (see the screenshot)',
       );
+      if (PLATFORM === 'windows')
+        row1.note(
+          'top-level windows while the menu was open',
+          await native.call({ cmd: 'topWindows' }),
+        );
+    }
     row1.expect('right-click opens the review', await app.count('dialog', REVIEW), 0);
     lane.shot('504-1-context-menu');
     await dismissMenus(lane);
@@ -570,7 +576,8 @@ export async function linkRows(lane, familiar, browser) {
     await app.click((await reviewFacts(app)).open);
     const plain = await waitForAddress(native, browser.key, ADDRESSES.plain, 30_000, lane);
     handoff.note('browser windows after Open on the plain address (browser running)', plain);
-    const shown = plain.flatMap((w) => w.fields.map((f) => f.value));
+    // Firefox's address field is not exposed on this runner; the loaded document's URL is.
+    const shown = plain.flatMap((w) => [...w.fields.map((f) => f.value), ...w.documents]);
     handoff.check(
       'the running browser shows the plain address (or notes its own HTTPS upgrade)',
       shown.includes(ADDRESSES.plain) ||
@@ -785,7 +792,9 @@ async function tableSteps(lane, familiar, frames, row) {
 /** A drag across text that a person would make: from the start of one node to the end of another. */
 async function dragText(app, fromPattern, toPattern, { fromIndex = 0, toIndex = -1 } = {}) {
   // UI Automation exposes a link's words only as the link, with no text child.
-  const words = (node) => shownText(node) || (node.role === 'link' ? node.name : '');
+  // Nor a table cell's words, which are its name.
+  const words = (node) =>
+    shownText(node) || (node.role === 'link' || node.role === 'cell' ? node.name : '');
   const ends = async () => {
     const texts = [...walk(await app.snapshot())].filter(
       (node) => node.frame && node.frame.w > 0 && words(node),
@@ -945,10 +954,13 @@ export async function quoteRow(lane, familiar, ime) {
       await native.call({ cmd: 'selectInputSource', source: ime.latin });
       if (ime.off) await app.key(ime.off);
       row.note('composer after composing "nihonn", Space, Enter', composed);
+      // What the IME commits depends on its candidates (Kotoeri's live conversion
+      // can land on 🇯🇵); what matters is a commit with no romaji left over.
+      const committed = composed.slice(quoted.length);
       row.check(
-        'Japanese text composed after the quote',
-        /[぀-ヿ一-鿿]/.test(composed.slice(quoted.length)),
-        composed.slice(quoted.length),
+        'Japanese input committed after the quote (no romaji left)',
+        committed.trim().length > 0 && !/[A-Za-z]/.test(committed),
+        committed,
       );
       row.check(
         'the quote is intact after composing',
@@ -1055,13 +1067,19 @@ export async function inspectorRow(lane, familiar, frames) {
       );
     }
 
-    const onLeft = await listen(lane, row, 'separator value change read aloud', () =>
-      app.key('left'),
-    );
-    if (onLeft) row.note(`${lane.reader.name} after Left`, onLeft);
+    await app.key('left');
     row.expect('Left widens by 16px', (await inspectorWidth(app)).value, 376);
     await app.key('right');
     row.expect('Right narrows by 16px', (await inspectorWidth(app)).value, 360);
+    // What VoiceOver says as the value changes, for the record. NVDA and Orca
+    // take arrow keys for their own reading cursor, so this runs on macOS only.
+    if (PLATFORM === 'mac') {
+      const onLeft = await listen(lane, row, 'separator value change read aloud', () =>
+        app.key('left'),
+      );
+      if (onLeft) row.note(`${lane.reader.name} after Left (376px)`, onLeft);
+      await app.key('right');
+    }
     await app.key('home');
     row.note('Home', (await inspectorWidth(app)).value);
     await app.key('end');

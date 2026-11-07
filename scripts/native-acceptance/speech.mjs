@@ -193,13 +193,19 @@ class Nvda extends LogReader {
 
 class Orca extends LogReader {
   name = 'Orca';
+  sessions = 0;
   constructor(out) {
-    super(join(out, 'orca.log'), /SPEECH OUTPUT: '(.*)'/);
+    // The utterance is quoted and followed by Orca's voice settings: 'text' {...}
+    super(join(out, 'orca-0.log'), /SPEECH OUTPUT: '(.*?)'(?: \{.*)?$/);
+    this.out = out;
   }
   async start() {
+    // One log per session, so each check's events stay on record.
+    this.sessions += 1;
+    this.path = join(this.out, `orca-${this.sessions}.log`);
     rmSync(this.path, { force: true });
     // Orca's own output is kept: a start that stalls says why there.
-    const output = openSync(`${this.path}.out`, 'a');
+    const output = openSync(join(this.out, 'orca-output.txt'), 'a');
     this.child = spawn('orca', ['--replace', `--debug-file=${this.path}`], {
       detached: true,
       stdio: ['ignore', output, output],

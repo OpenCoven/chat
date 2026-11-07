@@ -3,6 +3,7 @@
 // local storage in SQLite; WebView2 keeps it, and session storage, in LevelDB.
 
 import { execFileSync } from 'node:child_process';
+import { DatabaseSync } from 'node:sqlite';
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
@@ -120,6 +121,37 @@ function leveldbKeys(bytes) {
   return [...keys];
 }
 
+/**
+ * Where in a SQLite file a needle sits: table and column, read-only, from a
+ * copy (the profile may still hold a lock). Nothing of the row is kept but
+ * the place, the needle being synthetic text the lane typed or showed.
+ */
+export function sqlitePlaces(path, needle) {
+  const places = [];
+  let db;
+  try {
+    db = new DatabaseSync(path, { readOnly: true });
+    const tables = db.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all();
+    for (const { name } of tables) {
+      const columns = db.prepare(`PRAGMA table_info("${name.replace(/"/g, '""')}")`).all();
+      for (const column of columns) {
+        const quoted = `"${column.name.replace(/"/g, '""')}"`;
+        const hit = db
+          .prepare(
+            `SELECT count(*) AS n FROM "${name.replace(/"/g, '""')}" WHERE CAST(${quoted} AS TEXT) LIKE ?`,
+          )
+          .get(`%${needle}%`);
+        if (hit?.n) places.push(`${name}.${column.name} (${hit.n} rows)`);
+      }
+    }
+  } catch (error) {
+    places.push(`(not readable as SQLite: ${error.message})`);
+  } finally {
+    db?.close();
+  }
+  return places;
+}
+
 export function storageRow() {
   const row = new Row('504-8', 'Preference-only browser storage, read from disk after quitting');
   try {
@@ -225,6 +257,11 @@ export function storageRow() {
         );
       });
       row.expect(`browser storage files containing "${needle}"`, hits, []);
+      for (const path of hits)
+        row.note(
+          `where "${needle}" sits in ${path.replace(home, '~')}`,
+          sqlitePlaces(path, needle),
+        );
     }
     // Outside browser storage, for the record: Chat's own app data (not judged here).
     const appFiles = app.flatMap((root) => files(root));

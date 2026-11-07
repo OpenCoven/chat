@@ -133,6 +133,18 @@ public static class NativeDriver {
     return "[" + string.Join(",", menus) + "]";
   }
 
+  /// Top-level windows, for the record when no menu could be read.
+  public static string TopWindows() {
+    var tops = new List<string>();
+    foreach (AutomationElement top in AutomationElement.RootElement.FindAll(TreeScope.Children, Condition.TrueCondition)) {
+      try {
+        var c = top.Current;
+        tops.Add("{\"class\":" + Quote(c.ClassName ?? "") + ",\"name\":" + Quote(c.Name ?? "") + ",\"pid\":" + c.ProcessId + ",\"type\":" + Quote(c.ControlType.ProgrammaticName) + "}");
+      } catch { }
+    }
+    return "[" + string.Join(",", tops) + "]";
+  }
+
   public static void Down(int x, int y) { Move(x, y); System.Threading.Thread.Sleep(60); Mouse(Down("left")); }
   public static void Up(int x, int y) { SetCursorPos(x, y); Mouse(0x0001); Mouse(Up("left")); }
 
@@ -216,7 +228,9 @@ public static class NativeDriver {
   public static void Wheel(int x, int y, int dy, int dx) {
     Move(x, y);
     if (dy != 0) Mouse(0x0800, unchecked((uint)dy));
-    if (dx != 0) Mouse(0x1000, unchecked((uint)dx));
+    // A horizontal wheel's positive delta scrolls right; the lane's dx follows
+    // the macOS sign, where negative scrolls right.
+    if (dx != 0) Mouse(0x1000, unchecked((uint)(-dx)));
   }
 
   static void Key(ushort vk, bool up) {

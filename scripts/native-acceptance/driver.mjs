@@ -114,6 +114,8 @@ const WINDOWS_TYPES = {
 const LINUX_ROLES = {
   'push button': 'button',
   'toggle button': 'button',
+  // WebKitGTK reports a button with aria-haspopup (Settings, Chat actions) as a combo box.
+  'combo box': 'button',
   link: 'link',
   entry: 'textbox',
   'password text': 'textbox',
