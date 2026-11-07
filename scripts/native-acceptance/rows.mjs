@@ -71,7 +71,17 @@ export class Lane {
   }
 
   async clearComposer(familiar) {
-    await this.app.click(await this.composer(familiar));
+    // Select-all outside the composer would select the whole page, and a later
+    // drag that starts inside a selection moves it instead of selecting.
+    for (let attempt = 0; attempt < 4; attempt += 1) {
+      await this.app.click(await this.composer(familiar));
+      if ((await this.app.focused())?.name === `Message ${familiar}`) break;
+      await this.front();
+    }
+    if ((await this.app.focused())?.name !== `Message ${familiar}`)
+      throw new Error(
+        `the composer did not take focus (focus: ${(await this.app.focused())?.name})`,
+      );
     await this.app.key('a', [MOD]);
     await this.app.key('delete');
     await until(
@@ -875,13 +885,23 @@ async function dragText(app, fromPattern, toPattern, { fromIndex = 0, toIndex = 
     Math.round(from.frame.x + inset(from.frame)),
     Math.round(from.frame.y + from.frame.h / 2),
   ];
+  // A press inside an existing selection starts drag-and-drop instead of a new
+  // selection, so a selection left over is collapsed with a click first.
+  const collapsedFirst = Boolean(await app.selection());
+  if (collapsedFirst) {
+    await app.click([
+      Math.round(from.frame.x + inset(from.frame)),
+      Math.round(from.frame.y + from.frame.h / 2),
+    ]);
+    await sleep(300);
+  }
   // The end stays one pixel inside: a final "." is narrower than the inset.
   const end = [Math.round(to.frame.x + to.frame.w - 1), Math.round(to.frame.y + to.frame.h / 2)];
   await app.drag(
     [start, [Math.round((start[0] + end[0]) / 2), Math.round((start[1] + end[1]) / 2)], end],
     200,
   );
-  app.lastDrag = { start, end, from: from.frame, to: to.frame };
+  app.lastDrag = { start, end, from: from.frame, to: to.frame, collapsedFirst };
   return app.selection();
 }
 
