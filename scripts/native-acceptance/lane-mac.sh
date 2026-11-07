@@ -60,6 +60,16 @@ defaults write -g AppleKeyboardUIMode -int 2
 # VoiceOver answers AppleScript only when these are set.
 sudo mkdir -p /private/var/db/Accessibility
 sudo bash -c 'printf a > /private/var/db/Accessibility/.VoiceOverAppleScriptEnabled'
+# Reading VoiceOver's last phrase is an Apple Event to VoiceOver; without a
+# grant, macOS asks "hosted-compute-agent wants access to control VoiceOver"
+# on screen and every read waits. The runner's SIP is off, so the grant is
+# written the way the runner image writes its own.
+for db in "$HOME/Library/Application Support/com.apple.TCC/TCC.db" "/Library/Application Support/com.apple.TCC/TCC.db"; do
+  for client in /opt/hca/hosted-compute-agent /usr/bin/osascript /bin/bash /usr/local/opt/runner/provisioner/provisioner; do
+    sudo sqlite3 "$db" "INSERT OR REPLACE INTO access (service, client, client_type, auth_value, auth_reason, auth_version, indirect_object_identifier_type, indirect_object_identifier, flags, last_modified) VALUES ('kTCCServiceAppleEvents', '$client', 1, 2, 3, 1, 0, 'com.apple.VoiceOver', 0, CAST(strftime('%s','now') AS INTEGER));" 2>> "$out/tcc.txt"
+  done
+done
+log "Apple Events to VoiceOver granted: $(sudo sqlite3 "$HOME/Library/Application Support/com.apple.TCC/TCC.db" "select client from access where service='kTCCServiceAppleEvents' and indirect_object_identifier='com.apple.VoiceOver'" 2>&1 | tr '\n' ' ')"
 
 swiftc -O -o "$out/native-mac" "$here/mac/NativeDriver.swift" || exit 1
 log "helper trust: $(echo '{"cmd":"trust"}' | "$out/native-mac")"
@@ -87,5 +97,5 @@ node "$here/run.mjs" --app "$app/Contents/MacOS/opencoven-chat" --out "$out" \
   --helper "$out/native-mac" --facts "$out/facts.json" \
   --japanese com.apple.inputmethod.Kotoeri.RomajiTyping.Japanese --latin com.apple.keylayout.ABC
 status=$?
-log "TCC rows: $(sudo sqlite3 '/Library/Application Support/com.apple.TCC/TCC.db' "select service, client from access where service in ('kTCCServiceAccessibility','kTCCServiceScreenCapture','kTCCServiceAppleEvents','kTCCServicePostEvent')" 2>&1 | tr '\n' ';' | cut -c1-1500)"
+log "TCC rows: $(sudo sqlite3 '/Library/Application Support/com.apple.TCC/TCC.db' "select service, client, indirect_object_identifier from access where service in ('kTCCServiceAccessibility','kTCCServiceScreenCapture','kTCCServiceAppleEvents','kTCCServicePostEvent')" 2>&1 | tr '\n' ';' | cut -c1-2000)"
 exit $status

@@ -58,8 +58,8 @@ export class Row {
 
 /** The lane's shared state: the app, the model log, the screen reader, the output folder. */
 export class Lane {
-  constructor({ app, native, requests, tokens, reader, shot, save, cli }) {
-    Object.assign(this, { app, native, requests, tokens, reader, shot, save, cli });
+  constructor({ app, native, requests, tokens, reader, shot, save, cli, frames }) {
+    Object.assign(this, { app, native, requests, tokens, reader, shot, save, cli, frames });
   }
 
   composer(familiar) {
@@ -118,6 +118,8 @@ export class Lane {
   /** Closes whatever review, sheet or menu a failed step left open. */
   async reset() {
     await this.front().catch(() => undefined);
+    // A row that failed while the window was small must not leave it small.
+    if (this.frames) await this.app.setFrame(this.frames.wide).catch(() => undefined);
     for (let index = 0; index < 3; index += 1) await this.app.key('escape').catch(() => undefined);
     for (let index = 0; index < 3; index += 1) {
       const open = await this.app.all('dialog').catch(() => []);
@@ -280,6 +282,20 @@ async function openReview(app, name, row) {
   await app.one('dialog', REVIEW);
 }
 
+/** Clicks a control that opens a dialog; a second click, disclosed, if the first was absorbed. */
+async function openDialog(app, control, dialog, row) {
+  await app.click(control);
+  const opened = await app
+    .one('dialog', dialog, { timeout: 5_000 })
+    .then(() => true)
+    .catch(() => false);
+  if (opened) return;
+  row?.note(`the first click on "${control.name}" did not open "${dialog}"; clicked again`, true);
+  const again = (await app.all(control.role, control.name)).at(-1);
+  await app.click(again);
+  await app.one('dialog', dialog);
+}
+
 /** Escape until the platform reports no open menu. */
 async function dismissMenus(lane) {
   for (let attempt = 0; attempt < 4; attempt += 1) {
@@ -351,11 +367,16 @@ async function listen(lane, row, label, act) {
     return null;
   }
   await lane.app.activate();
-  await sleep(1_000);
+  // The reader's own start-up speech finishes before the action is taken.
+  if (reader.settle) await reader.settle();
+  else await sleep(1_000);
   try {
     const mark = await reader.mark();
     await act();
-    return await reader.since(mark);
+    const said = await reader.since(mark);
+    if (!said.length && reader.diagnostics)
+      row.note(`${reader.name} diagnostics`, reader.diagnostics);
+    return said;
   } finally {
     await reader.stop();
     await sleep(2_000);
@@ -630,9 +651,21 @@ const inside = (inner, outer) =>
 
 /** Row 5: tables, the sheet, and Copy table Markdown at 480x520 with Larger text. */
 export async function tableRow(lane, familiar, frames) {
-  const { app, native } = lane;
+  const { app } = lane;
   const row = new Row('504-5', 'Tables at 480x520 with Larger text');
   return lane.attempt(row, async () => {
+    try {
+      await tableSteps(lane, familiar, frames, row);
+    } finally {
+      await app.setFrame(frames.wide).catch(() => undefined);
+      await sleep(1_500);
+    }
+  });
+}
+
+async function tableSteps(lane, familiar, frames, row) {
+  const { app, native } = lane;
+  {
     const sample = (await app.all('text')).find((node) =>
       /three steps/.test(String(node.value ?? node.name)),
     );
@@ -739,9 +772,7 @@ export async function tableRow(lane, familiar, frames) {
       `Message ${familiar}`,
     );
     lane.shot('504-5-480x520');
-    await app.setFrame(frames.wide);
-    await sleep(1_500);
-  });
+  }
 }
 
 /** A drag across text that a person would make: from the start of one node to the end of another. */
@@ -764,8 +795,12 @@ async function dragText(app, fromPattern, toPattern, { fromIndex = 0, toIndex = 
     await app.visible(from);
     [from, to] = await ends();
   }
-  if (!from || !to || !(await app.onScreen(from)) || !(await app.onScreen(to)))
-    throw new Error(`the passage (${fromPattern} to ${toPattern}) does not fit in the window`);
+  if (!from || !to || !(await app.onScreen(from)) || !(await app.onScreen(to))) {
+    const { top, bottom, left, right } = await app.viewport();
+    throw new Error(
+      `the passage (${fromPattern} to ${toPattern}) does not fit in the window: from ${JSON.stringify(from?.frame)}, to ${JSON.stringify(to?.frame)}, visible ${JSON.stringify({ top, bottom, left, right })}`,
+    );
+  }
   const start = [Math.round(from.frame.x + 1), Math.round(from.frame.y + from.frame.h / 2)];
   const end = [Math.round(to.frame.x + to.frame.w - 1), Math.round(to.frame.y + to.frame.h / 2)];
   await app.drag(
@@ -796,11 +831,18 @@ export async function quoteRow(lane, familiar, ime) {
     row.expect('Quote selection offered once', await app.count('button', 'Quote selection'), 1);
 
     let tabs = 0;
-    while ((await app.focusedName()) !== 'Quote selection' && tabs < 80) {
+    const path = [];
+    let vanishedAt = null;
+    while ((await app.focusedName()) !== 'Quote selection' && tabs < 120) {
       await app.key('tab');
       tabs += 1;
+      path.push(await app.focusedName());
+      if (vanishedAt === null && tabs % 5 === 0 && !(await app.count('button', 'Quote selection')))
+        vanishedAt = tabs;
     }
     row.note('Tab presses from the conversation to the action', tabs);
+    row.note('focus at each Tab', path);
+    if (vanishedAt !== null) row.note('Quote selection was gone by Tab press', vanishedAt);
     row.expect('focus reaches Quote selection by Tab', await app.focusedName(), 'Quote selection');
 
     const sent = lane.requests();
@@ -818,9 +860,17 @@ export async function quoteRow(lane, familiar, ime) {
     );
 
     // IME: compose Japanese after the quote; committing must not send.
-    if (ime) {
-      const chosen = await native.call({ cmd: 'selectInputSource', source: ime.japanese });
-      row.note('input source for Japanese', chosen);
+    const chosen = ime
+      ? await native.call({ cmd: 'selectInputSource', source: ime.japanese })
+      : null;
+    if (chosen) row.note('input source for Japanese', chosen);
+    if (chosen && !chosen.ok) {
+      // Enter on Latin input would send the draft, so nothing is typed.
+      row.block(
+        'IME',
+        `the Japanese input source could not be selected: ${JSON.stringify(chosen)}`,
+      );
+    } else if (ime) {
       if (ime.on) await app.key(ime.on);
       await app.type('nihon');
       await app.key('space');
@@ -845,7 +895,7 @@ export async function quoteRow(lane, familiar, ime) {
     } else row.block('IME', 'no Japanese input method could be enabled on this runner');
 
     await lane.clearComposer(familiar);
-    const cell = await dragText(app, /^a \| b$/, /^a \| b$/);
+    const cell = await dragText(app, /^a \| b$/, /^a \| b$/, { toIndex: 0 });
     row.note('selection inside one table cell', cell);
     await app.click(await app.one('button', 'Quote selection'));
     await sleep(500);
@@ -940,7 +990,10 @@ export async function inspectorRow(lane, familiar, frames) {
       );
     }
 
-    await app.key('left');
+    const onLeft = await listen(lane, row, 'separator value change read aloud', () =>
+      app.key('left'),
+    );
+    if (onLeft) row.note(`${lane.reader.name} after Left`, onLeft);
     row.expect('Left widens by 16px', (await inspectorWidth(app)).value, 376);
     await app.key('right');
     row.expect('Right narrows by 16px', (await inspectorWidth(app)).value, 360);
@@ -1107,12 +1160,13 @@ export async function switchRow(lane, first, second) {
       await app.count('button', 'Quote selection'),
       1,
     );
-    await app.click((await app.all('button', 'Expand table')).at(-1));
-    await app.one('dialog', 'Expanded table');
-    await app.click(
+    await openDialog(app, (await app.all('button', 'Expand table')).at(-1), 'Expanded table', row);
+    await openDialog(
+      app,
       await app.one('link', 'Guide', { within: ['dialog', 'Expanded table'], first: true }),
+      REVIEW,
+      row,
     );
-    await app.one('dialog', REVIEW);
     row.note('visible to assistive technology before switching', await state());
 
     // Cmd/Ctrl+[ and ] are off while a dialog is open (rail-shortcuts.ts).

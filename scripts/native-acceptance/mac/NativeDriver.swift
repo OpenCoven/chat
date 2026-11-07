@@ -483,12 +483,26 @@ func run(_ command: [String: Any]) -> [String: Any] {
   case "selectInputSource":
     let id = command["source"] as? String ?? ""
     guard let found = inputSource(id) else { return ["ok": false, "error": "no input source \(id)"] }
+    // An input mode (Kotoeri's Japanese) is selectable only once its input
+    // method is enabled too, so the parent is enabled first.
+    var parentEnabled: Int? = nil
+    if let dot = id.lastIndex(of: "."), let parent = inputSource(String(id[..<dot])) {
+      parentEnabled = Int(TISEnableInputSource(parent))
+    }
     let enabled = TISEnableInputSource(found)
-    let selected = TISSelectInputSource(found)
+    var selected = TISSelectInputSource(found)
+    for _ in 0..<8 where selected != noErr {
+      usleep(500_000)
+      selected = TISSelectInputSource(found)
+    }
     usleep(300_000)
+    let capable = TISGetInputSourceProperty(found, kTISPropertyInputSourceIsSelectCapable).map {
+      CFBooleanGetValue(Unmanaged<CFBoolean>.fromOpaque($0).takeUnretainedValue())
+    }
     let current = TISCopyCurrentKeyboardInputSource()?.takeRetainedValue()
     return [
       "ok": selected == noErr, "enable": Int(enabled), "select": Int(selected),
+      "parentEnable": parentEnabled ?? "no parent", "selectCapable": capable ?? "unknown",
       "current": current.map(sourceID) ?? "",
     ]
   default:

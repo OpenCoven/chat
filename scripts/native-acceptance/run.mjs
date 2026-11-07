@@ -210,7 +210,17 @@ try {
   await app.activate();
 
   const save = (name, text) => writeFileSync(join(out, name), text);
-  const lane = new Lane({ app, native, requests, tokens, reader, shot, save, cli: covenCli() });
+  const lane = new Lane({
+    app,
+    native,
+    requests,
+    tokens,
+    reader,
+    shot,
+    save,
+    cli: covenCli(),
+    frames: FRAMES,
+  });
   await setUp(app);
   shot('chat-open');
   rows.push(...(await linkRows(lane, FIRST, browser)));

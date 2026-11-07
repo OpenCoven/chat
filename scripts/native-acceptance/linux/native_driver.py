@@ -237,7 +237,7 @@ def run(command):
         current = subprocess.run(["ibus", "engine"], capture_output=True, text=True, check=False).stdout.strip()
         return {"ok": True, "current": current}
     if name == "hideApp":
-        ids = xdotool("search", "--pid", int(command.get("pid", 0)), "--onlyvisible", "--name", ".").stdout.split()
+        ids = xdotool("search", "--all", "--pid", int(command.get("pid", 0)), "--onlyvisible", "--name", ".").stdout.split()
         for window in ids:
             xdotool("windowminimize", window)
         time.sleep(0.4)
@@ -321,14 +321,19 @@ def run(command):
         xdotool("type", "--delay", 30, command.get("text", ""))
         return {"ok": True}
     if name == "activate":
-        result = xdotool("search", "--pid", target, "--onlyvisible", "--name", ".")
+        result = xdotool("search", "--all", "--pid", target, "--onlyvisible", "--name", ".")
         ids = result.stdout.split()
+        if not ids:
+            # A minimised window is unmapped; map it again first.
+            ids = xdotool("search", "--all", "--pid", target, "--name", ".").stdout.split()
+            for window in ids:
+                xdotool("windowmap", window)
         if ids:
             xdotool("windowactivate", ids[-1])
             time.sleep(0.4)
         return {"ok": bool(ids), "windows": ids}
     if name == "setFrame":
-        ids = xdotool("search", "--pid", target, "--onlyvisible", "--name", ".").stdout.split()
+        ids = xdotool("search", "--all", "--pid", target, "--onlyvisible", "--name", ".").stdout.split()
         if not ids:
             return {"ok": False, "error": "no window"}
         if "w" in command:

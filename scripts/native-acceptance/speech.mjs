@@ -71,16 +71,29 @@ class VoiceOver {
       return null;
     }
   }
+  /** Waits for VoiceOver's start-up speech to stop changing. */
+  async settle() {
+    let previous = await this.last();
+    let stable = 0;
+    for (let index = 0; index < 40 && stable < 8; index += 1) {
+      await sleep(250);
+      const phrase = await this.last();
+      stable = phrase === previous ? stable + 1 : 0;
+      previous = phrase;
+    }
+  }
   /**
    * VoiceOver keeps only its last phrase, so a watcher polls it from the mark
    * on and keeps each new phrase, in order.
    */
   async mark() {
-    const watch = { phrases: [], done: false, unread: 0 };
+    const watch = { phrases: [], done: false, unread: 0, polls: 0 };
     let previous = await this.last();
+    watch.first = previous;
     watch.loop = (async () => {
       while (!watch.done) {
         const phrase = await this.last();
+        watch.polls += 1;
         if (phrase === null) watch.unread += 1;
         else if (phrase !== previous) {
           watch.phrases.push(phrase);
@@ -98,6 +111,7 @@ class VoiceOver {
     await sleep(2_500);
     watch.done = true;
     await watch.loop;
+    this.diagnostics = { before: watch.first, polls: watch.polls, unreadable: watch.unread };
     return watch.phrases;
   }
   async stop() {

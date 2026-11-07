@@ -444,11 +444,12 @@ export class App {
   async visible(node) {
     if (!node?.frame) return node;
     let current = node;
-    for (let attempt = 0; attempt < 12; attempt += 1) {
+    for (let attempt = 0; attempt < 20; attempt += 1) {
       const { frame, top, bottom, left, right, sw, sh } = await this.viewport();
       const [cx, cy] = center(current);
       if (cy > top && cy < bottom && cx > left && cx < right) return current;
-      if (cx <= left || cx >= right) {
+      const across = cx <= left || cx >= right;
+      if (across && (cy <= top || cy >= bottom)) {
         throw new Error(
           `${current.role} "${current.name}" is outside the visible window (at ${cx},${cy}; window ${JSON.stringify(frame)}; screen ${sw}x${sh})`,
         );
@@ -460,11 +461,21 @@ export class App {
         ),
         0,
       );
-      await this.native.must({
-        cmd: 'scroll',
-        at: [Math.round((left + right) / 2), Math.round((top + bottom) / 2)],
-        dy: cy >= bottom ? -240 : 240,
-      });
+      // Across: the wheel over the node's own row scrolls its container sideways.
+      await this.native.must(
+        across
+          ? {
+              cmd: 'scroll',
+              at: [Math.round((left + right) / 2), cy],
+              dx: cx >= right ? -240 : 240,
+              dy: 0,
+            }
+          : {
+              cmd: 'scroll',
+              at: [Math.round((left + right) / 2), Math.round((top + bottom) / 2)],
+              dy: cy >= bottom ? -240 : 240,
+            },
+      );
       await sleep(400);
       const after = await this.all(current.role, current.name);
       current = after[index] ?? after[0] ?? current;
