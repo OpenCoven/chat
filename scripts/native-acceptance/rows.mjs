@@ -921,7 +921,7 @@ async function caretToEnd(lane, familiar) {
 async function imeReady(lane, familiar, ime, quoted) {
   const { app, native } = lane;
   const tries = [];
-  for (let attempt = 1; attempt <= 4; attempt += 1) {
+  for (let attempt = 1; attempt <= 5; attempt += 1) {
     await lane.front();
     const chosen = await native.call({ cmd: 'selectInputSource', source: ime.japanese });
     await caretToEnd(lane, familiar);
@@ -933,7 +933,18 @@ async function imeReady(lane, familiar, ime, quoted) {
     const focus = (await app.focused())?.name;
     await app.key('delete');
     await sleep(500);
-    const after = await lane.composerValue(familiar);
+    // Before the input method owns the keys, its switch key can arrive as a
+    // control character beside the Latin "a"; whatever is left is deleted.
+    let after = await lane.composerValue(familiar);
+    for (
+      let extra = after.length - quoted.length;
+      extra > 0 && after.startsWith(quoted);
+      extra -= 1
+    ) {
+      await app.key('delete');
+      await sleep(150);
+      after = await lane.composerValue(familiar);
+    }
     tries.push({ attempt, current: chosen.current, probe, focus, restored: after === quoted });
     if (after !== quoted) break;
     if (probe && !/[a-z]/i.test(probe)) return { composing: true, tries };
