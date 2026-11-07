@@ -14,18 +14,12 @@ on:
         description: Published tag whose installers to drive, for example v0.0.8.
         required: true
         type: string
-  push:
-    branches: [test/504-native-acceptance]
-    paths:
-      - .github/workflows/native-acceptance.yml
-      - scripts/native-acceptance/**
-      - scripts/packaged-acceptance/model-fixture.mjs
 
 permissions:
   contents: read
 
 env:
-  RELEASE: ${{ inputs.release || 'v0.0.8' }}
+  RELEASE: ${{ inputs.release }}
 
 jobs:
   macos:

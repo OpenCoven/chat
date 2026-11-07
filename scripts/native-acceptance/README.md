@@ -26,13 +26,16 @@ drive the app.
 
 ## Status checkpoint
 
-- Runs are dispatched for a published tag, or triggered by a push to
-  `test/504-native-acceptance`. Each lane uploads `results.md`,
+- Runs are dispatched for a published tag (`workflow_dispatch`, input
+  `release`). While the lane was built, pushes to `test/504-native-acceptance`
+  also ran it; that trigger is gone. Each lane uploads `results.md`,
   `results.json`, its screenshots, the reader's log and the runner facts as an
   artifact (`native-macos-<arch>`, `native-windows-msi`, `native-linux-deb`).
-- v0.0.8 results and the issues they produced (#544, #545, #546, #547) are
+- v0.0.8 results and the issues they produced (#544, #545, #546, #547, #548) are
   recorded in `docs/verification/2026-10-18-rakazo-chat-ux.md`, section
   "Native OS-level automation on the published v0.0.8 installers".
-- Known limits: no clipboard refusal is staged; Orca runs with no speech
+- Known limits: no clipboard refusal is staged; the `macos-15-intel` runner
+  never delivered keys to Kotoeri, and `macos-15` did on some runners only, so
+  macOS IME can come back blocked; Orca runs with no speech
   server, so its words come from its debug log; WebView2's context menu is
   read by what UI Automation reports at a point inside it.
