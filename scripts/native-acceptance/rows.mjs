@@ -632,11 +632,11 @@ export async function linkRows(lane, familiar, browser) {
     handoff.note('browser windows after Open on the plain address (browser running)', plain);
     // Firefox's address field is not exposed on this runner; the loaded document's URL is.
     const shown = plain.flatMap((w) => [...w.fields.map((f) => f.value), ...w.documents]);
+    // Exactly the plain address, with or without its slash, or the browser's
+    // own HTTPS upgrade of it (or the bare host some address fields show).
     handoff.check(
       'the running browser shows the plain address (or notes its own HTTPS upgrade)',
-      shown.includes(ADDRESSES.plain) ||
-        shown.includes('http://example.com') ||
-        shown.some((v) => /^(https:\/\/)?example\.com\/?$/.test(v)),
+      shown.some((v) => /^(https?:\/\/)?example\.com\/?$/.test(v)),
       shown,
     );
     await closeReview(lane, handoff);
