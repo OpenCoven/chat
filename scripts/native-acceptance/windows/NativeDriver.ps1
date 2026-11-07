@@ -3,8 +3,13 @@
 # shows is read back from its UI Automation tree, which is what Narrator and NVDA
 # read. Nothing here touches the page's DOM or scripts.
 
-Add-Type -AssemblyName UIAutomationClient, UIAutomationTypes, System.Windows.Forms
-Add-Type -ReferencedAssemblies UIAutomationClient, UIAutomationTypes, System.Windows.Forms, System.Drawing -TypeDefinition @'
+Add-Type -AssemblyName UIAutomationClient, UIAutomationTypes, WindowsBase, System.Windows.Forms
+# BoundingRectangle is a System.Windows.Rect, which lives in WindowsBase.
+$references = @(
+  'UIAutomationClient', 'UIAutomationTypes', 'System.Windows.Forms', 'System.Drawing',
+  [System.Windows.Rect].Assembly.Location
+)
+Add-Type -ReferencedAssemblies $references -TypeDefinition @'
 using System;
 using System.Collections.Generic;
 using System.Runtime.InteropServices;
