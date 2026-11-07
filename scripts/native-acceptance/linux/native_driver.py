@@ -140,6 +140,19 @@ def windows(pid=None):
     return [app.getChildAtIndex(i) for i in range(app.childCount) if app.getChildAtIndex(i) is not None]
 
 
+def main_window(found):
+    def area(window):
+        try:
+            if not window.getState().contains(pyatspi.STATE_SHOWING):
+                return -1
+            box = window.queryComponent().getExtents(pyatspi.DESKTOP_COORDS)
+            return box.width * box.height
+        except Exception:
+            return -1
+
+    return max(found, key=area)
+
+
 def focused():
     app = application()
     if app is None:
@@ -226,7 +239,9 @@ def run(command):
         found = windows(command.get("pid"))
         if not found:
             return {"ok": False, "error": "no window"}
-        return {"ok": True, "tree": tree(found[0], command.get("depth", 80))}
+        # The app can hold more than one top-level window (a popup, an input
+        # method's window); the main window is the largest one showing.
+        return {"ok": True, "tree": tree(main_window(found), command.get("depth", 80)), "windows": len(found)}
     if name == "selectInputSource":
         # IBus engines: anthy composes Japanese, xkb:us::eng types Latin.
         subprocess.run(["ibus", "engine", command.get("source", "")], capture_output=True, text=True, check=False)

@@ -372,9 +372,16 @@ export class App {
       PLATFORM === 'mac'
         ? { cmd: 'web', depth: 90, budget: 9000 }
         : { cmd: 'tree', depth: 90, budget: 9000 };
-    const answer = await this.native.call(command);
-    if (!answer.ok) return null;
-    return normalize(answer.tree);
+    // A tree read can come back empty for a moment (a window appearing or
+    // going); it is read again before the moment counts.
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      const answer = await this.native.call(command);
+      if (answer.ok && answer.tree && (answer.tree.children ?? []).length)
+        return normalize(answer.tree);
+      if (attempt === 2) return answer.ok ? normalize(answer.tree) : null;
+      await sleep(700);
+    }
+    return null;
   }
 
   async all(role, name, options = {}) {
