@@ -588,10 +588,23 @@ export async function linkRows(lane, familiar, browser) {
     await sleep(4_000);
     const tabsAfter = await addressBars(native, browser.key);
     await lane.front();
-    handoff.expect(
-      'browser windows and fields after a second press',
-      tabsAfter.map((w) => w.fields.length),
-      tabsBefore.map((w) => w.fields.length),
+    // Firefox exposes no address field, only its pages, so both are counted:
+    // a second hand-off would add a window, or one more page at the address.
+    const handedOff = (windows) => ({
+      windows: windows.length,
+      atTheAddress: windows
+        .flatMap((w) => [...w.fields.map((f) => f.value), ...w.documents])
+        .filter((value) => value === ADDRESSES.query).length,
+    });
+    handoff.note('browser before and after a second press', {
+      before: tabsBefore,
+      after: tabsAfter,
+    });
+    handoff.check(
+      'a second press opens nothing more (windows, and fields or pages at the address)',
+      handedOff(tabsBefore).atTheAddress > 0 &&
+        isDeepStrictEqual(handedOff(tabsAfter), handedOff(tabsBefore)),
+      { before: handedOff(tabsBefore), after: handedOff(tabsAfter) },
     );
     await closeReview(lane, handoff);
     handoff.expect(
@@ -636,7 +649,7 @@ export async function linkRows(lane, familiar, browser) {
           w.fields.some((f) => f.value === ADDRESSES.ipv6 || f.value === '[::1]:8080/x') ||
           w.documents.includes(ADDRESSES.ipv6),
       ),
-      bars.flatMap((w) => w.fields),
+      bars.map((w) => ({ fields: w.fields, documents: w.documents })),
     );
     await closeReview(lane, row9);
   });
