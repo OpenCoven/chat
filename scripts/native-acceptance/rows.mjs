@@ -930,12 +930,17 @@ async function imeReady(lane, familiar, ime, quoted) {
     await app.type('a');
     await sleep(600);
     const probe = (await lane.composerValue(familiar)).slice(quoted.length);
+    const focus = (await app.focused())?.name;
     await app.key('delete');
     await sleep(500);
     const after = await lane.composerValue(familiar);
-    tries.push({ attempt, current: chosen.current, probe, restored: after === quoted });
+    tries.push({ attempt, current: chosen.current, probe, focus, restored: after === quoted });
     if (after !== quoted) break;
     if (probe && !/[a-z]/i.test(probe)) return { composing: true, tries };
+    // WebKitGTK keeps IBus's uncommitted text out of the field's accessible
+    // text: a key the focused composer took without showing it went to the IME.
+    if (!probe && focus === `Message ${familiar}`)
+      return { composing: true, hiddenPreedit: true, tries };
   }
   return { composing: false, tries };
 }
@@ -1040,7 +1045,10 @@ export async function quoteRow(lane, familiar, ime) {
       // So Enter is pressed only once the draft shows the IME composing.
       const composing = (await lane.composerValue(familiar)).slice(quoted.length);
       row.note('draft after "nihonn" and Space, before Enter', composing);
-      const imeActive = composing.length > 0 && !/nihonn?/i.test(composing);
+      const stillHere = (await app.focused())?.name === `Message ${familiar}`;
+      const imeActive =
+        (composing.length > 0 && !/nihonn?/i.test(composing)) ||
+        (composing === '' && Boolean(ready.hiddenPreedit) && stillHere);
       if (imeActive) await app.key('return');
       else {
         row.block('IME', 'the input source reported Japanese, but the keys arrived as Latin text');
@@ -1108,6 +1116,30 @@ async function tabToSeparator(lane, familiar) {
     tabs += 1;
   }
   return tabs;
+}
+
+/**
+ * Settings > General shows the width as text ("400px"). What the platform
+ * reports is kept beside the check when it is missing, to tell an absent
+ * value from one the tree does not carry.
+ */
+async function settingsShowWidth(lane, row, label, width) {
+  const settings = await lane.app.one('dialog', 'Settings');
+  const nodes = [...walk(settings)];
+  const shown = `${nodes.map((node) => String(node.value ?? node.name ?? '')).join(' ')} ${textIn(settings)}`;
+  const found = shown.match(/\d+\s*px/g) ?? [];
+  const ok = new RegExp(`\\b${width}\\s*px`).test(shown);
+  row.check(label, ok, { widthsShown: found, text: shown.slice(0, 200) });
+  if (!ok)
+    lane.save(
+      `settings-tree-${width}.txt`,
+      nodes
+        .map(
+          (node) =>
+            `${node.role} | ${node.name ?? ''} | ${node.value ?? ''} | ${node.raw?.text ?? ''} | children ${node.children.length}`,
+        )
+        .join('\n'),
+    );
 }
 
 /** Row 6: the separator through a real pointer that leaves the window, the keys, Settings, Reset, 1100px. */
@@ -1244,13 +1276,7 @@ export async function inspectorRow(lane, familiar, frames) {
     row.expect('no text selected during the drag', selectedDuring, '');
 
     await settingsGeneral(app);
-    const settings = await app.one('dialog', 'Settings');
-    const shown = `${[...walk(settings)].map((node) => String(node.value ?? node.name ?? '')).join(' ')} ${textIn(settings)}`;
-    row.check(
-      'Settings > General shows the width',
-      new RegExp(`${released.value}\\s*px`).test(shown),
-      shown.slice(0, 300),
-    );
+    await settingsShowWidth(lane, row, 'Settings > General shows the width', released.value);
     await app.click(
       await app.one('button', 'Reset inspector width', { within: ['dialog', 'Settings'] }),
     );
@@ -1289,9 +1315,7 @@ export async function inspectorRow(lane, familiar, frames) {
       600,
     );
     await settingsGeneral(app);
-    const reopened = await app.one('dialog', 'Settings');
-    const again = `${[...walk(reopened)].map((node) => String(node.value ?? node.name ?? '')).join(' ')} ${textIn(reopened)}`;
-    row.check('Settings still shows 600px', /600\s*px/.test(again), again.slice(0, 300));
+    await settingsShowWidth(lane, row, 'Settings still shows 600px', 600);
     await closeSettings(app);
   });
 }

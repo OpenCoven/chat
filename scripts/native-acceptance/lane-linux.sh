@@ -91,6 +91,23 @@ mkdir -p "$HOME/.local/share/orca"
 cat > "$HOME/.local/share/orca/orca-customizations.py" <<'PY'
 import orca.speech
 orca.speech.init = lambda *args, **kwargs: None
+
+# Orca buffers its debug log, so what it said can be lost if it is stopped
+# hard. Flushing every 200 ms keeps each utterance on disk while it runs.
+from gi.repository import GLib
+import orca.debug as _debug
+
+
+def _flush_debug_log():
+    try:
+        if _debug.debugFile:
+            _debug.debugFile.flush()
+    except Exception:
+        pass
+    return True
+
+
+GLib.timeout_add(200, _flush_debug_log)
 PY
 log "Orca: no speech server on this runner (no audio device); utterances read from its debug log"
 # Mozc starts in direct (Latin) input unless told to start in Japanese.
