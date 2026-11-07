@@ -34,8 +34,9 @@ drive the app.
 - v0.0.8 results and the issues they produced (#544, #545, #546, #547, #548) are
   recorded in `docs/verification/2026-10-18-rakazo-chat-ux.md`, section
   "Native OS-level automation on the published v0.0.8 installers".
-- Known limits: no clipboard refusal is staged; the `macos-15-intel` runner
-  never delivered keys to Kotoeri, and `macos-15` did on some runners only, so
-  macOS IME can come back blocked; Orca runs with no speech
+- Known limits: no clipboard refusal is staged; on the macOS runners the
+  first choice of Kotoeri often leaves its input method unstarted, so later
+  attempts choose it afresh (`rechooseKotoeri` in `rows.mjs`), and the row
+  still reports blocked if no attempt composes; Orca runs with no speech
   server, so its words come from its debug log; WebView2's context menu is
   read by what UI Automation reports at a point inside it.
