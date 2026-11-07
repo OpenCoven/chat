@@ -1,0 +1,44 @@
+# Scratch only (not for main): the macOS jobs of native-acceptance.yml on push,
+# to run the published v0.0.8 DMGs on the IME fix while the lane is dispatch-only.
+name: Native acceptance (macOS, scratch)
+
+on:
+  push:
+    branches: [test/504-ime-probe]
+
+permissions:
+  contents: read
+
+env:
+  RELEASE: v0.0.8
+
+jobs:
+  macos:
+    name: macOS (${{ matrix.arch }} DMG)
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-15
+            arch: aarch64
+          - runner: macos-15-intel
+            arch: x64
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version-file: .node-version
+      - name: Drive the published DMG
+        run: bash scripts/native-acceptance/lane-mac.sh "$RELEASE" "$RUNNER_TEMP/native" "${{ matrix.arch }}"
+      - name: Results
+        if: always()
+        run: cat "$RUNNER_TEMP/native/environment.txt" "$RUNNER_TEMP/native/results.md" 2>/dev/null || true
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        if: always()
+        with:
+          name: native-macos-${{ matrix.arch }}
+          path: ${{ runner.temp }}/native
