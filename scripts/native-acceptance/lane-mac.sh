@@ -92,16 +92,9 @@ cat > "$out/facts.json" <<EOF
 }
 EOF
 
-# Kotoeri's input method runs as its own app; on some runners selecting it
-# through TIS leaves keys Latin until that app is running, so it is started.
-log "input methods: $(ls '/System/Library/Input Methods' 2>&1 | tr '\n' ';')"
-for im in JapaneseIM-RomajiTyping JapaneseIM; do
-  if [ -d "/System/Library/Input Methods/$im.app" ]; then
-    open -g "/System/Library/Input Methods/$im.app" 2>>"$out/environment.txt" && log "started $im" && break
-  fi
-done
-sleep 2
-log "Japanese input method processes: $(pgrep -fl JapaneseIM 2>&1 | tr '\n' ';')"
+# Kotoeri runs as its own app, which the system starts when it is selected;
+# starting it by hand left the keys Latin, so it is only recorded here.
+log "Japanese input method processes before the run: $(pgrep -fl JapaneseIM 2>&1 | tr '\n' ';')"
 
 node "$here/run.mjs" --app "$app/Contents/MacOS/opencoven-chat" --out "$out" \
   --lane "macOS $(sw_vers -productVersion) $(uname -m), published ${arch} DMG ${release}" \
