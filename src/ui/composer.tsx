@@ -177,6 +177,8 @@ export function Composer({
       </label>
       <Textarea
         {...textareaProps}
+        // Browser autofill would keep what is typed here (#546).
+        autoComplete="off"
         id={fieldId}
         ref={textareaRef}
         value={value}

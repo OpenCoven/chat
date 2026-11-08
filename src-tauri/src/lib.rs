@@ -1,4 +1,5 @@
 mod cave;
+mod chat_approvals;
 mod chat_canonical;
 mod chat_lifecycle;
 mod chat_origin;
@@ -9,6 +10,7 @@ pub mod companion;
 #[cfg(feature = "phase1-conformance")]
 pub mod conformance;
 mod connection;
+mod context_menu;
 mod coven;
 mod coven_install;
 mod coven_runtime;
@@ -264,6 +266,10 @@ impl NativeConnectionState {
 
 fn builder() -> tauri::Builder<tauri::Wry> {
     tauri::Builder::default()
+        .setup(|app| {
+            context_menu::install(app);
+            Ok(())
+        })
         .manage(NativeConnectionState::default())
         .manage(coven_runtime::CovenRuntimeState::default())
         .manage(coven_runtime::missions::MissionState::default())
@@ -282,6 +288,10 @@ fn builder() -> tauri::Builder<tauri::Wry> {
             coven_runtime::coven_runtime_read,
             coven_runtime::coven_runtime_send,
             coven_runtime::coven_runtime_cancel,
+            coven_runtime::coven_runtime_approvals,
+            coven_runtime::coven_runtime_allow,
+            coven_runtime::coven_runtime_decline,
+            coven_runtime::coven_runtime_permission_log,
             coven_runtime::missions::mission_prepare,
             coven_runtime::missions::mission_list,
             coven_runtime::missions::mission_remove,

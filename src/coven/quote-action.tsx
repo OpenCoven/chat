@@ -62,10 +62,17 @@ function refusal(result: QuoteResult, promptLimit: number): string {
  * action runs, and a passage that changed, left the chat, or belongs to a chat
  * no longer shown quotes nothing. The capture lives in this component only and
  * is dropped once used, dismissed, deselected, or the chat changes.
+ *
+ * WebKit clears the selection whenever focus moves, so Tab from a passage to a
+ * link inside it would deselect it. A selection that goes because a key moved
+ * focus within the conversation or the composer area keeps what it captured,
+ * and Tab can carry on to the action. A pointer press elsewhere, Escape in the
+ * conversation, a new selection, or focus leaving those areas still drops it.
  */
 export function useQuoteSelection({
   transcriptRef,
   composerRef,
+  composerAreaRef,
   messages,
   familiarId,
   sessionId,
@@ -76,6 +83,8 @@ export function useQuoteSelection({
 }: Readonly<{
   transcriptRef: RefObject<HTMLElement | null>;
   composerRef: RefObject<HTMLTextAreaElement | null>;
+  /** Where the action and the composer sit; focus may pass through it. */
+  composerAreaRef?: RefObject<HTMLElement | null> | undefined;
   messages: readonly ChatMessage[];
   familiarId: string;
   sessionId: string;
@@ -97,12 +106,50 @@ export function useQuoteSelection({
   const chat = JSON.stringify([familiarId, sessionId]);
   const shown = useLatest({ messages, familiarId, sessionId, chat, promptLimit });
 
+  // What last moved focus or the selection: a key press, or a pointer press
+  // outside the action. Only the first may carry a passage past a link.
+  const lastInput = useRef<'key' | 'pointer'>('pointer');
+  useEffect(() => {
+    const onPointerDown = (event: PointerEvent) => {
+      if (!(event.target instanceof Node) || !actionRef.current?.contains(event.target))
+        lastInput.current = 'pointer';
+    };
+    const onKeyDown = (event: KeyboardEvent) => {
+      lastInput.current = 'key';
+      // The action takes its own Escape, and a dialog such as a link review
+      // closes on its own; in the conversation itself, Escape lets go.
+      if (
+        event.key === 'Escape' &&
+        !document.querySelector('dialog[open]') &&
+        transcriptRef.current?.contains(document.activeElement)
+      )
+        setState(null);
+    };
+    document.addEventListener('pointerdown', onPointerDown, true);
+    document.addEventListener('keydown', onKeyDown, true);
+    return () => {
+      document.removeEventListener('pointerdown', onPointerDown, true);
+      document.removeEventListener('keydown', onKeyDown, true);
+    };
+  }, [transcriptRef]);
+
   useEffect(() => {
     const onSelectionChange = () => {
-      const passage = selectedPassage(document.getSelection());
+      const selection = document.getSelection();
+      const passage = selectedPassage(selection);
       if (!passage || !transcriptRef.current?.contains(passage.source)) {
+        const focus = document.activeElement;
         // Focus moving into the action can collapse the selection; what it captured stands.
-        if (!actionRef.current?.contains(document.activeElement)) setState(null);
+        const intoAction = actionRef.current?.contains(focus);
+        // So can a key that moved focus to a link in the passage, or on toward the action.
+        const cleared = !selection || selection.rangeCount === 0 || selection.isCollapsed;
+        const passing =
+          cleared &&
+          lastInput.current === 'key' &&
+          Boolean(
+            transcriptRef.current?.contains(focus) || composerAreaRef?.current?.contains(focus),
+          );
+        if (!intoAction && !passing) setState(null);
         return;
       }
       const now = shown.current;
@@ -129,7 +176,7 @@ export function useQuoteSelection({
     };
     document.addEventListener('selectionchange', onSelectionChange);
     return () => document.removeEventListener('selectionchange', onSelectionChange);
-  }, [transcriptRef, shown]);
+  }, [transcriptRef, composerAreaRef, shown]);
 
   // A passage belongs to the chat it was selected in; another chat, or this one
   // again later, starts without it.

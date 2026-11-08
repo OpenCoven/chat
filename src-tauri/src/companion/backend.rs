@@ -110,6 +110,12 @@ pub(super) trait Backend: Send + Sync {
         self.active().filter(|r| r.id == id)
     }
     fn stop(&self, id: &str) -> Result<(), String>;
+    /// Spends an open request and starts its one turn with write access.
+    /// The familiar an open request belongs to; `None` once it has closed.
+    fn open_approval(&self, approval_id: &str) -> Result<Option<String>, String>;
+    fn allow(&self, request_id: String, approval_id: String) -> Result<Arc<RunRecord>, String>;
+    fn decline(&self, approval_id: &str) -> Result<(), String>;
+    fn permission_log(&self) -> Result<Value, String>;
 }
 
 pub(super) struct NativeBackend {
@@ -141,6 +147,18 @@ impl Backend for NativeBackend {
     fn stop(&self, id: &str) -> Result<(), String> {
         use tauri::Manager;
         crate::coven_runtime::coven_runtime_cancel(self.app.state(), id.into())
+    }
+    fn open_approval(&self, approval_id: &str) -> Result<Option<String>, String> {
+        crate::coven_runtime::companion_open_approval(&self.app, approval_id)
+    }
+    fn allow(&self, request_id: String, approval_id: String) -> Result<Arc<RunRecord>, String> {
+        crate::coven_runtime::companion_allow(self.app.clone(), request_id, approval_id)
+    }
+    fn decline(&self, approval_id: &str) -> Result<(), String> {
+        crate::coven_runtime::companion_decline(&self.app, approval_id)
+    }
+    fn permission_log(&self) -> Result<Value, String> {
+        crate::coven_runtime::companion_permission_log(&self.app)
     }
 }
 

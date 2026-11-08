@@ -37,6 +37,18 @@ function MockLayout(props: ChatLayoutProps) {
             {familiar.name}
           </button>
         ))}
+      {props.approvals?.map((approval) => (
+        <div key={approval.id}>
+          <button
+            type="button"
+            onClick={() => props.onAllowApproval?.(approval, choice.value)}
+          >{`Allow ${approval.summary}`}</button>
+          <button
+            type="button"
+            onClick={() => props.onDeclineApproval?.(approval)}
+          >{`Decline ${approval.summary}`}</button>
+        </div>
+      ))}
       <output data-testid="head">{props.sessionId}</output>
       <output data-testid="familiar">{props.familiarId}</output>
       <output data-testid="run-familiar">{props.busy ? props.runFamiliarId : 'idle'}</output>
@@ -204,6 +216,10 @@ function runtime(): CovenRuntime {
     send: vi.fn().mockResolvedValue({ runId: 'run', events: [] }),
     cancel: vi.fn().mockResolvedValue(undefined),
     changeChatLifecycle: vi.fn().mockResolvedValue(undefined),
+    pendingApprovals: vi.fn().mockResolvedValue([]),
+    allow: vi.fn().mockResolvedValue({ runId: 'allowed', events: [] }),
+    decline: vi.fn().mockResolvedValue(undefined),
+    permissionLog: vi.fn().mockResolvedValue([]),
   };
 }
 
@@ -1178,5 +1194,119 @@ describe('run options from Settings', () => {
     });
     await ready(api);
     await waitFor(() => expect(screen.getByTestId('model')).toHaveTextContent('openai/gpt-5.5'));
+  });
+});
+
+describe('answering a familiar that asks for permission', () => {
+  const approval = {
+    id: 'request-1',
+    familiarId: 'f',
+    summary: 'Create probe.txt',
+    requestedAt: 1,
+    expiresAt: 2,
+  };
+  beforeEach(() => {
+    localStorage.clear();
+    choice.value = runOptions(DEFAULT_PREFERENCES);
+  });
+  function asking() {
+    const api = runtime();
+    vi.mocked(api.pendingApprovals).mockResolvedValue([approval]);
+    return api;
+  }
+
+  it('offers what the host says is open, and shows nothing it does not', async () => {
+    const view = await ready(runtime());
+    expect(screen.queryByRole('button', { name: /^Allow / })).not.toBeInTheDocument();
+    view.unmount();
+    await ready(asking());
+    expect(
+      await screen.findByRole('button', { name: 'Allow Create probe.txt' }),
+    ).toBeInTheDocument();
+  });
+
+  it('names only the request when allowing, and leaves the draft alone', async () => {
+    const api = asking();
+    await ready(api);
+    draft('still typing');
+    fireEvent.click(await screen.findByRole('button', { name: 'Allow Create probe.txt' }));
+    await waitFor(() => expect(api.allow).toHaveBeenCalledOnce());
+    const input = vi.mocked(api.allow).mock.calls[0]?.[0];
+    expect(input).toEqual({ approvalId: 'request-1', runId: expect.any(String) });
+    expect(api.send).not.toHaveBeenCalled();
+    await waitFor(() => expect(screen.getByTestId('run-familiar')).toHaveTextContent('idle'));
+    expect(screen.getByRole('textbox')).toHaveValue('still typing');
+  });
+
+  it('keeps an allowed request away while the host may not have recorded the answer', async () => {
+    const api = asking();
+    const running = deferred<{ runId: string; events: never[] }>();
+    vi.mocked(api.allow).mockReturnValue(running.promise);
+    await ready(api);
+    const allow = await screen.findByRole('button', { name: 'Allow Create probe.txt' });
+    const reads = vi.mocked(api.pendingApprovals).mock.calls.length;
+    fireEvent.click(allow);
+    // A read the run's start set off still lists it, as the host hasn't caught up.
+    await waitFor(() =>
+      expect(vi.mocked(api.pendingApprovals).mock.calls.length).toBeGreaterThan(reads),
+    );
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(screen.queryByRole('button', { name: 'Allow Create probe.txt' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Decline Create probe.txt' })).toBeNull();
+    vi.mocked(api.pendingApprovals).mockResolvedValue([]);
+    await act(async () => {
+      running.resolve({ runId: 'run', events: [] });
+      await running.promise;
+    });
+    await waitFor(() => expect(screen.getByTestId('run-familiar')).toHaveTextContent('idle'));
+  });
+
+  it('asks the host again after a refused Allow, and offers no resend of an empty draft', async () => {
+    const api = asking();
+    vi.mocked(api.allow).mockRejectedValue(
+      new Error('This request expired. Ask the familiar again.'),
+    );
+    await ready(api);
+    fireEvent.click(await screen.findByRole('button', { name: 'Allow Create probe.txt' }));
+    await waitFor(() =>
+      expect(screen.getByRole('alert')).toHaveTextContent('This request expired.'),
+    );
+    await waitFor(() => expect(screen.getByTestId('run-familiar')).toHaveTextContent('idle'));
+    expect(api.pendingApprovals).toHaveBeenCalledTimes(4);
+    expect(screen.queryByRole('button', { name: 'Try again' })).not.toBeInTheDocument();
+    expect(screen.getByRole('textbox')).toHaveValue('');
+  });
+
+  it("won't allow while another run holds the runtime", async () => {
+    const api = asking();
+    const running = deferred<{ runId: string; events: never[] }>();
+    vi.mocked(api.send).mockReturnValue(running.promise);
+    await ready(api);
+    draft('first');
+    click('Send');
+    await waitFor(() => expect(screen.getByTestId('run-familiar')).toHaveTextContent('f'));
+    fireEvent.click(await screen.findByRole('button', { name: 'Allow Create probe.txt' }));
+    expect(api.allow).not.toHaveBeenCalled();
+    await act(async () => running.resolve({ runId: 'run', events: [] }));
+  });
+
+  it('declines through the host, then reads the chat and the requests again', async () => {
+    const api = asking();
+    await ready(api);
+    vi.mocked(api.pendingApprovals).mockResolvedValue([]);
+    const reads = vi.mocked(api.readSession).mock.calls.length;
+    fireEvent.click(await screen.findByRole('button', { name: 'Decline Create probe.txt' }));
+    await waitFor(() => expect(api.decline).toHaveBeenCalledExactlyOnceWith('request-1'));
+    await waitFor(() =>
+      expect(vi.mocked(api.readSession).mock.calls.length).toBeGreaterThan(reads),
+    );
+    await waitFor(() =>
+      expect(
+        screen.queryByRole('button', { name: 'Decline Create probe.txt' }),
+      ).not.toBeInTheDocument(),
+    );
+    expect(api.allow).not.toHaveBeenCalled();
   });
 });

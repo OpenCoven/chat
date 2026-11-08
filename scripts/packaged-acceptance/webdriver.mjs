@@ -89,6 +89,7 @@ const implicit = {
   columnheader: 'th, [role="columnheader"]',
   cell: 'td, [role="cell"]',
   alert: '[role="alert"]',
+  list: 'ul, ol, [role="list"]',
 };
 const nameOf = (node) => {
   const label = node.getAttribute('aria-label');

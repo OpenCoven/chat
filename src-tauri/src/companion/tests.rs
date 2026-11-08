@@ -39,3 +39,27 @@ fn replay_disclosure_is_a_status_message_without_system_metadata() {
         ]
     );
 }
+
+#[test]
+fn the_phone_reads_replies_without_the_block_and_sees_chats_own_line() {
+    let block = "```coven-permission-request\n{\"summary\":\"S\"}\n```";
+    let messages = project_messages(&[
+        json!({"type":"text_delta","text":format!("Needs access.\n\n{block}")}),
+        json!({"type":"result"}),
+        json!({"type":"assistant","message":{"content":[{"type":"text","text":block}]}}),
+        json!({"type":"user","message":{"content":[{"type":"text","text":block}]}}),
+        json!({"type":"system","subtype":"notice","source":"chat-approval","message":{"content":[{"type":"text","text":"You declined this request: S"}]}}),
+    ]);
+    let shown: Vec<_> = messages
+        .iter()
+        .map(|m| (m["role"].as_str().unwrap(), m["text"].as_str().unwrap()))
+        .collect();
+    assert_eq!(
+        shown,
+        vec![
+            ("assistant", "Needs access."),
+            ("user", block),
+            ("status", "You declined this request: S"),
+        ]
+    );
+}
