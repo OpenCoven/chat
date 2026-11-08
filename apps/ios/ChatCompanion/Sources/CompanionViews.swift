@@ -88,6 +88,7 @@ private struct Workspace: View {
   @Binding var dismissSend: Bool
   @State private var picking = false
   @State private var details = false
+  @State private var permissionLog = false
   /// Set from Connection Details, which asks to forget only once it has closed:
   /// a confirmation cannot present while a sheet is still dismissing.
   @State private var forgetAfterDetails = false
@@ -109,6 +110,7 @@ private struct Workspace: View {
       .toolbarVisibility(.hidden, for: .navigationBar)
     return page
       .sheet(isPresented: $picking) { picker }
+      .sheet(isPresented: $permissionLog) { PermissionLogView(model: model) }
       .sheet(isPresented: $details) {
         if forgetAfterDetails {
           forgetAfterDetails = false
@@ -123,7 +125,7 @@ private struct Workspace: View {
   private var picker: some View {
     FamiliarPicker(
       familiars: model.familiars, sessions: model.sessions, selectedId: model.selectedId,
-      respondingId: replyingId
+      respondingId: replyingId, askingIds: Set(model.approvals.map(\.familiarId))
     ) { id in Task { await model.select(id) } }
   }
 
@@ -181,6 +183,7 @@ private struct Workspace: View {
       Spacer(minLength: 8)
       Menu {
         Button("Refresh", systemImage: "arrow.clockwise") { Task { await model.refresh() } }
+        Button("Permission Log", systemImage: "hand.raised") { permissionLog = true }
         Button("Connection Details", systemImage: "info.circle") { details = true }
         Divider()
         Button("Forget Mac", systemImage: "link.badge.plus", role: .destructive) {
@@ -350,6 +353,26 @@ private struct Workspace: View {
   private var composer: some View {
     VStack(alignment: .leading, spacing: 8) {
       if !model.error.isEmpty { errorCard }
+      if let approval = model.approval {
+        ApprovalCard(
+          approval: approval, name: familiar?.displayName ?? "Your familiar",
+          canAllow: model.canAllow, answering: model.answering,
+          onAllow: { Task { await model.allow(approval) } },
+          onDecline: { Task { await model.decline(approval) } }
+        )
+        // A new request is a new question: an open confirmation mustn't answer it.
+        .id(approval.id)
+      } else if let other = model.otherApproval {
+        Button {
+          Task { await model.select(other.familiarId) }
+        } label: {
+          NoticeView(
+            text: "\(model.name(ofFamiliar: other.familiarId)) asks for permission. Tap to answer.",
+            symbol: "hand.raised.fill")
+        }
+        .buttonStyle(.plain)
+        .accessibilityIdentifier("approval-elsewhere")
+      }
       if model.archived {
         NoticeView(
           text: "This chat is archived. Restore it on your Mac to send a message.",

@@ -67,6 +67,10 @@ const covenRuntimeCommands = [
   'coven_runtime_read',
   'coven_runtime_send',
   'coven_runtime_cancel',
+  'coven_runtime_approvals',
+  'coven_runtime_allow',
+  'coven_runtime_decline',
+  'coven_runtime_permission_log',
 ];
 // Missions (#155): one bounded, read-only familiar mission over the CLI's
 // `coven missions` commands. The webview names a mission by its id; adoption

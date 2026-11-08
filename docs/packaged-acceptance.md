@@ -10,6 +10,8 @@ is the only automated check that runs the shipped binary.
 
 ## When it runs
 
+CI build jobs prepare Tauri CLI 2.11.4's required AppRun, linuxdeploy, and WiX tools with `scripts/prepare-bundler-tools.mjs`. It downloads immutable official GitHub asset IDs through the authenticated API, verifies exact sizes and SHA-256 hashes, and seeds only the disposable runner's normal Tauri cache. The read-only Actions token is never forwarded to the asset storage host. This avoids anonymous release-download outages without replacing the bundlers or relaxing their checks; update the manifest when changing the CLI version or build architecture.
+
 - **CI** calls it twice. *Packaged acceptance* runs after *Desktop build* and installs the `.deb`
   that job built. Its AppImage lane drives an AppImage built from the same tree on `ubuntu-22.04`,
   with the packages and `tauri build` command `release.yml` uses, because a release's bundled
@@ -89,6 +91,7 @@ what its window does. CI's `.deb` is built in the CI image (Ubuntu 24.04) and it
 | 8 Preference-only storage | Judged against `SECURITY.md`: local storage holds only `opencoven.chat.preferences.v1` (with a numeric `inspectorWidth`) and `opencoven.chat.navigation.v1` (`familiarId` and `sessionId`). Nothing is in session storage or IndexedDB, and no address, table, passage or draft text is stored anywhere | |
 | 9 IPv6 | `https://[::1]:8080/x` shows site `[::1]:8080`; Copy and Open use exactly that address | |
 | #515 handoff | **Open** hands the operating system exactly the reviewed address, once, for a query string, a plain address and IPv6 | The browser's own address bar, with the browser closed and with it running |
+| Asking for permission | On a read-only turn the real engine's write is refused and the file isn't created, and the dialog shows the familiar's request instead of the block; **Allow once** runs one turn that writes the file and says so in the thread; the next turn is refused again, **Decline** writes nothing, and Settings › Access logs the request, both answers, the tool call and the turn's end | The first run with a real model, and the same flow on the iPhone |
 | #525 launch environment (Linux) | The browser **Open** started received none of the AppImage runtime's variables (`APPDIR`, `APPIMAGE`, `ARGV0`, `OWD`), no variable pointing into the image, and `LD_LIBRARY_PATH`, `GDK_BACKEND` and `GTK_THEME` as Chat was launched with them | |
 
 macOS stays entirely hand-run: WKWebView has no WebDriver.

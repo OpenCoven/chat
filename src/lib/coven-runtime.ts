@@ -60,6 +60,36 @@ export type CovenSendInput = {
   attachments?: readonly { name: string; bytes: readonly number[] }[];
 };
 export type CovenRunResult = { runId: string; sessionId?: string; events: CovenRunEvent[] };
+/** A familiar's open request for write access, as the host recorded it. */
+export type CovenApproval = {
+  id: string;
+  familiarId: string;
+  summary: string;
+  reason?: string;
+  requestedAt: number;
+  expiresAt: number;
+};
+/** The chat, the permission and the words of the allowed turn are the host's. */
+export type CovenAllowInput = {
+  approvalId: string;
+  runId: string;
+  model?: string;
+  think?: boolean;
+  speed?: 'fast' | 'balanced' | 'thorough';
+};
+export type PermissionLogEntry = {
+  at: number;
+  event: 'requested' | 'allowed' | 'declined' | 'superseded' | 'action' | 'finished';
+  approvalId: string;
+  familiarId: string;
+  summary?: string;
+  reason?: string;
+  device?: 'desktop' | 'iphone';
+  runId?: string;
+  tool?: string;
+  detail?: string;
+  outcome?: string;
+};
 export type ChatLifecycle = 'active' | 'archived' | 'deleted';
 export interface CovenRuntime {
   status(): Promise<CovenStatus>;
@@ -69,6 +99,11 @@ export interface CovenRuntime {
   readSession(id: string, depth?: number): Promise<CovenSessionRead>;
   send(input: CovenSendInput, onEvent?: (event: CovenRunEvent) => void): Promise<CovenRunResult>;
   cancel(runId: string): Promise<void>;
+  pendingApprovals(): Promise<CovenApproval[]>;
+  /** Spends the request and streams its one turn with write access. */
+  allow(input: CovenAllowInput, onEvent?: (event: CovenRunEvent) => void): Promise<CovenRunResult>;
+  decline(approvalId: string): Promise<void>;
+  permissionLog(): Promise<PermissionLogEntry[]>;
   changeChatLifecycle(id: string, lifecycle: ChatLifecycle): Promise<void>;
 }
 
@@ -137,6 +172,36 @@ function familiar(value: unknown): value is CovenFamiliar {
         /^data:image\/png;base64,[A-Za-z0-9+/]+={0,2}$/.test(value.avatarUrl)))
   );
 }
+function approval(value: unknown): value is CovenApproval {
+  return (
+    record(value) &&
+    typeof value.id === 'string' &&
+    typeof value.familiarId === 'string' &&
+    typeof value.summary === 'string' &&
+    value.summary.length <= 1024 &&
+    optionalText(value.reason) &&
+    typeof value.requestedAt === 'number' &&
+    typeof value.expiresAt === 'number'
+  );
+}
+const LOG_EVENTS = ['requested', 'allowed', 'declined', 'superseded', 'action', 'finished'];
+function logEntry(value: unknown): value is PermissionLogEntry {
+  return (
+    record(value) &&
+    typeof value.at === 'number' &&
+    typeof value.event === 'string' &&
+    LOG_EVENTS.includes(value.event) &&
+    typeof value.approvalId === 'string' &&
+    typeof value.familiarId === 'string' &&
+    optionalText(value.summary) &&
+    optionalText(value.reason) &&
+    oneOf(value.device, ['desktop', 'iphone']) &&
+    optionalText(value.runId, 256) &&
+    optionalText(value.tool, 1024) &&
+    optionalText(value.detail) &&
+    optionalText(value.outcome, 64)
+  );
+}
 function checked<T>(value: unknown, guard: (value: unknown) => value is T): T {
   if (!guard(value)) throw new Error('Coven returned an invalid native result.');
   return value;
@@ -159,6 +224,26 @@ export function createCovenRuntime(
         error instanceof Error ? error.message : typeof error === 'string' ? error : '';
       throw new Error(message.slice(0, 2048) || 'Local Coven operation failed.');
     }
+  }
+  async function stream(
+    command: string,
+    input: unknown,
+    onEvent?: (event: CovenRunEvent) => void,
+  ): Promise<CovenRunResult> {
+    if (!available()) throw new Error(UNAVAILABLE);
+    const channel = new Channel<CovenRunEvent>();
+    channel.onmessage = (value) => onEvent?.(checked(value, event));
+    const result = checked(
+      await call(command, { input, onEvent: channel }),
+      (v): v is CovenRunResult => record(v) && typeof v.runId === 'string' && events(v.events),
+    );
+    const initialization = result.events.find(
+      (event) => event.type === 'system' && event.subtype === 'init',
+    );
+    const sessionId = initialization?.session_id;
+    return typeof sessionId === 'string' && sessionId.length > 0
+      ? { ...result, sessionId }
+      : result;
   }
   return {
     async status() {
@@ -190,24 +275,29 @@ export function createCovenRuntime(
           record(v) && session(v.session) && v.session.id === id && events(v.events),
       );
     },
-    async send(input, onEvent) {
-      if (!available()) throw new Error(UNAVAILABLE);
-      const channel = new Channel<CovenRunEvent>();
-      channel.onmessage = (value) => onEvent?.(checked(value, event));
-      const result = checked(
-        await call('coven_runtime_send', { input, onEvent: channel }),
-        (v): v is CovenRunResult => record(v) && typeof v.runId === 'string' && events(v.events),
-      );
-      const initialization = result.events.find(
-        (event) => event.type === 'system' && event.subtype === 'init',
-      );
-      const sessionId = initialization?.session_id;
-      return typeof sessionId === 'string' && sessionId.length > 0
-        ? { ...result, sessionId }
-        : result;
+    send(input, onEvent) {
+      return stream('coven_runtime_send', input, onEvent);
+    },
+    allow(input, onEvent) {
+      return stream('coven_runtime_allow', input, onEvent);
     },
     async cancel(runId) {
       await call('coven_runtime_cancel', { runId });
+    },
+    async pendingApprovals() {
+      return checked(
+        await call('coven_runtime_approvals'),
+        (v): v is CovenApproval[] => Array.isArray(v) && v.every(approval),
+      );
+    },
+    async decline(approvalId) {
+      await call('coven_runtime_decline', { approvalId });
+    },
+    async permissionLog() {
+      return checked(
+        await call('coven_runtime_permission_log'),
+        (v): v is PermissionLogEntry[] => Array.isArray(v) && v.every(logEntry),
+      );
     },
     async changeChatLifecycle(id, lifecycle) {
       const result = await call('coven_runtime_chat_lifecycle', { id, lifecycle });
