@@ -318,6 +318,43 @@ async function dismissMenus(lane) {
   }
 }
 
+/** A web view's page action, which would navigate or reload Chat's own window. */
+const pageAction = (item) =>
+  /^(back|forward|stop|reload|refresh|save as|print|more tools|inspect|view page source)\b/i.test(
+    String(item).trim(),
+  );
+
+/**
+ * The items of the context menu open after a right-click at `pressed`, read
+ * through accessibility; empty when no open menu could be read.
+ */
+async function readMenu(lane, row, label, pressed) {
+  const { native } = lane;
+  // The menu can reach accessibility a moment after it is drawn.
+  let menus = await native.call({ cmd: 'menus' });
+  for (let read = 0; read < 6 && menus.ok && !(menus.menus ?? []).length; read += 1) {
+    await sleep(500);
+    menus = await native.call({ cmd: 'menus' });
+  }
+  row.note(label, menus.ok ? menus.menus : menus.error);
+  let items = (menus.menus ?? []).flat();
+  if (!items.length && PLATFORM === 'windows') {
+    // WebView2's menu opens below and right of the press; what accessibility
+    // reports at a point inside it names the menu's own items. A menu of one
+    // item is short, so the first point is near its top.
+    for (const [dx, dy] of [
+      [40, 16],
+      [40, 50],
+    ]) {
+      const probe = await native.call({ cmd: 'menuAt', at: [pressed[0] + dx, pressed[1] + dy] });
+      row.note(`${label}: accessibility at +${dx},+${dy}`, probe.ok ? probe.at : probe.error);
+      items = probe.at?.items ?? [];
+      if (items.length) break;
+    }
+  }
+  return items;
+}
+
 async function linkNamed(app, name) {
   return await until(`link "${name}"`, async () => (await app.all('link', name)).at(-1), 15_000);
 }
@@ -435,50 +472,69 @@ export async function linkRows(lane, familiar, browser) {
     const pressed = center(await app.visible(await linkNamed(app, 'Handoff check')));
     await app.click(pressed, { button: 'right' });
     await sleep(1_200);
-    // The menu can reach accessibility a moment after it is drawn.
-    let menus = await native.call({ cmd: 'menus' });
-    for (let read = 0; read < 6 && menus.ok && !(menus.menus ?? []).length; read += 1) {
-      await sleep(500);
-      menus = await native.call({ cmd: 'menus' });
-    }
-    row1.note('native context menu on the link', menus.ok ? menus.menus : menus.error);
-    let items = (menus.menus ?? []).flat();
-    if (!items.length && PLATFORM === 'windows') {
-      // WebView2's menu opens below and right of the press; what accessibility
-      // reports at a point inside it names the menu's own items.
-      const probe = await native.call({ cmd: 'menuAt', at: [pressed[0] + 40, pressed[1] + 50] });
-      row1.note('accessibility at a point inside the menu', probe.ok ? probe.at : probe.error);
-      items = probe.at?.items ?? [];
-    }
-    // A menu that could not be read proves nothing either way.
-    if (items.length)
+    const items = await readMenu(lane, row1, 'native context menu on the link', pressed);
+    // README: links carry no address of their own, so the menu offers only text
+    // actions. Page actions such as Reload would reload Chat's whole window.
+    if (items.length) {
       row1.check(
         'the context menu offers no way to open the link',
         !items.some((item) => /open link|open in|new tab|new window/i.test(item)),
         items,
       );
-    // README: links carry no address of their own, so the menu offers only text
-    // actions. Page actions such as Reload would reload Chat's whole window.
-    if (items.length)
       row1.check(
         'the context menu offers only text actions (no page actions such as Reload)',
-        !items.some((item) =>
-          /^(back|forward|stop|reload|refresh|save as|print|more tools|inspect|view page source)\b/i.test(
-            String(item).trim(),
-          ),
-        ),
+        !items.some(pageAction),
         items,
       );
-    else {
+    } else if (PLATFORM === 'mac') {
+      // A menu that could not be read proves nothing either way.
       row1.block(
         'context menu items',
         'no open menu could be read through accessibility (see the screenshot)',
       );
-      if (PLATFORM === 'windows')
-        row1.note(
-          'top-level windows while the menu was open',
-          await native.call({ cmd: 'topWindows' }),
+    } else {
+      // On Windows and Linux Chat removes every item that is not a text action
+      // (#547), so a link with nothing selected may open no menu. That is told
+      // from a menu the lane cannot read by a control: right-click inside a
+      // selection in the same reply, where Copy must be offered.
+      lane.shot('504-1-context-menu-link');
+      await dismissMenus(lane);
+      await dragText(app, PASSAGE[0], PASSAGE[0]);
+      const { start, end } = app.lastDrag;
+      const inside = [Math.round((start[0] + end[0]) / 2), start[1]];
+      await app.click(inside, { button: 'right' });
+      await sleep(1_200);
+      const control = await readMenu(
+        lane,
+        row1,
+        'control: native context menu inside a selection in the same reply',
+        inside,
+      );
+      if (control.length) {
+        row1.check(
+          'the context menu on a selection offers Copy and only text actions',
+          control.some((item) => /^copy$/i.test(String(item).trim())) && !control.some(pageAction),
+          control,
         );
+        const none =
+          'no menu opened on the link with nothing selected, while the same reader read the selection menu';
+        row1.check('the context menu offers no way to open the link', true, none);
+        row1.check(
+          'the context menu offers only text actions (no page actions such as Reload)',
+          true,
+          none,
+        );
+      } else {
+        row1.block(
+          'context menu items',
+          'no open menu could be read through accessibility, on the link or on a selection (see the screenshots)',
+        );
+        if (PLATFORM === 'windows')
+          row1.note(
+            'top-level windows while the menu was open',
+            await native.call({ cmd: 'topWindows' }),
+          );
+      }
     }
     row1.expect('right-click opens the review', await app.count('dialog', REVIEW), 0);
     lane.shot('504-1-context-menu');
