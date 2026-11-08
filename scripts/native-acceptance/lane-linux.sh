@@ -28,15 +28,27 @@ if [ -z "${LANE_INNER:-}" ]; then
     fi
   done
   log "Japanese IBus engine: ${japanese:-none installable}"
-  version="${release#v}"
-  if [ "$kind" = appimage ]; then asset="OpenCoven.Chat_${version}_amd64.AppImage"; else asset="OpenCoven.Chat_${version}_amd64.deb"; fi
   work="$(mktemp -d)"
-  base="https://github.com/OpenCoven/chat/releases/download/${release}"
-  curl --proto '=https' --tlsv1.2 --fail --location --retry 3 -o "$work/SHA256SUMS" "$base/SHA256SUMS" || exit 1
-  curl --proto '=https' --tlsv1.2 --fail --location --retry 3 -o "$work/$asset" "$base/$asset" || exit 1
-  checksum="$(cd "$work" && grep -F "  ${asset}" SHA256SUMS | sha256sum -c - 2>&1)"
-  log "checksum: $checksum"
-  case "$checksum" in *": OK") ;; *) echo "::error::$asset does not match SHA256SUMS"; exit 1 ;; esac
+  if [ -n "${CANDIDATE_INSTALLER:-}" ]; then
+    # A candidate: this commit, built on this runner. Not a published release,
+    # so there is no SHA256SUMS to check, and the results say so.
+    commit="$(git -C "$here/../.." rev-parse --short HEAD)"
+    release="candidate-${commit}"
+    # Tauri names the bundle with a space; release assets carry a dot instead.
+    asset="$(basename "$CANDIDATE_INSTALLER" | tr ' ' .)"
+    cp "$CANDIDATE_INSTALLER" "$work/$asset"
+    checksum="candidate build of ${commit}; not a published release, so no SHA256SUMS"
+    log "checksum: $checksum"
+  else
+    version="${release#v}"
+    if [ "$kind" = appimage ]; then asset="OpenCoven.Chat_${version}_amd64.AppImage"; else asset="OpenCoven.Chat_${version}_amd64.deb"; fi
+    base="https://github.com/OpenCoven/chat/releases/download/${release}"
+    curl --proto '=https' --tlsv1.2 --fail --location --retry 3 -o "$work/SHA256SUMS" "$base/SHA256SUMS" || exit 1
+    curl --proto '=https' --tlsv1.2 --fail --location --retry 3 -o "$work/$asset" "$base/$asset" || exit 1
+    checksum="$(cd "$work" && grep -F "  ${asset}" SHA256SUMS | sha256sum -c - 2>&1)"
+    log "checksum: $checksum"
+    case "$checksum" in *": OK") ;; *) echo "::error::$asset does not match SHA256SUMS"; exit 1 ;; esac
+  fi
   log "prior app data: $(ls -d "$HOME/.local/share/ai.opencoven.chat" "$HOME/.config/ai.opencoven.chat" 2>&1 | tr '\n' ' ')"
   if [ "$kind" = appimage ]; then
     app="$HOME/Applications/$asset"
@@ -59,7 +71,7 @@ if [ -z "${LANE_INNER:-}" ]; then
   "release": "$release",
   "installer": "$asset",
   "installerSha256": "$(sha256sum "$work/$asset" | cut -d' ' -f1)",
-  "sha256sumsSha256": "$(sha256sum "$work/SHA256SUMS" | cut -d' ' -f1)",
+  "sha256sumsSha256": "$(if [ -f "$work/SHA256SUMS" ]; then sha256sum "$work/SHA256SUMS" | cut -d' ' -f1; else echo 'none (candidate)'; fi)",
   "checksum": "$checksum",
   "installed": "$app",
   "distro": "$(. /etc/os-release && echo "$PRETTY_NAME"), kernel $(uname -r)",
@@ -120,6 +132,6 @@ ibus engine xkb:us::eng 2>>"$out/environment.txt"
 log "default browser: $(xdg-settings get default-web-browser 2>&1)"
 
 node "$here/run.mjs" --app "$LANE_APP" --out "$out" \
-  --lane "$(. /etc/os-release && echo "$PRETTY_NAME"), published ${kind} ${release}" \
+  --lane "$(. /etc/os-release && echo "$PRETTY_NAME"), $(case "$release" in candidate-*) echo "candidate ${kind} built from ${release#candidate-}, not a published release" ;; *) echo "published ${kind} ${release}" ;; esac)" \
   --facts "$out/facts.json" ${LANE_JAPANESE:+--japanese "$LANE_JAPANESE" --ime-on Hiragana} --latin xkb:us::eng
 exit $?

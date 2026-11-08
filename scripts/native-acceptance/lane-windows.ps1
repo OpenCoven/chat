@@ -1,7 +1,7 @@
 # The Windows native lane: verify and install the published MSI or setup EXE on
 # a fresh runner, record what the runner is, then drive the app with run.mjs.
 param(
-  [Parameter(Mandatory = $true)][string]$Release,
+  [string]$Release = '',
   [Parameter(Mandatory = $true)][string]$Out,
   [ValidateSet('msi', 'exe')][string]$Installer = 'msi'
 )
@@ -13,18 +13,33 @@ function Log($text) {
   [System.IO.File]::AppendAllText((Join-Path $Out 'environment.txt'), "$text`n", $utf8)
 }
 
-$version = $Release.TrimStart('v')
-$asset = if ($Installer -eq 'msi') { "OpenCoven.Chat_${version}_x64_en-US.msi" } else { "OpenCoven.Chat_${version}_x64-setup.exe" }
 $work = Join-Path $env:RUNNER_TEMP 'native-installer'
 New-Item -ItemType Directory -Force -Path $work | Out-Null
-$base = "https://github.com/OpenCoven/chat/releases/download/$Release"
-Invoke-WebRequest -UseBasicParsing -Uri "$base/SHA256SUMS" -OutFile (Join-Path $work 'SHA256SUMS')
-Invoke-WebRequest -UseBasicParsing -Uri "$base/$asset" -OutFile (Join-Path $work $asset)
-$expected = (Get-Content (Join-Path $work 'SHA256SUMS') | Where-Object { $_ -match "  $([regex]::Escape($asset))$" }) -replace '\s.*$', ''
-$sha = (Get-FileHash -Algorithm SHA256 (Join-Path $work $asset)).Hash.ToLowerInvariant()
-$sums = (Get-FileHash -Algorithm SHA256 (Join-Path $work 'SHA256SUMS')).Hash.ToLowerInvariant()
-Log "checksum: $asset $sha, SHA256SUMS lists $expected"
-if (-not $expected -or $sha -ne $expected) { throw "$asset does not match SHA256SUMS" }
+if ($env:CANDIDATE_INSTALLER) {
+  # A candidate: this commit, built on this runner. Not a published release, so
+  # there is no SHA256SUMS to check, and the results say so.
+  $commit = (git -C (Join-Path $PSScriptRoot '..\..') rev-parse --short HEAD)
+  $Release = "candidate $commit"
+  # Tauri names the bundle with a space; release assets carry a dot instead.
+  $asset = (Split-Path -Leaf $env:CANDIDATE_INSTALLER) -replace ' ', '.'
+  Copy-Item $env:CANDIDATE_INSTALLER (Join-Path $work $asset)
+  $sha = (Get-FileHash -Algorithm SHA256 (Join-Path $work $asset)).Hash.ToLowerInvariant()
+  $sums = 'none (candidate)'
+  Log "checksum: candidate build of $commit ($asset $sha); not a published release, so no SHA256SUMS"
+  $sourceLabel = "candidate $Installer built from $commit, not a published release"
+} else {
+  $version = $Release.TrimStart('v')
+  $asset = if ($Installer -eq 'msi') { "OpenCoven.Chat_${version}_x64_en-US.msi" } else { "OpenCoven.Chat_${version}_x64-setup.exe" }
+  $base = "https://github.com/OpenCoven/chat/releases/download/$Release"
+  Invoke-WebRequest -UseBasicParsing -Uri "$base/SHA256SUMS" -OutFile (Join-Path $work 'SHA256SUMS')
+  Invoke-WebRequest -UseBasicParsing -Uri "$base/$asset" -OutFile (Join-Path $work $asset)
+  $expected = (Get-Content (Join-Path $work 'SHA256SUMS') | Where-Object { $_ -match "  $([regex]::Escape($asset))$" }) -replace '\s.*$', ''
+  $sha = (Get-FileHash -Algorithm SHA256 (Join-Path $work $asset)).Hash.ToLowerInvariant()
+  $sums = (Get-FileHash -Algorithm SHA256 (Join-Path $work 'SHA256SUMS')).Hash.ToLowerInvariant()
+  Log "checksum: $asset $sha, SHA256SUMS lists $expected"
+  if (-not $expected -or $sha -ne $expected) { throw "$asset does not match SHA256SUMS" }
+  $sourceLabel = "published $Installer $Release"
+}
 
 Log "prior app data: $(Test-Path "$env:LOCALAPPDATA\ai.opencoven.chat") $(Test-Path "$env:APPDATA\ai.opencoven.chat")"
 # A wide desktop for the 1400px rows, and Edge without its first-run pages.
@@ -93,7 +108,7 @@ try {
 } catch { $selfTest = "self-test threw: $($_.Exception.Message)" } finally { $ErrorActionPreference = 'Stop' }
 Log "helper self-test: $($selfTest.Trim())"
 
-$label = "$((Get-CimInstance Win32_OperatingSystem).Caption), published $Installer $Release"
+$label = "$((Get-CimInstance Win32_OperatingSystem).Caption), $sourceLabel"
 node (Join-Path $PSScriptRoot 'run.mjs') --app $exe --out $Out --lane $label --facts (Join-Path $Out 'facts.json') `
   --nvda $nvda --japanese 00000411 --latin 00000409 --ime-on imeon --ime-off imeoff
 exit $LASTEXITCODE
