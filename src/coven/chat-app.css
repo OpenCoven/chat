@@ -1293,6 +1293,12 @@
   display: inline-flex;
 }
 
+/* Colour isn't the only signal: the words change too. */
+.coven-composer-meta-text[data-access="full"] {
+  color: var(--color-warning);
+  font-weight: 600;
+}
+
 /* The path gives way first: it shrinks to an ellipsis, then wraps to its own line. */
 .coven-composer-meta-workspace {
   flex: 1 1 0;

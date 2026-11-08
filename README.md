@@ -113,8 +113,8 @@ permissions. Without a configured registry and grants, Chat assumes no project a
 
 The composer is one framed box: the message field, then a toolbar with attach (**+**, in Coven
 Code chats) and **Add context** on the left and **Send** on the right, then a details row. The details row shows what
-Chat knows about where the message goes: the familiar and the access its runs have (every run is
-**Read only**), the harness the chat runs on, or that a new chat will start on, the model from
+Chat knows about where the message goes: the familiar and its access (**Read only**, or **Full
+permission** during a turn you allowed), the harness the chat runs on, or that a new chat will start on, the model from
 **Settings › Model** (**Engine default** when none is set), and the reported chat project, or the
 familiar workspace when no chat project has been reported. This is observed context, not a
 workspace switch or a permission grant. The sliders button at the end of the row opens **Settings

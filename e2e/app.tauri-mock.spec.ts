@@ -30,9 +30,11 @@ async function installRuntimeFixture(
   // First-run setup's own answer. It normally follows `available`; a test of
   // the chat's disconnected state sets it so Coven goes missing after setup.
   setupComplete = available,
+  // Requests the host says are open. Allowing one holds its turn open until Stop.
+  approvals: Record<string, unknown>[] = [],
 ) {
   await page.addInitScript(
-    ({ ready, reply, population, stream, observerFailure, setupComplete }) => {
+    ({ ready, reply, population, stream, observerFailure, setupComplete, approvals }) => {
       const portrait = document.createElement('canvas');
       portrait.width = 2;
       portrait.height = 2;
@@ -283,6 +285,13 @@ async function installRuntimeFixture(
               case 'coven_runtime_cancel':
                 rejectRun?.(new Error('Coven run was cancelled.'));
                 return null;
+              case 'coven_runtime_approvals':
+                return approvals;
+              case 'coven_runtime_allow':
+                approvals.length = 0;
+                return new Promise((_, reject) => {
+                  rejectRun = reject;
+                });
               // The host would hand the address to the system; the fixture records it.
               case 'open_reviewed_link':
                 window.__openedLinks = [...(window.__openedLinks ?? []), args.address];
@@ -298,7 +307,7 @@ async function installRuntimeFixture(
         },
       });
     },
-    { ready: available, reply, population, stream, observerFailure, setupComplete },
+    { ready: available, reply, population, stream, observerFailure, setupComplete, approvals },
   );
 }
 
@@ -887,6 +896,36 @@ test('Escape stops a run from the page and the composer, but not from a dialog',
 });
 
 for (const colorScheme of ['dark', 'light'] as const) {
+  test(`says Full permission only during the allowed turn (${colorScheme})`, async ({ page }) => {
+    // The turn stays open on its thinking dots, which would never let the contrast read settle.
+    await page.emulateMedia({ colorScheme, reducedMotion: 'reduce' });
+    await page.setViewportSize({ width: 1600, height: 900 });
+    await installRuntimeFixture(page, true, undefined, 1, undefined, false, true, [
+      {
+        id: 'request-1',
+        familiarId: 'fixture-familiar',
+        summary: 'Create probe.txt',
+        requestedAt: Date.now(),
+        expiresAt: Date.now() + 3_600_000,
+      },
+    ]);
+    await page.goto('/');
+    const details = page
+      .getByRole('region', { name: 'Message composer' })
+      .getByRole('group', { name: 'Chat details' });
+    await expect(details).toContainText('Local familiar · Read only');
+    await page.getByRole('button', { name: 'Allow once', exact: true }).click();
+    const stop = page.getByRole('button', { name: 'Stop run', exact: true });
+    await expect(stop).toBeVisible();
+    await expect(details).toContainText('Local familiar · Full permission');
+    await page.mouse.move(2, 2);
+    expect(await contrastFailures(page)).toEqual([]);
+    // The card has gone, and the key still reaches the run.
+    await page.keyboard.press('Escape');
+    await expect(stop).toHaveCount(0);
+    await expect(details).toContainText('Local familiar · Read only');
+  });
+
   test(`lays the composer out as field, toolbar and details (${colorScheme})`, async ({
     page,
   }, testInfo) => {

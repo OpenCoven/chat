@@ -52,6 +52,7 @@ function MockLayout(props: ChatLayoutProps) {
       <output data-testid="head">{props.sessionId}</output>
       <output data-testid="familiar">{props.familiarId}</output>
       <output data-testid="run-familiar">{props.busy ? props.runFamiliarId : 'idle'}</output>
+      <output data-testid="run-access">{props.runFullPermission ? 'full' : 'read-only'}</output>
       <output data-testid="drafts">{JSON.stringify(props.drafts ?? {})}</output>
       <output data-testid="finished">{JSON.stringify(props.finished ?? {})}</output>
       <output data-testid="last-run">{props.lastRun ? props.lastRun.outcome : 'none'}</output>
@@ -1236,6 +1237,57 @@ describe('answering a familiar that asks for permission', () => {
     expect(api.send).not.toHaveBeenCalled();
     await waitFor(() => expect(screen.getByTestId('run-familiar')).toHaveTextContent('idle'));
     expect(screen.getByRole('textbox')).toHaveValue('still typing');
+  });
+
+  it('reports full permission only for the turn that was allowed', async () => {
+    const api = asking();
+    const running = deferred<{ runId: string; events: never[] }>();
+    vi.mocked(api.allow).mockReturnValue(running.promise);
+    await ready(api);
+    expect(screen.getByTestId('run-access')).toHaveTextContent('read-only');
+    fireEvent.click(await screen.findByRole('button', { name: 'Allow Create probe.txt' }));
+    await waitFor(() => expect(screen.getByTestId('run-access')).toHaveTextContent('full'));
+    vi.mocked(api.pendingApprovals).mockResolvedValue([]);
+    await act(async () => {
+      running.resolve({ runId: 'run', events: [] });
+      await running.promise;
+    });
+    await waitFor(() => expect(screen.getByTestId('run-familiar')).toHaveTextContent('idle'));
+    expect(screen.getByTestId('run-access')).toHaveTextContent('read-only');
+  });
+
+  it('keeps reporting read only when the host refuses to spend the request', async () => {
+    const api = asking();
+    vi.mocked(api.allow).mockRejectedValue(new Error('That request has closed.'));
+    await ready(api);
+    fireEvent.click(await screen.findByRole('button', { name: 'Allow Create probe.txt' }));
+    await waitFor(() => expect(api.allow).toHaveBeenCalledOnce());
+    await waitFor(() => expect(screen.getByTestId('run-familiar')).toHaveTextContent('idle'));
+    expect(screen.getByTestId('run-access')).toHaveTextContent('read-only');
+  });
+
+  it("takes a phone turn's access from the host's event", async () => {
+    const api = runtime();
+    let receive: (value: import('../lib/companion-runs').CompanionRunEvent) => void = () => {};
+    await act(async () => {
+      render(
+        <ChatApp
+          runtime={api}
+          observePhoneRuns={async (callback) => {
+            receive = callback;
+            return () => {};
+          }}
+        />,
+      );
+    });
+    await waitFor(() => expect(screen.getByRole('textbox')).toBeEnabled());
+    const run = { runId: 'phone', familiarId: 'f' };
+    await act(async () => receive({ ...run, status: 'running' }));
+    expect(screen.getByTestId('run-access')).toHaveTextContent('read-only');
+    await act(async () => receive({ ...run, status: 'running', fullPermission: true }));
+    expect(screen.getByTestId('run-access')).toHaveTextContent('full');
+    await act(async () => receive({ ...run, status: 'completed' }));
+    await waitFor(() => expect(screen.getByTestId('run-access')).toHaveTextContent('read-only'));
   });
 
   it('keeps an allowed request away while the host may not have recorded the answer', async () => {

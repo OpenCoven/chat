@@ -3299,6 +3299,27 @@ describe('composer stop key, running copy and details row', () => {
     ).toBeInTheDocument();
   });
 
+  it('says when this familiar is on a turn with full permission', () => {
+    const { rerender } = render(<ChatLayout {...running({ runFullPermission: true })} />);
+    const details = within(screen.getByRole('group', { name: 'Chat details' }));
+    expect(details.getByText('Astra · Full permission')).toHaveAttribute('data-access', 'full');
+    expect(details.queryByText(/Read only/)).not.toBeInTheDocument();
+    // Another familiar's allowed turn says nothing about this one.
+    rerender(<ChatLayout {...running({ runFullPermission: true, runFamiliarId: 'other' })} />);
+    expect(details.getByText('Astra · Read only')).toBeInTheDocument();
+    // Nor does a flag left over once the turn has ended.
+    rerender(<ChatLayout {...running({ busy: false, runFullPermission: true })} />);
+    expect(details.getByText('Astra · Read only')).toBeInTheDocument();
+  });
+
+  it('does not call every run read only now that a turn can be allowed', () => {
+    render(<ChatLayout {...running({ busy: false })} />);
+    const details = within(screen.getByRole('group', { name: 'Chat details' }));
+    const item = details.getByText('Astra · Read only').closest('[title]');
+    expect(item?.getAttribute('title')).not.toMatch(/every run/i);
+    expect(item?.getAttribute('title')).toMatch(/ask you to allow one turn/);
+  });
+
   it('reports no workspace, and names no familiar when none is selected', () => {
     render(<ChatLayout {...layoutProps()} connected ready />);
     const details = within(screen.getByRole('group', { name: 'Chat details' }));

@@ -156,6 +156,8 @@ export function ChatApp({
   const [runFamiliarId, setRunFamiliarId] = useState('');
   const [approvals, setApprovals] = useState<CovenApproval[]>([]);
   const [answeringApproval, setAnsweringApproval] = useState(false);
+  /** This window's run is the one turn a person allowed. */
+  const [allowedRun, setAllowedRun] = useState(false);
   const approvalReads = useRef(0);
   /** Requests being allowed: the host may not have recorded the answer yet. */
   const allowing = useRef(new Set<string>());
@@ -544,6 +546,7 @@ export function ChatApp({
     const { harness: _chatKeepsItsHarness, ...runOptions } = sendOptions(options, chatHarness);
     allowing.current.add(approval.id);
     setApprovals((previous) => previous.filter((item) => item.id !== approval.id));
+    setAllowedRun(true);
     try {
       await runTurn({
         keepsDraft: true,
@@ -553,6 +556,7 @@ export function ChatApp({
           runtime.allow({ approvalId: approval.id, runId, ...runOptions }, onEvent),
       });
     } finally {
+      setAllowedRun(false);
       // A request the host refused to spend comes back here.
       allowing.current.delete(approval.id);
       void refreshApprovals();
@@ -904,6 +908,7 @@ export function ChatApp({
       }
       busy={busy}
       runFamiliarId={phoneRun?.familiarId ?? runFamiliarId}
+      runFullPermission={phoneRun ? phoneRun.fullPermission === true : allowedRun}
       partialHistory={partial}
       {...(partial && depth < MAX_HISTORY_DEPTH && !busy && !loading
         ? {

@@ -142,6 +142,8 @@ export type ChatLayoutProps = Readonly<{
    * live; absent, the run is credited to the shown familiar.
    */
   runFamiliarId?: string;
+  /** The run in progress is a turn someone allowed, so it isn't read only. */
+  runFullPermission?: boolean;
   /** Only the newest part of this chat's history is loaded; said as a notice, not an error. */
   partialHistory?: boolean;
   /** Reads further back; present while more history can be loaded. */
@@ -782,6 +784,7 @@ export function ChatLayout(props: ChatLayoutProps) {
   // A run belongs to the familiar it was sent to, not to whichever is shown.
   const runFamiliarId = props.busy ? props.runFamiliarId || props.familiarId : '';
   const runHere = props.busy && runFamiliarId === props.familiarId;
+  const fullPermissionHere = runHere && Boolean(props.runFullPermission);
   const runName =
     props.familiars.find((item) => item.id === runFamiliarId)?.name ?? 'Another familiar';
   // Runs that ended elsewhere and have not been looked at; the collapsed
@@ -1760,12 +1763,21 @@ export function ChatLayout(props: ChatLayoutProps) {
                       {familiar ? (
                         <span
                           className="coven-composer-meta-item coven-composer-meta-familiar"
-                          title={`Every run is read only: ${name} can read files but not change them.`}
+                          title={
+                            fullPermissionHere
+                              ? `This turn has full permission: ${name} can do anything your user account can until this reply ends. The next turn is read only.`
+                              : `Messages run read only: ${name} can read files but not change them. ${name} can ask you to allow one turn with full permission.`
+                          }
                         >
                           <span className="coven-composer-meta-avatar" aria-hidden="true">
                             <FamiliarAvatar name={name} avatarUrl={familiar.avatarUrl} size={18} />
                           </span>
-                          <span className="coven-composer-meta-text">{`${name} · Read only`}</span>
+                          <span
+                            className="coven-composer-meta-text"
+                            data-access={fullPermissionHere ? 'full' : 'read-only'}
+                          >
+                            {`${name} · ${fullPermissionHere ? 'Full permission' : 'Read only'}`}
+                          </span>
                         </span>
                       ) : null}
                       <span
