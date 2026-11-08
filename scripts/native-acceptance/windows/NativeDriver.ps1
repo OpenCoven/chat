@@ -43,13 +43,23 @@ public static class NativeDriver {
       "\"min\":{0},\"max\":{1}", range.Minimum, range.Maximum);
   }
 
+  // A range's number comes first: with aria-valuetext, Chromium's Value pattern
+  // gives the text ("360 pixels") and RangeValue the number, which is what the
+  // other platforms report as the value. The text is kept as valueText.
   static string Value(AutomationElement element) {
     object pattern;
-    if (element.TryGetCurrentPattern(ValuePattern.Pattern, out pattern))
-      return ((ValuePattern)pattern).Current.Value;
     if (element.TryGetCurrentPattern(RangeValuePattern.Pattern, out pattern))
       return ((RangeValuePattern)pattern).Current.Value.ToString(System.Globalization.CultureInfo.InvariantCulture);
+    if (element.TryGetCurrentPattern(ValuePattern.Pattern, out pattern))
+      return ((ValuePattern)pattern).Current.Value;
     return null;
+  }
+
+  static string ValueText(AutomationElement element) {
+    object pattern;
+    if (!element.TryGetCurrentPattern(RangeValuePattern.Pattern, out pattern)) return null;
+    if (!element.TryGetCurrentPattern(ValuePattern.Pattern, out pattern)) return null;
+    return ((ValuePattern)pattern).Current.Value;
   }
 
   public static string Summary(AutomationElement element) {
@@ -62,6 +72,7 @@ public static class NativeDriver {
     if (!string.IsNullOrEmpty(current.LocalizedControlType)) parts.Add("\"localized\":" + Quote(current.LocalizedControlType));
     if (!string.IsNullOrEmpty(current.HelpText)) parts.Add("\"help\":" + Quote(current.HelpText));
     try { var value = Value(element); if (value != null) parts.Add("\"value\":" + Quote(value)); } catch { }
+    try { var text = ValueText(element); if (!string.IsNullOrEmpty(text)) parts.Add("\"valueText\":" + Quote(text)); } catch { }
     try { var range = Range(element); if (range != null) parts.Add(range); } catch { }
     if (current.Orientation != OrientationType.None) parts.Add("\"orientation\":" + Quote(current.Orientation.ToString()));
     try {
