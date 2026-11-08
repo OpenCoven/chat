@@ -2004,7 +2004,7 @@ pub(crate) async fn coven_runtime_allow(
         let approval = input.approval_id.clone();
         let run = input.run_id.clone();
         blocking(move || {
-            crate::chat_approvals::allow(
+            crate::chat_approvals::allow_request(
                 &data,
                 &approval,
                 crate::chat_approvals::Device::Desktop,
@@ -2039,7 +2039,8 @@ pub(crate) async fn coven_runtime_approvals(
         .path()
         .app_local_data_dir()
         .map_err(|_| "Cannot locate local chat storage.")?;
-    blocking(move || crate::chat_approvals::pending(&data, crate::chat_approvals::now_ms())).await
+    blocking(move || crate::chat_approvals::open_requests(&data, crate::chat_approvals::now_ms()))
+        .await
 }
 
 #[tauri::command]
@@ -2231,22 +2232,13 @@ fn send_turn(
         !input.attachments.is_empty(),
         replay.as_ref().map(|replay| replay.prompt.as_str()),
     );
-    // The engine's copy says what this turn may do; the saved input stays the
-    // person's own words.
-    let sent_prompt = if input.grant.is_some() {
-        format!(
-            "{}\n\n{conversation}",
-            crate::chat_approvals::allowed_note()
-        )
-    } else {
-        let declined = match input.session_id.as_deref() {
-            Some(session) => crate::chat_approvals::declined_summary(data, session)?,
-            None => None,
-        };
-        format!(
-            "{}\n\n{conversation}",
-            crate::chat_approvals::read_only_note(declined.as_deref())
-        )
+    let sent_prompt = match crate::chat_approvals::turn_note(
+        data,
+        input.session_id.as_deref(),
+        input.grant.is_some(),
+    )? {
+        Some(note) => format!("{note}\n\n{conversation}"),
+        None => conversation.to_owned(),
     };
     let mut args = run_arguments(&input, &harness, &workspace, &sent_prompt)?;
     let staged = if input.attachments.is_empty() {
@@ -2429,8 +2421,7 @@ fn send_turn(
     });
     let failure = match (&run, failed_result) {
         (Ok(_), None) if events.iter().any(is_result) => {
-            // A turn that already has write access has nothing left to ask for.
-            if input.grant.is_none() {
+            if crate::chat_approvals::files_requests(input.grant.is_some()) {
                 if let (Some(session), Some(proposal)) = (
                     input_session.as_deref(),
                     crate::chat_approvals::proposal_in(&events),

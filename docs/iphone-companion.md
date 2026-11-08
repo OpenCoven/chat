@@ -68,26 +68,8 @@ the phone checks, and the app version.
 
 Both devices share one runtime. While a run is going, whichever device started
 it, a second send can't start another. Archived chats are readable; restore one
-on the Mac before sending. Attachments, remote shell and push notifications
-aren't part of this version.
-
-### Answering a familiar that asks for permission
-
-When a familiar needs more than read-only, a card above the composer shows what
-it asks for. **Allow once** asks you to confirm, then runs one turn on the Mac
-that can change files and run commands as you, until that reply ends. That access
-isn't limited to what the card describes. **Decline** runs nothing. If another
-familiar is asking, a line above the composer takes you to it, and the familiar
-picker marks it **Asks permission**.
-
-The phone finds requests when it refreshes, about every four seconds with the app
-open. Without push notifications, it can't tell you while it's closed. A request
-closes when it's answered on either device, an hour after it was made, or when
-you send that familiar another message. **⋯ › Permission Log** shows the same log
-as Settings › Access on the Mac.
-
-An answer is checked the same way as a send: if the connection drops, the phone
-asks the Mac what happened to it and never sends it twice.
+on the Mac before sending. Attachments, write approvals, remote shell and push
+notifications aren't part of this version.
 
 A connection failure never automatically sends the message again. After
 reconnecting, the phone checks the Mac's receipt for the original request. If
