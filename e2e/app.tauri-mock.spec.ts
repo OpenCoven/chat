@@ -13,6 +13,7 @@ declare global {
     __covenFixture: { calls: string[]; inputs?: unknown[]; finish?: () => void };
     /** Overrides the first familiar's name, for layout tests with long names. */
     __fixtureFamiliarName?: string;
+    __fixtureReadDelayMs?: number;
     /** Addresses the window asked the host to open, in order. */
     __openedLinks?: unknown[];
   }
@@ -160,6 +161,13 @@ async function installRuntimeFixture(
                   (head) => head.session.id === args.id,
                 );
                 if (!selected) throw new Error('Unexpected session read.');
+                // A real read goes through the CLI and takes a moment; the composer
+                // is turned off until it's done.
+                if (window.__fixtureReadDelayMs) {
+                  return new Promise((resolve) =>
+                    setTimeout(() => resolve(selected), window.__fixtureReadDelayMs),
+                  );
+                }
                 return selected;
               }
               case 'setup_run': {
@@ -902,6 +910,39 @@ test('cancellation retains the submitted draft instead of pretending success', a
   await expect(page.getByRole('alert')).toContainText('cancelled');
   await expect(composer).toHaveValue('Keep this draft after cancellation');
   expect(await page.evaluate(() => window.__covenFixture.calls)).toContain('coven_runtime_cancel');
+});
+
+test('keeps focus in the composer through the read that follows a run', async ({ page }) => {
+  await page.addInitScript(() => {
+    window.__fixtureReadDelayMs = 700;
+  });
+  await installRuntimeFixture(page);
+  await page.goto('/');
+  const composer = page.getByRole('textbox', { name: 'Message Local familiar' });
+  await expect(composer).toBeEnabled();
+  const stop = page.getByRole('button', { name: 'Stop run', exact: true });
+
+  // Stopped with Escape from the field, in a chat with no reply yet.
+  await composer.fill('Stop me');
+  await page.getByRole('button', { name: 'Send', exact: true }).click();
+  await expect(stop).toBeVisible();
+  await composer.focus();
+  await page.keyboard.press('Escape');
+  await expect(stop).toHaveCount(0);
+  await expect(composer).toBeEnabled();
+  await expect(composer).toBeFocused();
+
+  // A run that ends by itself, with someone typing in the field as it does.
+  await page.getByRole('button', { name: 'Send', exact: true }).click();
+  await expect(stop).toBeVisible();
+  await composer.focus();
+  await page.keyboard.type('next');
+  await page.evaluate(() => window.__covenFixture.finish?.());
+  await expect(stop).toHaveCount(0);
+  await expect(composer).toBeEnabled();
+  await expect(composer).toBeFocused();
+  await page.keyboard.type(' question');
+  await expect(composer).toHaveValue(/next question$/);
 });
 
 test('Escape stops a run from the page and the composer, but not from a dialog', async ({

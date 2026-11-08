@@ -1671,18 +1671,45 @@ export async function stopKeyRow(lane, familiar) {
       0,
     );
     row.expect('the draft stays', await lane.composerValue(familiar), DRAFT);
+    // The field stays off until Chat has read the chat again through the CLI.
+    await until(
+      'focus to come back to the composer',
+      async () => (await app.focused())?.name === `Message ${familiar}`,
+      20_000,
+      500,
+    ).catch(() => undefined);
     row.expect('focus is back in the composer', (await app.focused())?.name, `Message ${familiar}`);
+
+    // From the Stop control, with the pointer. Reported, not judged: a pointer press
+    // moves focus differently on each web view.
+    await slowRun('[[slow]] Stop me from the Stop control.');
+    await app.click(await lane.composer(familiar));
+    await app.click(await app.one('button', 'Stop run'));
+    await lane.idle();
+    await until(
+      'focus to come back to the composer',
+      async () => (await app.focused())?.name === `Message ${familiar}`,
+      20_000,
+      500,
+    ).catch(() => undefined);
+    row.note(
+      'focus after pressing Stop run with the pointer',
+      (await app.focused())?.name ?? '(none)',
+    );
 
     // From the page: a click in the conversation, away from the field.
     await slowRun('[[slow]] Stop me from the page.');
-    const line = (await app.all('text')).find((n) => /Slow line/.test(String(n.value ?? n.name)));
+    // The newest line: earlier replies have scrolled out of the conversation's view.
+    const line = (await app.all('text'))
+      .filter((n) => /Slow line/.test(String(n.value ?? n.name)))
+      .at(-1);
     await app.click(line);
     row.note('focus before Escape', (await app.focused())?.name ?? '(none)');
     await app.key('escape');
     await lane.idle();
     row.expect('Escape from the page stopped the run', await app.count('button', 'Stop run'), 0);
 
-    row.expect('slow runs sent to the model', lane.tokens('slow') - slowBefore, 2);
+    row.expect('slow runs sent to the model', lane.tokens('slow') - slowBefore, 3);
     const settled = lane.requests();
     await sleep(5_000);
     row.expect('nothing sent after the stops', lane.requests(), settled);

@@ -7,6 +7,7 @@ import {
   type RefObject,
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -855,16 +856,6 @@ export function ChatLayout(props: ChatLayoutProps) {
   const workspaceLabel = session?.projectRoot ? 'Chat project' : 'Familiar workspace';
   const composerDisabled =
     !props.ready || props.loading || props.cancelling || props.attaching || props.readOnly;
-  // Stopping turns the composer off, and that drops focus. Give it back to the field
-  // once it's on again, unless focus has already gone somewhere else.
-  const refocusAfterStop = useRef(false);
-  useEffect(() => {
-    if (composerDisabled || !refocusAfterStop.current) return;
-    refocusAfterStop.current = false;
-    if (!document.activeElement || document.activeElement === document.body) {
-      composerRef.current?.focus();
-    }
-  }, [composerDisabled]);
   const approval = props.approvals?.find((item) => item.familiarId === props.familiarId);
   // Allow starts a run, so it waits for the same things a message would.
   const allowUnavailable = props.readOnly
@@ -932,6 +923,25 @@ export function ChatLayout(props: ChatLayoutProps) {
     },
   };
   const composerRef = useRef<HTMLTextAreaElement>(null);
+  // The field turns off while a run stops and while the chat is read again after a
+  // run, and that drops focus. If the field had it, give it back when the field comes
+  // on again, unless focus has already gone somewhere else. Chromium takes focus off
+  // a field the moment it's disabled, so this reads focus before that commit.
+  const giveFocusBack = useRef(false);
+  const fieldHasFocus =
+    composerRef.current !== null && document.activeElement === composerRef.current;
+  // biome-ignore lint/correctness/useExhaustiveDependencies: only the field turning off or on counts, not focus moving while it's on.
+  useLayoutEffect(() => {
+    if (composerDisabled) {
+      if (fieldHasFocus) giveFocusBack.current = true;
+      return;
+    }
+    if (!giveFocusBack.current) return;
+    giveFocusBack.current = false;
+    if (!document.activeElement || document.activeElement === document.body) {
+      composerRef.current?.focus();
+    }
+  }, [composerDisabled]);
   // Start typing anywhere in the shell and the words go to the familiar. The
   // first letter is appended here rather than left to the browser, so it is
   // neither lost to a controlled field nor delivered twice.
@@ -1758,11 +1768,13 @@ export function ChatLayout(props: ChatLayoutProps) {
                     : {})}
                   running={props.busy && !composerDisabled}
                   onStop={() => {
-                    refocusAfterStop.current = Boolean(
+                    // The Stop control goes away with the run, so its focus comes here too.
+                    if (
                       composerRef.current
                         ?.closest('[data-slot="composer"]')
-                        ?.contains(document.activeElement),
-                    );
+                        ?.contains(document.activeElement)
+                    )
+                      giveFocusBack.current = true;
                     props.onCancel();
                   }}
                   allowAttachmentOnly
