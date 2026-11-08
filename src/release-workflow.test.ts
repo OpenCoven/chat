@@ -116,6 +116,11 @@ describe('release workflow specification', () => {
     }
     expect(verify).toContain('0.*|*-*) prerelease=true');
     expect(build).toContain('runner: macos-15-intel');
+    // GitHub removed the macos-14 Arm64 image (actions/runner-images#15227):
+    // a job asking for it is refused before its first step, so a tag could not
+    // build the Apple Silicon app. The image is pinned by name, like the rest.
+    expect(build).toMatch(/platform: macos-aarch64\n\s+runner: macos-15\n/);
+    expect(build).not.toContain('macos-14');
     expect(build).toContain('lipo -archs');
     expect(build).toContain(`dpkg-deb --field "\${deb}" Version`);
     expect(build).toContain('dpkg-deb --contents');

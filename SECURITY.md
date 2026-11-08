@@ -27,7 +27,9 @@ In either repository, use its private vulnerability reporting rather than a publ
 OpenCoven Chat does not persist authenticated conversation bodies in IndexedDB, `localStorage`,
 or `sessionStorage`. The window keeps only your selected familiar and your Settings choices in
 `localStorage`: display preferences, and the harness, model, reasoning and speed your messages ask
-for. Unsent drafts stay in memory. The desktop host keeps the following in Chat's
+for. Unsent drafts stay in memory. On Windows the window turns WebView2's general autofill off,
+and every text field is marked `autocomplete="off"`, so what you type is not kept in the web view's
+own autofill data either. The desktop host keeps the following in Chat's
 local app data folder (on macOS, `~/Library/Application Support/ai.opencoven.chat`):
 
 - **Transcripts.** Chat saves one transcript per message you send, as
@@ -45,6 +47,12 @@ local app data folder (on macOS, `~/Library/Application Support/ai.opencoven.cha
 - **Companion credentials.** The iPhone companion's certificate and key, its
   bearer token, and its send receipts live in a private `iphone-companion/`
   folder.
+- **Permission log.** `permission-log.jsonl` records each time a familiar asks for permission:
+  what it said it wants and why, your answer and the device you answered from, and each tool call
+  Coven reports during the turn you allowed, with up to 240 characters of its input. So a line can
+  hold a file path or part of a command. It is capped at about 4 MiB across two files,
+  oldest lines going first. On macOS and Linux only your user account can read it. **Delete chat**
+  does not remove its lines: the log is your record of what you allowed.
 - **Missions.** For each mission you send from Chat, a private `coven-missions/`
   folder keeps the keys Chat needs to learn its outcome after a restart: the
   mission's id, the familiar it was sent to and that familiar's revision, and the
@@ -63,6 +71,26 @@ that names a site, at most 8,192 bytes of printable ASCII, with no sign-in name.
 it, as one argument and never through a shell, to the system's URL handler. Reports of an address
 that reaches anything other than the default browser, or of a link that opens without the review,
 are in scope.
+
+## Permission for one turn
+
+Every message runs read-only unless you answer a familiar's request with **Allow once**. Then one
+turn runs with Coven's full permission, and the next message is read-only again.
+
+- A request is text the familiar wrote in its reply, so it may be mistaken, or written under the
+  influence of something the familiar read. It grants nothing until you answer it. Its description
+  is not a limit: an allowed turn can do anything your user account can, and the card says so.
+- The window and the phone can name a request to answer. Neither can ask for full permission, or
+  supply a grant of their own: the host builds the grant from its own record of the request.
+- The host marks a request as answered on disk before the turn starts, so one request allows at most
+  one turn, across both devices and across restarts. A request also closes after an hour, and when
+  the familiar's chat moves on.
+- If a tool call of an allowed turn can't be written to the log, the host stops the turn.
+- Coven doesn't report Codex's tool calls, so the log holds the answer to a Codex familiar's request
+  but not what it did with it.
+
+Reports of a turn that runs with full permission without your answer, of one request allowing two
+turns, or of an allowed tool call missing from the log (other than Codex's), are in scope.
 
 ## Reporting a vulnerability
 
@@ -131,5 +159,9 @@ interface.
   device-only Keychain, and stores no transcript or draft on disk.
 - Desktop credentials and durable idempotency receipts use private app storage.
 - Revoking phones rotates the bearer and closes existing connections.
+- A paired phone can answer a familiar's request for permission, which runs one turn with full
+  permission on the Mac. So the bearer can reach everything an allowed turn can. The phone asks you
+  to confirm first, and the log names the device that answered. **Forget paired phones** on the Mac
+  closes this along with the rest.
 - Discovery records contain only a candidate endpoint and a public fingerprint, never a token.
 - The test-only `companion-fixture` Cargo feature is not enabled in releases.

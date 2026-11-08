@@ -447,7 +447,7 @@ jobs:
           # the .msi, -setup.exe, .AppImage and .deb themselves and archives
           # only the macOS app (.app.tar.gz), each with a .sig beside it.
           - platform: macos-aarch64
-            runner: macos-14
+            runner: macos-15
             target: aarch64-apple-darwin
             bundles: app,dmg
           - platform: macos-x86_64

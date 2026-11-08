@@ -333,6 +333,35 @@ test('keeps the familiar list and inspector scrollable inside a short window', a
   expect(await page.evaluate(() => [window.scrollX, window.scrollY])).toEqual([0, 0]);
 });
 
+test('keeps the end of a long workspace path visible in the inspector', async ({ page }) => {
+  await page.setViewportSize({ width: 1200, height: 800 });
+  await installRuntimeFixture(page);
+  await page.goto('/');
+  await expect(page.getByRole('textbox', { name: 'Message Local familiar' })).toBeEnabled();
+  await page.getByRole('button', { name: "Open Local familiar's familiar card" }).click();
+  const value = page.locator('.fr-inspector').getByTitle('/fixture/familiars/0/workspace').first();
+  await expect(value).toBeVisible();
+  const ends = await value.evaluate((element) => {
+    const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT);
+    let text: Text | undefined;
+    while (walker.nextNode()) text = walker.currentNode as Text;
+    if (!text) throw new Error('The path row has no text.');
+    const box = element.getBoundingClientRect();
+    const range = document.createRange();
+    range.setStart(text, text.length - 1);
+    range.setEnd(text, text.length);
+    const last = range.getBoundingClientRect();
+    return {
+      truncated: element.scrollWidth > element.clientWidth,
+      endVisible: last.left >= box.left - 0.5 && last.right <= box.right + 0.5,
+    };
+  });
+  // The folder name at the end is what tells paths apart; the start gives way.
+  // Measured in Chromium, the suite's engine: WebKit's range geometry ignores
+  // the right-to-left overflow shift, so a WebKit run of this check misreads.
+  expect(ends).toEqual({ truncated: true, endVisible: true });
+});
+
 test('names the native window after the familiar being shown', async ({ page }) => {
   await installRuntimeFixture(page);
   await page.goto('/');

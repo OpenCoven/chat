@@ -41,6 +41,10 @@ export const ALLOWED_PERMISSIONS = [
   'allow-coven-runtime-read',
   'allow-coven-runtime-send',
   'allow-coven-runtime-cancel',
+  'allow-coven-runtime-approvals',
+  'allow-coven-runtime-allow',
+  'allow-coven-runtime-decline',
+  'allow-coven-runtime-permission-log',
   'allow-mission-prepare',
   'allow-mission-list',
   'allow-mission-remove',
@@ -94,6 +98,13 @@ export function verifyPackage({ conf, capabilities, cargo, exists }) {
   if (windows.length !== 1 || !main)
     fail('The package must declare exactly one window, labelled main.');
   else {
+    // WebView2 keeps what is typed into a field in its profile's Web Data while
+    // its general autofill is on, which it is by default, and it may not honor a
+    // field's autocomplete="off" (#546). Conversation text never goes there.
+    if (main.generalAutofillEnabled !== false)
+      fail(
+        'generalAutofillEnabled must be false: WebView2 autofill would keep typed text on disk.',
+      );
     if (main.width !== DEFAULT_WINDOW.width || main.height !== DEFAULT_WINDOW.height)
       fail(
         `The default window is ${main.width}x${main.height}, not ${DEFAULT_WINDOW.width}x${DEFAULT_WINDOW.height}.`,

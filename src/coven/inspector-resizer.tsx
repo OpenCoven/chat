@@ -1,4 +1,4 @@
-import { type KeyboardEvent, type PointerEvent, useRef } from 'react';
+import { type KeyboardEvent, type PointerEvent, useId, useRef } from 'react';
 import {
   INSPECTOR_MAX_WIDTH,
   INSPECTOR_MIN_WIDTH,
@@ -33,6 +33,7 @@ export function InspectorResizer({
   onCommit: (width: number) => void;
 }>) {
   const drag = useRef<Drag | null>(null);
+  const describedBy = useId();
   const widest = settleInspectorWidth(INSPECTOR_MAX_WIDTH, room);
 
   const finish = (event: PointerEvent<HTMLDivElement>) => {
@@ -59,50 +60,61 @@ export function InspectorResizer({
   };
 
   return (
-    // biome-ignore lint/a11y/useSemanticElements: a focusable separator with a value is the ARIA widget for a draggable edge; <hr> is a rule.
-    <div
-      role="separator"
-      tabIndex={0}
-      className="coven-inspector-resizer"
-      aria-label="Resize inspector"
-      aria-orientation="vertical"
-      aria-controls="coven-familiar-inspector"
-      aria-valuenow={width}
-      aria-valuemin={INSPECTOR_MIN_WIDTH}
-      aria-valuemax={widest}
-      onKeyDown={onKeyDown}
-      onPointerDown={(event) => {
-        if (event.button !== 0 || drag.current) return;
-        event.preventDefault();
-        const node = event.currentTarget;
-        if (typeof node.setPointerCapture === 'function') node.setPointerCapture(event.pointerId);
-        drag.current = {
-          pointerId: event.pointerId,
-          startX: event.clientX,
-          startWidth: width,
-          width,
-        };
-        onPreview(width);
-      }}
-      onPointerMove={(event) => {
-        const current = drag.current;
-        if (!current || current.pointerId !== event.pointerId) return;
-        const travel = (current.startX - event.clientX) * (direction === 'rtl' ? -1 : 1);
-        const next = preferredInspectorWidth(current.startWidth + travel);
-        drag.current = { ...current, width: next };
-        onPreview(next);
-      }}
-      onPointerUp={finish}
-      onPointerCancel={finish}
-      onLostPointerCapture={() => {
-        // Capture can go without an up or cancel (a modal took the window,
-        // say): whatever pointer held it, the drag ends where it was.
-        const current = drag.current;
-        if (!current) return;
-        drag.current = null;
-        onPreview(null);
-        onCommit(current.width);
-      }}
-    />
+    <>
+      {/* biome-ignore lint/a11y/useSemanticElements: a focusable separator with a value is the ARIA widget for a draggable edge; <hr> is a rule. */}
+      <div
+        role="separator"
+        tabIndex={0}
+        className="coven-inspector-resizer"
+        aria-label="Resize inspector"
+        aria-orientation="vertical"
+        aria-controls="coven-familiar-inspector"
+        aria-valuenow={width}
+        aria-valuemin={INSPECTOR_MIN_WIDTH}
+        aria-valuemax={widest}
+        // Without it VoiceOver names the focused handle but not its width, and
+        // on a change speaks a percentage of the range; Settings shows pixels.
+        aria-valuetext={`${width} pixels`}
+        // Orca speaks a focused splitter's role and name, but neither its value
+        // nor its value text; it does speak a description, so the width is here too.
+        aria-describedby={describedBy}
+        onKeyDown={onKeyDown}
+        onPointerDown={(event) => {
+          if (event.button !== 0 || drag.current) return;
+          event.preventDefault();
+          const node = event.currentTarget;
+          if (typeof node.setPointerCapture === 'function') node.setPointerCapture(event.pointerId);
+          drag.current = {
+            pointerId: event.pointerId,
+            startX: event.clientX,
+            startWidth: width,
+            width,
+          };
+          onPreview(width);
+        }}
+        onPointerMove={(event) => {
+          const current = drag.current;
+          if (!current || current.pointerId !== event.pointerId) return;
+          const travel = (current.startX - event.clientX) * (direction === 'rtl' ? -1 : 1);
+          const next = preferredInspectorWidth(current.startWidth + travel);
+          drag.current = { ...current, width: next };
+          onPreview(next);
+        }}
+        onPointerUp={finish}
+        onPointerCancel={finish}
+        onLostPointerCapture={() => {
+          // Capture can go without an up or cancel (a modal took the window,
+          // say): whatever pointer held it, the drag ends where it was.
+          const current = drag.current;
+          if (!current) return;
+          drag.current = null;
+          onPreview(null);
+          onCommit(current.width);
+        }}
+      />
+      <span id={describedBy} hidden>
+        {width} pixels wide. Arrow keys resize it, Home and End reach the limits.
+      </span>
+    </>
   );
 }

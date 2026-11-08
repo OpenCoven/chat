@@ -2,7 +2,16 @@
 // records what it observed. A failed expectation throws, and the row is
 // reported as failed with everything observed up to that point.
 
-import { ADDRESSES, TABLE } from './model-fixture.mjs';
+import { existsSync } from 'node:fs';
+import { join, resolve } from 'node:path';
+
+import {
+  ADDRESSES,
+  APPROVAL_DONE,
+  APPROVAL_REFUSED,
+  APPROVAL_SUMMARY,
+  TABLE,
+} from './model-fixture.mjs';
 import { readClipboard } from './platform.mjs';
 import { freshly, Key, Stop, sleep, until } from './webdriver.mjs';
 
@@ -53,12 +62,34 @@ async function clearComposer(s, composer) {
   await until('an empty draft', async () => (await composer.property('value')) === '', 5_000);
 }
 
+/**
+ * The composer is disabled while the chat (re)loads, and a reload can begin just
+ * after a run ends, so wait for both: a ready composer in a loaded chat.
+ */
+async function composerReady(s, composer) {
+  await until('the chat to load and the composer to accept input', async () => {
+    const loading = await s.execute(
+      "return document.body.innerText.includes('Loading conversation');",
+    );
+    return !loading && !(await composer.property('disabled'));
+  });
+}
+
 /** Sends through the real composer and waits for the reply's marker to render. */
 export async function send(s, familiar, text, role, name) {
   const composer = await composerOf(s, familiar);
-  await until('the composer to accept input', () => composer.property('disabled').then((d) => !d));
-  await composer.click();
-  await composer.type(text);
+  await composerReady(s, composer);
+  try {
+    await composer.click();
+    await composer.type(text);
+  } catch (error) {
+    // A reload that started between the check and the keys disables the
+    // composer; nothing was typed, so wait it out and type once more.
+    if (!/not interactable|invalid element state/i.test(error.message)) throw error;
+    await composerReady(s, composer);
+    await clearComposer(s, composer);
+    await composer.type(text);
+  }
   await (await s.one('button', 'Send')).click();
   // A failed run shows its error; report those words rather than time out.
   await until(
@@ -316,14 +347,12 @@ export async function quoteRow(s, familiar, requests) {
   try {
     const composer = await composerOf(s, familiar);
     await clearComposer(s, composer);
-    const selected = await selectText(
-      s,
-      `const bubble = [...document.querySelectorAll('.fr-bubble--familiar')]
+    const passage = `const bubble = [...document.querySelectorAll('.fr-bubble--familiar')]
         .find((node) => node.textContent.includes('three steps'));
       const items = bubble.querySelectorAll('li');
       range.setStart(bubble.querySelector('p'), 0);
-      range.setEnd(items[0], items[0].childNodes.length);`,
-    );
+      range.setEnd(items[0], items[0].childNodes.length);`;
+    const selected = await selectText(s, passage);
     row.note('selection across a paragraph break and a list item', selected);
     const quote = await s.one('button', 'Quote selection');
     row.check('Quote selection offered', Boolean(quote));
@@ -336,13 +365,15 @@ export async function quoteRow(s, familiar, requests) {
     // The action follows the conversation in the tab order: Tab from whatever precedes it.
     // React may re-render the controls between the lookup and the key press.
     await freshly(async () => {
-      const action = await s.one('button', 'Quote selection');
+      // A retry starts over: the attempt before it may have let the passage go.
+      if ((await s.all('button', 'Quote selection')).length === 0) await selectText(s, passage);
+      const first = await s.one('button', 'Quote selection');
       const previous = await s.execute(
         `const focusable = [...document.querySelectorAll('a[href], button, textarea, input, select, [tabindex]')]
           .filter((node) => !node.disabled && node.tabIndex >= 0 && node.getClientRects().length > 0);
         const index = focusable.indexOf(arguments[0]);
         return index > 0 ? focusable[index - 1] : null;`,
-        action,
+        first,
       );
       row.check('a control precedes the action in the tab order', Boolean(previous));
       row.note(
@@ -352,6 +383,16 @@ export async function quoteRow(s, familiar, requests) {
         ),
       );
       await previous.focus();
+      // The control before the action is a link inside the reply. Focusing it can
+      // collapse the selection, and WebKitGTK may deliver that selectionchange
+      // before or after the Tab below: before, the action rightly lets the passage
+      // go (focus is not in it). Select the passage again once focus has settled,
+      // so Tab always starts from the link with the passage selected, as it
+      // does for a reader who selects and then tabs from there.
+      await sleep(250);
+      await selectText(s, passage);
+      const action = await s.one('button', 'Quote selection');
+      row.expect('focus stays on the control before the action', await s.isActive(previous), true);
       await s.press(Key.Tab);
       row.expect(
         'Tab reaches the action with the passage still captured',
@@ -955,6 +996,111 @@ export async function storageRow(s) {
   } catch (error) {
     row.error = error.message;
     await snapshot(row.id);
+  }
+  return row;
+}
+
+/** The folder the familiar's engine works in, as Chat shows it under the thread. */
+async function familiarFolder(s) {
+  const line = await s.execute(
+    "return [...document.querySelectorAll('body *')].find((node) => node.childElementCount === 0 && /^(Chat project|Familiar workspace): /.test(node.textContent))?.textContent ?? '';",
+  );
+  const folder = line.replace(/^(Chat project|Familiar workspace): /, '');
+  if (!folder) throw new Error("Chat did not show the familiar's folder.");
+  return folder;
+}
+
+/**
+ * A familiar asks for permission. The engine really is asked to write a real
+ * file on every turn here, so the file itself says what each turn could do. The
+ * file goes in the familiar's own folder: an engine may refuse paths outside it
+ * even with access, and that is not what this row is about.
+ */
+export async function approvalRow(s, familiar) {
+  const row = new Row('approval', 'A familiar asks; one allowed turn writes, and the log says so');
+  const heading = `${familiar} asks for permission`;
+  const bodyHas = (text) =>
+    s.execute('return document.body.innerText.includes(arguments[0]);', text);
+  try {
+    await s.click(await s.one('button', familiar));
+    await composerOf(s, familiar);
+    const folder = await familiarFolder(s);
+    row.note("the familiar's folder", folder);
+    const allowedProof = resolve(join(folder, 'approval-allowed.txt'));
+    const declinedProof = resolve(join(folder, 'approval-declined.txt'));
+    await send(s, familiar, `[[ask ${allowedProof}]] Write the proof file.`, 'heading', heading);
+    row.expect('the read-only turn wrote the file', existsSync(allowedProof), false);
+    const [summary] = await s.css('.coven-approval-summary');
+    row.expect('the dialog shows the request', await summary.text(), APPROVAL_SUMMARY);
+    row.expect(
+      'the request block reads as prose',
+      await bodyHas('coven-permission-request'),
+      false,
+    );
+
+    await (await s.one('button', 'Allow once')).click();
+    await until(
+      'the allowed turn to report',
+      async () => {
+        const errors = await s.css('.coven-error-text');
+        if (errors.length) throw new Stop(`The run failed: ${await errors[0].text()}`);
+        const refused = await s.execute(
+          "return document.body.innerText.split('\\n').find((line) => line.includes(arguments[0])) ?? '';",
+          APPROVAL_REFUSED,
+        );
+        if (refused) throw new Stop(refused);
+        return bodyHas(APPROVAL_DONE);
+      },
+      120_000,
+      250,
+    );
+    await until(
+      'the allowed turn to finish',
+      async () => (await s.css('.oc-composer[data-running]')).length === 0,
+      60_000,
+    );
+    row.check('the allowed turn wrote the file', existsSync(allowedProof));
+    row.expect('the dialog is gone', (await s.all('button', 'Allow once')).length, 0);
+    row.check(
+      'the thread says the turn had access',
+      await bodyHas('You allowed this turn to change files'),
+    );
+    row.check('the thread shows the click', await bodyHas(`Allowed: ${APPROVAL_SUMMARY}`));
+
+    // Access ended with that turn: the next one is refused and has to ask again.
+    await send(s, familiar, `[[ask ${declinedProof}]] Write another.`, 'heading', heading);
+    row.expect('the next turn wrote the file', existsSync(declinedProof), false);
+    await (await s.one('button', 'Decline')).click();
+    await until('the decline to show in the thread', () =>
+      bodyHas(`You declined this request: ${APPROVAL_SUMMARY}`),
+    );
+    row.expect('declining wrote the file', existsSync(declinedProof), false);
+    row.expect('the dialog is gone after declining', (await s.all('button', 'Decline')).length, 0);
+
+    const settings = await openSettingsGeneral(s);
+    await (await s.one('button', 'Access', { within: settings })).click();
+    const log = await s.one('list', 'Permission log, newest first', { within: settings });
+    // Not text(): msedgedriver returns only what is on screen, and the oldest
+    // entries sit below the fold of the Settings panel.
+    const text = await log.property('innerText');
+    row.note('permission log', text);
+    for (const line of [
+      `${familiar} asked: ${APPROVAL_SUMMARY}`,
+      `Allowed on this computer for ${familiar}: ${APPROVAL_SUMMARY}`,
+      `${familiar} used Write`,
+      `${familiar}'s allowed turn finished.`,
+      `Declined on this computer for ${familiar}: ${APPROVAL_SUMMARY}`,
+    ]) {
+      row.check(`the log says "${line}"`, text.includes(line), text);
+    }
+    await closeSettings(s);
+  } catch (error) {
+    row.error = error.message;
+    await snapshot(row.id);
+    // Settings left open would cover the next row's targets; that row
+    // should fail on its own merits, not on this one's leftovers.
+    const open = await s.all('dialog', 'Settings').catch(() => []);
+    if (open.length) await closeSettings(s).catch(() => {});
   }
   return row;
 }

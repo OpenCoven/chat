@@ -631,6 +631,10 @@
   font-weight: 500;
 }
 
+.coven-agent-asks {
+  color: var(--color-warning);
+}
+
 .coven-agent-done--error {
   color: var(--color-danger);
 }
@@ -832,6 +836,14 @@
   text-align: right;
 }
 
+/*
+ * A long path keeps its end, the part that names the folder: the box runs
+ * right to left, so it overflows and ellipsizes at the start. The value sits
+ * in a <bdi> that is isolated left to right, so its own characters keep their
+ * order (a leading `/` stays first). Setting `unicode-bidi: plaintext` on the
+ * box instead hid both ends in WebKit (an ellipsis at the start and the end
+ * clipped) and kept the start in Chromium.
+ */
 .coven-row-value--path {
   display: block;
   overflow: hidden;
@@ -840,7 +852,11 @@
   direction: rtl;
   text-overflow: ellipsis;
   white-space: nowrap;
-  unicode-bidi: plaintext;
+}
+
+.coven-row-value--path > bdi {
+  direction: ltr;
+  unicode-bidi: isolate;
 }
 
 /* A path row keeps its copy control beside the truncated value. */
@@ -1072,6 +1088,46 @@
 }
 
 /* ------------------------------------------------------------- composer */
+
+.coven-approval {
+  display: grid;
+  gap: 6px;
+  margin: 0 0 10px;
+  padding: 12px 14px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-control);
+  background: var(--bg-raised);
+}
+
+.coven-approval-heading {
+  margin: 0;
+  color: var(--text-primary);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.coven-approval-summary {
+  margin: 0;
+  color: var(--text-primary);
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+
+.coven-approval-reason,
+.coven-approval-scope,
+.coven-approval-hint {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.coven-approval-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 4px;
+}
 
 .coven-composer-note {
   margin: 0 4px 8px;

@@ -134,6 +134,7 @@ export function ContextPicker({
             ref={input}
             role="combobox"
             aria-label="Search familiars and workspaces"
+            autoComplete="off"
             aria-describedby={`${id}-hint`}
             aria-expanded="true"
             aria-controls={`${id}-options`}

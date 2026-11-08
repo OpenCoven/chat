@@ -209,6 +209,25 @@ describe('top bar identity', () => {
   });
 });
 
+describe('typed text and browser autofill', () => {
+  it('marks every text field in the window autocomplete off', () => {
+    // WebView2 kept composer text in its profile's Web Data (#546). The host
+    // turns its general autofill off; the fields say so as well.
+    const { container } = render(<ChatLayout {...layoutProps()} ready />);
+    fireEvent.keyDown(window, { key: 'f', code: 'KeyF', metaKey: true });
+    const fields = [
+      ...container.querySelectorAll<HTMLElement>(
+        'textarea, input:not([type="file"]):not([type="checkbox"]):not([type="radio"])',
+      ),
+    ];
+    const names = fields.map((field) => field.getAttribute('aria-label'));
+    expect(names).toEqual(
+      expect.arrayContaining(['Search familiars', 'Find in conversation', 'Message']),
+    );
+    for (const field of fields) expect(field).toHaveAttribute('autocomplete', 'off');
+  });
+});
+
 describe('composer copy', () => {
   it('names the addressee only when there is one', () => {
     expect(composerCopy(true, 'Astra')).toEqual({
@@ -581,7 +600,7 @@ describe('production Familiars layout', () => {
     expect(screen.queryByRole('button', { name: 'New chat' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Import from Cave' })).not.toBeInTheDocument();
     expect(openSettingsAt('Access')).toHaveTextContent(
-      'Tool approval controls are not available in this app.',
+      "Every turn runs read-only unless you allow a familiar's request",
     );
   });
 
@@ -824,9 +843,12 @@ describe('inspector metadata rows', () => {
         ]}
       />,
     );
-    const value = screen.getByText(
+    const text = screen.getByText(
       '/Users/someone/.coven/workspaces/familiars/astra/very/deep/path',
     );
+    // Isolated left to right, so the box can truncate the start of the path.
+    expect(text.tagName).toBe('BDI');
+    const value = text.parentElement;
     expect(value).toHaveAttribute(
       'title',
       '/Users/someone/.coven/workspaces/familiars/astra/very/deep/path',
@@ -1784,8 +1806,7 @@ describe('declared access and error copying', () => {
     ]);
     expect(items[0]).toHaveTextContent('chatRead and write/work/chat');
     expect(items[1]).toHaveTextContent('apiRead only/work/api');
-    expect(access).toHaveTextContent(/neither enforces nor extends/);
-    expect(access).toHaveTextContent('Tool approval controls are not available in this app.');
+    expect(access).toHaveTextContent("an allowed turn isn't limited to these projects");
   });
 
   it('tells "none declared" apart from "could not read"', () => {
@@ -2770,6 +2791,15 @@ describe('inspector resizing', () => {
     expect(separator).toHaveAttribute('aria-valuenow', '360');
     expect(separator).toHaveAttribute('aria-valuemin', '280');
     expect(separator).toHaveAttribute('aria-valuemax', '600');
+    // VoiceOver reads a focused splitter's name and role but not its number,
+    // and on a change says a percentage of the range (#545). The value text
+    // gives the width in the unit Settings shows.
+    expect(separator).toHaveAttribute('aria-valuetext', '360 pixels');
+    // Orca speaks a focused splitter's role and name but not its value or value
+    // text; it does speak a description (#545).
+    expect(separator).toHaveAccessibleDescription(
+      '360 pixels wide. Arrow keys resize it, Home and End reach the limits.',
+    );
     expect(separator).toHaveAttribute('tabindex', '0');
     expect(inspectorWidth(container)).toBe('360px');
     fireEvent.click(screen.getByRole('button', { name: 'Close inspector' }));
@@ -2802,6 +2832,8 @@ describe('inspector resizing', () => {
     fireEvent.keyDown(separator, { key: 'ArrowLeft' });
     expect(inspectorWidth(container)).toBe('376px');
     expect(separator).toHaveAttribute('aria-valuenow', '376');
+    expect(separator).toHaveAttribute('aria-valuetext', '376 pixels');
+    expect(separator).toHaveAccessibleDescription(/^376 pixels wide\./);
     fireEvent.keyDown(separator, { key: 'ArrowRight' });
     fireEvent.keyDown(separator, { key: 'ArrowRight' });
     expect(inspectorWidth(container)).toBe('344px');
@@ -2918,11 +2950,19 @@ describe('inspector resizing', () => {
     fireEvent.keyDown(handle(), { key: 'End' });
     const general = openSettingsAt('General');
     expect(general).toHaveTextContent('600px');
+    // WebKitGTK gave AT-SPI none of this row's text while it was drawn in
+    // spans, so Orca had no width to read (#548). The label, hint and width
+    // are paragraphs, as the Text size hint is, and the width describes Reset.
+    expect(within(general).getByText('600px').tagName).toBe('P');
+    expect(within(general).getByText('Inspector width').tagName).toBe('P');
+    expect(within(general).getByText(/^Drag the inspector's left edge/).tagName).toBe('P');
     const reset = within(general).getByRole('button', { name: 'Reset inspector width' });
+    expect(reset).toHaveAccessibleDescription('600px');
     expect(reset).toBeEnabled();
     fireEvent.click(reset);
     expect(inspectorWidth(container)).toBe('360px');
     expect(general).toHaveTextContent('360px');
+    expect(reset).toHaveAccessibleDescription('360px');
     expect(reset).toBeDisabled();
     expect(stored()?.inspectorWidth).toBe(360);
   });
@@ -3086,5 +3126,102 @@ describe('model settings', () => {
       />,
     );
     expect(screen.queryByRole('button', { name: 'Attach file' })).not.toBeInTheDocument();
+  });
+});
+
+describe('a familiar asking for permission', () => {
+  const approval = {
+    id: 'request-1',
+    familiarId: 'f',
+    summary: '<b>Create</b> probe.txt',
+    reason: 'It needs a new file',
+    requestedAt: 1,
+    expiresAt: 2,
+  };
+  function asking(extra: Partial<ChatLayoutProps> = {}): ChatLayoutProps {
+    const props = layoutProps();
+    return {
+      ...props,
+      ready: true,
+      connected: true,
+      familiars: [
+        { id: 'f', name: 'Astra' },
+        { id: 'g', name: 'Sage' },
+      ],
+      familiarId: 'f',
+      approvals: [approval],
+      onAllowApproval: vi.fn(),
+      onDeclineApproval: vi.fn(),
+      ...extra,
+    };
+  }
+
+  it("shows the familiar's words as plain text, and says what Allow really does", () => {
+    render(<ChatLayout {...asking()} />);
+    const card = screen.getByRole('region', { name: /asks for permission/ });
+    expect(card).toHaveTextContent('<b>Create</b> probe.txt');
+    expect(card.querySelector('b')).toBeNull();
+    expect(card).toHaveTextContent('It needs a new file');
+    expect(card).toHaveTextContent(
+      'change files and run commands on this computer as you, for one turn',
+    );
+    expect(card).toHaveTextContent("isn't limited to what's described here");
+  });
+
+  it('answers with the request it shows', () => {
+    const props = asking();
+    render(<ChatLayout {...props} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Allow once' }));
+    expect(props.onAllowApproval).toHaveBeenCalledWith(approval, expect.anything());
+    fireEvent.click(screen.getByRole('button', { name: 'Decline' }));
+    expect(props.onDeclineApproval).toHaveBeenCalledWith(approval);
+  });
+
+  it('keeps Allow off while a run is going, and says so, but Decline stays', () => {
+    render(<ChatLayout {...asking({ busy: true, runFamiliarId: 'g' })} />);
+    expect(screen.getByRole('button', { name: 'Allow once' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Allow once' })).toHaveAccessibleDescription(
+      'Allow once is available when the current run ends.',
+    );
+    expect(screen.getByRole('button', { name: 'Decline' })).toBeEnabled();
+  });
+
+  it("shows no card in another familiar's chat, and marks the asking familiar in the sidebar", () => {
+    render(<ChatLayout {...asking({ familiarId: 'g' })} />);
+    expect(screen.queryByRole('button', { name: 'Allow once' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /asks for permission/ })).toHaveTextContent(
+      'Asks permission',
+    );
+  });
+
+  it('reads the log in Settings, in plain words', async () => {
+    const onPermissionLog = vi.fn().mockResolvedValue([
+      { at: 3, event: 'finished', approvalId: 'a', familiarId: 'f', outcome: 'completed' },
+      { at: 2, event: 'action', approvalId: 'a', familiarId: 'f', tool: 'Write', detail: '/p.txt' },
+      { at: 1, event: 'allowed', approvalId: 'a', familiarId: 'f', device: 'iphone', summary: 'S' },
+    ]);
+    render(<ChatLayout {...asking({ onPermissionLog })} />);
+    const access = openSettingsAt('Access');
+    const log = await within(access).findByRole('list', { name: /Permission log/ });
+    const lines = within(log)
+      .getAllByRole('listitem')
+      .map((item) => item.textContent);
+    expect(lines[0]).toContain('allowed turn finished.');
+    expect(lines[1]).toContain('used Write: /p.txt');
+    expect(lines[2]).toContain('Allowed on iPhone');
+  });
+
+  it('says when the log is empty or unreadable rather than showing nothing', async () => {
+    const { unmount } = render(
+      <ChatLayout {...asking({ onPermissionLog: vi.fn().mockResolvedValue([]) })} />,
+    );
+    expect(await within(openSettingsAt('Access')).findByText(/Nothing yet/)).toBeInTheDocument();
+    unmount();
+    render(
+      <ChatLayout
+        {...asking({ onPermissionLog: vi.fn().mockRejectedValue(new Error('Disk is gone.')) })}
+      />,
+    );
+    expect(await within(openSettingsAt('Access')).findByText('Disk is gone.')).toBeInTheDocument();
   });
 });
