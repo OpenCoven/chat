@@ -896,9 +896,11 @@ export function ChatLayout(props: ChatLayoutProps) {
     field.setSelectionRange(end, end);
     return true;
   });
+  const composerAreaRef = useRef<HTMLDivElement>(null);
   const quote = useQuoteSelection({
     transcriptRef,
     composerRef,
+    composerAreaRef,
     messages: props.messages,
     familiarId: props.familiarId,
     sessionId: props.sessionId,
@@ -1589,7 +1591,7 @@ export function ChatLayout(props: ChatLayoutProps) {
             </div>
           </div>
           <div className="fr-composer-wrap">
-            <div className="fr-composer-inner">
+            <div className="fr-composer-inner" ref={composerAreaRef}>
               {showLatest && (
                 <button
                   type="button"
