@@ -51,7 +51,8 @@ previous 880px limit), while the app frame stays still. The window can shrink to
 
 While both rails are in the grid, the inspector can be resized. Drag its left edge, or Tab to the
 **Resize inspector** handle on that edge and press **Left** or **Right** (16px a step; the keys
-mirror in a right-to-left layout), or **Home** and **End** for the ends. It ranges from 280px to
+mirror in a right-to-left layout), or **Home** and **End** for the ends. The handle gives screen readers
+its width in pixels. It ranges from 280px to
 600px, and the conversation column always keeps at least 440px, so a narrower window or an open
 familiars list can hold the inspector under your choice for a while; the width you chose comes back
 when there is room. The default is 360px, and Settings → General shows the current width with a

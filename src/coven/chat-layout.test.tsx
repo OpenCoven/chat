@@ -2773,6 +2773,10 @@ describe('inspector resizing', () => {
     expect(separator).toHaveAttribute('aria-valuenow', '360');
     expect(separator).toHaveAttribute('aria-valuemin', '280');
     expect(separator).toHaveAttribute('aria-valuemax', '600');
+    // VoiceOver reads a focused splitter's name and role but not its number,
+    // and on a change says a percentage of the range (#545). The value text
+    // gives the width in the unit Settings shows.
+    expect(separator).toHaveAttribute('aria-valuetext', '360 pixels');
     expect(separator).toHaveAttribute('tabindex', '0');
     expect(inspectorWidth(container)).toBe('360px');
     fireEvent.click(screen.getByRole('button', { name: 'Close inspector' }));
@@ -2805,6 +2809,7 @@ describe('inspector resizing', () => {
     fireEvent.keyDown(separator, { key: 'ArrowLeft' });
     expect(inspectorWidth(container)).toBe('376px');
     expect(separator).toHaveAttribute('aria-valuenow', '376');
+    expect(separator).toHaveAttribute('aria-valuetext', '376 pixels');
     fireEvent.keyDown(separator, { key: 'ArrowRight' });
     fireEvent.keyDown(separator, { key: 'ArrowRight' });
     expect(inspectorWidth(container)).toBe('344px');

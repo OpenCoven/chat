@@ -70,6 +70,9 @@ export function InspectorResizer({
       aria-valuenow={width}
       aria-valuemin={INSPECTOR_MIN_WIDTH}
       aria-valuemax={widest}
+      // Without it VoiceOver names the focused handle but not its width, and
+      // on a change speaks a percentage of the range; Settings shows pixels.
+      aria-valuetext={`${width} pixels`}
       onKeyDown={onKeyDown}
       onPointerDown={(event) => {
         if (event.button !== 0 || drag.current) return;
