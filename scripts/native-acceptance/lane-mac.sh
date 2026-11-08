@@ -10,17 +10,32 @@ mkdir -p "$out"
 here="$(cd "$(dirname "$0")" && pwd)"
 log() { printf '%s\n' "$*" | tee -a "$out/environment.txt"; }
 
-version="${release#v}"
-asset="OpenCoven.Chat_${version}_${arch}.dmg"
 work="$(mktemp -d)"
-base="https://github.com/OpenCoven/chat/releases/download/${release}"
-curl --proto '=https' --tlsv1.2 --fail --location --retry 3 -o "$work/SHA256SUMS" "$base/SHA256SUMS" || exit 1
-curl --proto '=https' --tlsv1.2 --fail --location --retry 3 -o "$work/$asset" "$base/$asset" || exit 1
-checksum="$(cd "$work" && grep -F "  ${asset}" SHA256SUMS | shasum -a 256 -c - 2>&1)"
-log "checksum: $checksum"
-case "$checksum" in *": OK") ;; *) echo "::error::$asset does not match SHA256SUMS"; exit 1 ;; esac
+if [ -n "${CANDIDATE_INSTALLER:-}" ]; then
+  # A candidate: this commit, built on this runner. Not a published release, so
+  # there is no SHA256SUMS to check, and the results say so.
+  commit="$(git -C "$here/../.." rev-parse --short HEAD)"
+  release="candidate ${commit}"
+  # Tauri names the bundle with a space; release assets carry a dot instead.
+  asset="$(basename "$CANDIDATE_INSTALLER" | tr ' ' .)"
+  cp "$CANDIDATE_INSTALLER" "$work/$asset"
+  checksum="candidate build of ${commit}; not a published release, so no SHA256SUMS"
+  log "checksum: $checksum"
+  sums="none (candidate)"
+  source_label="candidate ${arch} DMG built from ${commit}, not a published release"
+else
+  version="${release#v}"
+  asset="OpenCoven.Chat_${version}_${arch}.dmg"
+  base="https://github.com/OpenCoven/chat/releases/download/${release}"
+  curl --proto '=https' --tlsv1.2 --fail --location --retry 3 -o "$work/SHA256SUMS" "$base/SHA256SUMS" || exit 1
+  curl --proto '=https' --tlsv1.2 --fail --location --retry 3 -o "$work/$asset" "$base/$asset" || exit 1
+  checksum="$(cd "$work" && grep -F "  ${asset}" SHA256SUMS | shasum -a 256 -c - 2>&1)"
+  log "checksum: $checksum"
+  case "$checksum" in *": OK") ;; *) echo "::error::$asset does not match SHA256SUMS"; exit 1 ;; esac
+  sums="$(shasum -a 256 "$work/SHA256SUMS" | cut -d' ' -f1)"
+  source_label="published ${arch} DMG ${release}"
+fi
 sha="$(shasum -a 256 "$work/$asset" | cut -d' ' -f1)"
-sums="$(shasum -a 256 "$work/SHA256SUMS" | cut -d' ' -f1)"
 
 log "prior app data: $(ls -d "$HOME/Library/Application Support/ai.opencoven.chat" "$HOME/Library/WebKit/ai.opencoven.chat" 2>&1 | tr '\n' ' ')"
 mount="$(hdiutil attach -nobrowse -readonly "$work/$asset" | awk -F'\t' '/\/Volumes\//{print $NF}' | tail -1)"
@@ -97,7 +112,7 @@ EOF
 log "Japanese input method processes before the run: $(pgrep -fl JapaneseIM 2>&1 | tr '\n' ';')"
 
 node "$here/run.mjs" --app "$app/Contents/MacOS/opencoven-chat" --out "$out" \
-  --lane "macOS $(sw_vers -productVersion) $(uname -m), published ${arch} DMG ${release}" \
+  --lane "macOS $(sw_vers -productVersion) $(uname -m), ${source_label}" \
   --helper "$out/native-mac" --facts "$out/facts.json" \
   --japanese com.apple.inputmethod.Kotoeri.RomajiTyping.Japanese --latin com.apple.keylayout.ABC \
   --ime-on kana --ime-off eisu

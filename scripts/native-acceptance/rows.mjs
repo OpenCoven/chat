@@ -592,7 +592,15 @@ export async function linkRows(lane, familiar, browser) {
     lane.shot('515-first-open');
     await lane.front();
     await sleep(800);
-    const tabsBefore = await addressBars(native, browser.key);
+    // The address can show before its page has loaded, and a page that loads
+    // later would look like a second hand-off: wait until two reads agree.
+    let tabsBefore = await addressBars(native, browser.key);
+    for (let read = 0; read < 10; read += 1) {
+      await sleep(1_000);
+      const next = await addressBars(native, browser.key);
+      if (JSON.stringify(next) === JSON.stringify(tabsBefore)) break;
+      tabsBefore = next;
+    }
     const again = (await reviewFacts(app)).open;
     handoff.expect('Open is disabled after one press', again?.enabled, false);
     if (again) await app.click(again);

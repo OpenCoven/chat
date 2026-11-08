@@ -31,6 +31,14 @@ drive the app.
   also ran it; that trigger is gone. Each lane uploads `results.md`,
   `results.json`, its screenshots, the reader's log and the runner facts as an
   artifact (`native-macos-<arch>`, `native-windows-msi`, `native-linux-deb`).
+- **Candidate runs.** Dispatched with `release` empty, each lane builds the
+  dispatched commit on its runner, with the release workflow's toolchain
+  (pnpm 10.34.0, Rust 1.95.0) and `tauri build --bundles dmg|msi|deb`, but
+  unsigned and on the lane's runner image, then drives that build. There is no
+  `SHA256SUMS` to check. Every result names the build "candidate … built from
+  `<commit>`, not a published release". A candidate run checks a fix before a
+  tag; it never stands in for the published installers, which are driven again
+  once the release is out.
 - v0.0.8 results and the issues they produced (#544, #545, #546, #547, #548) are
   recorded in `docs/verification/2026-10-18-rakazo-chat-ux.md`, section
   "Native OS-level automation on the published v0.0.8 installers".
