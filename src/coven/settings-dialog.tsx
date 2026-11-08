@@ -231,18 +231,20 @@ function Row({
   stacked?: boolean;
 }>) {
   return (
+    // The copy is paragraphs, not spans: WebKitGTK hands AT-SPI no text for a
+    // row drawn only in spans, so Orca had nothing to read here (#548).
     <div className={cx('coven-settings-row', stacked && 'coven-settings-row--stacked')}>
-      <span className="coven-settings-row-copy">
+      <div className="coven-settings-row-copy">
         {htmlFor ? (
           <label className="coven-settings-row-label" htmlFor={htmlFor}>
             {label}
           </label>
         ) : (
-          <span className="coven-settings-row-label">{label}</span>
+          <p className="coven-settings-row-label">{label}</p>
         )}
-        {hint ? <span className="coven-settings-row-hint">{hint}</span> : null}
-      </span>
-      <span className="coven-settings-row-control">{control}</span>
+        {hint ? <p className="coven-settings-row-hint">{hint}</p> : null}
+      </div>
+      <div className="coven-settings-row-control">{control}</div>
     </div>
   );
 }
@@ -273,6 +275,7 @@ function Switch({
 
 function GeneralSection({ preferences, onPreferences }: SettingsDialogProps) {
   const groupId = useId();
+  const widthId = useId();
   return (
     <>
       <Group title="Text size">
@@ -313,18 +316,21 @@ function GeneralSection({ preferences, onPreferences }: SettingsDialogProps) {
           label="Inspector width"
           hint="Drag the inspector's left edge, or focus its Resize inspector handle and use the arrow keys, Home and End. The conversation keeps at least 440px."
           control={
-            <span className="coven-inspector-width">
-              <span className="coven-inspector-width-value">{preferences.inspectorWidth}px</span>
+            <div className="coven-inspector-width">
+              <p id={widthId} className="coven-inspector-width-value">
+                {preferences.inspectorWidth}px
+              </p>
               <button
                 type="button"
                 className="fr-btn fr-btn--secondary fr-btn--sm"
                 aria-label="Reset inspector width"
+                aria-describedby={widthId}
                 disabled={preferences.inspectorWidth === INSPECTOR_DEFAULT_WIDTH}
                 onClick={() => onPreferences({ inspectorWidth: INSPECTOR_DEFAULT_WIDTH })}
               >
                 Reset
               </button>
-            </span>
+            </div>
           }
         />
       </Group>

@@ -2921,11 +2921,19 @@ describe('inspector resizing', () => {
     fireEvent.keyDown(handle(), { key: 'End' });
     const general = openSettingsAt('General');
     expect(general).toHaveTextContent('600px');
+    // WebKitGTK gave AT-SPI none of this row's text while it was drawn in
+    // spans, so Orca had no width to read (#548). The label, hint and width
+    // are paragraphs, as the Text size hint is, and the width describes Reset.
+    expect(within(general).getByText('600px').tagName).toBe('P');
+    expect(within(general).getByText('Inspector width').tagName).toBe('P');
+    expect(within(general).getByText(/^Drag the inspector's left edge/).tagName).toBe('P');
     const reset = within(general).getByRole('button', { name: 'Reset inspector width' });
+    expect(reset).toHaveAccessibleDescription('600px');
     expect(reset).toBeEnabled();
     fireEvent.click(reset);
     expect(inspectorWidth(container)).toBe('360px');
     expect(general).toHaveTextContent('360px');
+    expect(reset).toHaveAccessibleDescription('360px');
     expect(reset).toBeDisabled();
     expect(stored()?.inspectorWidth).toBe(360);
   });
