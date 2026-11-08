@@ -814,7 +814,8 @@ jobs:
       - run: cargo check --manifest-path src-tauri/Cargo.toml --all-targets
       - run: cargo check --manifest-path src-tauri/Cargo.toml --all-targets --all-features
       - name: Test approval consumption across Windows host processes
-        run: cargo test --manifest-path src-tauri/Cargo.toml --locked --lib chat_approvals::tests:: -- --test-threads=1
+        run: >-
+          cargo test --manifest-path src-tauri/Cargo.toml --locked --lib chat_approvals::tests:: -- --test-threads=1
       - name: Install and verify frozen supervisor
         shell: pwsh
         run: |
