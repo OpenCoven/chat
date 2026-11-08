@@ -1691,10 +1691,13 @@ export function ChatLayout(props: ChatLayoutProps) {
                 />
               ) : null}
               {props.busy && (
-                <output className="coven-run-status">
-                  {runStatusText(name, runName, runHere, props.cancelling, runningTool)}
+                <p className="coven-run-status">
+                  <output>
+                    {runStatusText(name, runName, runHere, props.cancelling, runningTool)}
+                  </output>
+                  {/* Beside the live region, not in it: it would be read out every second. */}
                   {elapsed ? <span className="coven-run-elapsed"> · {elapsed}</span> : null}
-                </output>
+                </p>
               )}
               {/* The placeholder says this until there's a draft to cover it. Always
                   rendered during a run, so the words are announced when they appear. */}

@@ -1703,9 +1703,10 @@ describe('the clock', () => {
         runStartedAt={Date.now() - 75_000}
       />,
     );
-    expect(screen.getByText(/Astra is responding/)).toHaveTextContent('· 1m 15s');
+    const line = screen.getByText(/Astra is responding/).parentElement;
+    expect(line).toHaveTextContent('· 1m 15s');
     act(() => vi.advanceTimersByTime(5_000));
-    expect(screen.getByText(/Astra is responding/)).toHaveTextContent('· 1m 20s');
+    expect(line).toHaveTextContent('· 1m 20s');
   });
 
   it('ages the sidebar caption while the window sits open', () => {
@@ -3384,6 +3385,13 @@ describe('composer stop key, running copy and details row', () => {
     act(() => elsewhere.focus());
     rerender(<ChatLayout {...props} busy={false} cancelling={false} />);
     expect(elsewhere).toHaveFocus();
+  });
+
+  it('keeps the ticking clock out of the status a screen reader announces', () => {
+    render(<ChatLayout {...running({ runStartedAt: Date.now() - 5_000 })} />);
+    const clock = screen.getByText(/· \d+s/);
+    expect(clock.closest('output, [role="status"], [aria-live]')).toBeNull();
+    expect(screen.getByText('Astra is responding…').closest('output')).not.toBeNull();
   });
 
   it('says what happens to a draft while the reply runs, where it can be read', () => {
