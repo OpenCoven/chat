@@ -16,7 +16,7 @@ the ones published (this is also why the lane is not blocked by #532).
 runner, then run `run.mjs`. `.github/workflows/native-acceptance.yml` runs them.
 
 The model is the one stand-in: `fixture.mjs` extends the packaged suite's
-deterministic endpoint with a slow streaming reply (row 7) and an address with a
+deterministic endpoint with a slow streaming reply (rows 7 and 543-1) and an address with a
 sign-in name (#515). Every word the app shows is synthetic.
 
 Results are **native OS-level automation** on CI runners. They are never

@@ -1625,3 +1625,67 @@ export async function cancelledRunRow(lane, familiar) {
     await lane.clearComposer(familiar);
   });
 }
+
+/** #543: Escape stops a real run from the composer and from the page. */
+export async function stopKeyRow(lane, familiar) {
+  const { app } = lane;
+  const row = new Row('543-1', 'Escape stops a real run and leaves the draft');
+  const DRAFT = 'Still here after the stop';
+  const words = async () => (await app.all('text')).map((n) => String(n.value ?? n.name));
+  const slowRun = async (prompt) => {
+    const slowSent = lane.tokens('slow');
+    await lane.idle();
+    await lane.clearComposer(familiar);
+    await app.click(await lane.composer(familiar));
+    await app.type(prompt);
+    await app.click(await app.one('button', 'Send'));
+    await app.one('button', 'Stop run', { timeout: 60_000 });
+    // Earlier runs left slow lines on the page, so wait for the model itself.
+    await until(
+      'the model to take the run',
+      async () => lane.tokens('slow') > slowSent,
+      60_000,
+      500,
+    );
+    await sleep(2_500);
+  };
+  return lane.attempt(row, async () => {
+    const slowBefore = lane.tokens('slow');
+
+    // From the composer, over a draft.
+    await slowRun('[[slow]] Stop me from the composer.');
+    await app.click(await lane.composer(familiar));
+    await app.type(DRAFT);
+    await sleep(600);
+    row.expect(
+      'the line about the draft shows during the run',
+      (await words()).some((text) => /You can send it when the reply ends/.test(text)),
+      true,
+    );
+    row.expect('Stop run stays on offer over a draft', await app.count('button', 'Stop run'), 1);
+    await app.key('escape');
+    await lane.idle();
+    row.expect(
+      'Escape from the composer stopped the run',
+      await app.count('button', 'Stop run'),
+      0,
+    );
+    row.expect('the draft stays', await lane.composerValue(familiar), DRAFT);
+    row.expect('focus is back in the composer', (await app.focused())?.name, `Message ${familiar}`);
+
+    // From the page: a click in the conversation, away from the field.
+    await slowRun('[[slow]] Stop me from the page.');
+    const line = (await app.all('text')).find((n) => /Slow line/.test(String(n.value ?? n.name)));
+    await app.click(line);
+    row.note('focus before Escape', (await app.focused())?.name ?? '(none)');
+    await app.key('escape');
+    await lane.idle();
+    row.expect('Escape from the page stopped the run', await app.count('button', 'Stop run'), 0);
+
+    row.expect('slow runs sent to the model', lane.tokens('slow') - slowBefore, 2);
+    const settled = lane.requests();
+    await sleep(5_000);
+    row.expect('nothing sent after the stops', lane.requests(), settled);
+    await lane.clearComposer(familiar);
+  });
+}

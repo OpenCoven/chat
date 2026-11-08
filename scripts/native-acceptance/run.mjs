@@ -24,6 +24,7 @@ import {
   quoteRow,
   Row,
   showFamiliars,
+  stopKeyRow,
   switchRow,
   tableRow,
 } from './rows.mjs';
@@ -263,6 +264,9 @@ try {
   await lane.front();
   await lane.reset();
   rows.push(await cancelledRunRow(lane, FIRST));
+  await lane.front();
+  await lane.reset();
+  rows.push(await stopKeyRow(lane, FIRST));
   shot('before-quit');
 
   // Quit as a person would, so the web view writes its storage out.
