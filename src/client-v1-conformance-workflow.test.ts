@@ -451,7 +451,7 @@ async function workflowFixture() {
       recordPathTemplate: '.artifacts/client-v1-conformance-{platform}.json',
       sourceRef: 'refs/heads/main',
       runnerLabels: {
-        'darwin-arm64': ['macos-14'],
+        'darwin-arm64': ['macos-15'],
         'linux-x64': ['ubuntu-24.04'],
         'win32-x64': ['windows-2025'],
       },
@@ -473,6 +473,16 @@ async function workflowFixture() {
 }
 
 describe('client-v1 conformance workflow bootstrap', () => {
+  test('keeps protected macOS ARM64 conformance on the supported image', () => {
+    const workflow = readFileSync(workflowPath, 'utf8');
+    const job = workflowJob(workflow, 'platform-conformance');
+    expect(job).toContain('platform: darwin-arm64\n            runner: macos-15');
+    expect(job).not.toContain('macos-14');
+    expect(job).toContain("if: github.ref == 'refs/heads/main'");
+    expect(job).toContain('environment: client-v1-conformance');
+    expect(job).toContain('runs-on: $' + '{{ matrix.runner }}');
+  });
+
   test('fits the GitHub Actions 500 KiB workflow file limit', () => {
     expect(readFileSync(workflowPath).byteLength).toBeLessThanOrEqual(500 * 1024);
   });
@@ -2859,7 +2869,8 @@ ${source.slice(start, end)}
     // entry cannot carry its own condition. Both platforms must still be
     // reachable, and the macOS one must be the gated half.
     expect(job).toContain('"platform":"linux-x64","runner":"ubuntu-24.04"');
-    expect(job).toContain('"platform":"darwin-arm64","runner":"macos-14"');
+    expect(job).toContain('"platform":"darwin-arm64","runner":"macos-15"');
+    expect(job).not.toContain('macos-14');
     expect(job).toContain("contains(github.event.pull_request.labels.*.name, 'ci:full')");
     expect(job).toContain('bash scripts/unix-producer-supervisor.test.sh');
 
