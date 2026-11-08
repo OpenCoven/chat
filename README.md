@@ -413,7 +413,10 @@ Switching familiar or chat closes an open review, and so does its message going 
 returns to the conversation. Chat won't open or copy an address over 8,192 bytes once encoded, or
 one that isn't a complete web address, and never shortens one to fit; the reply's **Copy** still
 copies it as written. Because links in a reply carry no address of their own, the right-click menu
-offers only text actions. Chat keeps no address after the review closes.
+offers only text actions. On Windows and Linux, Chat takes the web view's page actions (Back,
+Reload, Save as, Print and the like) out of that menu, since they would reload or navigate Chat's
+own window, so a right-click with no text to act on, such as on a link with nothing selected, opens
+no menu there. Chat keeps no address after the review closes.
 
 Each table in a reply has two controls above it. **Copy table Markdown** copies that table's
 source exactly as the reply wrote it, escapes, alignment markers, links and inline code included,

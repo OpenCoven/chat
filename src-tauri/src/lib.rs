@@ -9,6 +9,7 @@ pub mod companion;
 #[cfg(feature = "phase1-conformance")]
 pub mod conformance;
 mod connection;
+mod context_menu;
 mod coven;
 mod coven_install;
 mod coven_runtime;
@@ -264,6 +265,10 @@ impl NativeConnectionState {
 
 fn builder() -> tauri::Builder<tauri::Wry> {
     tauri::Builder::default()
+        .setup(|app| {
+            context_menu::install(app);
+            Ok(())
+        })
         .manage(NativeConnectionState::default())
         .manage(coven_runtime::CovenRuntimeState::default())
         .manage(coven_runtime::missions::MissionState::default())
