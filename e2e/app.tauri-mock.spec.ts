@@ -484,6 +484,30 @@ for (const colorScheme of ['dark', 'light'] as const) {
   });
 }
 
+test('keeps the access word whole beside a long familiar name in a narrow window', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 480, height: 520 });
+  const name = 'Astra the Remarkably Long Named Familiar of the Northern Reach';
+  await page.addInitScript((familiar) => {
+    window.__fixtureFamiliarName = familiar;
+  }, name);
+  await installRuntimeFixture(page);
+  await page.goto('/');
+  await expect(page.getByRole('textbox', { name: `Message ${name}` })).toBeEnabled();
+  const access = page.locator('[data-access="read-only"]');
+  await expect(access).toContainText('Read only');
+  const fit = await access.evaluate((element) => {
+    const box = element.getBoundingClientRect();
+    const row = element.parentElement?.getBoundingClientRect();
+    return {
+      clipped: element.scrollWidth > element.clientWidth + 1,
+      insideRow: Boolean(row && box.left >= row.left - 1 && box.right <= row.right + 1),
+    };
+  });
+  expect(fit).toEqual({ clipped: false, insideRow: true });
+});
+
 test('keeps a long composer placeholder on one line in a narrow window', async ({ page }) => {
   await page.setViewportSize({ width: 480, height: 520 });
   const name = 'Astra the Remarkably Long Named Familiar of the Northern Reach';
@@ -893,6 +917,17 @@ test('Escape stops a run from the page and the composer, but not from a dialog',
   await expect(stop).toHaveCount(0);
   expect(await cancels()).toBe(2);
   await expect(composer).toHaveValue('Stop me from the composer');
+  // The field was turned off while the run stopped; focus comes back to it.
+  await expect(composer).toBeFocused();
+
+  // The same goes for the Stop control itself, reached from the keyboard.
+  await page.getByRole('button', { name: 'Send', exact: true }).click();
+  await expect(stop).toBeVisible();
+  await stop.focus();
+  await page.keyboard.press('Enter');
+  await expect(stop).toHaveCount(0);
+  expect(await cancels()).toBe(3);
+  await expect(composer).toBeFocused();
 });
 
 for (const colorScheme of ['dark', 'light'] as const) {

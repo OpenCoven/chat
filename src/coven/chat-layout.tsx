@@ -72,8 +72,8 @@ import {
   useSearchShortcut,
   useSettingsShortcut,
   useStepShortcut,
-  useStopShortcut,
   useTypeToCompose,
+  useWindowEscape,
 } from './rail-shortcuts';
 import {
   activityTime,
@@ -269,9 +269,10 @@ export function composerCopy(connected: boolean, familiarName?: string, anyFamil
  * does not queue a message: Stop takes Send's place and Enter does nothing
  * until the run ends, so what is typed waits in the field to be sent then.
  * Escape stops the run, in the field or anywhere a dialog, drawer or other
- * field does not claim it (`useStopShortcut`).
+ * field does not claim it (`useWindowEscape`).
  */
 export const RUNNING_PLACEHOLDER = 'Replying… (send when the reply ends · esc to stop)';
+const DRAFT_WAITS_NOTE = 'Your message stays here. You can send it when the reply ends.';
 
 /**
  * What the end of the transcript says while a run is active and no prose is
@@ -721,8 +722,6 @@ export function ChatLayout(props: ChatLayoutProps) {
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, [scrim, drawers]);
-  // Escape stops a run, after an open drawer has taken it.
-  useStopShortcut(props.busy && !props.cancelling && !scrim, props.onCancel);
   function openSidebar() {
     sidebarOpener.current = activeControl();
     setSidebar(true);
@@ -856,6 +855,16 @@ export function ChatLayout(props: ChatLayoutProps) {
   const workspaceLabel = session?.projectRoot ? 'Chat project' : 'Familiar workspace';
   const composerDisabled =
     !props.ready || props.loading || props.cancelling || props.attaching || props.readOnly;
+  // Stopping turns the composer off, and that drops focus. Give it back to the field
+  // once it's on again, unless focus has already gone somewhere else.
+  const refocusAfterStop = useRef(false);
+  useEffect(() => {
+    if (composerDisabled || !refocusAfterStop.current) return;
+    refocusAfterStop.current = false;
+    if (!document.activeElement || document.activeElement === document.body) {
+      composerRef.current?.focus();
+    }
+  }, [composerDisabled]);
   const approval = props.approvals?.find((item) => item.familiarId === props.familiarId);
   // Allow starts a run, so it waits for the same things a message would.
   const allowUnavailable = props.readOnly
@@ -1052,6 +1061,11 @@ export function ChatLayout(props: ChatLayoutProps) {
     setFindOpen(false);
     transcriptRef.current?.focus();
   }
+  // Escape closes what's open before it touches the run: a drawer takes it first,
+  // then the find bar, wherever focus is. Only then does it stop a run, and only
+  // this chat's: a run in another chat stays with its own Stop control.
+  useWindowEscape(findOpen && !scrim, closeFind);
+  useWindowEscape(runHere && !props.cancelling && !scrim && !findOpen, props.onCancel);
   function stepFind(direction: 1 | -1) {
     if (!matches.length) return;
     setFindAt(
@@ -1679,6 +1693,15 @@ export function ChatLayout(props: ChatLayoutProps) {
                   {elapsed ? <span className="coven-run-elapsed"> · {elapsed}</span> : null}
                 </output>
               )}
+              {/* The placeholder says this until there's a draft to cover it. Always
+                  rendered during a run, so the words are announced when they appear. */}
+              {runHere && (
+                <p className="coven-run-note" aria-live="polite">
+                  {!props.cancelling && (props.draft.trim() || props.attachments?.length)
+                    ? DRAFT_WAITS_NOTE
+                    : null}
+                </p>
+              )}
               {props.readOnly && (
                 <p className="coven-composer-note">
                   This familiar chat is archived. Restore it to continue the conversation.
@@ -1698,19 +1721,25 @@ export function ChatLayout(props: ChatLayoutProps) {
                   onKeyDown={(event) => {
                     quote.onComposerKeyDown(event);
                     if (!event.defaultPrevented) mentionCompletion.onKeyDown(event);
+                    if (event.key !== 'Escape' || event.defaultPrevented) return;
                     // An open drawer takes Escape before the run does; the run keeps going.
-                    if (event.key === 'Escape' && scrim) event.preventDefault();
+                    if (scrim) event.preventDefault();
+                    // So does the find bar, and focus stays in this field.
+                    else if (findOpen && !event.repeat && !event.nativeEvent.isComposing) {
+                      event.preventDefault();
+                      setFindOpen(false);
+                    }
                   }}
                   className="coven-compact-composer"
                   minRows={1}
                   attachmentIcon="plus"
                   sendIcon
-                  stopOnEscape
+                  stopOnEscape={runHere}
                   value={props.draft}
                   onValueChange={props.onDraft}
                   label={composer.label}
                   placeholder={
-                    props.busy && !composerDisabled ? RUNNING_PLACEHOLDER : composer.placeholder
+                    runHere && !composerDisabled ? RUNNING_PLACEHOLDER : composer.placeholder
                   }
                   onSend={() => props.onSend(run)}
                   {...(oversize
@@ -1722,7 +1751,14 @@ export function ChatLayout(props: ChatLayoutProps) {
                       }
                     : {})}
                   running={props.busy && !composerDisabled}
-                  onStop={props.onCancel}
+                  onStop={() => {
+                    refocusAfterStop.current = Boolean(
+                      composerRef.current
+                        ?.closest('[data-slot="composer"]')
+                        ?.contains(document.activeElement),
+                    );
+                    props.onCancel();
+                  }}
                   allowAttachmentOnly
                   attachments={(props.attachments ?? []).map((file) => ({
                     id: file.id,
@@ -1772,11 +1808,12 @@ export function ChatLayout(props: ChatLayoutProps) {
                           <span className="coven-composer-meta-avatar" aria-hidden="true">
                             <FamiliarAvatar name={name} avatarUrl={familiar.avatarUrl} size={18} />
                           </span>
+                          <span className="coven-composer-meta-text">{name}</span>
                           <span
-                            className="coven-composer-meta-text"
+                            className="coven-composer-meta-access"
                             data-access={fullPermissionHere ? 'full' : 'read-only'}
                           >
-                            {`${name} · ${fullPermissionHere ? 'Full permission' : 'Read only'}`}
+                            {` · ${fullPermissionHere ? 'Full permission' : 'Read only'}`}
                           </span>
                         </span>
                       ) : null}

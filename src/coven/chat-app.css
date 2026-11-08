@@ -204,6 +204,17 @@
   font-size: 12px;
 }
 
+.coven-run-note {
+  margin: -4px 8px 8px;
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+/* Empty, it stays on the page for screen readers and takes no room. */
+.coven-run-note:empty {
+  margin: 0;
+}
+
 .coven-run-elapsed {
   color: var(--text-muted);
   font-variant-numeric: tabular-nums;
@@ -1293,8 +1304,13 @@
   display: inline-flex;
 }
 
+/* The name gives way before the access word, which always shows in full. */
+.coven-composer-meta-access {
+  flex: none;
+}
+
 /* Colour isn't the only signal: the words change too. */
-.coven-composer-meta-text[data-access="full"] {
+.coven-composer-meta-access[data-access="full"] {
   color: var(--color-warning);
   font-weight: 600;
 }

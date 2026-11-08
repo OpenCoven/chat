@@ -433,6 +433,20 @@ describe('quoting a selected passage', () => {
     expect(quoteButton()).not.toBeInTheDocument();
   });
 
+  it('lets Escape go of the passage first, and only the next press stops a run', () => {
+    const props: ChatLayoutProps = { ...quoteProps(), busy: true };
+    render(<Harness {...props} />);
+    const log = screen.getByRole('log');
+    act(() => log.focus());
+    selectText('three steps');
+    expect(quoteButton()).toBeInTheDocument();
+    fireEvent.keyDown(log, { key: 'Escape' });
+    expect(quoteButton()).not.toBeInTheDocument();
+    expect(props.onCancel).not.toHaveBeenCalled();
+    fireEvent.keyDown(log, { key: 'Escape' });
+    expect(props.onCancel).toHaveBeenCalledOnce();
+  });
+
   it('closes on Escape or Dismiss and returns focus to the conversation', () => {
     const props = quoteProps();
     render(<Harness {...props} />);

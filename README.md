@@ -79,7 +79,10 @@ composition don't trigger them.
 
 **Escape** stops a run from the composer, and from anywhere else in the window unless something
 else is using the key: an open dialog or menu, another text field such as the familiar search, or
-an open drawer, which Escape closes first. Your draft stays where it was.
+an open drawer, the find bar or a passage waiting to be quoted, which Escape closes first. Holding
+the key down doesn't carry on from one to the next. It stops only the run in the chat you're
+viewing: a run in another familiar's chat keeps going until you use its **Stop run** control. Your
+draft stays where it was, and focus comes back to the composer when the run has stopped.
 
 Typing a letter while nothing editable has focus starts a message: the keystroke moves to the
 composer and lands there, unless the composer can't send or a dialog or menu is open.
@@ -127,6 +130,7 @@ composer out of view.
 Run status and **Stop** stay beside the composer. While a run is going, **Send** becomes an **esc ·
 stop** control, and Escape stops the run (see **Keyboard shortcuts**). You can keep typing: Chat
 doesn't queue messages, so what you type stays in the composer, and you send it once the reply ends.
+A line above the composer says so while there's a draft, because the draft covers the placeholder.
 
 Until reply text starts to stream, the end of the thread shows the familiar's avatar with what the
 run is doing right now: waiting for the familiar, running a named tool, or stopping. The status counts how long the run has been going. After thirty

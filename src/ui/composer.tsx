@@ -148,7 +148,8 @@ export function Composer({
     }
     if (event.key === 'Escape' && stopOnEscape && running && onStop) {
       event.preventDefault();
-      onStop();
+      // A held key that closed something else isn't a request to stop.
+      if (!event.repeat) onStop();
       return;
     }
     if (event.key === 'Enter' && !event.shiftKey) {

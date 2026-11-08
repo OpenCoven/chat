@@ -3258,7 +3258,10 @@ describe('composer stop key, running copy and details row', () => {
   it('shows the real familiar, access, harness, model and workspace under the composer', () => {
     const { rerender } = render(<ChatLayout {...running({ busy: false })} />);
     let details = within(screen.getByRole('group', { name: 'Chat details' }));
-    expect(details.getByText('Astra · Read only')).toBeInTheDocument();
+    expect(details.getByText('· Read only')).toBeInTheDocument();
+    expect(screen.getByRole('group', { name: 'Chat details' })).toHaveTextContent(
+      'Astra · Read only',
+    );
     // A new chat starts on the Settings harness, and no model means the engine's own.
     expect(details.getByText('Coven Code')).toBeInTheDocument();
     expect(details.getByText('Engine default')).toBeInTheDocument();
@@ -3299,23 +3302,118 @@ describe('composer stop key, running copy and details row', () => {
     ).toBeInTheDocument();
   });
 
+  it('leaves another chat alone: Escape here does not stop a run over there', () => {
+    const props = running({ runFamiliarId: 'other' });
+    render(<ChatLayout {...props} />);
+    const field = screen.getByRole('textbox', { name: 'Message Astra' });
+    fireEvent.keyDown(field, { key: 'Escape' });
+    fireEvent.keyDown(screen.getByRole('log', { name: 'Messages' }), { key: 'Escape' });
+    expect(props.onCancel).not.toHaveBeenCalled();
+    // This field isn't replying, and the control doesn't promise the key.
+    expect(field).not.toHaveAttribute('placeholder', RUNNING_PLACEHOLDER);
+    const stop = screen.getByRole('button', { name: 'Stop run' });
+    expect(stop).not.toHaveAttribute('aria-keyshortcuts');
+    expect(stop).not.toHaveTextContent('esc');
+  });
+
+  it('does not stop on a held key that started on something else', () => {
+    const props = running();
+    render(<ChatLayout {...props} />);
+    const field = screen.getByRole('textbox', { name: 'Message Astra' });
+    fireEvent.keyDown(screen.getByRole('log', { name: 'Messages' }), {
+      key: 'Escape',
+      repeat: true,
+    });
+    fireEvent.keyDown(field, { key: 'Escape', repeat: true });
+    expect(props.onCancel).not.toHaveBeenCalled();
+  });
+
+  it('gives the find bar Escape first, wherever focus is', () => {
+    const props = running();
+    render(<ChatLayout {...props} />);
+    fireEvent.keyDown(window, { key: 'f', metaKey: true });
+    const find = screen.getByRole('searchbox', { name: /find/i });
+    const next = screen.getByRole('button', { name: 'Close find' });
+    act(() => next.focus());
+    fireEvent.keyDown(next, { key: 'Escape' });
+    expect(find).not.toBeInTheDocument();
+    expect(props.onCancel).not.toHaveBeenCalled();
+
+    fireEvent.keyDown(window, { key: 'f', metaKey: true });
+    const again = screen.getByRole('searchbox', { name: /find/i });
+    act(() => (document.activeElement as HTMLElement | null)?.blur());
+    fireEvent.keyDown(document.body, { key: 'Escape' });
+    expect(again).not.toBeInTheDocument();
+    expect(props.onCancel).not.toHaveBeenCalled();
+
+    fireEvent.keyDown(window, { key: 'f', metaKey: true });
+    const third = screen.getByRole('searchbox', { name: /find/i });
+    const field = screen.getByRole('textbox', { name: 'Message Astra' });
+    act(() => field.focus());
+    fireEvent.keyDown(field, { key: 'Escape' });
+    expect(third).not.toBeInTheDocument();
+    expect(props.onCancel).not.toHaveBeenCalled();
+  });
+
+  it('puts focus back in the field after Escape stops the run from there', () => {
+    const props = running();
+    const { rerender } = render(<ChatLayout {...props} />);
+    const field = screen.getByRole('textbox', { name: 'Message Astra' });
+    act(() => field.focus());
+    fireEvent.keyDown(field, { key: 'Escape' });
+    expect(props.onCancel).toHaveBeenCalledOnce();
+    // A browser drops focus from a field that's turned off; jsdom doesn't, and it
+    // ignores blur() on a disabled field, so focus leaves before the field turns off.
+    act(() => field.blur());
+    expect(document.body).toHaveFocus();
+    rerender(<ChatLayout {...props} cancelling />);
+    expect(field).toBeDisabled();
+    rerender(<ChatLayout {...props} busy={false} cancelling={false} />);
+    expect(field).toBeEnabled();
+    expect(field).toHaveFocus();
+  });
+
+  it('does not take focus back if it moved on while the run was stopping', () => {
+    const props = running();
+    const { rerender } = render(<ChatLayout {...props} />);
+    const field = screen.getByRole('textbox', { name: 'Message Astra' });
+    act(() => field.focus());
+    fireEvent.keyDown(field, { key: 'Escape' });
+    rerender(<ChatLayout {...props} cancelling />);
+    const elsewhere = screen.getByRole('log', { name: 'Messages' });
+    act(() => elsewhere.focus());
+    rerender(<ChatLayout {...props} busy={false} cancelling={false} />);
+    expect(elsewhere).toHaveFocus();
+  });
+
+  it('says what happens to a draft while the reply runs, where it can be read', () => {
+    const { rerender } = render(<ChatLayout {...running()} />);
+    expect(screen.getByText(/You can send it when the reply ends/)).toBeInTheDocument();
+    rerender(<ChatLayout {...running({ draft: '' })} />);
+    expect(screen.queryByText(/You can send it when the reply ends/)).not.toBeInTheDocument();
+    rerender(<ChatLayout {...running({ cancelling: true })} />);
+    expect(screen.queryByText(/You can send it when the reply ends/)).not.toBeInTheDocument();
+    rerender(<ChatLayout {...running({ runFamiliarId: 'other' })} />);
+    expect(screen.queryByText(/You can send it when the reply ends/)).not.toBeInTheDocument();
+  });
+
   it('says when this familiar is on a turn with full permission', () => {
     const { rerender } = render(<ChatLayout {...running({ runFullPermission: true })} />);
     const details = within(screen.getByRole('group', { name: 'Chat details' }));
-    expect(details.getByText('Astra · Full permission')).toHaveAttribute('data-access', 'full');
+    expect(details.getByText('· Full permission')).toHaveAttribute('data-access', 'full');
     expect(details.queryByText(/Read only/)).not.toBeInTheDocument();
     // Another familiar's allowed turn says nothing about this one.
     rerender(<ChatLayout {...running({ runFullPermission: true, runFamiliarId: 'other' })} />);
-    expect(details.getByText('Astra · Read only')).toBeInTheDocument();
+    expect(details.getByText('· Read only')).toBeInTheDocument();
     // Nor does a flag left over once the turn has ended.
     rerender(<ChatLayout {...running({ busy: false, runFullPermission: true })} />);
-    expect(details.getByText('Astra · Read only')).toBeInTheDocument();
+    expect(details.getByText('· Read only')).toBeInTheDocument();
   });
 
   it('does not call every run read only now that a turn can be allowed', () => {
     render(<ChatLayout {...running({ busy: false })} />);
     const details = within(screen.getByRole('group', { name: 'Chat details' }));
-    const item = details.getByText('Astra · Read only').closest('[title]');
+    const item = details.getByText('· Read only').closest('[title]');
     expect(item?.getAttribute('title')).not.toMatch(/every run/i);
     expect(item?.getAttribute('title')).toMatch(/ask you to allow one turn/);
   });
