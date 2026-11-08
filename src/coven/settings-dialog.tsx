@@ -559,6 +559,7 @@ function AccessSection({ familiar, onRefresh, refreshDisabled }: SettingsDialogP
               <input
                 type="search"
                 aria-label="Filter projects"
+                autoComplete="off"
                 placeholder="Filter projects"
                 value={query}
                 onChange={(event) => setQuery(event.target.value)}

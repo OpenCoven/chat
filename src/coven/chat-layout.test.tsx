@@ -209,6 +209,25 @@ describe('top bar identity', () => {
   });
 });
 
+describe('typed text and browser autofill', () => {
+  it('marks every text field in the window autocomplete off', () => {
+    // WebView2 kept composer text in its profile's Web Data (#546). The host
+    // turns its general autofill off; the fields say so as well.
+    const { container } = render(<ChatLayout {...layoutProps()} ready />);
+    fireEvent.keyDown(window, { key: 'f', code: 'KeyF', metaKey: true });
+    const fields = [
+      ...container.querySelectorAll<HTMLElement>(
+        'textarea, input:not([type="file"]):not([type="checkbox"]):not([type="radio"])',
+      ),
+    ];
+    const names = fields.map((field) => field.getAttribute('aria-label'));
+    expect(names).toEqual(
+      expect.arrayContaining(['Search familiars', 'Find in conversation', 'Message']),
+    );
+    for (const field of fields) expect(field).toHaveAttribute('autocomplete', 'off');
+  });
+});
+
 describe('composer copy', () => {
   it('names the addressee only when there is one', () => {
     expect(composerCopy(true, 'Astra')).toEqual({
