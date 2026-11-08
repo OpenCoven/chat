@@ -919,7 +919,9 @@ for (const colorScheme of ['dark', 'light'] as const) {
     await expect(stop).toBeVisible();
     await expect(details).toContainText('Local familiar · Full permission');
     await page.mouse.move(2, 2);
-    expect(await contrastFailures(page)).toEqual([]);
+    // Retried: with motion off nothing tells the helper the first paint has settled, and a
+    // backdrop caught mid-repaint reads every text at about 1:1. A real failure still fails.
+    await expect.poll(() => contrastFailures(page), { timeout: 15_000 }).toEqual([]);
     // The card has gone, and the key still reaches the run.
     await page.keyboard.press('Escape');
     await expect(stop).toHaveCount(0);
