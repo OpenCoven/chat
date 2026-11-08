@@ -221,7 +221,7 @@ struct PairingView: View {
       .padding(14)
       .glass(.control, cornerRadius: 16)
       .accentGlow(active: focused)
-      Text("Only use a link from your own Mac. It grants access to your conversations.")
+      Text("Only use a link from your own Mac. It grants access to your conversations, and lets this phone allow a familiar to run commands on the Mac.")
         .font(.footnote)
         .foregroundStyle(Palette.textSecondary)
         .fixedSize(horizontal: false, vertical: true)

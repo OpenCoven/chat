@@ -149,7 +149,8 @@ function CompanionDialog({ client, close }: { client: Companion; close: () => vo
           </label>
           <CopyButton text={link} label="Copy pairing link" />
           <p className="coven-companion-note">
-            This link grants access to your Chat conversations. Share it only with your own phone.
+            This link grants access to your Chat conversations, and lets the phone allow a familiar
+            to run commands on this computer. Share it only with your own phone.
           </p>
         </div>
       )}

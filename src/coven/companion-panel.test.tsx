@@ -25,6 +25,8 @@ describe('iPhone companion controls', () => {
     fireEvent.click(screen.getByRole('button', { name: 'iPhone companion' }));
     fireEvent.click(await screen.findByRole('button', { name: 'Turn on companion' }));
     expect(await screen.findByLabelText('Private pairing link')).toHaveValue(link);
+    // What the link can do, said where people handle it.
+    expect(screen.getByText(/lets the phone allow a familiar to run commands/)).toBeInTheDocument();
     expect(await screen.findByAltText('Scan with Chat on your iPhone')).toBeVisible();
     fireEvent.click(screen.getByRole('button', { name: 'Close companion' }));
     expect(screen.queryByLabelText('Private pairing link')).not.toBeInTheDocument();
