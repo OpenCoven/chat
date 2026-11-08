@@ -164,6 +164,9 @@ sent. A quote is ordinary draft text: edit or delete it before sending like anyt
   action, nothing is added and the action asks you to select the passage again.
 - **Dismiss quote** or Escape closes the action. While a passage waits to be quoted, the
   conversation holds its place instead of following a streaming reply.
+- Tab reaches the action from the passage, past any links in or after it, even where moving focus
+  clears the selection, as it does on macOS and Linux. Clicking elsewhere, Escape in the
+  conversation, a new selection, or Tab out of the conversation and composer lets the passage go.
 - The selection is held in memory only while the action is open, and is never stored.
 
 ## When the list is empty
