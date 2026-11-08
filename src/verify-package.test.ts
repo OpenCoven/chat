@@ -67,6 +67,22 @@ describe('verify-package', () => {
       },
       /withGlobalTauri/,
     ],
+    // WebView2 keeps what is typed in a field in its profile's Web Data while
+    // its general autofill is on, and it is on unless the window says otherwise (#546).
+    [
+      'general autofill left on',
+      (i: Input) => {
+        i.conf.app.windows[0].generalAutofillEnabled = true;
+      },
+      /generalAutofillEnabled/,
+    ],
+    [
+      'general autofill left to its default',
+      (i: Input) => {
+        delete i.conf.app.windows[0].generalAutofillEnabled;
+      },
+      /generalAutofillEnabled/,
+    ],
     [
       'unsafe-eval in the CSP',
       (i: Input) => {

@@ -439,6 +439,7 @@ export function MissionPanel({ familiar, name, missions = defaultMissions }: Pro
           <input
             id={`${id}-statement`}
             className="coven-missions-input"
+            autoComplete="off"
             value={statement}
             maxLength={STATEMENT_LIMIT * 2}
             placeholder="Why does the build fail?"
@@ -450,6 +451,7 @@ export function MissionPanel({ familiar, name, missions = defaultMissions }: Pro
           <textarea
             id={`${id}-prompt`}
             className="coven-missions-input coven-missions-prompt"
+            autoComplete="off"
             value={prompt}
             rows={4}
             placeholder="Read the last CI log and explain why the build fails."

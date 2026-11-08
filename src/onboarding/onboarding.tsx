@@ -441,6 +441,7 @@ function FamiliarStep({
       >
         <input
           aria-label="Familiar name"
+          autoComplete="off"
           className="coven-onboarding-input"
           maxLength={64}
           placeholder="Astra"

@@ -1204,6 +1204,7 @@ export function ChatLayout(props: ChatLayoutProps) {
                 ref={searchRef}
                 type="search"
                 aria-label="Search familiars"
+                autoComplete="off"
                 aria-keyshortcuts={SEARCH_SHORTCUT}
                 title={SEARCH_HINT}
                 placeholder="Search"
@@ -1421,6 +1422,7 @@ export function ChatLayout(props: ChatLayoutProps) {
                   ref={findRef}
                   type="search"
                   aria-label="Find in conversation"
+                  autoComplete="off"
                   placeholder="Find in conversation"
                   value={findQuery}
                   onChange={(event) => {

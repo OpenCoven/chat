@@ -45,6 +45,16 @@ describe('Composer', () => {
     expect(screen.getByRole('region', { name: 'Message composer' })).toBeInTheDocument();
   });
 
+  it('keeps what is typed out of browser autofill', () => {
+    // WebView2 stored composer text in its profile's Web Data (#546).
+    renderComposer();
+
+    expect(screen.getByRole('textbox', { name: 'Message Astra' })).toHaveAttribute(
+      'autocomplete',
+      'off',
+    );
+  });
+
   it('sends on Enter and ⌘Enter, breaks a line on Shift+Enter', () => {
     const { props } = renderComposer({ value: 'Ready' });
     const field = screen.getByRole('textbox', { name: 'Message Astra' });
