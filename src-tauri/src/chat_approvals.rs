@@ -717,13 +717,7 @@ fn open_request(data: &Path, id: &str, now: u64) -> Result<Entry, String> {
 
 /// Spends the request and returns the grant. The caller holds the run slot, so
 /// a busy runtime never costs anyone their request.
-fn allow(
-    data: &Path,
-    id: &str,
-    device: Device,
-    run_id: &str,
-    now: u64,
-) -> Result<Grant, String> {
+fn allow(data: &Path, id: &str, device: Device, run_id: &str, now: u64) -> Result<Grant, String> {
     crate::coven_runtime::validate_id(id)?;
     crate::coven_runtime::validate_id(run_id)?;
     let request = {
