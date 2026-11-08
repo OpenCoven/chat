@@ -1266,9 +1266,14 @@ mod tests {
         data.head("astra", "session-1");
         let request = submit(&data.0, "astra", "session-1", "run-1", proposal(), 1_000).unwrap();
         let path = data.0.join(LOG_FILE);
-        let mut file = OpenOptions::new().append(true).open(&path).unwrap();
-        file.set_len(LOG_ROTATE_BYTES + 1).unwrap();
-        file.flush().unwrap();
+        // Resizing needs write access on Windows; append-only access cannot
+        // extend the fixture. Close it before exercising production rotation.
+        OpenOptions::new()
+            .write(true)
+            .open(&path)
+            .unwrap()
+            .set_len(LOG_ROTATE_BYTES + 1)
+            .unwrap();
         decline(&data.0, &request.id, Device::Desktop, 2_000).unwrap();
         assert!(!fs::read_to_string(&path).unwrap().contains("requested"));
         assert_eq!(

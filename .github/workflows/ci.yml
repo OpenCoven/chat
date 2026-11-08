@@ -804,6 +804,9 @@ jobs:
           toolchain: 1.95.0
       - name: Test native Windows cleanup grant ownership
         run: cargo test --manifest-path src-tauri/Cargo.toml --locked --features phase1-conformance --lib cleanup_grant::marker_io::owner_cleanup_tests
+      - name: Test approval consumption across Windows host processes
+        run: >-
+          cargo test --manifest-path src-tauri/Cargo.toml --locked --features phase1-conformance --lib chat_approvals::tests:: -- --test-threads=1
       - name: Build phase1 native RPC
         run: cargo build --manifest-path src-tauri/Cargo.toml --features phase1-conformance --bin phase1-native-rpc
       - name: Test Windows Job Object supervision
@@ -813,9 +816,6 @@ jobs:
         run: pwsh -NoLogo -NoProfile -NonInteractive -File scripts/windows-job-supervisor.test.ps1
       - run: cargo check --manifest-path src-tauri/Cargo.toml --all-targets
       - run: cargo check --manifest-path src-tauri/Cargo.toml --all-targets --all-features
-      - name: Test approval consumption across Windows host processes
-        run: >-
-          cargo test --manifest-path src-tauri/Cargo.toml --locked --lib chat_approvals::tests:: -- --test-threads=1
       - name: Install and verify frozen supervisor
         shell: pwsh
         run: |
