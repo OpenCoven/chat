@@ -10,6 +10,8 @@ is the only automated check that runs the shipped binary.
 
 ## When it runs
 
+CI build jobs prepare Tauri CLI 2.11.4's required AppRun, linuxdeploy, and WiX tools with `scripts/prepare-bundler-tools.mjs`. It downloads immutable official GitHub asset IDs through the authenticated API, verifies exact sizes and SHA-256 hashes, and seeds only the disposable runner's normal Tauri cache. The read-only Actions token is never forwarded to the asset storage host. This avoids anonymous release-download outages without replacing the bundlers or relaxing their checks; update the manifest when changing the CLI version or build architecture.
+
 - **CI** calls it twice. *Packaged acceptance* runs after *Desktop build* and installs the `.deb`
   that job built. Its AppImage lane drives an AppImage built from the same tree on `ubuntu-22.04`,
   with the packages and `tauri build` command `release.yml` uses, because a release's bundled
