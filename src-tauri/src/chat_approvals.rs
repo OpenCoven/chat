@@ -15,7 +15,7 @@ use std::{
     io::{self, Read, Seek, SeekFrom, Write},
     path::Path,
     sync::Mutex,
-    time::{SystemTime, UNIX_EPOCH},
+    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
 use serde::{Deserialize, Serialize};
@@ -23,6 +23,8 @@ use serde_json::Value;
 
 const LOG_FILE: &str = "permission-log.jsonl";
 const ROTATED_LOG_FILE: &str = "permission-log.1.jsonl";
+const LOCK_FILE: &str = "permission-log.lock";
+const LOCK_TIMEOUT: Duration = Duration::from_secs(2);
 const LOG_ROTATE_BYTES: u64 = 2 * 1024 * 1024;
 const REQUEST_TTL_MS: u64 = 60 * 60 * 1000;
 const SUMMARY_LIMIT: usize = 200;
@@ -513,8 +515,58 @@ fn append(data: &Path, entry: &Entry) -> Result<(), String> {
     file.sync_all().map_err(|_| LOG_UNAVAILABLE.to_owned())
 }
 
-fn lock() -> Result<std::sync::MutexGuard<'static, ()>, String> {
-    LOG_LOCK.lock().map_err(|_| LOG_UNAVAILABLE.to_owned())
+/// The file lock is released before the local mutex. It is a stable sidecar,
+/// never the log itself: rotation replaces that inode while an answer is saved.
+struct LogGuard {
+    _file: fs::File,
+    _local: std::sync::MutexGuard<'static, ()>,
+}
+
+fn lock(data: &Path) -> Result<LogGuard, String> {
+    let local = LOG_LOCK.lock().map_err(|_| LOG_UNAVAILABLE.to_owned())?;
+    fs::create_dir_all(data).map_err(|_| LOG_UNAVAILABLE)?;
+    let mut options = OpenOptions::new();
+    options.read(true).write(true).create(true).truncate(false);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600).custom_flags(libc::O_NOFOLLOW);
+    }
+    let file = options
+        .open(data.join(LOCK_FILE))
+        .map_err(|_| LOG_UNAVAILABLE)?;
+    let metadata = file.metadata().map_err(|_| LOG_UNAVAILABLE)?;
+    if !metadata.is_file() {
+        return Err(LOG_UNAVAILABLE.into());
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        if metadata.uid() != unsafe { libc::geteuid() } || metadata.mode() & 0o077 != 0 {
+            return Err(LOG_UNAVAILABLE.into());
+        }
+    }
+    // Logging errors must stop an allowed turn. A peer stuck while holding the
+    // file must not turn that fail-closed path into an unbounded wait.
+    let deadline = Instant::now() + LOCK_TIMEOUT;
+    let contended = fs2::lock_contended_error().raw_os_error();
+    loop {
+        match fs2::FileExt::try_lock_exclusive(&file) {
+            Ok(()) => break,
+            Err(error)
+                if (error.kind() == io::ErrorKind::Interrupted
+                    || contended.is_some_and(|code| error.raw_os_error() == Some(code)))
+                    && Instant::now() < deadline =>
+            {
+                std::thread::sleep(Duration::from_millis(10));
+            }
+            Err(_) => return Err(LOG_UNAVAILABLE.into()),
+        }
+    }
+    Ok(LogGuard {
+        _file: file,
+        _local: local,
+    })
 }
 
 fn is_answer(event: &str) -> bool {
@@ -552,7 +604,7 @@ pub(crate) fn submit(
         reason: proposal.reason,
         ..Entry::default()
     };
-    let _log = lock()?;
+    let _log = lock(data)?;
     append(data, &request)?;
     Ok(approval(&request))
 }
@@ -560,7 +612,7 @@ pub(crate) fn submit(
 /// The requests still waiting for an answer, oldest first.
 pub(crate) fn pending(data: &Path, now: u64) -> Result<Vec<Approval>, String> {
     let entries = {
-        let _log = lock()?;
+        let _log = lock(data)?;
         read_file(&data.join(LOG_FILE))?
     };
     let mut open: Vec<&Entry> = Vec::new();
@@ -616,7 +668,7 @@ pub(crate) fn allow(
     crate::coven_runtime::validate_id(id)?;
     crate::coven_runtime::validate_id(run_id)?;
     let request = {
-        let _log = lock()?;
+        let _log = lock(data)?;
         open_request(data, id, now)?
     };
     let session = request
@@ -632,7 +684,7 @@ pub(crate) fn allow(
         }
         crate::chat_lifecycle::require_active(data, &session)?;
     }
-    let _log = lock()?;
+    let _log = lock(data)?;
     // Checked again under the same hold as the write: two devices can't both win.
     let request = open_request(data, id, now)?;
     append(
@@ -659,7 +711,7 @@ pub(crate) fn allow(
 /// Records the answer and returns the request, for the transcript's notice.
 pub(crate) fn decline(data: &Path, id: &str, device: Device, now: u64) -> Result<Entry, String> {
     crate::coven_runtime::validate_id(id)?;
-    let _log = lock()?;
+    let _log = lock(data)?;
     let request = open_request(data, id, now)?;
     append(
         data,
@@ -678,7 +730,7 @@ pub(crate) fn decline(data: &Path, id: &str, device: Device, now: u64) -> Result
 
 /// A new turn replaces whatever the familiar was still waiting on.
 pub(crate) fn supersede(data: &Path, familiar: &str, now: u64) -> Result<(), String> {
-    let _log = lock()?;
+    let _log = lock(data)?;
     let entries = read_file(&data.join(LOG_FILE))?;
     let waiting: Vec<&Entry> = entries
         .iter()
@@ -720,7 +772,7 @@ pub(crate) fn open_familiar(data: &Path, id: &str, now: u64) -> Result<Option<St
 pub(crate) fn declined_summary(data: &Path, session: &str) -> Result<Option<String>, String> {
     let asked =
         |entry: &Entry| entry.event == "requested" && entry.session_id.as_deref() == Some(session);
-    let _log = lock()?;
+    let _log = lock(data)?;
     let mut entries = read_file(&data.join(LOG_FILE))?;
     if !entries.iter().any(asked) {
         // Writing the answer can rotate the request out from under it.
@@ -747,7 +799,7 @@ pub(crate) fn record_action(
     detail: &str,
     now: u64,
 ) -> Result<(), String> {
-    let _log = lock()?;
+    let _log = lock(data)?;
     append(
         data,
         &Entry {
@@ -770,7 +822,7 @@ pub(crate) fn record_finished(
     outcome: &str,
     now: u64,
 ) -> Result<(), String> {
-    let _log = lock()?;
+    let _log = lock(data)?;
     append(
         data,
         &Entry {
@@ -787,7 +839,7 @@ pub(crate) fn record_finished(
 
 /// The newest `limit` entries, newest first, without the chats' real session ids.
 pub(crate) fn recent(data: &Path, limit: usize) -> Result<Vec<Entry>, String> {
-    let _log = lock()?;
+    let _log = lock(data)?;
     let mut entries = read_file(&data.join(LOG_FILE))?;
     if entries.len() < limit {
         let mut older = read_file(&data.join(ROTATED_LOG_FILE))?;
@@ -1274,10 +1326,300 @@ mod tests {
         let data = Data::new();
         data.head("astra", "session-1");
         submit(&data.0, "astra", "session-1", "run-1", proposal(), 1_000).unwrap();
-        let mode = fs::metadata(data.0.join(LOG_FILE))
+        for name in [LOG_FILE, LOCK_FILE] {
+            let mode = fs::metadata(data.0.join(name))
+                .unwrap()
+                .permissions()
+                .mode();
+            assert_eq!(mode & 0o777, 0o600, "{name}");
+        }
+    }
+
+    /// This same test binary acts as a real second host process when the parent
+    /// supplies its disposable fixture. No app, listener or engine is started.
+    #[test]
+    fn approval_answers_are_exclusive_across_processes() {
+        use std::{process::Command, time::Instant};
+
+        fn wait_for(path: &Path) {
+            let deadline = Instant::now() + std::time::Duration::from_secs(10);
+            while !path.exists() {
+                assert!(Instant::now() < deadline, "Waiting for {}", path.display());
+                std::thread::sleep(std::time::Duration::from_millis(10));
+            }
+        }
+
+        if let Some(path) = std::env::var_os("CHAT_APPROVAL_TEST_DATA") {
+            let data = std::path::PathBuf::from(path);
+            let id = std::env::var("CHAT_APPROVAL_TEST_ID").unwrap();
+            let run = std::env::var("CHAT_APPROVAL_TEST_RUN").unwrap();
+            if run == "lock-holder" {
+                let _guard = lock(&data).unwrap();
+                fs::write(data.join(format!("ready-{run}")), b"").unwrap();
+                loop {
+                    std::thread::sleep(Duration::from_secs(1));
+                }
+            }
+            fs::write(data.join(format!("ready-{run}")), b"").unwrap();
+            wait_for(&data.join("start-workers"));
+            fs::write(data.join(format!("attempting-{run}")), b"").unwrap();
+            let device = if run == "phone" {
+                Device::Iphone
+            } else {
+                Device::Desktop
+            };
+            let answer = allow(&data, &id, device, &run, 2_000).map(|grant| grant.approval_id);
+            fs::write(
+                data.join(format!("answer-{run}")),
+                serde_json::to_vec(&answer).unwrap(),
+            )
+            .unwrap();
+            return;
+        }
+
+        struct Worker {
+            child: Option<std::process::Child>,
+            answer: std::path::PathBuf,
+        }
+        impl Worker {
+            fn start(data: &Path, id: &str, run: &str) -> Self {
+                let child = Command::new(std::env::current_exe().unwrap())
+                    .args([
+                        "--exact",
+                        "chat_approvals::tests::approval_answers_are_exclusive_across_processes",
+                        "--test-threads=1",
+                    ])
+                    .env("CHAT_APPROVAL_TEST_DATA", data)
+                    .env("CHAT_APPROVAL_TEST_ID", id)
+                    .env("CHAT_APPROVAL_TEST_RUN", run)
+                    .stdout(std::process::Stdio::null())
+                    .spawn()
+                    .unwrap();
+                Self {
+                    child: Some(child),
+                    answer: data.join(format!("answer-{run}")),
+                }
+            }
+
+            fn finish(mut self) -> Result<String, String> {
+                let deadline = Instant::now() + std::time::Duration::from_secs(10);
+                while self.child.as_mut().unwrap().try_wait().unwrap().is_none() {
+                    assert!(Instant::now() < deadline, "Approval worker did not finish");
+                    std::thread::sleep(std::time::Duration::from_millis(10));
+                }
+                assert!(self.child.take().unwrap().wait().unwrap().success());
+                serde_json::from_slice(&fs::read(&self.answer).unwrap()).unwrap()
+            }
+        }
+        impl Drop for Worker {
+            fn drop(&mut self) {
+                if let Some(mut child) = self.child.take() {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                }
+            }
+        }
+
+        for rotation in ["none", "before-request", "on-answer"] {
+            let data = Data::new();
+            data.head("astra", "session-1");
+            if rotation == "before-request" {
+                fs::write(data.0.join(LOG_FILE), " ".repeat(LOG_ROTATE_BYTES as usize)).unwrap();
+            }
+            let request =
+                submit(&data.0, "astra", "session-1", "run-1", proposal(), 1_000).unwrap();
+            assert_eq!(
+                data.0.join(ROTATED_LOG_FILE).exists(),
+                rotation == "before-request"
+            );
+            if rotation == "on-answer" {
+                OpenOptions::new()
+                    .write(true)
+                    .open(data.0.join(LOG_FILE))
+                    .unwrap()
+                    .set_len(LOG_ROTATE_BYTES)
+                    .unwrap();
+            }
+            let refusal = if rotation == "on-answer" {
+                "Chat has no record of this request. Ask the familiar again."
+            } else {
+                "This request was already answered."
+            };
+
+            // A different process already owns the ledger. An answer must wait
+            // even after rotation replaced the log inode.
+            let mut options = OpenOptions::new();
+            options.read(true).write(true).create(true).truncate(false);
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::OpenOptionsExt;
+                options.mode(0o600);
+            }
+            let held = options.open(data.0.join(LOCK_FILE)).unwrap();
+            fs2::FileExt::lock_exclusive(&held).unwrap();
+            let workers = ["desktop", "phone"].map(|run| Worker::start(&data.0, &request.id, run));
+            for run in ["desktop", "phone"] {
+                wait_for(&data.0.join(format!("ready-{run}")));
+            }
+            fs::write(data.0.join("start-workers"), b"").unwrap();
+            for run in ["desktop", "phone"] {
+                wait_for(&data.0.join(format!("attempting-{run}")));
+            }
+            std::thread::sleep(std::time::Duration::from_millis(250));
+            assert!(
+                workers.iter().all(|worker| !worker.answer.exists()),
+                "An approval bypassed the other process's ledger lock"
+            );
+            drop(held);
+
+            let answers = workers.map(Worker::finish);
+            assert_eq!(answers.iter().filter(|answer| answer.is_ok()).count(), 1);
+            assert!(answers
+                .iter()
+                .any(|answer| answer.as_ref().is_err_and(|error| error == refusal)));
+            // A fresh process after both answerers exit must still see it spent.
+            assert_eq!(
+                Worker::start(&data.0, &request.id, "restarted").finish(),
+                Err(refusal.into())
+            );
+            assert_eq!(
+                recent(&data.0, 10)
+                    .unwrap()
+                    .iter()
+                    .filter(|entry| entry.event == "allowed")
+                    .count(),
+                1
+            );
+        }
+
+        // Killing a host while it owns the ledger must release the OS lock,
+        // without spending the request or requiring deletion of the sidecar.
+        let data = Data::new();
+        data.head("astra", "session-1");
+        let request = submit(&data.0, "astra", "session-1", "run-1", proposal(), 1_000).unwrap();
+        let mut holder = Worker::start(&data.0, &request.id, "lock-holder");
+        wait_for(&data.0.join("ready-lock-holder"));
+        fs::write(data.0.join("start-workers"), b"").unwrap();
+        assert_eq!(
+            Worker::start(&data.0, &request.id, "blocked").finish(),
+            Err(LOG_UNAVAILABLE.into())
+        );
+        let mut child = holder.child.take().unwrap();
+        child.kill().unwrap();
+        assert!(!child.wait().unwrap().success());
+        assert_eq!(
+            Worker::start(&data.0, &request.id, "after-kill").finish(),
+            Ok(request.id.clone())
+        );
+        assert_eq!(
+            Worker::start(&data.0, &request.id, "after-restart").finish(),
+            Err("This request was already answered.".into())
+        );
+        assert_eq!(
+            recent(&data.0, 10)
+                .unwrap()
+                .iter()
+                .filter(|entry| entry.event == "allowed")
+                .count(),
+            1
+        );
+    }
+
+    #[test]
+    fn a_failed_log_rotation_cannot_authorize_a_turn() {
+        let data = Data::new();
+        data.head("astra", "session-1");
+        let request = submit(&data.0, "astra", "session-1", "run-1", proposal(), 1_000).unwrap();
+        OpenOptions::new()
+            .write(true)
+            .open(data.0.join(LOG_FILE))
             .unwrap()
-            .permissions()
-            .mode();
-        assert_eq!(mode & 0o777, 0o600);
+            .set_len(LOG_ROTATE_BYTES)
+            .unwrap();
+        let rotated = data.0.join(ROTATED_LOG_FILE);
+        fs::create_dir(&rotated).unwrap();
+        fs::write(rotated.join("obstruction"), b"keep").unwrap();
+        assert_eq!(
+            allow(&data.0, &request.id, Device::Desktop, "run-2", 2_000),
+            Err(LOG_UNAVAILABLE.into())
+        );
+        assert!(!read_file(&data.0.join(LOG_FILE))
+            .unwrap()
+            .iter()
+            .any(|entry| entry.event == "allowed"));
+        fs::remove_file(rotated.join("obstruction")).unwrap();
+        fs::remove_dir(rotated).unwrap();
+        assert!(allow(&data.0, &request.id, Device::Desktop, "run-2", 2_000).is_ok());
+    }
+
+    #[test]
+    fn an_unavailable_process_lock_does_not_spend_the_request() {
+        let data = Data::new();
+        data.head("astra", "session-1");
+        let request = submit(&data.0, "astra", "session-1", "run-1", proposal(), 1_000).unwrap();
+        let path = data.0.join(LOCK_FILE);
+        // Remove a previously created lock only in this single-process fixture.
+        let _ = fs::remove_file(&path);
+        fs::create_dir(&path).unwrap();
+        assert_eq!(
+            allow(&data.0, &request.id, Device::Desktop, "run-2", 2_000),
+            Err(LOG_UNAVAILABLE.into())
+        );
+        fs::remove_dir(&path).unwrap();
+        assert!(allow(&data.0, &request.id, Device::Desktop, "run-2", 2_000).is_ok());
+    }
+
+    #[test]
+    fn a_busy_process_lock_times_out_without_spending_the_request() {
+        let data = Data::new();
+        data.head("astra", "session-1");
+        let request = submit(&data.0, "astra", "session-1", "run-1", proposal(), 1_000).unwrap();
+        let held = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(data.0.join(LOCK_FILE))
+            .unwrap();
+        fs2::FileExt::lock_exclusive(&held).unwrap();
+        let (send, receive) = std::sync::mpsc::sync_channel(1);
+        let path = data.0.clone();
+        let id = request.id.clone();
+        let worker = std::thread::spawn(move || {
+            let _ = send.send(allow(&path, &id, Device::Desktop, "run-2", 2_000));
+        });
+        let answer = receive.recv_timeout(LOCK_TIMEOUT + Duration::from_secs(10));
+        // Release the peer before asserting, so even a regression to an
+        // unbounded OS lock cannot strand this test's worker.
+        drop(held);
+        worker.join().unwrap();
+        assert_eq!(answer.unwrap(), Err(LOG_UNAVAILABLE.into()));
+        assert!(allow(&data.0, &request.id, Device::Desktop, "run-2", 2_000).is_ok());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_process_lock_must_be_private_and_cannot_be_redirected() {
+        use std::os::unix::fs::{symlink, PermissionsExt};
+        let data = Data::new();
+        data.head("astra", "session-1");
+        let request = submit(&data.0, "astra", "session-1", "run-1", proposal(), 1_000).unwrap();
+        let path = data.0.join(LOCK_FILE);
+        fs::remove_file(&path).unwrap();
+        let unrelated = data.0.join("unrelated");
+        fs::write(&unrelated, "untouched").unwrap();
+        symlink(&unrelated, &path).unwrap();
+        assert_eq!(
+            allow(&data.0, &request.id, Device::Desktop, "run-2", 2_000),
+            Err(LOG_UNAVAILABLE.into())
+        );
+        assert_eq!(fs::read_to_string(&unrelated).unwrap(), "untouched");
+        fs::remove_file(&path).unwrap();
+        fs::write(&path, "").unwrap();
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o644)).unwrap();
+        assert_eq!(
+            allow(&data.0, &request.id, Device::Desktop, "run-2", 2_000),
+            Err(LOG_UNAVAILABLE.into())
+        );
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o600)).unwrap();
+        assert!(allow(&data.0, &request.id, Device::Desktop, "run-2", 2_000).is_ok());
     }
 }
