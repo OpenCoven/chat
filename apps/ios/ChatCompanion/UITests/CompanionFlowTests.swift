@@ -47,6 +47,39 @@ final class CompanionFlowTests: XCTestCase {
         .firstMatch.waitForExistence(timeout: 10))
     app.buttons["stop"].tap()
     XCTAssertTrue(app.buttons["send"].waitForExistence(timeout: 15))
+
+    // A familiar asks for permission, and the person allows it from the phone.
+    focus(composer, in: app)
+    composer.typeText("This needs permission")
+    // An expectation can be waited on only once.
+    let readyAgain = XCTNSPredicateExpectation(
+      predicate: NSPredicate(format: "enabled == true AND hittable == true"), object: send)
+    XCTAssertEqual(XCTWaiter.wait(for: [readyAgain], timeout: 20), .completed)
+    send.tap()
+    let allow = app.buttons["approval-allow"]
+    XCTAssertTrue(allow.waitForExistence(timeout: 20), app.debugDescription)
+    XCTAssertTrue(app.staticTexts["approval-summary"].label.contains("Create fixture.txt"))
+    let canAllow = XCTNSPredicateExpectation(
+      predicate: NSPredicate(format: "enabled == true AND hittable == true"), object: allow)
+    XCTAssertEqual(XCTWaiter.wait(for: [canAllow], timeout: 20), .completed)
+    allow.tap()
+    // The confirmation's own button, not the card's behind it.
+    let confirm = app.buttons.matching(
+      NSPredicate(format: "label == %@ AND identifier != %@", "Allow once", "approval-allow")
+    ).firstMatch
+    XCTAssertTrue(confirm.waitForExistence(timeout: 10), app.debugDescription)
+    confirm.tap()
+    XCTAssertTrue(
+      app.staticTexts.containing(NSPredicate(format: "label CONTAINS %@", "Created fixture.txt."))
+        .firstMatch.waitForExistence(timeout: 20), app.debugDescription)
+    XCTAssertFalse(app.buttons["approval-allow"].exists)
+    app.buttons["Connection options"].tap()
+    app.buttons["Permission Log"].tap()
+    XCTAssertTrue(
+      app.staticTexts.containing(NSPredicate(format: "label CONTAINS %@", "Allowed on iPhone"))
+        .firstMatch.waitForExistence(timeout: 15), app.debugDescription)
+    app.buttons["Done"].tap()
+
     app.terminate()
     app.launch()
     XCTAssertTrue(

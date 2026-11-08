@@ -631,6 +631,10 @@
   font-weight: 500;
 }
 
+.coven-agent-asks {
+  color: var(--color-warning);
+}
+
 .coven-agent-done--error {
   color: var(--color-danger);
 }
@@ -1084,6 +1088,46 @@
 }
 
 /* ------------------------------------------------------------- composer */
+
+.coven-approval {
+  display: grid;
+  gap: 6px;
+  margin: 0 0 10px;
+  padding: 12px 14px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-control);
+  background: var(--bg-raised);
+}
+
+.coven-approval-heading {
+  margin: 0;
+  color: var(--text-primary);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.coven-approval-summary {
+  margin: 0;
+  color: var(--text-primary);
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+
+.coven-approval-reason,
+.coven-approval-scope,
+.coven-approval-hint {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.coven-approval-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 4px;
+}
 
 .coven-composer-note {
   margin: 0 4px 8px;

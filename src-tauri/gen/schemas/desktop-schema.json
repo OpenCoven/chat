@@ -327,6 +327,18 @@
           "markdownDescription": "Enables the coven_health command without any pre-configured scope."
         },
         {
+          "description": "Enables the coven_runtime_allow command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-coven-runtime-allow",
+          "markdownDescription": "Enables the coven_runtime_allow command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the coven_runtime_approvals command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-coven-runtime-approvals",
+          "markdownDescription": "Enables the coven_runtime_approvals command without any pre-configured scope."
+        },
+        {
           "description": "Enables the coven_runtime_cancel command without any pre-configured scope.",
           "type": "string",
           "const": "allow-coven-runtime-cancel",
@@ -339,10 +351,22 @@
           "markdownDescription": "Enables the coven_runtime_chat_lifecycle command without any pre-configured scope."
         },
         {
+          "description": "Enables the coven_runtime_decline command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-coven-runtime-decline",
+          "markdownDescription": "Enables the coven_runtime_decline command without any pre-configured scope."
+        },
+        {
           "description": "Enables the coven_runtime_familiars command without any pre-configured scope.",
           "type": "string",
           "const": "allow-coven-runtime-familiars",
           "markdownDescription": "Enables the coven_runtime_familiars command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the coven_runtime_permission_log command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-coven-runtime-permission-log",
+          "markdownDescription": "Enables the coven_runtime_permission_log command without any pre-configured scope."
         },
         {
           "description": "Enables the coven_runtime_read command without any pre-configured scope.",
@@ -615,6 +639,18 @@
           "markdownDescription": "Denies the coven_health command without any pre-configured scope."
         },
         {
+          "description": "Denies the coven_runtime_allow command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-coven-runtime-allow",
+          "markdownDescription": "Denies the coven_runtime_allow command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the coven_runtime_approvals command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-coven-runtime-approvals",
+          "markdownDescription": "Denies the coven_runtime_approvals command without any pre-configured scope."
+        },
+        {
           "description": "Denies the coven_runtime_cancel command without any pre-configured scope.",
           "type": "string",
           "const": "deny-coven-runtime-cancel",
@@ -627,10 +663,22 @@
           "markdownDescription": "Denies the coven_runtime_chat_lifecycle command without any pre-configured scope."
         },
         {
+          "description": "Denies the coven_runtime_decline command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-coven-runtime-decline",
+          "markdownDescription": "Denies the coven_runtime_decline command without any pre-configured scope."
+        },
+        {
           "description": "Denies the coven_runtime_familiars command without any pre-configured scope.",
           "type": "string",
           "const": "deny-coven-runtime-familiars",
           "markdownDescription": "Denies the coven_runtime_familiars command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the coven_runtime_permission_log command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-coven-runtime-permission-log",
+          "markdownDescription": "Denies the coven_runtime_permission_log command without any pre-configured scope."
         },
         {
           "description": "Denies the coven_runtime_read command without any pre-configured scope.",

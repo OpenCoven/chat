@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { projectEvents, RAW_LIMIT, RAW_TRUNCATED, summarizeToolInput } from './events';
+import {
+  projectEvents,
+  RAW_LIMIT,
+  RAW_TRUNCATED,
+  stripPermissionRequests,
+  summarizeToolInput,
+} from './events';
 
 describe('genuine Coven event projection', () => {
   it('reports the model the latest run named, and nothing when no run did', () => {
@@ -294,5 +300,69 @@ describe('genuine Coven event projection', () => {
         { type: 'recorded', kind: 'unknown', payload: { text: 'not chat text' } },
       ]).messages,
     ).toEqual([{ id: '0', role: 'output', text: 'Recorded CLI output' }]);
+  });
+});
+
+describe('a familiar asking for permission', () => {
+  const BLOCK =
+    '```coven-permission-request\n{"summary":"Create probe.txt","reason":"It needs a new file"}\n```';
+
+  it('reads as a reply without the block, because the block becomes a dialog', () => {
+    expect(stripPermissionRequests(`Done.\n\n${BLOCK}\n`)).toBe('Done.');
+    expect(stripPermissionRequests(BLOCK)).toBe('');
+  });
+
+  it('hides a block still arriving, however far it has got', () => {
+    expect(stripPermissionRequests('Needs access.\n\n```coven-permission-request\n{"summ')).toBe(
+      'Needs access.',
+    );
+    expect(stripPermissionRequests('Needs access.\n\n```coven-perm')).toBe('Needs access.');
+  });
+
+  it('hides a block a stream ran straight into a tool line', () => {
+    expect(stripPermissionRequests(`⚒ Read(notes.md)${BLOCK}`)).toBe('⚒ Read(notes.md)');
+    expect(stripPermissionRequests('⚒ Read(notes.md)```coven-perm')).toBe('⚒ Read(notes.md)');
+  });
+
+  it('leaves everything else exactly as written', () => {
+    const code = '```rust\nfn main() {}\n```\n';
+    expect(stripPermissionRequests(code)).toBe(code);
+    expect(stripPermissionRequests('Text\n```')).toBe('Text\n```');
+    const prose = 'A request starts with ```coven-permission-request inline.';
+    expect(stripPermissionRequests(prose)).toBe(prose);
+  });
+
+  it('applies to streamed and whole replies, and a reply that was only the block leaves nothing', () => {
+    expect(
+      projectEvents([
+        { type: 'text_delta', text: 'Needs access.\n\n```coven-permission' },
+        { type: 'text_delta', text: '-request\n{}\n```' },
+      ]).messages.map((message) => message.text),
+    ).toEqual(['Needs access.']);
+    expect(
+      projectEvents([{ type: 'assistant', message: { content: [{ type: 'text', text: BLOCK }] } }])
+        .messages,
+    ).toEqual([]);
+  });
+
+  it("doesn't touch what a person typed", () => {
+    expect(
+      projectEvents([
+        { type: 'user', message: { content: [{ type: 'text', text: BLOCK }] } },
+      ]).messages.map((message) => message.text),
+    ).toEqual([BLOCK]);
+  });
+
+  it("shows Chat's own line about an answer as a notice", () => {
+    expect(
+      projectEvents([
+        {
+          type: 'system',
+          subtype: 'notice',
+          source: 'chat-approval',
+          message: { content: [{ type: 'text', text: 'You declined this request: X' }] },
+        },
+      ]).messages,
+    ).toMatchObject([{ role: 'notice', notice: 'approval', text: 'You declined this request: X' }]);
   });
 });

@@ -358,6 +358,102 @@ impl Host {
                     }
                 }
             }
+            ("GET", "/v1/permission-log") if query.is_empty() => {
+                match self.backend.permission_log() {
+                    Ok(value) => (200, value),
+                    Err(_) => error(503, "Cannot read the permission log on your Mac."),
+                }
+            }
+            ("POST", "/v1/approval") if query.is_empty() => {
+                #[derive(serde::Deserialize)]
+                #[serde(rename_all = "camelCase", deny_unknown_fields)]
+                struct Answer {
+                    request_id: String,
+                    approval_id: String,
+                    decision: String,
+                }
+                let Ok(input) = serde_json::from_slice::<Answer>(&request.body) else {
+                    return error(400, "Invalid approval answer.");
+                };
+                if crate::coven_runtime::validate_id(&input.request_id).is_err()
+                    || crate::coven_runtime::validate_id(&input.approval_id).is_err()
+                {
+                    return error(400, "Invalid approval answer.");
+                }
+                let mut gate = self.gate.lock().unwrap_or_else(|e| e.into_inner());
+                if !gate.enabled {
+                    return error(401, "Pair again from Chat on your Mac.");
+                }
+                match input.decision.as_str() {
+                    "decline" => match self.backend.decline(&input.approval_id) {
+                        Ok(()) => (200, json!({"status":"declined"})),
+                        Err(message) => answer_refused(&message),
+                    },
+                    "allow" => {
+                        // The same receipt as a send: an uncertain answer is
+                        // checked again by its request ID, never repeated.
+                        let digest = credentials::hex(&Sha256::digest(&request.body));
+                        if let Some(previous) = gate.receipts.get(&input.request_id) {
+                            if previous.digest != digest {
+                                return error(
+                                    409,
+                                    "This request ID was already used for something else.",
+                                );
+                            }
+                            let run = gate.runs.get(&input.request_id).map_or_else(
+                                || previous.recovered(&input.request_id),
+                                |run| run.value(),
+                            );
+                            return (200, json!({"status":"allowed","run":run}));
+                        }
+                        if gate.receipts.len() >= RECEIPT_LIMIT {
+                            return error(
+                                507,
+                                "Companion send receipts are full. Answer from your Mac.",
+                            );
+                        }
+                        // The receipt names its familiar from the start, because
+                        // a crash can leave it on disk just as it was first saved.
+                        let familiar_id = match self.backend.open_approval(&input.approval_id) {
+                            Ok(Some(familiar_id)) => familiar_id,
+                            Ok(None) => return error(409, "This request is no longer open."),
+                            Err(message) => return answer_refused(&message),
+                        };
+                        gate.receipts.insert(
+                            input.request_id.clone(),
+                            Receipt {
+                                digest,
+                                familiar_id,
+                            },
+                        );
+                        if save_receipts(&self.data, &gate.receipts).is_err() {
+                            gate.receipts.remove(&input.request_id);
+                            return error(503, "Cannot save the receipt. No run was started.");
+                        }
+                        match self
+                            .backend
+                            .allow(input.request_id.clone(), input.approval_id)
+                        {
+                            Ok(run) => {
+                                let value = run.value();
+                                if gate.runs.len() >= 16 {
+                                    gate.runs.retain(|_, r| r.running());
+                                }
+                                gate.runs.insert(run.id.clone(), run);
+                                (200, json!({"status":"allowed","run":value}))
+                            }
+                            // Nothing started and the request is unspent, so the
+                            // phone may answer again under a fresh ID.
+                            Err(message) => {
+                                gate.receipts.remove(&input.request_id);
+                                let _ = save_receipts(&self.data, &gate.receipts);
+                                answer_refused(&message)
+                            }
+                        }
+                    }
+                    _ => error(400, "Invalid approval answer."),
+                }
+            }
             ("POST", "/v1/stop") if query.is_empty() => {
                 #[derive(serde::Deserialize)]
                 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -391,6 +487,16 @@ fn allowed_peer(peer: SocketAddr) -> bool {
 }
 fn error(code: u16, message: &str) -> (u16, Value) {
     (code, json!({"error":message}))
+}
+/// A closed request or a busy runtime is a conflict the phone can act on. A log
+/// that can't be written isn't, and the request may well still be open.
+fn answer_refused(message: &str) -> (u16, Value) {
+    let code = if message == crate::chat_approvals::LOG_UNAVAILABLE {
+        503
+    } else {
+        409
+    };
+    error(code, message)
 }
 fn reason(code: u16) -> &'static str {
     match code {

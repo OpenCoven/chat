@@ -278,10 +278,33 @@ Installing Coven doesn't configure a model provider, so complete any provider se
 before you start a run.
 
 New chats run on Coven's bundled `coven-code` engine unless **Settings › Model** says Codex or
-Claude Code. Every run has explicit read-only permissions. Chat doesn't grant write access or
-simulate approval controls. The native runtime supports macOS, Linux, and
+Claude Code. Every run starts read-only. The native runtime supports macOS, Linux, and
 Windows. Every run's process tree is contained (as a process group on macOS and Linux, and as a
 kill-on-close job on Windows), so **Stop** ends the Coven CLI together with everything it started.
+
+### Asking for permission
+
+A familiar that needs more than read-only ends its reply with a request, and Chat shows it as a
+dialog above the composer, in this window and on the paired iPhone. Coven's engines report a refused
+write only in prose, so the familiar is told how to ask at the start of each read-only turn. Chat
+reads the request from the run's own output, never from the window or the phone.
+
+- **Allow once** runs one more turn with Coven's `--permission full`. The familiar can change files
+  and run commands as you, on this computer, until that reply ends. That access isn't limited to
+  what the request describes, or to the projects listed in **Settings › Access**. The next turn is
+  read-only again.
+- **Decline** runs nothing and leaves a line in the chat. The familiar is told on your next message.
+
+One click starts one turn. A request closes when it's answered, an hour after it was made, or when
+you send another message to that familiar. **Allow once** waits for any run in progress, and doesn't
+touch your draft.
+
+**Settings › Access** and **⋯ › Permission Log** on the iPhone show the newest 200 lines of the log:
+each request, each answer and the device it came from, each tool call Coven reports from the allowed
+turn, and how that turn ended. Coven reports Coven Code and Claude Code tool calls, but none for
+Codex, so an allowed Codex turn logs only the request, your answer and its end. If Chat can't write
+a line about an allowed turn, it stops that turn. The log is `permission-log.jsonl` in Chat's app
+data, readable only by your user. It rotates at 2 MiB and keeps one older file.
 
 The frozen SDK artifacts stay pinned. Chat doesn't expand their existing health and conformance
 contracts into undocumented chat methods, and the standalone runtime doesn't fall back to Cave.
@@ -573,7 +596,7 @@ filesystem, or HTTP command to the webview, and grants no Tauri shell, filesyste
 network plugin permission. The main window's capability, `src-tauri/capabilities/default.json`,
 lets it invoke only:
 
-- the seven `coven_runtime_*` commands the chat interface uses,
+- the eleven `coven_runtime_*` commands the chat interface uses,
 - the eight `mission_*` commands that send one read-only familiar mission, follow it,
   cancel it and remove it (#155), which keep each mission's keys on the native side,
 - the four `setup_*` commands of first-run setup,
