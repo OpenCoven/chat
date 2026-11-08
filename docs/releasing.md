@@ -508,9 +508,11 @@ Per release, the workflow publishes:
 
 - **macOS**: a `.dmg` for `aarch64` (`_aarch64.dmg`) and one for `x86_64`
   (`_x64.dmg`). The image and the app inside it are each signed, notarized and
-  stapled. The `.app` is not a separate asset. The Intel target runs natively
-  on GitHub's `macos-15-intel` runner rather than cross-compiling on Apple
-  silicon.
+  stapled. The `.app` is not a separate asset. The Apple silicon target builds
+  on `macos-15`. GitHub removed the `macos-14` Arm64 image in November 2026,
+  and a job that asks for it is refused before its first step. The Intel
+  target runs natively on GitHub's `macos-15-intel` runner rather than
+  cross-compiling on Apple silicon.
 - **Windows**: `.msi` (WiX, `_x64_en-US`) and NSIS `.exe` (`_x64-setup`) for
   `x86_64`, built on `windows-2025`. Unsigned until #411 is settled; the build
   job reads the product name and version back from both installers and
