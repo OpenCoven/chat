@@ -484,6 +484,35 @@ for (const colorScheme of ['dark', 'light'] as const) {
   });
 }
 
+test('puts a permission request first in a narrow window, and typing finds the field', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 480, height: 520 });
+  await installRuntimeFixture(page, true, undefined, 1, undefined, false, true, [
+    {
+      id: 'request-narrow',
+      familiarId: 'fixture-familiar',
+      summary: 'Create notes.md in the project folder and add the agenda from this chat.',
+      reason: 'The read-only turn could not write the file, and the agenda needs saving now.',
+      requestedAt: Date.now(),
+      expiresAt: Date.now() + 3_600_000,
+    },
+  ]);
+  await page.goto('/');
+  // The card and the composer don't both fit here, so the answer comes first.
+  for (const name of ['Allow once', 'Decline']) {
+    await expect(page.getByRole('button', { name, exact: true })).toBeInViewport({ ratio: 1 });
+  }
+  const composer = page.getByRole('textbox', { name: 'Message Local familiar' });
+  await page.keyboard.type('x');
+  await expect(composer).toHaveValue('x');
+  await expect(composer).toBeFocused();
+  await expect(composer).toBeInViewport({ ratio: 1 });
+  const send = page.getByRole('button', { name: 'Send', exact: true });
+  await send.scrollIntoViewIfNeeded();
+  await expect(send).toBeInViewport({ ratio: 1 });
+});
+
 test('keeps the access word whole beside a long familiar name in a narrow window', async ({
   page,
 }) => {

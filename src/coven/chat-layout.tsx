@@ -940,6 +940,9 @@ export function ChatLayout(props: ChatLayoutProps) {
     if (composerDisabled || !field) return false;
     props.onDraft(props.draft + key);
     field.focus();
+    // WebKit doesn't bring a focused field into view on its own, and a permission
+    // card in a small window can have pushed this one out of sight.
+    field.scrollIntoView?.({ block: 'nearest' });
     const end = props.draft.length + key.length;
     field.setSelectionRange(end, end);
     return true;
