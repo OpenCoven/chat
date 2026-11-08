@@ -34,14 +34,23 @@ changes here.
   It writes about 300 screenshots and JSON measurements to `.artifacts/design-review/out/`
   (gitignored) in under a minute. It is not part of `test:e2e`.
 
+**Rechecked 2026-11-08.** The harness was rerun on this record merged with `main` at `8ee345a`,
+which adds #540, #542 and the #544–#548 fixes. Every measurement below came out the same as the
+original capture. That recheck also corrected five statements that the original capture never
+supported: the type-size counts in Finding 4, the sentence on the 45–75 range and the `60ch` row
+in Finding 2, the animation count under *Other checks*, and the line reference for the portal's
+token copy.
+
 **Not verified:** the packaged app's own WKWebView, WebView2 on Windows, WebKitGTK on Linux,
-and real Coven output. The fixture reproduces the host's event shapes, not its timing.
+and real Coven output. The fixture reproduces the host's event shapes, not its timing. It also
+does not implement the approval commands from #542, so the permission request card and the
+**Permission log** are not measured here.
 
 ## Mention-completion portal
 
 **Settled: no defect.** The panel is portalled to `document.body`, outside `.fr-shell`, where
 `--bg-raised` and `--border-strong` are unset and `--text-primary` is the historical
-`#f4f1fa`. But `src/coven/mention-completion.tsx:66` copies six theme properties from the
+`#f4f1fa`. But `src/coven/mention-completion.tsx:68` copies six theme properties from the
 composer onto the panel when it mounts. The panel's computed colours match the shell's
 exactly:
 
@@ -69,8 +78,10 @@ given.
 | 960 compact | open | 76–79 chars (57ch) | 63–65 chars (47ch) |
 | 480 narrow | (drawers) | 44–46 chars (33ch) | 36–37 chars (27ch) |
 
-Only the compact window with rails open, or Larger text, lands in the conventional 45–75
-range. With rails closed on a wide display, a paragraph line is about twice that long.
+Only the compact window with rails open at Larger (63–65) sits inside the conventional 45–75
+range. The same window at Default just misses it (76–79), the narrow window touches its lower
+edge at Default (44–46) and falls below it at Larger (36–37), and everything else is above it.
+With rails closed on a wide display, a paragraph line is about twice the top of the range.
 
 **Candidates rendered.** Both cap only ordinary prose blocks, and leave tables, code, tool
 rows, attachments and the composer on the documented 1200px column:
@@ -85,7 +96,7 @@ rows, attachments and the composer on the documented 1200px column:
 | --- | --- | --- |
 | Current | up to 155 | never |
 | `72ch` (inside the audit's 68–80ch band) | 96–99 | compact rails closed; wide either way |
-| `60ch` | 80–82 | as above, plus wide and compact at Larger |
+| `60ch` | 80–82 | as above, plus compact rails closed at Larger |
 
 With either cap, code blocks keep the full column (1140px with rails closed), and the
 eight-column table keeps its own horizontal scroll. The `.coven-tools` exclusion matters:
@@ -107,11 +118,15 @@ measure inside the 1200px column. Compare
 bubbles only (`--coven-text-scale`). Everything else is fixed, including text the reader must
 act on.
 
-| Surface | Distinct sizes | Range | Follows Text size |
-| --- | --- | --- | --- |
-| Shell around the conversation | 11 | 8–16px | no |
-| Settings (all seven sections) | 20 | 10.5–21px | only the preview sentence |
-| Message bubbles | 1 | 16px × scale | yes |
+| Surface | Distinct sizes | Size and weight pairs | Range | Follows Text size |
+| --- | ---: | ---: | --- | --- |
+| Shell around the conversation | 7 | 12 | 8–18px | no |
+| Settings (all seven sections) | 15 | 21 | 10.5–21px | only the preview sentence |
+| Message bubbles | 1 | 1 | 16px × scale | yes |
+
+The shell's 18px is only the chevron on the rail tabs; its text stops at 14px. The shell row
+counts the conversation, empty chat and failed run screens, not onboarding, whose 20px heading
+would make it eight sizes.
 
 At **Larger** (×1.22), measured at 480×520:
 
@@ -188,8 +203,9 @@ overflow. Fixed in #540, which wraps the six affected values in an isolated `<bd
 
 ## Other checks
 
-- **Reduced motion:** honoured. During a run, three animations play normally
-  (`coven-tool-pip-pulse`, and `fr-thinking-bounce` on three dots). With `reduce`, none run.
+- **Reduced motion:** honoured. During a run, four animations play normally
+  (`coven-tool-pip-pulse` on the tool pip, and `fr-thinking-bounce` on each of three dots). With
+  `reduce`, none run.
 - **Keyboard focus:** in Chromium, all 17 Tab stops in the main window show a visible
   indicator in both schemes. The composer and search fields draw theirs on the wrapper. In
   WebKit, Tab reaches only six stops and skips buttons, which is Safari's default unless the

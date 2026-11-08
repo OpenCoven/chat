@@ -183,7 +183,7 @@ only `--text-primary` exists, and with the historical `styles.css` value.
 The component bridges the gap itself. When the panel mounts, it copies
 `--bg-raised`, `--text-primary`, `--text-secondary`, `--border-strong`,
 `--accent-presence` and `--font-inter` from the composer's computed style onto
-the panel as inline properties (`src/coven/mention-completion.tsx:66`). The
+the panel as inline properties (`src/coven/mention-completion.tsx:68`). The
 rendered pass of 2026-11-05 confirmed that the panel's background, border and
 text resolve to the shell's values in both schemes
 ([record](design-audits/2026-11-05-rendered-pass.md#mention-completion-portal)).
