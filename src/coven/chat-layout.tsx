@@ -1789,7 +1789,7 @@ export function ChatLayout(props: ChatLayoutProps) {
                         <span className="fr-row-label">Identity</span>
                         <span className="coven-row-path">
                           <code className="fr-row-value coven-row-value--path" title={familiar.id}>
-                            {familiar.id}
+                            <bdi>{familiar.id}</bdi>
                           </code>
                           <CopyButton
                             className="coven-row-copy"
@@ -1806,7 +1806,7 @@ export function ChatLayout(props: ChatLayoutProps) {
                               className="fr-row-value coven-row-value--path"
                               title={familiar.workspace}
                             >
-                              {familiar.workspace}
+                              <bdi>{familiar.workspace}</bdi>
                             </span>
                             <CopyButton
                               className="coven-row-copy"
@@ -1908,7 +1908,7 @@ export function ChatLayout(props: ChatLayoutProps) {
                           className="fr-row-value coven-row-value--path"
                           title={`Reported by the latest run: ${props.model}`}
                         >
-                          {props.model}
+                          <bdi>{props.model}</bdi>
                         </code>
                       </div>
                     ) : null}

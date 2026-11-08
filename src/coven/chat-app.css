@@ -832,6 +832,14 @@
   text-align: right;
 }
 
+/*
+ * A long path keeps its end, the part that names the folder: the box runs
+ * right to left, so it overflows and ellipsizes at the start. The value sits
+ * in a <bdi> that is isolated left to right, so its own characters keep their
+ * order (a leading `/` stays first). Setting `unicode-bidi: plaintext` on the
+ * box instead hid both ends in WebKit (an ellipsis at the start and the end
+ * clipped) and kept the start in Chromium.
+ */
 .coven-row-value--path {
   display: block;
   overflow: hidden;
@@ -840,7 +848,11 @@
   direction: rtl;
   text-overflow: ellipsis;
   white-space: nowrap;
-  unicode-bidi: plaintext;
+}
+
+.coven-row-value--path > bdi {
+  direction: ltr;
+  unicode-bidi: isolate;
 }
 
 /* A path row keeps its copy control beside the truncated value. */
