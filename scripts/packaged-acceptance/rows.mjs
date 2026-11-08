@@ -8,6 +8,7 @@ import { join, resolve } from 'node:path';
 import {
   ADDRESSES,
   APPROVAL_DONE,
+  APPROVAL_NO_NOTE,
   APPROVAL_REFUSED,
   APPROVAL_SUMMARY,
   TABLE,
@@ -1099,6 +1100,51 @@ export async function approvalRow(s, familiar) {
     await snapshot(row.id);
     // Settings left open would cover the next row's targets; that row
     // should fail on its own merits, not on this one's leftovers.
+    const open = await s.all('dialog', 'Settings').catch(() => []);
+    if (open.length) await closeSettings(s).catch(() => {});
+  }
+  return row;
+}
+
+/**
+ * Asking is switched off in this release (`ASKING_ENABLED` in
+ * `src-tauri/src/chat_approvals.rs`). The fixture asks the real engine to write a
+ * real file, and its reply says whether Chat's note reached the engine. So this
+ * row fails if the note comes back, if the write lands, or if anything is offered
+ * to answer. `approvalRow` replaces it when asking comes back.
+ */
+export async function askingOffRow(s, familiar) {
+  const row = new Row('asking-off', 'A read-only turn writes nothing and asks for nothing');
+  try {
+    await s.click(await s.one('button', familiar));
+    await composerOf(s, familiar);
+    const folder = await familiarFolder(s);
+    row.note("the familiar's folder", folder);
+    const proof = resolve(join(folder, 'asking-off.txt'));
+    await send(s, familiar, `[[ask ${proof}]] Write the proof file.`, 'heading', APPROVAL_NO_NOTE);
+    // Chat reads for requests when a run ends, so give that a moment to show one.
+    await sleep(1_500);
+    row.expect('the read-only turn wrote the file', existsSync(proof), false);
+    row.expect('Allow once is offered', (await s.all('button', 'Allow once')).length, 0);
+    row.expect('Decline is offered', (await s.all('button', 'Decline')).length, 0);
+    row.expect('a request is shown', (await s.css('.coven-approval-summary')).length, 0);
+    row.expect(
+      'the sidebar says the familiar is asking',
+      await s.execute('return document.body.innerText.includes(arguments[0]);', 'Asks permission'),
+      false,
+    );
+
+    const settings = await openSettingsGeneral(s);
+    await (await s.one('button', 'Access', { within: settings })).click();
+    row.expect(
+      'Settings shows a permission log',
+      (await s.all('list', 'Permission log, newest first', { within: settings })).length,
+      0,
+    );
+    await closeSettings(s);
+  } catch (error) {
+    row.error = error.message;
+    await snapshot(row.id);
     const open = await s.all('dialog', 'Settings').catch(() => []);
     if (open.length) await closeSettings(s).catch(() => {});
   }

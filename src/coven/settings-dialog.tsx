@@ -584,7 +584,7 @@ function AccessSection(props: SettingsDialogProps) {
   return (
     <>
       <FamiliarAccess {...props} />
-      <PermissionLog {...props} />
+      {props.onPermissionLog ? <PermissionLog {...props} /> : null}
     </>
   );
 }

@@ -58,6 +58,8 @@ export const APPROVAL_SUMMARY = 'Write the proof file';
 export const APPROVAL_DONE = 'The proof file is written.';
 /** The allowed turn's reply when the engine refused the write anyway. */
 export const APPROVAL_REFUSED = 'The engine refused the write:';
+/** A heading, so a row can wait for it: this turn's prompt carried no note from Chat. */
+export const APPROVAL_NO_NOTE = 'Chat sent no permission note';
 const REQUEST_BLOCK = [
   '```coven-permission-request',
   JSON.stringify({ summary: APPROVAL_SUMMARY, reason: 'The engine refused it read-only.' }),
@@ -108,7 +110,7 @@ export function approvalStep(messages) {
   return {
     text: prompt.includes('coven-permission-request')
       ? `I need write access for that.\n\n${REQUEST_BLOCK}`
-      : "Chat's read-only note did not reach the engine.",
+      : `## ${APPROVAL_NO_NOTE}`,
   };
 }
 

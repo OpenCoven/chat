@@ -139,8 +139,67 @@ pub(crate) struct Proposal {
     pub reason: Option<String>,
 }
 
+/// Whether a familiar can ask for permission in this release. While this is
+/// false, no turn is told it can ask, nothing is filed, nothing is shown, and no
+/// answer becomes a [`Grant`], so nothing in Chat can start a turn with full
+/// permission. `allow` and `pending` are private so that the window and the phone
+/// can only reach them through the checks below.
+const ASKING_ENABLED: bool = false;
+
+/// Only a window or a phone holding a request from a build that could ask sees this.
+pub(crate) const ASKING_OFF: &str =
+    "Familiars can't ask for permission in this version of Chat, so nothing ran.";
+
+/// The only way for the window or the phone to turn an answer into a [`Grant`].
+pub(crate) fn allow_request(
+    data: &Path,
+    id: &str,
+    device: Device,
+    run_id: &str,
+    now: u64,
+) -> Result<Grant, String> {
+    if !ASKING_ENABLED {
+        return Err(ASKING_OFF.into());
+    }
+    allow(data, id, device, run_id, now)
+}
+
+/// The requests the window and the phone may show.
+pub(crate) fn open_requests(data: &Path, now: u64) -> Result<Vec<Approval>, String> {
+    if !ASKING_ENABLED {
+        return Ok(Vec::new());
+    }
+    pending(data, now)
+}
+
+/// Whether a finished turn's reply can file a request. A turn that already has
+/// write access has nothing left to ask for.
+pub(crate) fn files_requests(allowed: bool) -> bool {
+    ASKING_ENABLED && !allowed
+}
+
+/// What the engine's copy of a turn opens with, if anything. The saved input stays
+/// the person's own words.
+pub(crate) fn turn_note(
+    data: &Path,
+    session: Option<&str>,
+    allowed: bool,
+) -> Result<Option<String>, String> {
+    if !ASKING_ENABLED {
+        return Ok(None);
+    }
+    if allowed {
+        return Ok(Some(allowed_note().to_owned()));
+    }
+    let declined = match session {
+        Some(session) => declined_summary(data, session)?,
+        None => None,
+    };
+    Ok(Some(read_only_note(declined.as_deref())))
+}
+
 /// Prefixed to every read-only turn, never shown in the transcript.
-pub(crate) fn read_only_note(declined: Option<&str>) -> String {
+fn read_only_note(declined: Option<&str>) -> String {
     let declined = declined.map_or(String::new(), |summary| {
         format!(" The user declined your last request (\"{summary}\"), so don't repeat it unless they ask.")
     });
@@ -155,7 +214,7 @@ pub(crate) fn read_only_note(declined: Option<&str>) -> String {
 }
 
 /// Prefixed to the one turn with write access, never shown in the transcript.
-pub(crate) fn allowed_note() -> &'static str {
+fn allowed_note() -> &'static str {
     "[Note from Coven Chat, not from the user's typing. The user clicked Allow on your request, named below. This turn has write access, so you can change files and run commands. Do only that work, then report what you changed. Write access ends when this turn does.]"
 }
 
@@ -610,7 +669,7 @@ pub(crate) fn submit(
 }
 
 /// The requests still waiting for an answer, oldest first.
-pub(crate) fn pending(data: &Path, now: u64) -> Result<Vec<Approval>, String> {
+fn pending(data: &Path, now: u64) -> Result<Vec<Approval>, String> {
     let entries = {
         let _log = lock(data)?;
         read_file(&data.join(LOG_FILE))?
@@ -658,7 +717,7 @@ fn open_request(data: &Path, id: &str, now: u64) -> Result<Entry, String> {
 
 /// Spends the request and returns the grant. The caller holds the run slot, so
 /// a busy runtime never costs anyone their request.
-pub(crate) fn allow(
+fn allow(
     data: &Path,
     id: &str,
     device: Device,
@@ -977,6 +1036,39 @@ mod tests {
         let code = "```rust\nfn main() {}\n```\n";
         assert_eq!(strip_requests(code), code);
         assert_eq!(strip_requests("Text\n```"), "Text\n```");
+    }
+
+    /// Pins the release that keeps asking off. Turning it back on changes this
+    /// test in the same commit, along with the notes and the acceptance row.
+    #[test]
+    fn while_asking_is_off_nothing_can_start_a_full_permission_turn() {
+        let data = Data::new();
+        data.head("astra", "session-1");
+        // A request a build that could ask left open on disk.
+        let request = submit(&data.0, "astra", "session-1", "run-1", proposal(), 1_000).unwrap();
+
+        for device in [Device::Desktop, Device::Iphone] {
+            assert_eq!(
+                allow_request(&data.0, &request.id, device, "run-2", 2_000).unwrap_err(),
+                ASKING_OFF
+            );
+        }
+        // Neither answer reached the ledger, and nothing offers the request again.
+        assert_eq!(pending(&data.0, 2_000).unwrap(), vec![request]);
+        assert!(recent(&data.0, 10)
+            .unwrap()
+            .iter()
+            .all(|entry| entry.event == "requested"));
+        assert!(open_requests(&data.0, 2_000).unwrap().is_empty());
+
+        // No turn is told it can ask, and no reply files a request.
+        for allowed in [false, true] {
+            assert_eq!(
+                turn_note(&data.0, Some("session-1"), allowed).unwrap(),
+                None
+            );
+            assert!(!files_requests(allowed));
+        }
     }
 
     #[test]
