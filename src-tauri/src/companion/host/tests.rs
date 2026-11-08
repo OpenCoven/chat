@@ -151,8 +151,10 @@ async fn accepted_send_is_idempotent_changed_replays_fail_and_stop_uses_same_run
             .1["status"],
         "stopped"
     );
-    host.disable();
-    tokio::task::yield_now().await;
+    // Wait for the listener to go: reopening binds the same port.
+    if let Some(task) = host.disable() {
+        let _ = task.await;
+    }
     let reopened = Host::start(&root, Ipv4Addr::LOCALHOST, backend.clone()).unwrap();
     assert_eq!(
         request(&reopened, "POST", "/v1/send", Some(send("request-1")), "")
@@ -473,4 +475,179 @@ async fn network_rebind_preserves_pin_port_token_and_live_run() {
     assert_eq!(backend.starts.load(Ordering::SeqCst), 1);
     moved.disable();
     std::fs::remove_dir_all(root).unwrap();
+}
+
+async fn ask_for_permission(host: &Host) {
+    let (code, _) = request(
+        host,
+        "POST",
+        "/v1/send",
+        Some(json!({"requestId":"needs-1","familiarId":"fixture","sessionId":null,"prompt":"This needs permission"})),
+        "",
+    )
+    .await;
+    assert_eq!(code, 200);
+}
+
+#[tokio::test]
+async fn the_phone_sees_an_open_request_and_allows_it_once() {
+    let backend = Arc::new(FixtureBackend::default());
+    let host = Host::start(&temp(), Ipv4Addr::LOCALHOST, backend.clone()).unwrap();
+    let (_, snapshot) = request(&host, "GET", "/v1/snapshot", None, "").await;
+    assert_eq!(snapshot["pendingApprovals"], json!([]));
+    ask_for_permission(&host).await;
+    let (_, snapshot) = request(&host, "GET", "/v1/snapshot", None, "").await;
+    assert_eq!(
+        snapshot["pendingApprovals"][0]["summary"],
+        "Create fixture.txt"
+    );
+
+    let allow = json!({"requestId":"allow-1","approvalId":"fixture-approval","decision":"allow"});
+    let (code, answer) = request(&host, "POST", "/v1/approval", Some(allow.clone()), "").await;
+    assert_eq!(code, 200);
+    assert_eq!(answer["status"], "allowed");
+    assert_eq!(answer["run"]["id"], "allow-1");
+    assert_eq!(answer["run"]["status"], "completed");
+    let starts = backend.starts.load(Ordering::SeqCst);
+
+    // An uncertain answer is checked by its ID. It never starts a second turn.
+    let (code, repeated) = request(&host, "POST", "/v1/approval", Some(allow), "").await;
+    assert_eq!(code, 200);
+    assert_eq!(repeated["run"]["id"], "allow-1");
+    assert_eq!(backend.starts.load(Ordering::SeqCst), starts);
+    // A fresh ID can't spend the same request again.
+    let (code, _) = request(
+        &host,
+        "POST",
+        "/v1/approval",
+        Some(json!({"requestId":"allow-2","approvalId":"fixture-approval","decision":"allow"})),
+        "",
+    )
+    .await;
+    assert_eq!(code, 409);
+    assert_eq!(backend.starts.load(Ordering::SeqCst), starts);
+
+    let (_, log) = request(&host, "GET", "/v1/permission-log", None, "").await;
+    assert_eq!(log["entries"][0]["event"], "allowed");
+    assert_eq!(log["entries"][0]["device"], "iphone");
+}
+
+#[tokio::test]
+async fn a_receipt_saved_before_a_crash_lets_the_companion_start_again() {
+    let root = temp();
+    let backend = Arc::new(FixtureBackend::default());
+    let host = Host::start(&root, Ipv4Addr::LOCALHOST, backend.clone()).unwrap();
+    ask_for_permission(&host).await;
+    let allow = json!({"requestId":"allow-1","approvalId":"fixture-approval","decision":"allow"});
+    assert_eq!(
+        request(&host, "POST", "/v1/approval", Some(allow.clone()), "")
+            .await
+            .0,
+        200
+    );
+    if let Some(task) = host.disable() {
+        let _ = task.await;
+    }
+    // Nothing about the first save needs the run to have started.
+    let saved: Value =
+        serde_json::from_slice(&std::fs::read(root.join("receipts.json")).unwrap()).unwrap();
+    assert_eq!(saved["allow-1"]["familiarId"], "fixture");
+    let reopened = Host::start(
+        &root,
+        Ipv4Addr::LOCALHOST,
+        Arc::new(FixtureBackend::default()),
+    )
+    .unwrap();
+    let (code, answer) = request(&reopened, "POST", "/v1/approval", Some(allow), "").await;
+    assert_eq!(code, 200);
+    assert_eq!(answer["run"]["status"], "failed");
+    assert_eq!(answer["run"]["familiarId"], "fixture");
+    reopened.disable();
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[tokio::test]
+async fn a_closed_request_leaves_no_receipt_behind() {
+    let root = temp();
+    let backend = Arc::new(FixtureBackend::default());
+    let host = Host::start(&root, Ipv4Addr::LOCALHOST, backend.clone()).unwrap();
+    let (code, _) = request(
+        &host,
+        "POST",
+        "/v1/approval",
+        Some(json!({"requestId":"allow-1","approvalId":"fixture-approval","decision":"allow"})),
+        "",
+    )
+    .await;
+    assert_eq!(code, 409);
+    assert_eq!(backend.starts.load(Ordering::SeqCst), 0);
+    assert!(!std::fs::read(root.join("receipts.json"))
+        .map(|bytes| String::from_utf8_lossy(&bytes).contains("allow-1"))
+        .unwrap_or(false));
+    host.disable();
+}
+
+#[test]
+fn a_log_that_can_t_be_written_isn_t_a_closed_request() {
+    assert_eq!(
+        answer_refused(crate::chat_approvals::LOG_UNAVAILABLE).0,
+        503
+    );
+    assert_eq!(answer_refused("This request is no longer open.").0, 409);
+}
+
+#[tokio::test]
+async fn the_phone_declines_and_nothing_runs() {
+    let backend = Arc::new(FixtureBackend::default());
+    let host = Host::start(&temp(), Ipv4Addr::LOCALHOST, backend.clone()).unwrap();
+    ask_for_permission(&host).await;
+    let starts = backend.starts.load(Ordering::SeqCst);
+    let (code, answer) = request(
+        &host,
+        "POST",
+        "/v1/approval",
+        Some(json!({"requestId":"decline-1","approvalId":"fixture-approval","decision":"decline"})),
+        "",
+    )
+    .await;
+    assert_eq!(code, 200);
+    assert_eq!(answer["status"], "declined");
+    assert_eq!(backend.starts.load(Ordering::SeqCst), starts);
+    let (_, snapshot) = request(&host, "GET", "/v1/snapshot", None, "").await;
+    assert_eq!(snapshot["pendingApprovals"], json!([]));
+}
+
+#[tokio::test]
+async fn an_approval_answer_needs_the_pairing_and_a_known_shape() {
+    let backend = Arc::new(FixtureBackend::default());
+    let host = Host::start(&temp(), Ipv4Addr::LOCALHOST, backend.clone()).unwrap();
+    ask_for_permission(&host).await;
+    let starts = backend.starts.load(Ordering::SeqCst);
+    let body = json!({"requestId":"allow-1","approvalId":"fixture-approval","decision":"allow"});
+    let mut stream = connect(&host).await;
+    let text = body.to_string();
+    let unpaired = format!("POST /v1/approval HTTP/1.1\r\nHost: coven-chat.local\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{text}", text.len());
+    stream.write_all(unpaired.as_bytes()).await.unwrap();
+    let mut response = Vec::new();
+    stream.read_to_end(&mut response).await.unwrap();
+    assert!(String::from_utf8_lossy(&response).starts_with("HTTP/1.1 401"));
+    // A browser page is refused even with the token: the phone sends no Origin.
+    let (code, _) = request(
+        &host,
+        "POST",
+        "/v1/approval",
+        Some(body),
+        "Origin: https://example.test\r\n",
+    )
+    .await;
+    assert_eq!(code, 401);
+    for bad in [
+        json!({"requestId":"a","approvalId":"fixture-approval","decision":"maybe"}),
+        json!({"requestId":"a","approvalId":"../x","decision":"allow"}),
+        json!({"requestId":"a","approvalId":"fixture-approval","decision":"allow","permission":"full"}),
+    ] {
+        let (code, _) = request(&host, "POST", "/v1/approval", Some(bad), "").await;
+        assert_eq!(code, 400);
+    }
+    assert_eq!(backend.starts.load(Ordering::SeqCst), starts);
 }

@@ -1,4 +1,5 @@
 mod cave;
+mod chat_approvals;
 mod chat_canonical;
 mod chat_lifecycle;
 mod chat_origin;
@@ -287,6 +288,10 @@ fn builder() -> tauri::Builder<tauri::Wry> {
             coven_runtime::coven_runtime_read,
             coven_runtime::coven_runtime_send,
             coven_runtime::coven_runtime_cancel,
+            coven_runtime::coven_runtime_approvals,
+            coven_runtime::coven_runtime_allow,
+            coven_runtime::coven_runtime_decline,
+            coven_runtime::coven_runtime_permission_log,
             coven_runtime::missions::mission_prepare,
             coven_runtime::missions::mission_list,
             coven_runtime::missions::mission_remove,

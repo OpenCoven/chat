@@ -17,6 +17,10 @@ import Observation
   /// Set while iOS denies Local Network access, so the error can name the setting.
   private(set) var localNetworkDenied = false
   private(set) var historyRunId: String?
+  private(set) var approvals: [Approval] = []
+  private(set) var answering = false
+  private(set) var permissionLog: [PermissionLogEntry]?
+  private(set) var permissionLogError: String?
   private var retainedRun: Run?
   private var terminalError = ""
   private(set) var status = "Connect to your Mac"
@@ -57,6 +61,18 @@ import Observation
     connected && historyReady && selectedId != nil && !archived && !busy
       && activeRun?.running != true && pendingRunId == nil
       && !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && draft.utf8.count <= 32768
+  }
+  /// The request the selected familiar is waiting on.
+  var approval: Approval? { approvals.first { $0.familiarId == selectedId } }
+  /// A request from a familiar other than the one on screen.
+  var otherApproval: Approval? { approvals.first { $0.familiarId != selectedId } }
+  /// Allow starts a run, so it waits for the same things a message would.
+  var canAllow: Bool {
+    connected && historyReady && !archived && !busy && !answering
+      && activeRun?.running != true && pendingRunId == nil
+  }
+  func name(ofFamiliar id: String) -> String {
+    familiars.first { $0.id == id }?.displayName ?? id
   }
   var shownRun: Run? {
     retainedRun?.familiarId == selectedId && retainedRun?.id == historyRunId ? retainedRun : nil
@@ -203,6 +219,78 @@ import Observation
     if generation == expected { busy = false }
     await refresh()
   }
+  /// The person's Allow, already confirmed. It runs like a send: the run outlives
+  /// this request, and an uncertain delivery is checked by its ID, never repeated.
+  func allow(_ approval: Approval) async {
+    guard canAllow, let api = client, approval.familiarId == selectedId else { return }
+    let answer = ApprovalAnswer(
+      requestId: UUID().uuidString.lowercased(), approvalId: approval.id, decision: "allow")
+    let expected = generation
+    pendingRunId = answer.requestId
+    historyRunId = answer.requestId
+    terminalError = ""
+    busy = true
+    error = ""
+    do {
+      let result = try await api.answer(answer)
+      guard generation == expected else { return }
+      approvals.removeAll { $0.id == approval.id }
+      if let run = result.run {
+        accept(run)
+      } else {
+        pendingRunId = nil
+        historyRunId = nil
+      }
+    } catch CompanionError.message(let refusal) {
+      // The Mac answered, so this is certain: no run started.
+      guard generation == expected else { return }
+      pendingRunId = nil
+      historyRunId = nil
+      error = refusal
+    } catch {
+      guard generation == expected else { return }
+      handle(error)
+      if pairing != nil {
+        self.error =
+          "Delivery is uncertain. Reconnecting will check this answer without sending it again."
+      }
+    }
+    if generation == expected { busy = false }
+  }
+  func decline(_ approval: Approval) async {
+    guard let api = client, connected, !answering else { return }
+    let answer = ApprovalAnswer(
+      requestId: UUID().uuidString.lowercased(), approvalId: approval.id, decision: "decline")
+    let expected = generation
+    answering = true
+    error = ""
+    do {
+      _ = try await api.answer(answer)
+      guard generation == expected else { return }
+      approvals.removeAll { $0.id == approval.id }
+    } catch CompanionError.message(let refusal) {
+      guard generation == expected else { return }
+      error = refusal
+    } catch {
+      guard generation == expected else { return }
+      handle(error)
+    }
+    if generation == expected { answering = false }
+    await refresh()
+  }
+  func loadPermissionLog() async {
+    guard let api = client else { return }
+    let expected = generation
+    do {
+      let log = try await api.permissionLog()
+      guard generation == expected else { return }
+      permissionLog = log.entries
+      permissionLogError = nil
+    } catch {
+      guard generation == expected else { return }
+      permissionLogError = Self.explain(error)
+    }
+  }
   /// Explicitly dismisses only an unresolved receipt after the user inspects the chat.
   func dismissUncertainSend() {
     pendingRunId = nil
@@ -276,6 +364,7 @@ import Observation
   private func apply(_ snapshot: Snapshot) {
     familiars = snapshot.familiars
     sessions = snapshot.sessions
+    approvals = snapshot.pendingApprovals ?? []
     if !familiars.contains(where: { $0.id == selectedId }) {
       selectedId = familiars.first?.id
       selection += 1
@@ -332,6 +421,10 @@ import Observation
     historyRunId = nil
     retainedRun = nil
     terminalError = ""
+    approvals = []
+    answering = false
+    permissionLog = nil
+    permissionLogError = nil
   }
   static let localNetworkOffStatus = "Local Network access is off"
   static let localNetworkOff =
