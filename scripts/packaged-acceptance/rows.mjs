@@ -11,6 +11,7 @@ import {
   APPROVAL_NO_NOTE,
   APPROVAL_REFUSED,
   APPROVAL_SUMMARY,
+  APPROVAL_UNASKED,
   TABLE,
 } from './model-fixture.mjs';
 import { readClipboard } from './platform.mjs';
@@ -1109,12 +1110,28 @@ export async function approvalRow(s, familiar) {
 /**
  * Asking is switched off in this release (`ASKING_ENABLED` in
  * `src-tauri/src/chat_approvals.rs`). The fixture asks the real engine to write a
- * real file, and its reply says whether Chat's note reached the engine. So this
- * row fails if the note comes back, if the write lands, or if anything is offered
- * to answer. `approvalRow` replaces it when asking comes back.
+ * real file, and its reply says whether Chat's note reached the engine. A second
+ * turn's reply carries a request block anyway, and the host's own log is read
+ * back, because the window would hide a filed request while asking is off. So this
+ * row fails if the note comes back, if a write lands, if anything is offered to
+ * answer, or if anything is filed. `approvalRow` replaces it when asking comes back.
  */
 export async function askingOffRow(s, familiar) {
   const row = new Row('asking-off', 'A read-only turn writes nothing and asks for nothing');
+  const bodyHas = (text) =>
+    s.execute('return document.body.innerText.includes(arguments[0]);', text);
+  const nothingOffered = async (when) => {
+    // Chat reads for requests when a run ends, so give that a moment to show one.
+    await sleep(1_500);
+    row.expect(`Allow once is offered ${when}`, (await s.all('button', 'Allow once')).length, 0);
+    row.expect(`Decline is offered ${when}`, (await s.all('button', 'Decline')).length, 0);
+    row.expect(`a request is shown ${when}`, (await s.css('.coven-approval-summary')).length, 0);
+    row.expect(
+      `the sidebar says "Asks permission" ${when}`,
+      await bodyHas('Asks permission'),
+      false,
+    );
+  };
   try {
     await s.click(await s.one('button', familiar));
     await composerOf(s, familiar);
@@ -1122,24 +1139,44 @@ export async function askingOffRow(s, familiar) {
     row.note("the familiar's folder", folder);
     const proof = resolve(join(folder, 'asking-off.txt'));
     await send(s, familiar, `[[ask ${proof}]] Write the proof file.`, 'heading', APPROVAL_NO_NOTE);
-    // Chat reads for requests when a run ends, so give that a moment to show one.
-    await sleep(1_500);
     row.expect('the read-only turn wrote the file', existsSync(proof), false);
-    row.expect('Allow once is offered', (await s.all('button', 'Allow once')).length, 0);
-    row.expect('Decline is offered', (await s.all('button', 'Decline')).length, 0);
-    row.expect('a request is shown', (await s.css('.coven-approval-summary')).length, 0);
+    await nothingOffered('after a refused write');
+
+    const unasked = resolve(join(folder, 'asking-off-unasked.txt'));
+    await send(
+      s,
+      familiar,
+      `[[ask ${unasked}]] [[request anyway]] Write another.`,
+      'heading',
+      APPROVAL_UNASKED,
+    );
+    row.expect('the second read-only turn wrote the file', existsSync(unasked), false);
+    await nothingOffered('after a reply carrying a request');
     row.expect(
-      'the sidebar says the familiar is asking',
-      await s.execute('return document.body.innerText.includes(arguments[0]);', 'Asks permission'),
+      'the request block reads as prose',
+      await bodyHas('coven-permission-request'),
       false,
     );
+    const ledger = await s.executeAsync(`const done = arguments[arguments.length - 1];
+      window.__TAURI_INTERNALS__.invoke('coven_runtime_permission_log').then(
+        (entries) => done(JSON.stringify(entries)),
+        (error) => done('unreadable: ' + String(error)),
+      );`);
+    row.expect('the host filed or logged', ledger, '[]');
 
     const settings = await openSettingsGeneral(s);
     await (await s.one('button', 'Access', { within: settings })).click();
+    await until(
+      'Settings to show Access',
+      async () => (await s.css('.coven-access-hero')).length === 1,
+    );
+    // Text, not a list lookup: an empty log renders no list, with or without its
+    // section, and the section is what must be gone.
+    const access = await settings.property('innerText');
     row.expect(
       'Settings shows a permission log',
-      (await s.all('list', 'Permission log, newest first', { within: settings })).length,
-      0,
+      access.toLowerCase().includes('permission log'),
+      false,
     );
     await closeSettings(s);
   } catch (error) {
