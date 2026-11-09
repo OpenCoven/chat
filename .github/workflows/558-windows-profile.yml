@@ -1,0 +1,34 @@
+name: 558 Windows image profile
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/558-windows-profile.yml'
+permissions:
+  contents: read
+jobs:
+  profile:
+    runs-on: windows-2025
+    timeout-minutes: 5
+    steps:
+      - name: Collect bounded image and compiler metadata
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          Set-StrictMode -Version Latest
+          $version = Get-ItemProperty -LiteralPath 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion'
+          $vs = 'C:\Program Files\Microsoft Visual Studio\18\Enterprise'
+          $profile = [ordered]@{
+            ImageOS = $env:ImageOS
+            ImageVersion = $env:ImageVersion
+            OSArchitecture = [Runtime.InteropServices.RuntimeInformation]::OSArchitecture.ToString()
+            ProcessArchitecture = [Runtime.InteropServices.RuntimeInformation]::ProcessArchitecture.ToString()
+            Build = "$($version.CurrentBuildNumber).$($version.UBR)"
+            Kernel32 = ([Diagnostics.FileVersionInfo]::GetVersionInfo('C:\Windows\System32\kernel32.dll').FileVersion -split ' ')[0]
+            PowerShell = $PSVersionTable.PSVersion.ToString()
+            PowerShellPath = [Diagnostics.Process]::GetCurrentProcess().MainModule.FileName
+            DotNet = [Environment]::Version.ToString()
+            VisualStudio = ([Diagnostics.FileVersionInfo]::GetVersionInfo("$vs\Common7\IDE\devenv.exe").ProductVersion -split ' ')[0]
+            Msvc = @(Get-ChildItem -LiteralPath "$vs\VC\Tools\MSVC" -Directory | ForEach-Object { $_.Name })
+            WindowsSdk = @(Get-ChildItem -LiteralPath 'C:\Program Files (x86)\Windows Kits\10\bin' -Directory | ForEach-Object { $_.Name })
+          }
+          $profile | ConvertTo-Json -Depth 4
