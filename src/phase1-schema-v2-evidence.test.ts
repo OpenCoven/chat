@@ -623,11 +623,36 @@ async function fixture() {
     commit: 'f'.repeat(40),
     tree: 'e'.repeat(40),
   };
+  const frozenProducer = frozenLock.evidenceProducer as JsonRecord;
   const producer = {
+    ...frozenProducer,
     status: 'compatible',
     repository: 'OpenCoven/chat',
     commit: chat.commit,
     tree: chat.tree,
+    ...(Object.hasOwn(frozenProducer, 'source')
+      ? {
+          source: {
+            repository: chat.repository,
+            commit: 'd'.repeat(40),
+            tree: chat.tree,
+          },
+        }
+      : {}),
+    ...(Object.hasOwn(frozenProducer, 'sourceAuthorityPath')
+      ? {
+          sourceAuthorityPath: [],
+        }
+      : {}),
+    ...(Object.hasOwn(frozenProducer, 'harnessAuthority')
+      ? {
+          harnessAuthority: {
+            repository: chat.repository,
+            commit: 'a'.repeat(40),
+            tree: 'b'.repeat(40),
+          },
+        }
+      : {}),
     packageManifest: {
       path: 'package.json',
       size: 3_500,
@@ -657,14 +682,13 @@ async function fixture() {
       artifactNameTemplate: 'client-v1-conformance-{platform}',
       recordPathTemplate: '.artifacts/client-v1-conformance-{platform}.json',
       sourceRef: 'refs/heads/main',
-      runnerLabels: {
-        'darwin-arm64': ['macos-14'],
-        'linux-x64': ['ubuntu-24.04'],
-        'win32-x64': ['windows-2025'],
-      },
+      runnerLabels: structuredClone(
+        ((frozenLock.evidenceProducer as JsonRecord).workflow as JsonRecord).runnerLabels,
+      ),
       signerWorkflow: 'OpenCoven/chat/.github/workflows/client-v1-conformance.yml',
       signerDigest: chat.commit,
       sourceDigest: chat.commit,
+      sourceDescent: [],
       predicateType: 'https://slsa.dev/provenance/v1',
       denySelfHostedRunners: true,
     },
@@ -1943,6 +1967,18 @@ describe.skipIf(!validatorAvailable)('Phase 1 SDK schema-v2 evidence adapter', (
   });
 
   test('accepts the canonical source pins without treating this Chat head as the SDK producer', () => {
+    const expectedLock = JSON.parse(
+      execFileSync(
+        'git',
+        [
+          '-C',
+          validatorRoot,
+          'show',
+          `${validatorCommit}:conformance/client-v1-cross-repository-lock.json`,
+        ],
+        { encoding: 'utf8' },
+      ),
+    ) as JsonRecord;
     const loaded = JSON.parse(
       execFileSync(
         process.execPath,
@@ -2002,8 +2038,8 @@ describe.skipIf(!validatorAvailable)('Phase 1 SDK schema-v2 evidence adapter', (
           pathToFileURL(resolve(projectRoot, 'scripts', 'phase1-schema-v2-evidence.mjs')).href,
           pathToFileURL(resolve(projectRoot, 'scripts', 'phase1-conformance-lock.mjs')).href,
           validatorRoot,
-          phase1CompatibilityValidator.commit,
-          phase1CompatibilityValidator.tree,
+          validatorCommit,
+          validatorTree,
         ],
         { encoding: 'utf8' },
       ),
@@ -2017,22 +2053,15 @@ describe.skipIf(!validatorAvailable)('Phase 1 SDK schema-v2 evidence adapter', (
       frozenSources: JsonRecord;
     };
 
-    expect(loaded.validator.commit).toBe(phase1CompatibilityValidator.commit);
+    expect(loaded.validator.commit).toBe(validatorCommit);
+    expect(loaded.validator.tree).toBe(validatorTree);
     expect(loaded.frozenLockSchemaVersion).toBe(2);
     expect(loaded.registrySchemaVersion).toBe(2);
     expect(loaded.schemaId).toBe(
       'urn:opencoven:schema:client-v1-cross-repository-platform-evidence:2',
     );
     expect((loaded.validator.contract as JsonRecord).path).toBe('scripts/conformance-contract.mjs');
-    expect(loaded.producer).toMatchObject({
-      status: 'compatible',
-      repository: 'OpenCoven/chat',
-      commit: '724690e64c4be820bdf4e0e1f8c568db516ba490',
-      tree: 'd04b68843f534ef992642e4de281a0a3071c4f09',
-      workflow: {
-        environmentId: '20863036831',
-      },
-    });
+    expect(loaded.producer).toEqual(expectedLock.evidenceProducer);
     expect(loaded.phase1Sources).toEqual(loaded.frozenSources);
   }, 30_000);
 

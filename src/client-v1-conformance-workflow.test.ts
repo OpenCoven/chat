@@ -458,6 +458,7 @@ async function workflowFixture() {
       signerWorkflow: 'OpenCoven/chat/.github/workflows/client-v1-conformance.yml',
       signerDigest: producerCommit,
       sourceDigest: producerCommit,
+      sourceDescent: [],
       predicateType: 'https://slsa.dev/provenance/v1',
       denySelfHostedRunners: true,
     },
