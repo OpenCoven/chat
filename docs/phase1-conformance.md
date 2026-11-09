@@ -233,11 +233,7 @@ assignment, RPC decoder and primary/secondary exception pipeline. This fixture
 correction does not establish the protected installation failure's cause or
 relax the round-trip assertions.
 
-The lock now selects reviewed source `0cae307ebbf8ed10a5c9aaa4e3c3c6afc954d339`,
-tree `f12b5361711fb01aaeda9eb4f9af2c5af117e979`, including all 25 governed files
-and ten production deltas. The checkout regression exercises all five labels
-from that immutable revision. SDK rebinding, both scope rotations and fresh
-protected validation remain required; this binding alone is not acceptance.
+The lock now selects reviewed source `3aa2ed6a4fcdee9db4470c4466ed8ead910273d1`, tree `4f8135af87a8b6f723ddbc40007130e7dc19f935`, including all 25 governed files and ten production deltas. The checkout regression exercises all five labels from that immutable revision. SDK rebinding, both scope rotations and fresh protected validation remain required; this binding alone is not acceptance.
 
 ## Cave rc.7 adoption (landed)
 
