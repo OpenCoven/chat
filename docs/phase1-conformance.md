@@ -1195,16 +1195,12 @@ explicitly skip, and must not claim, the privileged UID/cgroup runtime results.
 
 ### Windows pre-bootstrap trust boundary
 
-The `win32-x64` matrix expansion does not begin with checkout or a setup
-action. Its first step is inline `pwsh` reviewed as part of the workflow
-itself. Before network access or repository mutation, that step requires the
-GitHub `windows-2025-vs2026` x64 image with one of two reviewed image
-profiles:
+The `win32-x64` matrix expansion begins with inline `pwsh` reviewed as part of the workflow itself. Before network access or repository mutation, that step requires the GitHub `windows-2025-vs2026` x64 image with one of two reviewed image profiles:
 
 | Image version | Visual Studio | Windows build | PowerShell | .NET runtime |
 | --- | --- | --- | --- | --- |
-| `20260907.229.1` | `18.9.12120.119` | `26100.33296` | `7.6.5` | `10.0.11` |
 | `20260922.246.2` | `18.10.12210.168` | `26100.33438` | `7.6.6` | `10.0.12` |
+| `20261103.298.1` | `18.11.12328.437` | `26100.33674` | `7.6.9` | `10.0.14` |
 
 The image selects its whole profile. Unknown images and any crossed value are
 rejected. GitHub deploys a new image gradually, so for a while runners serve
@@ -3085,3 +3081,6 @@ does not validate the new cancellation guard.
 
 
 The #558 protected run 42550212128 stopped on the unreviewed Windows image 20261103.298.1 and a Homebrew Rust launcher dispatch mismatch on macOS. Read-only profile run 42552224366 observed Windows build 26100.33674, PowerShell 7.6.9, .NET 10.0.14 and Visual Studio 18.11.12328.437 on that image; kernel32 10.0.26100.33296, MSVC 14.44.35207 and Windows SDK 10.0.26100.0 remain available. The current exact profile is updated to that observed combination, retaining the previously reviewed 20260922.246.2 combination as the second allowed profile. Unknown images and mixed profile versions still fail closed. The trusted Unix cargo and rustc launchers explicitly dispatch through rustup run 1.95.0, preserving the private toolchain homes, root ownership, read-only staging and producer containment. These fixes require a new reviewed authority and SDK binding before another protected execution; this source change is not a successful conformance receipt.
+
+
+The #558 native runner compatibility authority is f8d4dd4263c28fa5943426f53ee72910ec0caeae, tree 92a2e2fc9170ac6cc2b629da727e6ba4c7d17571. The separate repin reviews all 25 governed files and ten production deltas; only the protected workflow and trusted Unix supervisor differ from authority 3aa2ed6a4fcdee9db4470c4466ed8ead910273d1. The explicit pinned Rust dispatch and observed complete Windows image profile require a matching delivered SDK validator and fresh protected execution before acceptance.
