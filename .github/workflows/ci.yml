@@ -772,7 +772,7 @@ jobs:
           ${{ fromJSON(
             ((github.event_name == 'push' && github.ref == 'refs/heads/main')
               || contains(github.event.pull_request.labels.*.name, 'ci:full'))
-            && '[{"platform":"linux-x64","runner":"ubuntu-24.04"},{"platform":"darwin-arm64","runner":"macos-14"}]'
+            && '[{"platform":"linux-x64","runner":"ubuntu-24.04"},{"platform":"darwin-arm64","runner":"macos-15"}]'
             || '[{"platform":"linux-x64","runner":"ubuntu-24.04"}]') }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0

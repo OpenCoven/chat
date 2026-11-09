@@ -3529,4 +3529,11 @@ describe('a familiar asking for permission', () => {
     );
     expect(await within(openSettingsAt('Access')).findByText('Disk is gone.')).toBeInTheDocument();
   });
+
+  it('leaves the log out of Settings when nothing can read it', () => {
+    render(<ChatLayout {...asking({})} />);
+    const access = openSettingsAt('Access');
+    expect(within(access).queryByText('Permission log')).not.toBeInTheDocument();
+    expect(within(access).queryByText(/Nothing yet/)).not.toBeInTheDocument();
+  });
 });

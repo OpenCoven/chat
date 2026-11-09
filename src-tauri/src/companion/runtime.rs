@@ -30,7 +30,7 @@ pub(crate) async fn companion_snapshot(app: AppHandle) -> Result<Value, String> 
             "familiarId":s["familiarId"],"title":s["title"],"archived":s["archived"]
         })).collect::<Vec<_>>();
         // Takes the storage lock itself, so it runs after that hold has ended.
-        let approvals = crate::chat_approvals::pending(&data, crate::chat_approvals::now_ms())?;
+        let approvals = crate::chat_approvals::open_requests(&data, crate::chat_approvals::now_ms())?;
         Ok(json!({"version":1,"familiars":familiars,"sessions":sessions,"activeRun":null,"pendingApprovals":approvals}))
     }).await
 }
@@ -109,7 +109,7 @@ pub(crate) fn companion_allow(
     // Allow spends the request, so the run slot comes first: a busy runtime
     // leaves the request open for the person to try again.
     let (cancel, registration) = state.register_run(&request_id)?;
-    let grant = crate::chat_approvals::allow(
+    let grant = crate::chat_approvals::allow_request(
         &data,
         &approval_id,
         crate::chat_approvals::Device::Iphone,

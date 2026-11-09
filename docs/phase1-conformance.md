@@ -233,11 +233,7 @@ assignment, RPC decoder and primary/secondary exception pipeline. This fixture
 correction does not establish the protected installation failure's cause or
 relax the round-trip assertions.
 
-The lock now selects reviewed source `4f35d9a35c1e3a7b9779231b02482ad5f926cf2d`,
-tree `807984a5fdae4f1000227259857ac50a2f02e1df`, including all 25 governed files
-and ten production deltas. The checkout regression exercises all five labels
-from that immutable revision. SDK rebinding, both scope rotations and fresh
-protected validation remain required; this binding alone is not acceptance.
+The lock now selects reviewed source `3aa2ed6a4fcdee9db4470c4466ed8ead910273d1`, tree `4f8135af87a8b6f723ddbc40007130e7dc19f935`, including all 25 governed files and ten production deltas. The checkout regression exercises all five labels from that immutable revision. SDK rebinding, both scope rotations and fresh protected validation remain required; this binding alone is not acceptance.
 
 ## Cave rc.7 adoption (landed)
 
@@ -2099,7 +2095,7 @@ revision authorities can therefore have different workflow hashes:
 
 | File | Bytes | SHA-256 |
 | --- | ---: | --- |
-| `.github/workflows/client-v1-conformance.yml` | 183,220 | `d71071d3a3d99472021e6b90e2299cc1b87b720a65356086ff205874e202b7fa` |
+| `.github/workflows/client-v1-conformance.yml` | 183,220 | `56ca0b00264e465aea76b274fbec7c4366290ab0de03dbe6f1f1760d586d2978` |
 | `scripts/contract-canary.mjs` | 40,618 | `a4c2fe0a5eb6a5ff4653de5374c34c0fb46907c6806a5d23b86d8b37206ef958` |
 | `scripts/executable-resolution.mjs` | 9,154 | `31e3c412ff8c835f14522f36a59e91f4a4ba82913210ae8e3b4455217503f430` |
 | `scripts/owned-temp-directory.mjs` | 9,205 | `1ba30d2d5f0312143e2837956899a4f3f116f3619937d5d9756ff197ecb2a325` |

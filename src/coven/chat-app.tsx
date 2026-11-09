@@ -847,7 +847,6 @@ export function ChatApp({
       answeringApproval={answeringApproval}
       onAllowApproval={(approval, options) => void allowApproval(approval, options)}
       onDeclineApproval={(approval) => void declineApproval(approval)}
-      onPermissionLog={() => runtime.permissionLog()}
       archivedFilter={archived}
       onArchivedFilter={(value) => {
         if (lifecyclePending.current) return;
