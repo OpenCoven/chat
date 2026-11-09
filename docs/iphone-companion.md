@@ -2,9 +2,8 @@
 
 The iPhone companion, **Coven Chat** on your home screen (source in
 `apps/ios/ChatCompanion`), connects to a running Mac Chat app on the same
-private IPv4 network. Coven runs on the Mac, with the same permissions and the
-same one-run-at-a-time limit as the desktop: read-only, unless you allow one turn
-from a familiar's request. You don't
+private IPv4 network. Coven runs on the Mac, with the same read-only
+permissions and the same one-run-at-a-time limit as the desktop. You don't
 need Cave. This supersedes earlier plans that routed the phone
 through Cave.
 
@@ -19,10 +18,7 @@ through Cave.
    **Enter pairing link**, paste it and choose **Connect**. A link opened from
    elsewhere fills the field but still waits for **Connect**.
 
-A link grants access to Chat conversations and read-only agent runs, and lets the
-phone answer a familiar's request for permission, which runs one turn with full
-permission on the Mac. Links paired before Chat 0.0.9 gain this too, because a
-link has no scope of its own: **Forget paired phones** replaces them. It contains
+A link grants access to Chat conversations and read-only agent runs. It contains
 an HTTPS address, a random bearer token and the SHA-256 fingerprint of the Mac's
 certificate. Before sending credentials, the phone checks that the Mac presents
 that exact certificate. Bonjour (local network discovery) only supplies
