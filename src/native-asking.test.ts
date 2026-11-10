@@ -1,7 +1,8 @@
 import { execFileSync, spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { createServer, type IncomingHttpHeaders } from 'node:https';
+import type { IncomingHttpHeaders } from 'node:http';
+import { createServer } from 'node:https';
 import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -194,14 +195,14 @@ describe('the phone stand-in', () => {
       const pem = readFileSync(cert, 'utf8');
       const der = Buffer.from(pem.replace(/-----[^-]+-----|\s/g, ''), 'base64');
       const fingerprint = createHash('sha256').update(der).digest('hex');
-      const seen: { method?: string; headers?: IncomingHttpHeaders; body?: string }[] = [];
+      const seen: { method: string; headers: IncomingHttpHeaders; body: string }[] = [];
       const server = createServer({ key: readFileSync(key), cert: pem }, (req, res) => {
         let body = '';
         req.on('data', (chunk) => {
           body += chunk;
         });
         req.on('end', () => {
-          seen.push({ method: req.method, headers: req.headers, body });
+          seen.push({ method: req.method ?? '', headers: req.headers, body });
           res.writeHead(200, { 'content-type': 'application/json' });
           res.end(JSON.stringify({ pendingApprovals: [] }));
         });
@@ -216,16 +217,16 @@ describe('the phone stand-in', () => {
         expect(read).toMatchObject({ status: 200, json: { pendingApprovals: [] } });
         const answer = await phone.answer('approval-1', 'decline');
         expect(answer.status).toBe(200);
-        expect(seen[0]).toMatchObject({ method: 'GET', body: '' });
-        expect(seen[0].headers?.authorization).toBe(`Bearer ${hex('c')}`);
-        expect(seen[0].headers?.origin).toBeUndefined();
-        expect(seen[1].method).toBe('POST');
-        expect(seen[1].headers?.['content-type']).toBe('application/json');
-        expect(seen[1].headers?.['transfer-encoding']).toBeUndefined();
-        expect(Number(seen[1].headers?.['content-length'])).toBe(
-          Buffer.byteLength(seen[1].body ?? ''),
-        );
-        expect(JSON.parse(seen[1].body ?? '{}')).toMatchObject({
+        const [get, post] = seen;
+        if (!get || !post) throw new Error(`the server saw ${seen.length} requests`);
+        expect(get).toMatchObject({ method: 'GET', body: '' });
+        expect(get.headers.authorization).toBe(`Bearer ${hex('c')}`);
+        expect(get.headers.origin).toBeUndefined();
+        expect(post.method).toBe('POST');
+        expect(post.headers['content-type']).toBe('application/json');
+        expect(post.headers['transfer-encoding']).toBeUndefined();
+        expect(Number(post.headers['content-length'])).toBe(Buffer.byteLength(post.body));
+        expect(JSON.parse(post.body)).toMatchObject({
           approvalId: 'approval-1',
           decision: 'decline',
           requestId: expect.stringMatching(/^[0-9a-f-]{36}$/),
