@@ -89,6 +89,15 @@ describe('switching asking on for a candidate', () => {
     expect(readFileSync(window, 'utf8')).toBe(WINDOW.replace(DECLINE, DECLINE + LOG));
   });
 
+  test("keeps a Windows checkout's CRLF line endings", () => {
+    const crlf = WINDOW.replaceAll('\n', '\r\n');
+    const [host, window] = files('crlf', OFF, crlf);
+    expect(run(host, window).status).toBe(0);
+    expect(readFileSync(window, 'utf8')).toBe(
+      WINDOW.replace(DECLINE, DECLINE + LOG).replaceAll('\n', '\r\n'),
+    );
+  });
+
   test('refuses a checkout it does not recognise, and changes neither file', () => {
     const [host, window] = files('two', OFF + OFF, WINDOW);
     expect(run(host, window).status).toBe(1);

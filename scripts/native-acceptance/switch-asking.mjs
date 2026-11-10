@@ -18,8 +18,10 @@ const window = process.argv[3] ?? join(repo, 'src', 'coven', 'chat-app.tsx');
 
 const OFF = 'const ASKING_ENABLED: bool = false;';
 const ON = 'const ASKING_ENABLED: bool = true;';
-const DECLINE = '      onDeclineApproval={(approval) => void declineApproval(approval)}\n';
-const LOG = '      onPermissionLog={() => runtime.permissionLog()}\n';
+// Windows runners check out with CRLF line endings, so the line's own ending is kept.
+const DECLINE =
+  /^( *)onDeclineApproval=\{\(approval\) => void declineApproval\(approval\)\}(\r?\n)/gm;
+const LOG = 'onPermissionLog={() => runtime.permissionLog()}';
 
 const count = (text, part) => text.split(part).length - 1;
 const plan = [];
@@ -35,8 +37,12 @@ if (count(hostSource, ON) === 1 && !hostSource.includes(OFF)) {
 const windowSource = readFileSync(window, 'utf8');
 if (windowSource.includes(LOG)) {
   console.log("The window's permission log is already passed in this checkout.");
-} else if (count(windowSource, DECLINE) === 1) {
-  plan.push([window, windowSource.replace(DECLINE, DECLINE + LOG), "the window's log is back"]);
+} else if ([...windowSource.matchAll(DECLINE)].length === 1) {
+  const restored = windowSource.replace(
+    DECLINE,
+    (line, indent, end) => `${line}${indent}${LOG}${end}`,
+  );
+  plan.push([window, restored, "the window's log is back"]);
 } else {
   console.error(`Expected exactly one onDeclineApproval line in ${window}; nothing was changed.`);
   process.exit(1);
