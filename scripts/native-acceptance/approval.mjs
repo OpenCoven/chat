@@ -215,7 +215,15 @@ export async function approvalRows(lane, familiar) {
   await lane.attempt(phoneRow, async () => {
     await lane.idle();
     await lane.reset();
-    phone = new Phone(await pairingLink(lane, phoneRow));
+    try {
+      phone = new Phone(await pairingLink(lane, phoneRow));
+    } catch (error) {
+      // The companion is macOS and Linux only, and says so; anything else fails.
+      if (!/requires macOS or Linux/.test(error.message)) throw error;
+      phoneRow.block('pairing a phone', error.message);
+      await lane.reset();
+      return;
+    }
     phoneRow.note('the phone connects to', phone.address);
     await phoneSees('before anyone asks', 0);
   });

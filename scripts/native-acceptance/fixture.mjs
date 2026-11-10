@@ -54,11 +54,19 @@ function lastText(messages) {
   return '';
 }
 
-/** The newest token decides, as in the packaged fixture. */
-function tokenOf(messages) {
-  return [
-    ...lastText(messages).matchAll(/\[\[(links|table|other|slow|userinfo|reviewrace|moveon)\]\]/g),
-  ].at(-1)?.[1];
+/**
+ * The newest token decides, as in the packaged fixture. Chat replays a chat's
+ * recent turns ahead of each message (`build_replay`), so an older turn's token
+ * can sit behind this message's own. `askAt` is where the newest `[[ask …]]`
+ * starts: an allowed turn's own words carry no token, so the request it answers
+ * reaches the fixture only through the replay.
+ */
+export function newestToken(messages) {
+  const text = lastText(messages);
+  const native = [
+    ...text.matchAll(/\[\[(links|table|other|slow|userinfo|reviewrace|moveon)\]\]/g),
+  ].at(-1);
+  return { token: native?.[1], at: native?.index ?? -1, askAt: text.lastIndexOf('[[ask ') };
 }
 
 function events(res, model) {
@@ -119,8 +127,10 @@ export function startModelFixture({ log } = {}) {
       }
       const path = (req.url ?? '').split('?')[0];
       const isMessage = req.method === 'POST' && path === '/v1/messages';
-      const step = isMessage ? approvalStep(parsed.messages) : undefined;
-      const token = tokenOf(parsed.messages) ?? (step ? 'ask' : undefined);
+      const newest = newestToken(parsed.messages);
+      const askWins = !newest.token || newest.askAt > newest.at;
+      const step = isMessage && askWins ? approvalStep(parsed.messages) : undefined;
+      const token = step ? 'ask' : newest.token;
       if (log) {
         // `step` says what an approval turn was served: `write` is a real Write
         // call for the engine to run or refuse, `text` the turn's closing reply.

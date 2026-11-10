@@ -64,24 +64,45 @@ describe('which asking rows a native run drives', () => {
 
 describe('switching asking on for a candidate', () => {
   const script = join(process.cwd(), 'scripts/native-acceptance/switch-asking.mjs');
-  const run = (path: string) => spawnSync(process.execPath, [script, path], { encoding: 'utf8' });
+  const DECLINE = '      onDeclineApproval={(approval) => void declineApproval(approval)}\n';
+  const LOG = '      onPermissionLog={() => runtime.permissionLog()}\n';
+  const WINDOW = `    <ChatLayout\n${DECLINE}      archivedFilter={archived}\n`;
+  const run = (host: string, window: string) =>
+    spawnSync(process.execPath, [script, host, window], { encoding: 'utf8' });
+  const files = (name: string, host: string, window: string) => {
+    const paths = [join(scratch, `${name}.rs`), join(scratch, `${name}.tsx`)] as const;
+    writeFileSync(paths[0], host);
+    writeFileSync(paths[1], window);
+    return paths;
+  };
 
-  test('turns the one switch on, and leaves an already switched-on file alone', () => {
-    const path = join(scratch, 'off.rs');
-    writeFileSync(path, OFF);
-    expect(run(path).status).toBe(0);
-    expect(readFileSync(path, 'utf8')).toBe(ON);
-    const again = run(path);
+  test("undoes #562's two switches, and leaves an already switched-on checkout alone", () => {
+    const [host, window] = files('off', OFF, WINDOW);
+    expect(run(host, window).status).toBe(0);
+    expect(readFileSync(host, 'utf8')).toBe(ON);
+    expect(readFileSync(window, 'utf8')).toBe(WINDOW.replace(DECLINE, DECLINE + LOG));
+    const again = run(host, window);
     expect(again.status).toBe(0);
     expect(again.stdout).toContain('already on');
-    expect(readFileSync(path, 'utf8')).toBe(ON);
+    expect(again.stdout).toContain('already passed');
+    expect(readFileSync(host, 'utf8')).toBe(ON);
+    expect(readFileSync(window, 'utf8')).toBe(WINDOW.replace(DECLINE, DECLINE + LOG));
   });
 
-  test('refuses a file without exactly one switch, and changes nothing', () => {
-    const path = join(scratch, 'two.rs');
-    writeFileSync(path, OFF + OFF);
-    expect(run(path).status).toBe(1);
-    expect(readFileSync(path, 'utf8')).toBe(OFF + OFF);
+  test('refuses a checkout it does not recognise, and changes neither file', () => {
+    const [host, window] = files('two', OFF + OFF, WINDOW);
+    expect(run(host, window).status).toBe(1);
+    expect(readFileSync(host, 'utf8')).toBe(OFF + OFF);
+    expect(readFileSync(window, 'utf8')).toBe(WINDOW);
+    const [host2, window2] = files('moved', OFF, '<ChatLayout />\n');
+    expect(run(host2, window2).status).toBe(1);
+    expect(readFileSync(host2, 'utf8')).toBe(OFF);
+  });
+
+  test("matches this checkout's window, so a candidate run can't silently skip it", () => {
+    const source = readFileSync(join(process.cwd(), 'src/coven/chat-app.tsx'), 'utf8');
+    expect(source.split(DECLINE).length - 1).toBe(1);
+    expect(source).not.toContain(LOG);
   });
 });
 
@@ -127,6 +148,30 @@ describe("the native fixture's approval script", () => {
       });
       expect(spaced).toContain('/Users/r/Application Support/p.txt');
 
+      // Chat replays earlier turns ahead of each message: this message's own
+      // token wins over a replayed [[ask]], and an allowed turn, whose own words
+      // carry none, still reaches the request it answers.
+      const replay = (latest: string) =>
+        `[Coven Chat replay]\nEarlier turns:\nUser: [[slow]] Take your time.\n\nUser: [[ask /tmp/old.txt]] Write the proof file.\n\nLatest message:\n${latest}`;
+      const replayedMove = await post({
+        stream: true,
+        model: 'm',
+        messages: [{ role: 'user', content: replay('[[moveon]] Never mind.') }],
+      });
+      expect(replayedMove).toContain(`## ${MOVED_ON}`);
+      expect(replayedMove).not.toContain('tool_use');
+      const allowedTurn = await post({
+        stream: true,
+        model: 'm',
+        messages: [
+          {
+            role: 'user',
+            content: `This turn has write access. ${replay('Go ahead: Write the proof file.')}`,
+          },
+        ],
+      });
+      expect(allowedTurn).toContain('/tmp/old.txt');
+
       const moved = await post({
         stream: true,
         model: 'm',
@@ -141,6 +186,8 @@ describe("the native fixture's approval script", () => {
       expect(entries.map((entry) => [entry.token, entry.step])).toEqual([
         ['ask', 'write'],
         ['ask', 'text'],
+        ['ask', 'write'],
+        ['moveon', undefined],
         ['ask', 'write'],
         ['moveon', undefined],
       ]);

@@ -45,9 +45,11 @@ drive the app.
   `as-built`, the default, reads the build's `ASKING_ENABLED` switch in
   `src-tauri/src/chat_approvals.rs` (this checkout for a candidate, the tag for
   a published release) and drives rows `542-1` to `542-4` when it is on, or
-  `asking-off` when it is off. `switched-on` builds a candidate with the switch
-  on for that run only (`switch-asking.mjs`); `run.mjs` refuses it for a
-  published release, and the build stays on the runner. `rows-on-as-built`
+  `asking-off` when it is off. `switched-on` builds a candidate with asking on
+  for that run only: `switch-asking.mjs` undoes #562's two switches, the host's
+  `ASKING_ENABLED` and the window's permission log in Settings › Access.
+  `run.mjs` refuses it for a published release, and the build stays on the
+  runner. `rows-on-as-built`
   drives `542-1` to `542-4` whatever the build says, which is how they are seen
   to fail on a build with asking off.
   - `542-1`: **Allow once** lets exactly one write land. The read-only turn's
@@ -59,6 +61,8 @@ drive the app.
     from the phone is refused.
   - `542-4`: what a paired phone is told matches the window at each step, and
     the permission log reads the same in Settings › Access and to the phone.
+  - The companion runs only on macOS and Linux, so on Windows every phone
+    check is recorded as blocked, with the window's own reason.
   - The phone is a stand-in. The lane turns the companion on in Settings ›
     Devices, reads the private pairing link from its text box, and calls the
     companion's API with the link's token, pinning the Mac's certificate to the
