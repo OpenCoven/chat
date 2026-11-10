@@ -550,7 +550,15 @@ export function ChatApp({
         prompt: '',
         selectedFiles: [],
         start: (runId, onEvent) =>
-          runtime.allow({ approvalId: approval.id, runId, ...runOptions }, onEvent),
+          runtime.allow(
+            {
+              approvalId: approval.id,
+              runId,
+              writableRoots: approval.writableRoots ?? [],
+              ...runOptions,
+            },
+            onEvent,
+          ),
       });
     } finally {
       // A request the host refused to spend comes back here.
@@ -835,6 +843,23 @@ export function ChatApp({
     () => projectEvents(liveEvents ? [...events, ...liveEvents] : events),
     [events, liveEvents],
   );
+  const effectiveWritableRoots = useMemo(() => {
+    if (!busy || (phoneRun?.familiarId ?? runFamiliarId) !== navigation.familiarId) return;
+    const frames = liveEvents?.length ? liveEvents : phoneRun ? events : [];
+    const init = frames.findLast((event) => event.type === 'system' && event.subtype === 'init');
+    if (!init || !init.effectiveAccess || typeof init.effectiveAccess !== 'object') return;
+    const scope = init.effectiveAccess as Record<string, unknown>;
+    if (phoneRun && scope.runId !== phoneRun.runId) return;
+    const roots = scope.writableRoots;
+    if (
+      scope.enforced === true &&
+      scope.access === 'workspace-write' &&
+      Array.isArray(roots) &&
+      roots.every((root) => typeof root === 'string')
+    ) {
+      return roots as string[];
+    }
+  }, [busy, phoneRun, runFamiliarId, navigation.familiarId, liveEvents, events]);
   const messages = projection.messages;
 
   return (
@@ -877,6 +902,8 @@ export function ChatApp({
         workspace: item.workspace,
         projectAccess: item.projectAccess,
         projectAccessUnavailable: item.projectAccessUnavailable,
+        savedAccess: item.savedAccess,
+        accessError: item.accessError,
         avatarUrl:
           'avatarUrl' in item && typeof item.avatarUrl === 'string' ? item.avatarUrl : undefined,
       }))}
@@ -884,6 +911,7 @@ export function ChatApp({
       screen={screen}
       onWindowTitle={onWindowTitle}
       messages={messages}
+      effectiveWritableRoots={effectiveWritableRoots}
       familiarId={navigation.familiarId}
       sessionId={navigation.sessionId}
       draft={navigation.drafts[draftKey(navigation)] ?? ''}

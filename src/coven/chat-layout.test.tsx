@@ -600,7 +600,7 @@ describe('production Familiars layout', () => {
     expect(screen.queryByRole('button', { name: 'New chat' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Import from Cave' })).not.toBeInTheDocument();
     expect(openSettingsAt('Access')).toHaveTextContent(
-      "Every turn runs read-only unless you allow a familiar's request",
+      'The familiar can write in its workspace and projects with write access',
     );
   });
 
@@ -1806,7 +1806,7 @@ describe('declared access and error copying', () => {
     ]);
     expect(items[0]).toHaveTextContent('chatRead and write/work/chat');
     expect(items[1]).toHaveTextContent('apiRead only/work/api');
-    expect(access).toHaveTextContent("an allowed turn isn't limited to these projects");
+    expect(access).toHaveTextContent('Extra folders require your approval for one reply');
   });
 
   it('tells "none declared" apart from "could not read"', () => {
@@ -3137,6 +3137,7 @@ describe('a familiar asking for permission', () => {
     reason: 'It needs a new file',
     requestedAt: 1,
     expiresAt: 2,
+    writableRoots: ['/projects/extra'],
   };
   function asking(extra: Partial<ChatLayoutProps> = {}): ChatLayoutProps {
     const props = layoutProps();
@@ -3162,10 +3163,8 @@ describe('a familiar asking for permission', () => {
     expect(card).toHaveTextContent('<b>Create</b> probe.txt');
     expect(card.querySelector('b')).toBeNull();
     expect(card).toHaveTextContent('It needs a new file');
-    expect(card).toHaveTextContent(
-      'change files and run commands on this computer as you, for one turn',
-    );
-    expect(card).toHaveTextContent("isn't limited to what's described here");
+    expect(card).toHaveTextContent('write to these extra folders for the next reply');
+    expect(card).toHaveTextContent('/projects/extra');
   });
 
   it('answers with the request it shows', () => {
@@ -3230,5 +3229,49 @@ describe('a familiar asking for permission', () => {
     const access = openSettingsAt('Access');
     expect(within(access).queryByText('Permission log')).not.toBeInTheDocument();
     expect(within(access).queryByText(/Nothing yet/)).not.toBeInTheDocument();
+  });
+});
+
+describe('saved workspace access', () => {
+  it('shows exact saved roots without presenting them as a verified running policy', () => {
+    render(
+      <ChatLayout
+        {...layoutProps()}
+        familiarId="nova"
+        familiars={[
+          {
+            id: 'nova',
+            name: 'Nova',
+            savedAccess: {
+              access: 'workspace-write',
+              writableRoots: ['/projects/nova', '/projects/chat'],
+              verified: false,
+            },
+          },
+        ]}
+      />,
+    );
+    expect(screen.getByText('Saved workspace write access · checked at each send')).toBeTruthy();
+    expect(screen.getByText('/projects/nova')).toBeTruthy();
+    expect(screen.getByText('/projects/chat')).toBeTruthy();
+    expect(screen.getByText(/beyond them needs a separate approval/)).toBeTruthy();
+  });
+
+  it('shows unavailable grants as an error instead of an empty access list', () => {
+    render(
+      <ChatLayout
+        {...layoutProps()}
+        familiarId="nova"
+        familiars={[
+          {
+            id: 'nova',
+            name: 'Nova',
+            accessError: 'Restore the project registry and refresh Coven.',
+          },
+        ]}
+      />,
+    );
+    expect(screen.getByText('Restore the project registry and refresh Coven.')).toBeTruthy();
+    expect(screen.queryByText('Saved workspace write access · checked at each send')).toBeNull();
   });
 });

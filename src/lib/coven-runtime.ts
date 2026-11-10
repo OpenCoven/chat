@@ -22,6 +22,9 @@ export type CovenFamiliar = {
   projectAccess?: readonly CovenProjectAccess[];
   /** The host could not read the project registry or grants; access is unknown. */
   projectAccessUnavailable?: boolean;
+  /** Saved host grant; a run must independently verify its effective access. */
+  savedAccess?: { access: 'workspace-write'; writableRoots: string[]; verified: false };
+  accessError?: string;
 };
 export type CovenProjectAccess = {
   name: string;
@@ -68,11 +71,13 @@ export type CovenApproval = {
   reason?: string;
   requestedAt: number;
   expiresAt: number;
+  writableRoots?: readonly string[];
 };
 /** The chat, the permission and the words of the allowed turn are the host's. */
 export type CovenAllowInput = {
   approvalId: string;
   runId: string;
+  writableRoots?: readonly string[];
   model?: string;
   think?: boolean;
   speed?: 'fast' | 'balanced' | 'thorough';
@@ -165,6 +170,16 @@ function familiar(value: unknown): value is CovenFamiliar {
             project.path.length <= 4096 &&
             (project.access === 'read' || project.access === 'write'),
         ))) &&
+    optionalText(value.accessError, 4096) &&
+    (value.savedAccess === undefined ||
+      (record(value.savedAccess) &&
+        value.savedAccess.access === 'workspace-write' &&
+        value.savedAccess.verified === false &&
+        Array.isArray(value.savedAccess.writableRoots) &&
+        value.savedAccess.writableRoots.length <= 1025 &&
+        value.savedAccess.writableRoots.every(
+          (root: unknown) => typeof root === 'string' && root.length > 0 && root.length <= 4096,
+        ))) &&
     (value.projectAccessUnavailable === undefined || value.projectAccessUnavailable === true) &&
     (value.avatarUrl === undefined ||
       (typeof value.avatarUrl === 'string' &&
@@ -179,6 +194,12 @@ function approval(value: unknown): value is CovenApproval {
     typeof value.familiarId === 'string' &&
     typeof value.summary === 'string' &&
     value.summary.length <= 1024 &&
+    (value.writableRoots === undefined ||
+      (Array.isArray(value.writableRoots) &&
+        value.writableRoots.length <= 8 &&
+        value.writableRoots.every(
+          (root: unknown) => typeof root === 'string' && root.length > 0 && root.length <= 4096,
+        ))) &&
     optionalText(value.reason) &&
     typeof value.requestedAt === 'number' &&
     typeof value.expiresAt === 'number'

@@ -47,7 +47,7 @@ impl FixtureBackend {
 impl Backend for FixtureBackend {
     async fn snapshot(&self) -> Result<Value, String> {
         let approvals = if self.approval_open.load(Ordering::SeqCst) {
-            json!([{"id":FIXTURE_APPROVAL,"familiarId":"fixture","summary":"Create fixture.txt","reason":"The fixture needs a new file","requestedAt":1,"expiresAt":4_102_444_800_000u64}])
+            json!([{"id":FIXTURE_APPROVAL,"familiarId":"fixture","summary":"Create fixture.txt","reason":"The fixture needs a new file","requestedAt":1,"expiresAt":4_102_444_800_000u64,"writableRoots":["/fixture/project"]}])
         } else {
             json!([])
         };
@@ -121,9 +121,17 @@ impl Backend for FixtureBackend {
         let open = approval_id == FIXTURE_APPROVAL && self.approval_open.load(Ordering::SeqCst);
         Ok(open.then(|| "fixture".to_owned()))
     }
-    fn allow(&self, request_id: String, approval_id: String) -> Result<Arc<RunRecord>, String> {
+    fn allow(
+        &self,
+        request_id: String,
+        approval_id: String,
+        writable_roots: Vec<String>,
+    ) -> Result<Arc<RunRecord>, String> {
         if self.active().is_some() {
             return Err("Busy".into());
+        }
+        if writable_roots != ["/fixture/project"] {
+            return Err("Review the exact folders before allowing this request.".into());
         }
         self.answer(&approval_id, "allowed")?;
         let run = self.begin(request_id, "fixture".into(), "Allowed: Create fixture.txt")?;

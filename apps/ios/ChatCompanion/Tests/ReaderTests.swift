@@ -167,4 +167,22 @@ final class MarkdownTests: XCTestCase {
       Markdown.plainText(Markdown.parse("**Bold** and `code`\n\n- one\n- two")),
       "Bold and code\n\n• one\n• two")
   }
+  func testSavedAccessIsOptionalAndNeverClaimsNativeVerification() throws {
+    let old = Data(#"{"id":"nova","name":"nova","displayName":"Nova"}"#.utf8)
+    XCTAssertNil(try JSONDecoder().decode(Familiar.self, from: old).savedAccess)
+    let current = Data(#"{"id":"nova","name":"nova","displayName":"Nova","savedAccess":{"access":"workspace-write","writableRoots":["/projects/nova"],"verified":false}}"#.utf8)
+    let familiar = try JSONDecoder().decode(Familiar.self, from: current)
+    XCTAssertEqual(familiar.savedAccess?.writableRoots, ["/projects/nova"])
+    XCTAssertEqual(familiar.savedAccess?.verified, false)
+  }
+
+  func testSavedAccessRejectsFullOrUnverifiedNativeClaims() throws {
+    for access in ["full", "read-only"] {
+      let json = "{\"access\":\"\(access)\",\"writableRoots\":[\"/projects/nova\"],\"verified\":false}"
+      XCTAssertThrowsError(try JSONDecoder().decode(SavedAccess.self, from: Data(json.utf8)))
+    }
+    let forged = Data(#"{"access":"workspace-write","writableRoots":["/projects/nova"],"verified":true}"#.utf8)
+    XCTAssertThrowsError(try JSONDecoder().decode(SavedAccess.self, from: forged))
+  }
+
 }

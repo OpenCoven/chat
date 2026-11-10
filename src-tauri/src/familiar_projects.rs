@@ -122,6 +122,24 @@ impl ProjectAccess {
         Self::from_sources(&sources, &home)
     }
 
+    pub(super) fn protect_execution_authority(
+        policy: &super::execution_policy::RunPolicy,
+    ) -> Result<(), String> {
+        let sources = Self::environment_sources(&super::home()?)?;
+        for file in [
+            Some(sources.projects),
+            Some(sources.permissions),
+            sources.legacy_projects,
+            sources.legacy_permissions,
+        ]
+        .into_iter()
+        .flatten()
+        {
+            policy.protect_authority_file(&file)?;
+        }
+        Ok(())
+    }
+
     fn environment_sources(home: &Path) -> Result<Sources, String> {
         let mut environment = HashMap::new();
         for key in [
@@ -228,7 +246,7 @@ impl ProjectAccess {
         })
     }
 
-    pub(super) fn for_familiar(&self, id: &str) -> Result<Value, String> {
+    fn effective_grants(&self, id: &str) -> HashMap<&str, Access> {
         let mut grants: HashMap<&str, Access> = HashMap::new();
         for direct in self
             .permissions
@@ -257,6 +275,29 @@ impl ProjectAccess {
                 }
             }
         }
+        grants
+    }
+
+    /// Execution must not mistake unavailable write authority for an empty
+    /// grant. Suggestion lists remain best-effort for backwards compatibility.
+    pub(super) fn for_execution(&self, id: &str) -> Result<Value, String> {
+        let available: HashSet<&str> = self
+            .projects
+            .values()
+            .map(|project| project.id.as_str())
+            .collect();
+        if self
+            .effective_grants(id)
+            .iter()
+            .any(|(project, access)| *access == Access::Write && !available.contains(project))
+        {
+            return Err("A project write grant names an unavailable folder. Restore that folder or correct the project grant, then refresh Coven and retry.".into());
+        }
+        self.for_familiar(id)
+    }
+
+    pub(super) fn for_familiar(&self, id: &str) -> Result<Value, String> {
+        let grants = self.effective_grants(id);
         let mut entries = Vec::new();
         for (path, project) in &self.projects {
             if let Some(&access) = grants.get(project.id.as_str()) {
@@ -853,5 +894,21 @@ mod tests {
         }
         eprintln!("Cave metadata counts: projects={}, direct_grants={}, groups={}, familiar_ids={}, effective_entries={total}",
             loaded.projects.len(), loaded.permissions.project_grants.len(), loaded.permissions.access_groups.len(), members.len());
+    }
+    #[test]
+    fn execution_rejects_unavailable_or_stale_write_grants_without_changing_suggestions() {
+        let f = Fixture::new();
+        let project = f.project("missing");
+        fs::remove_dir(project["root"].as_str().unwrap()).unwrap();
+        f.write(json!([project]), json!({"version":2,"projectGrants":[{"familiarId":"sage","projectId":"missing","access":"write"}]}));
+        let access = f.load().unwrap();
+        assert_eq!(access.for_familiar("sage").unwrap(), json!([]));
+        assert!(access
+            .for_execution("sage")
+            .unwrap_err()
+            .contains("unavailable folder"));
+        assert_eq!(access.for_execution("other").unwrap(), json!([]));
+        f.write(json!([]), json!({"version":2,"projectGrants":[{"familiarId":"sage","projectId":"removed-from-registry","access":"write"}]}));
+        assert!(f.load().unwrap().for_execution("sage").is_err());
     }
 }

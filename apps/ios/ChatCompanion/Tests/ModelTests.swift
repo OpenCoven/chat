@@ -91,7 +91,7 @@ import XCTest
   }
   private let request = Approval(
     id: "request-1", familiarId: "astra", summary: "Create probe.txt", reason: "It needs a file",
-    requestedAt: 1, expiresAt: 2)
+    requestedAt: 1, expiresAt: 2, writableRoots: ["/fixture/project"])
   private func asking(_ api: FakeClient) -> Snapshot {
     Snapshot(
       version: 1, familiars: api.snapshotValue.familiars, sessions: [], activeRun: nil,
@@ -109,6 +109,7 @@ import XCTest
     XCTAssertEqual(api.answers.count, 1)
     XCTAssertEqual(api.answers[0].approvalId, "request-1")
     XCTAssertEqual(api.answers[0].decision, "allow")
+    XCTAssertEqual(api.answers[0].writableRoots, ["/fixture/project"])
     XCTAssertEqual(model.activeRun?.id, api.answers[0].requestId)
     XCTAssertTrue(api.sent.isEmpty)
     XCTAssertEqual(model.draft, "still typing")
@@ -181,7 +182,7 @@ import XCTest
   func testARequestFromAnotherFamiliarIsOfferedButNotAnswerableHere() async {
     let api = FakeClient()
     let other = Approval(
-      id: "request-2", familiarId: "sage", summary: "S", reason: nil, requestedAt: 1, expiresAt: 2)
+      id: "request-2", familiarId: "sage", summary: "S", reason: nil, requestedAt: 1, expiresAt: 2, writableRoots: ["/fixture/project"])
     api.snapshotValue = Snapshot(
       version: 1,
       familiars: api.snapshotValue.familiars + [

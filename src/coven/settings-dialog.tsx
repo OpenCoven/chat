@@ -701,8 +701,8 @@ function FamiliarAccess({ familiar, onRefresh, refreshDisabled }: SettingsDialog
         >
           refresh
         </button>
-        . Every turn runs read-only unless you allow a familiar's request, and an allowed turn isn't
-        limited to these projects.
+        . The familiar can write in its workspace and projects with write access. Extra folders
+        require your approval for one reply.
       </p>
     </>
   );

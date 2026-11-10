@@ -502,7 +502,7 @@ async fn the_phone_sees_an_open_request_and_allows_it_once() {
         "Create fixture.txt"
     );
 
-    let allow = json!({"requestId":"allow-1","approvalId":"fixture-approval","decision":"allow"});
+    let allow = json!({"requestId":"allow-1","approvalId":"fixture-approval","decision":"allow","writableRoots":["/fixture/project"]});
     let (code, answer) = request(&host, "POST", "/v1/approval", Some(allow.clone()), "").await;
     assert_eq!(code, 200);
     assert_eq!(answer["status"], "allowed");
@@ -520,7 +520,7 @@ async fn the_phone_sees_an_open_request_and_allows_it_once() {
         &host,
         "POST",
         "/v1/approval",
-        Some(json!({"requestId":"allow-2","approvalId":"fixture-approval","decision":"allow"})),
+        Some(json!({"requestId":"allow-2","approvalId":"fixture-approval","decision":"allow","writableRoots":["/fixture/project"]})),
         "",
     )
     .await;
@@ -538,7 +538,7 @@ async fn a_receipt_saved_before_a_crash_lets_the_companion_start_again() {
     let backend = Arc::new(FixtureBackend::default());
     let host = Host::start(&root, Ipv4Addr::LOCALHOST, backend.clone()).unwrap();
     ask_for_permission(&host).await;
-    let allow = json!({"requestId":"allow-1","approvalId":"fixture-approval","decision":"allow"});
+    let allow = json!({"requestId":"allow-1","approvalId":"fixture-approval","decision":"allow","writableRoots":["/fixture/project"]});
     assert_eq!(
         request(&host, "POST", "/v1/approval", Some(allow.clone()), "")
             .await
@@ -575,7 +575,7 @@ async fn a_closed_request_leaves_no_receipt_behind() {
         &host,
         "POST",
         "/v1/approval",
-        Some(json!({"requestId":"allow-1","approvalId":"fixture-approval","decision":"allow"})),
+        Some(json!({"requestId":"allow-1","approvalId":"fixture-approval","decision":"allow","writableRoots":["/fixture/project"]})),
         "",
     )
     .await;
@@ -623,7 +623,7 @@ async fn an_approval_answer_needs_the_pairing_and_a_known_shape() {
     let host = Host::start(&temp(), Ipv4Addr::LOCALHOST, backend.clone()).unwrap();
     ask_for_permission(&host).await;
     let starts = backend.starts.load(Ordering::SeqCst);
-    let body = json!({"requestId":"allow-1","approvalId":"fixture-approval","decision":"allow"});
+    let body = json!({"requestId":"allow-1","approvalId":"fixture-approval","decision":"allow","writableRoots":["/fixture/project"]});
     let mut stream = connect(&host).await;
     let text = body.to_string();
     let unpaired = format!("POST /v1/approval HTTP/1.1\r\nHost: coven-chat.local\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{text}", text.len());
@@ -643,7 +643,7 @@ async fn an_approval_answer_needs_the_pairing_and_a_known_shape() {
     assert_eq!(code, 401);
     for bad in [
         json!({"requestId":"a","approvalId":"fixture-approval","decision":"maybe"}),
-        json!({"requestId":"a","approvalId":"../x","decision":"allow"}),
+        json!({"requestId":"a","approvalId":"../x","decision":"allow","writableRoots":["/fixture/project"]}),
         json!({"requestId":"a","approvalId":"fixture-approval","decision":"allow","permission":"full"}),
     ] {
         let (code, _) = request(&host, "POST", "/v1/approval", Some(bad), "").await;

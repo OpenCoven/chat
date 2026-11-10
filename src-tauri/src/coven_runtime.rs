@@ -24,6 +24,9 @@ pub(crate) mod attachments;
 #[path = "child_env.rs"]
 pub(crate) mod child_env;
 
+#[path = "execution_policy.rs"]
+pub(crate) mod execution_policy;
+
 #[path = "familiar_projects.rs"]
 mod familiar_projects;
 
@@ -941,7 +944,7 @@ fn run_arguments(
     validate_input(input)?;
     if !matches!(harness, "coven-code" | "codex" | "claude") {
         return Err(
-            "This harness is not enabled for read-only chat. Use Coven Code, Codex or Claude."
+            "This harness is not enabled for workspace chat. Use Coven Code, Codex or Claude."
                 .into(),
         );
     }
@@ -949,13 +952,6 @@ fn run_arguments(
         "run".into(),
         harness.into(),
         "--stream-json".into(),
-        "--permission".into(),
-        if input.grant.is_some() {
-            "full"
-        } else {
-            "read-only"
-        }
-        .into(),
         "--cwd".into(),
         cwd.to_str().ok_or("Workspace path is not UTF-8.")?.into(),
     ];
@@ -1090,6 +1086,39 @@ fn attach_project_access(
     }
 }
 
+fn attach_saved_access(
+    familiar: &mut Value,
+    projects: Option<&familiar_projects::ProjectAccess>,
+    id: &str,
+) {
+    let policy = (|| {
+        if familiar["projectAccessUnavailable"] == true {
+            return Err(
+                "Project access could not be read. Refresh Coven and check its project grants."
+                    .to_owned(),
+            );
+        }
+        let project_access = projects
+            .ok_or("Project access could not be read. Refresh Coven and check its project grants.")?
+            .for_execution(id)?;
+        let workspace = Path::new(string(familiar, "workspace")?);
+        let policy = execution_policy::RunPolicy::resolve(
+            "preview",
+            workspace,
+            workspace,
+            &project_access,
+            &home()?,
+        )?;
+        Ok(
+            json!({"access": policy.access, "writableRoots": policy.writable_roots, "verified": false}),
+        )
+    })();
+    match policy {
+        Ok(policy) => familiar["savedAccess"] = policy,
+        Err(error) => familiar["accessError"] = json!(error),
+    }
+}
+
 #[tauri::command]
 pub(crate) async fn coven_runtime_familiars() -> Result<Value, String> {
     blocking(|| {
@@ -1112,6 +1141,7 @@ pub(crate) async fn coven_runtime_familiars() -> Result<Value, String> {
             .map(|f| {
                 let mut familiar = normalize_familiar(f, crate::familiar_avatar::read_avatar)?;
                 attach_project_access(&mut familiar, projects.as_ref(), string(f, "id")?);
+                attach_saved_access(&mut familiar, projects.as_ref(), string(f, "id")?);
                 Ok(familiar)
             })
             .collect::<Result<Vec<_>, String>>()
@@ -1955,6 +1985,8 @@ async fn run_in_window(
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct AllowInput {
     approval_id: String,
+    #[serde(default)]
+    writable_roots: Vec<String>,
     run_id: String,
     model: Option<String>,
     #[serde(default)]
@@ -2003,6 +2035,7 @@ pub(crate) async fn coven_runtime_allow(
         let data = data.clone();
         let approval = input.approval_id.clone();
         let run = input.run_id.clone();
+        let roots = input.writable_roots;
         blocking(move || {
             crate::chat_approvals::allow_request(
                 &data,
@@ -2010,6 +2043,7 @@ pub(crate) async fn coven_runtime_allow(
                 crate::chat_approvals::Device::Desktop,
                 &run,
                 crate::chat_approvals::now_ms(),
+                &roots,
             )
         })
         .await?
@@ -2122,7 +2156,13 @@ fn send_local(
 ) -> Result<Value, String> {
     let grant = input.grant.clone();
     let run_id = input.run_id.clone();
-    let result = send_turn(data, input, cancel, on_event);
+    let result = (|| {
+        if cancel.load(Ordering::SeqCst) {
+            return Err(RUN_CANCELLED.into());
+        }
+        execution_policy::ExecutionPolicy::load_or_migrate(data)?;
+        send_turn(data, input, cancel, on_event)
+    })();
     if let Some(grant) = grant {
         let outcome = match &result {
             Ok(_) => "completed",
@@ -2147,6 +2187,21 @@ fn send_turn(
     on_event: &mut dyn FnMut(Value) -> Result<(), String>,
 ) -> Result<Value, String> {
     validate_input(&input)?;
+    let extra_roots = match &input.grant {
+        Some(grant) => {
+            if input.prompt != crate::chat_approvals::allowed_prompt(&grant.summary)
+                || input.familiar_id.as_deref() != Some(&grant.familiar_id)
+                || input.session_id.as_deref() != Some(&grant.session_id)
+            {
+                return Err(
+                    "This reply no longer matches the approved action. Ask for a new request."
+                        .into(),
+                );
+            }
+            crate::chat_approvals::granted_roots(data, grant, &input.run_id)?
+        }
+        None => Vec::new(),
+    };
     let mut input = input;
     let selected_familiar = input
         .familiar_id
@@ -2217,6 +2272,39 @@ fn send_turn(
             "Coven requires a dedicated project workspace, not a filesystem or home root.".into(),
         );
     }
+    // Resolve authority from the current familiar registry even when resuming:
+    // a session's project_root never grants write access by itself.
+    let familiars = cli_json(&["familiars", "--json"])?;
+    let familiar = familiars
+        .as_array()
+        .ok_or("Coven returned invalid familiars.")?
+        .iter()
+        .find(|f| f["id"].as_str() == Some(selected_familiar.as_str()))
+        .ok_or("The selected familiar is no longer installed in Coven.")?;
+    let projects = familiar_projects::ProjectAccess::load()
+        .map_err(|error| format!("Workspace access could not be read. Correct the project registry or grants, then retry. {error}"))?
+        .for_execution(&selected_familiar)?;
+    let mut policy = execution_policy::RunPolicy::resolve(
+        &input.run_id,
+        Path::new(string(familiar, "workspace")?),
+        &workspace,
+        &projects,
+        &home()?,
+    )?;
+    policy.extend_approved(&extra_roots, &home()?)?;
+    policy.protect_host_storage(data)?;
+    familiar_projects::ProjectAccess::protect_execution_authority(&policy)?;
+    let help = run_process(
+        &["run".into(), "--help".into()],
+        None,
+        cancel,
+        READ_TIMEOUT,
+        None,
+    )?;
+    if !String::from_utf8_lossy(&help).contains("--chat-workspace-policy-v1") {
+        return Err(execution_policy::UNVERIFIED.into());
+    }
+    let policy_file = policy.stage(data)?;
     // A harness that cannot reopen the thread natively gets the captured
     // history replayed into this turn; the saved input stays the user's text.
     let replay = match &resumed {
@@ -2241,6 +2329,17 @@ fn send_turn(
         None => conversation.to_owned(),
     };
     let mut args = run_arguments(&input, &harness, &workspace, &sent_prompt)?;
+    args.splice(
+        2..2,
+        [
+            "--chat-workspace-policy-v1".into(),
+            policy_file
+                .0
+                .to_str()
+                .ok_or("Workspace policy path is not UTF-8.")?
+                .into(),
+        ],
+    );
     let staged = if input.attachments.is_empty() {
         None
     } else {
@@ -2252,13 +2351,16 @@ fn send_turn(
         )?)
     };
     let input_file = if let Some((directory, path, _)) = &staged {
-        args.extend([
-            "--add-dir".into(),
-            directory
-                .to_str()
-                .ok_or("Attachment path is not UTF-8.")?
-                .into(),
-        ]);
+        args.splice(
+            2..2,
+            [
+                "--chat-input-directory".into(),
+                directory
+                    .to_str()
+                    .ok_or("Attachment path is not UTF-8.")?
+                    .into(),
+            ],
+        );
         // Coven requires a positional prompt to create a ledger session; the
         // stream-mode engine consumes the full user message from stdin instead.
         args.extend([
@@ -2297,7 +2399,14 @@ fn send_turn(
         }
         Ok(())
     };
+    let mut policy_verified = false;
     let mut observe = |event: Value| -> Result<(), String> {
+        if event["type"] == "system" && event["subtype"] == "init" {
+            policy.verify(&event)?;
+            policy_verified = true;
+        } else if !policy_verified {
+            return Err(execution_policy::UNVERIFIED.into());
+        }
         // Text holding Chat's note can only be the echo, whatever session it names.
         if is_cli_input_echo(&event, &sent_prompt)
             || (staged.is_some() && is_cli_input_echo(&event, echo_prompt))
@@ -2424,7 +2533,8 @@ fn send_turn(
             if crate::chat_approvals::files_requests(input.grant.is_some()) {
                 if let (Some(session), Some(proposal)) = (
                     input_session.as_deref(),
-                    crate::chat_approvals::proposal_in(&events),
+                    crate::chat_approvals::proposal_in(&events)
+                        .filter(|proposal| !proposal.writable_roots.is_empty()),
                 ) {
                     crate::chat_approvals::submit(
                         data,
@@ -2454,6 +2564,15 @@ fn send_turn(
     // Before the CLI names a session there is no chat line to keep a report
     // on, so the error itself carries what is known, as it always did.
     let Some((file, id)) = transcript.as_mut().zip(input_session.as_deref()) else {
+        if !policy_verified {
+            let detail = stderr_report
+                .lines()
+                .find(|line| line.contains("cannot verify workspace write access on this host"));
+            return Err(detail.map_or_else(
+                || execution_policy::UNVERIFIED.into(),
+                |_| execution_policy::UNSUPPORTED.into(),
+            ));
+        }
         return Err(run.err().unwrap_or_else(|| NO_TERMINAL_RESULT.into()));
     };
     let (notice, message) = record_run_failure(file, id, &failure, &stderr_report)?;
@@ -3215,6 +3334,7 @@ mod tests {
         .contains("chat has changed since this view loaded"));
         fs::remove_file(data.join("chat-lifecycle-v1.json")).unwrap();
         fs::remove_file(data.join("chat-canonical-v1.json")).unwrap();
+        fs::remove_file(data.join("chat-execution-policy-v1.json")).unwrap();
         fs::remove_dir(transcripts).unwrap();
         fs::remove_dir(data).unwrap();
     }
@@ -3270,9 +3390,7 @@ mod tests {
             &input.prompt,
         )
         .unwrap();
-        assert!(args
-            .windows(2)
-            .any(|pair| pair == ["--permission", "read-only"]));
+        assert!(!args.iter().any(|arg| arg == "--permission"));
         assert_eq!(
             &args[args.len() - 2..],
             ["--", "--permission full; touch file"]
@@ -3304,7 +3422,7 @@ mod tests {
     }
 
     #[test]
-    fn attachment_only_input_uses_supported_stream_transport_and_read_only_permission() {
+    fn attachment_only_input_uses_stream_transport_without_legacy_permission() {
         let input: SendInput = serde_json::from_value(json!({
             "runId": "attachment-run",
             "prompt": "",
@@ -3313,9 +3431,7 @@ mod tests {
         .unwrap();
         let args = run_arguments(&input, "coven-code", Path::new("/safe"), &input.prompt).unwrap();
         assert!(args.iter().any(|arg| arg == "--stream-json-input"));
-        assert!(args
-            .windows(2)
-            .any(|pair| pair == ["--permission", "read-only"]));
+        assert!(!args.iter().any(|arg| arg == "--permission"));
         assert!(run_arguments(&input, "codex", Path::new("/safe"), &input.prompt).is_err());
         assert!(run_arguments(&input, "claude", Path::new("/safe"), &input.prompt).is_err());
     }
@@ -3800,7 +3916,7 @@ mod tests {
     }
 
     #[test]
-    fn bundled_engine_is_read_only_and_preserves_session_identity() {
+    fn bundled_engine_preserves_session_identity_without_legacy_permission() {
         let input = SendInput {
             run_id: "run-1".into(),
             prompt: "hello".into(),
@@ -3821,9 +3937,7 @@ mod tests {
             .windows(2)
             .any(|pair| pair == ["--continue", "session-1"]));
         assert!(args.windows(2).any(|pair| pair == ["--familiar", "sage"]));
-        assert!(args
-            .windows(2)
-            .any(|pair| pair == ["--permission", "read-only"]));
+        assert!(!args.iter().any(|arg| arg == "--permission"));
     }
 
     #[test]
@@ -3860,7 +3974,7 @@ mod tests {
     }
 
     #[test]
-    fn only_a_grant_asks_coven_for_full_permission() {
+    fn neither_normal_nor_legacy_granted_turns_request_full_access() {
         let mut input = SendInput {
             run_id: "run-1".into(),
             prompt: "Allowed: Create probe.txt".into(),
@@ -3875,17 +3989,17 @@ mod tests {
         };
         let permission = |input: &SendInput| {
             let args = run_arguments(input, "claude", Path::new("/workspace"), "x").unwrap();
-            let at = args.iter().position(|arg| arg == "--permission").unwrap();
-            args[at + 1].clone()
+            args.iter()
+                .any(|arg| arg == "--permission" || arg == "full")
         };
-        assert_eq!(permission(&input), "read-only");
+        assert!(!permission(&input));
         input.grant = Some(crate::chat_approvals::Grant {
             approval_id: "approval-1".into(),
             familiar_id: "sage".into(),
             session_id: "session-1".into(),
             summary: "Create probe.txt".into(),
         });
-        assert_eq!(permission(&input), "full");
+        assert!(!permission(&input));
     }
 
     #[test]
@@ -4121,7 +4235,7 @@ mod tests {
                 .find(|event| event["type"] == "system" && event["subtype"] == "init")
                 .unwrap();
             let id = string(init, "session_id").unwrap().to_owned();
-            assert_eq!(init["permission"], "read-only");
+            assert_eq!(init["effectiveAccess"]["access"], "workspace-write");
             let expected = markers[turn];
             let replay_notices = observed
                 .iter()
@@ -4618,5 +4732,53 @@ mod tests {
             .find(|path| executable(path));
         std::fs::remove_dir_all(&root).unwrap();
         assert_eq!(found, Some(native));
+    }
+    #[test]
+    fn legacy_approval_rejection_and_early_stop_keep_audit_receipts_without_launching() {
+        let data =
+            std::env::temp_dir().join(format!("chat-policy-approval-{}", uuid::Uuid::new_v4()));
+        fs::create_dir_all(&data).unwrap();
+        for (run, cancelled, outcome) in [
+            ("new-action", false, "failed"),
+            ("stopped-action", true, "stopped"),
+        ] {
+            let input = SendInput {
+                run_id: run.into(),
+                prompt: "A different action must not inherit an old approval".into(),
+                familiar_id: Some("sage".into()),
+                session_id: Some("old-chat".into()),
+                harness: None,
+                model: None,
+                think: false,
+                speed: None,
+                attachments: vec![],
+                grant: Some(crate::chat_approvals::Grant {
+                    approval_id: "old-approval".into(),
+                    familiar_id: "sage".into(),
+                    session_id: "old-chat".into(),
+                    summary: "old action".into(),
+                }),
+            };
+            let result = send_local(&data, input, &AtomicBool::new(cancelled), &mut |_| {
+                panic!("an unscoped approval must not start an engine")
+            });
+            let error = result.unwrap_err();
+            assert!(if cancelled {
+                error == RUN_CANCELLED
+            } else {
+                error.contains("no folder scope")
+                    || error.contains("no longer matches the approved action")
+            });
+            let log =
+                serde_json::to_value(crate::chat_approvals::recent(&data, 10).unwrap()).unwrap();
+            assert!(log
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|entry| entry["event"] == "finished"
+                    && entry["runId"] == run
+                    && entry["outcome"] == outcome));
+        }
+        fs::remove_dir_all(&data).unwrap();
     }
 }

@@ -55,7 +55,7 @@ const PROSE_LIMIT: usize = 64 * 1024;
 
 /// The thread-visible disclosure at the top of a turn with write access.
 pub(crate) const GRANT_NOTICE: &str =
-    "You allowed this turn to change files and run commands. That access ends when this reply does.";
+    "You allowed extra folders for this reply. Your saved workspace access stays available.";
 pub(crate) const NOTICE_SOURCE: &str = "chat-approval";
 
 static LOG_LOCK: Mutex<()> = Mutex::new(());
@@ -107,6 +107,8 @@ pub(crate) struct Entry {
     pub detail: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub outcome: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub roots: Vec<ApprovedRoot>,
 }
 
 /// An open request, as the window and the phone see it. The chat's real session
@@ -121,6 +123,8 @@ pub(crate) struct Approval {
     pub reason: Option<String>,
     pub requested_at: u64,
     pub expires_at: u64,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub writable_roots: Vec<String>,
 }
 
 /// Write access for exactly one turn. Only `allow` makes one, and it can't
@@ -137,18 +141,59 @@ pub(crate) struct Grant {
 pub(crate) struct Proposal {
     pub summary: String,
     pub reason: Option<String>,
+    pub writable_roots: Vec<String>,
 }
 
-/// Whether a familiar can ask for permission in this release. While this is
-/// false, no turn is told it can ask, nothing is filed, nothing is shown, and no
-/// answer becomes a [`Grant`], so nothing in Chat can start a turn with full
-/// permission. `allow` and `pending` are private so that the window and the phone
-/// can only reach them through the checks below.
-const ASKING_ENABLED: bool = false;
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct ApprovedRoot {
+    path: String,
+    device: u64,
+    inode: u64,
+}
 
-/// Only a window or a phone holding a request from a build that could ask sees this.
-pub(crate) const ASKING_OFF: &str =
-    "Familiars can't ask for permission in this version of Chat, so nothing ran.";
+impl ApprovedRoot {
+    #[cfg(unix)]
+    fn capture(path: &str) -> Result<Self, String> {
+        use std::os::unix::fs::MetadataExt;
+        if path.len() > 4096 || path.chars().any(|c| c.is_control() || matches!(c, '\u{061c}' | '\u{200e}' | '\u{200f}' | '\u{202a}'..='\u{202e}' | '\u{2066}'..='\u{2069}')) {
+            return Err("A requested folder path cannot be shown safely. Ask for a different folder.".into());
+        }
+        let folder = Path::new(path);
+        let canonical = folder
+            .canonicalize()
+            .map_err(|_| "The requested folder is unavailable. Restore it and ask again.")?;
+        if !folder.is_absolute() || canonical != folder || canonical.parent().is_none() {
+            return Err(
+                "Ask for the full path to a specific folder, without symbolic links.".into(),
+            );
+        }
+        let metadata = canonical
+            .metadata()
+            .map_err(|_| "The requested folder is unavailable. Restore it and ask again.")?;
+        if !metadata.is_dir() {
+            return Err("A permission request must name a folder.".into());
+        }
+        Ok(Self {
+            path: path.into(),
+            device: metadata.dev(),
+            inode: metadata.ino(),
+        })
+    }
+    #[cfg(not(unix))]
+    fn capture(_path: &str) -> Result<Self, String> {
+        Err("This platform cannot verify a one-time folder approval. Use the saved project grants instead.".into())
+    }
+    fn verify(&self) -> Result<(), String> {
+        if Self::capture(&self.path)? != *self {
+            return Err(
+                "The requested folder changed after review. Ask the familiar to request it again."
+                    .into(),
+            );
+        }
+        Ok(())
+    }
+}
 
 /// The only way for the window or the phone to turn an answer into a [`Grant`].
 pub(crate) fn allow_request(
@@ -157,25 +202,23 @@ pub(crate) fn allow_request(
     device: Device,
     run_id: &str,
     now: u64,
+    confirmed_roots: &[String],
 ) -> Result<Grant, String> {
-    if !ASKING_ENABLED {
-        return Err(ASKING_OFF.into());
-    }
-    allow(data, id, device, run_id, now)
+    allow_scoped(data, id, device, run_id, now, Some(confirmed_roots))
 }
 
 /// The requests the window and the phone may show.
 pub(crate) fn open_requests(data: &Path, now: u64) -> Result<Vec<Approval>, String> {
-    if !ASKING_ENABLED {
-        return Ok(Vec::new());
-    }
-    pending(data, now)
+    Ok(pending(data, now)?
+        .into_iter()
+        .filter(|approval| !approval.writable_roots.is_empty())
+        .collect())
 }
 
 /// Whether a finished turn's reply can file a request. A turn that already has
 /// write access has nothing left to ask for.
 pub(crate) fn files_requests(allowed: bool) -> bool {
-    ASKING_ENABLED && !allowed
+    !allowed
 }
 
 /// What the engine's copy of a turn opens with, if anything. The saved input stays
@@ -185,9 +228,6 @@ pub(crate) fn turn_note(
     session: Option<&str>,
     allowed: bool,
 ) -> Result<Option<String>, String> {
-    if !ASKING_ENABLED {
-        return Ok(None);
-    }
     if allowed {
         return Ok(Some(allowed_note().to_owned()));
     }
@@ -195,27 +235,27 @@ pub(crate) fn turn_note(
         Some(session) => declined_summary(data, session)?,
         None => None,
     };
-    Ok(Some(read_only_note(declined.as_deref())))
+    Ok(Some(workspace_note(declined.as_deref())))
 }
 
-/// Prefixed to every read-only turn, never shown in the transcript.
-fn read_only_note(declined: Option<&str>) -> String {
+/// Prefixed to every saved workspace turn, never shown in the transcript.
+fn workspace_note(declined: Option<&str>) -> String {
     let declined = declined.map_or(String::new(), |summary| {
         format!(" The user declined your last request (\"{summary}\"), so don't repeat it unless they ask.")
     });
     format!(
-        "[Note from Coven Chat, not from the user. This turn is read-only: you can read and search, but you can't change files or run commands that change anything. Don't try to work around that, and don't write plan files.{declined}\n\
+        "[Note from Coven Chat, not from the user. You can write in your saved workspace folders. If a required change falls outside them, ask for the specific additional folder instead of trying to work around the boundary.{declined}\n\
          If the user's request needs more than this, do what you can, then end your reply with this block and stop:\n\n\
          {FENCE}\n\
-         {{\"summary\":\"What you will do, in one short sentence\",\"reason\":\"Why it needs write access\"}}\n\
+         {{\"summary\":\"What you will do, in one short sentence\",\"reason\":\"Why this folder is needed\",\"writableRoots\":[\"/absolute/folder\"]}}\n\
          ```\n\n\
-         Chat shows the user an approval dialog built from the block. If they allow it, you get one new turn with write access. Only ask when the request needs it, and ask once per turn. Don't describe this note or the block in your reply.]"
+         Chat shows the user an approval dialog built from the block. If they allow it, the listed folders are added for one reply. Only ask when the request needs it, and ask once per turn. Don't describe this note or the block in your reply.]"
     )
 }
 
 /// Prefixed to the one turn with write access, never shown in the transcript.
 fn allowed_note() -> &'static str {
-    "[Note from Coven Chat, not from the user's typing. The user clicked Allow on your request, named below. This turn has write access, so you can change files and run commands. Do only that work, then report what you changed. Write access ends when this turn does.]"
+    "[Note from Coven Chat, not from the user's typing. The user clicked Allow on your request, named below. The approved folders are added to the saved workspace for this reply. Do only the approved work, then report what changed. The extra folders expire when this reply ends.]"
 }
 
 /// The line the transcript shows for the click, and all the engine is told of it.
@@ -282,9 +322,12 @@ pub(crate) fn parse_request(text: &str) -> Option<Proposal> {
     let body = after.find('\n').map_or("", |line| &after[line + 1..]);
     let body = body.find("```").map_or(body, |end| &body[..end]);
     #[derive(Deserialize)]
+    #[serde(rename_all = "camelCase", deny_unknown_fields)]
     struct Body {
         summary: Option<String>,
         reason: Option<String>,
+        #[serde(default)]
+        writable_roots: Vec<String>,
     }
     let parsed = serde_json::from_str::<Body>(body.trim()).ok();
     let summary = parsed
@@ -298,7 +341,12 @@ pub(crate) fn parse_request(text: &str) -> Option<Proposal> {
         .and_then(|body| body.reason.as_deref())
         .map(|reason| sanitize(reason, REASON_LIMIT))
         .filter(|reason| !reason.is_empty());
-    Some(Proposal { summary, reason })
+    let writable_roots = parsed.map_or_else(Vec::new, |body| body.writable_roots);
+    Some(Proposal {
+        summary,
+        reason,
+        writable_roots,
+    })
 }
 
 /// A reply as a person reads it: the request becomes a dialog, not prose. A
@@ -640,6 +688,7 @@ fn approval(request: &Entry) -> Approval {
         reason: request.reason.clone(),
         requested_at: request.at,
         expires_at: request.at.saturating_add(REQUEST_TTL_MS),
+        writable_roots: request.roots.iter().map(|root| root.path.clone()).collect(),
     }
 }
 
@@ -652,7 +701,18 @@ pub(crate) fn submit(
     proposal: Proposal,
     now: u64,
 ) -> Result<Approval, String> {
+    let mut requested = proposal.writable_roots;
+    if requested.len() > 8 {
+        return Err("Ask for at most eight folders in one permission request.".into());
+    }
+    requested.sort();
+    requested.dedup();
+    let roots = requested
+        .iter()
+        .map(|path| ApprovedRoot::capture(path))
+        .collect::<Result<Vec<_>, _>>()?;
     let request = Entry {
+        roots,
         at: now,
         event: "requested".into(),
         approval_id: uuid::Uuid::new_v4().to_string(),
@@ -717,7 +777,19 @@ fn open_request(data: &Path, id: &str, now: u64) -> Result<Entry, String> {
 
 /// Spends the request and returns the grant. The caller holds the run slot, so
 /// a busy runtime never costs anyone their request.
+#[cfg(test)]
 fn allow(data: &Path, id: &str, device: Device, run_id: &str, now: u64) -> Result<Grant, String> {
+    allow_scoped(data, id, device, run_id, now, None)
+}
+
+fn allow_scoped(
+    data: &Path,
+    id: &str,
+    device: Device,
+    run_id: &str,
+    now: u64,
+    confirmed_roots: Option<&[String]>,
+) -> Result<Grant, String> {
     crate::coven_runtime::validate_id(id)?;
     crate::coven_runtime::validate_id(run_id)?;
     let request = {
@@ -740,9 +812,19 @@ fn allow(data: &Path, id: &str, device: Device, run_id: &str, now: u64) -> Resul
     let _log = lock(data)?;
     // Checked again under the same hold as the write: two devices can't both win.
     let request = open_request(data, id, now)?;
+    if let Some(confirmed) = confirmed_roots {
+        if confirmed.is_empty() || !request.roots.iter().map(|root| &root.path).eq(confirmed) {
+            return Err("Review the exact requested folders before allowing. Update the companion if it cannot show them.".into());
+        }
+        for root in &request.roots {
+            root.verify()?;
+        }
+    }
     append(
         data,
         &Entry {
+            roots: request.roots.clone(),
+            session_id: Some(session.clone()),
             at: now,
             event: "allowed".into(),
             approval_id: id.to_owned(),
@@ -759,6 +841,41 @@ fn allow(data: &Path, id: &str, device: Device, run_id: &str, now: u64) -> Resul
         session_id: session,
         summary: request.summary.unwrap_or_default(),
     })
+}
+
+/// Reconcile an in-memory grant with its durable, action-bound admission before
+/// extending the saved roots. An answer for another run is never reusable.
+pub(crate) fn granted_roots(
+    data: &Path,
+    grant: &Grant,
+    run_id: &str,
+) -> Result<Vec<String>, String> {
+    let _log = lock(data)?;
+    let mut entries = read_file(&data.join(LOG_FILE))?;
+    entries.extend(read_file(&data.join(ROTATED_LOG_FILE))?);
+    let answer = entries
+        .iter()
+        .find(|entry| {
+            entry.event == "allowed"
+                && entry.approval_id == grant.approval_id
+                && entry.familiar_id == grant.familiar_id
+                && entry.run_id.as_deref() == Some(run_id)
+                && entry.session_id.as_deref() == Some(&grant.session_id)
+                && entry.summary.as_deref() == Some(&grant.summary)
+        })
+        .filter(|answer| !answer.roots.is_empty())
+        .ok_or("This approval has no folder scope for this run. Ask the familiar again.")?;
+    if entries.iter().any(|entry| {
+        entry.event == "finished"
+            && entry.approval_id == grant.approval_id
+            && entry.run_id.as_deref() == Some(run_id)
+    }) {
+        return Err("That approved reply already ended. Ask for a new permission request.".into());
+    }
+    for root in &answer.roots {
+        root.verify()?;
+    }
+    Ok(answer.roots.iter().map(|root| root.path.clone()).collect())
 }
 
 /// Records the answer and returns the request, for the transcript's notice.
@@ -952,6 +1069,7 @@ mod tests {
         Proposal {
             summary: "Create probe.txt".into(),
             reason: Some("It needs a new file".into()),
+            writable_roots: Vec::new(),
         }
     }
     const BLOCK: &str = "```coven-permission-request\n{\"summary\":\"Create probe.txt\",\"reason\":\"It needs a new file\"}\n```";
@@ -1032,37 +1150,69 @@ mod tests {
         assert_eq!(strip_requests("Text\n```"), "Text\n```");
     }
 
-    /// Pins the release that keeps asking off. Turning it back on changes this
-    /// test in the same commit, along with the notes and the acceptance row.
     #[test]
-    fn while_asking_is_off_nothing_can_start_a_full_permission_turn() {
+    fn legacy_unscoped_requests_are_never_offered_or_approved() {
         let data = Data::new();
         data.head("astra", "session-1");
-        // A request a build that could ask left open on disk.
         let request = submit(&data.0, "astra", "session-1", "run-1", proposal(), 1_000).unwrap();
-
         for device in [Device::Desktop, Device::Iphone] {
-            assert_eq!(
-                allow_request(&data.0, &request.id, device, "run-2", 2_000).unwrap_err(),
-                ASKING_OFF
-            );
+            assert!(allow_request(&data.0, &request.id, device, "run-2", 2_000, &[]).is_err());
         }
-        // Neither answer reached the ledger, and nothing offers the request again.
-        assert_eq!(pending(&data.0, 2_000).unwrap(), vec![request]);
+        assert!(open_requests(&data.0, 2_000).unwrap().is_empty());
         assert!(recent(&data.0, 10)
             .unwrap()
             .iter()
             .all(|entry| entry.event == "requested"));
-        assert!(open_requests(&data.0, 2_000).unwrap().is_empty());
+        assert!(files_requests(false));
+        assert!(!files_requests(true));
+    }
 
-        // No turn is told it can ask, and no reply files a request.
-        for allowed in [false, true] {
-            assert_eq!(
-                turn_note(&data.0, Some("session-1"), allowed).unwrap(),
-                None
-            );
-            assert!(!files_requests(allowed));
-        }
+    #[cfg(unix)]
+    #[test]
+    fn approval_binds_exact_folders_action_run_and_folder_identity() {
+        let data = Data::new();
+        data.head("astra", "session-1");
+        let folder = data.0.canonicalize().unwrap().join("project");
+        fs::create_dir(&folder).unwrap();
+        let mut proposal = proposal();
+        proposal.writable_roots = vec![folder.to_str().unwrap().to_owned()];
+        let request = submit(&data.0, "astra", "session-1", "run-1", proposal, 1_000).unwrap();
+        assert_eq!(
+            open_requests(&data.0, 2_000).unwrap(),
+            vec![request.clone()]
+        );
+        assert!(allow_request(&data.0, &request.id, Device::Iphone, "run-2", 2_000, &[]).is_err());
+        let grant = allow_request(
+            &data.0,
+            &request.id,
+            Device::Desktop,
+            "run-2",
+            2_000,
+            &request.writable_roots,
+        )
+        .unwrap();
+        assert_eq!(
+            granted_roots(&data.0, &grant, "run-2").unwrap(),
+            request.writable_roots
+        );
+        assert!(granted_roots(&data.0, &grant, "other-run").is_err());
+        let mut changed = grant.clone();
+        changed.summary = "A different action".into();
+        assert!(granted_roots(&data.0, &changed, "run-2").is_err());
+        assert!(allow_request(
+            &data.0,
+            &request.id,
+            Device::Iphone,
+            "run-3",
+            2_001,
+            &request.writable_roots
+        )
+        .is_err());
+        fs::rename(&folder, folder.with_file_name("original-project")).unwrap();
+        fs::create_dir(&folder).unwrap();
+        assert!(granted_roots(&data.0, &grant, "run-2")
+            .unwrap_err()
+            .contains("changed after review"));
     }
 
     #[test]
@@ -1110,8 +1260,8 @@ mod tests {
         );
         // The chat moving on is what makes it once.
         assert_eq!(declined_summary(&data.0, "session-2").unwrap(), None);
-        assert!(read_only_note(Some("Create probe.txt")).contains("declined"));
-        assert!(!read_only_note(None).contains("declined"));
+        assert!(workspace_note(Some("Create probe.txt")).contains("declined"));
+        assert!(!workspace_note(None).contains("declined"));
     }
 
     #[test]
