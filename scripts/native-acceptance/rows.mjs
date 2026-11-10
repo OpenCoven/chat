@@ -1433,7 +1433,7 @@ export async function settingsShowWidth(lane, row, label, width) {
       // https://help.gnome.org/orca/commands_flat_review.html
       await lane.app.key('Insert+KP_Home');
       for (let index = 0; index < 32; index += 1) {
-        await lane.app.key('KP_Next');
+        await lane.app.key('KP_Page_Up');
         await sleep(200);
       }
     });
