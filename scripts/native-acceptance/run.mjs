@@ -20,6 +20,7 @@ import {
   cancelledRunRow,
   inspectorRow,
   Lane,
+  linkCompletionRow,
   linkRows,
   quoteRow,
   Row,
@@ -224,6 +225,7 @@ try {
   await setUp(app);
   shot('chat-open');
   rows.push(...(await linkRows(lane, FIRST, browser)));
+  rows.push(await linkCompletionRow(lane, FIRST, fixture.finishReview));
   rows.push(await tableRow(lane, FIRST, FRAMES));
   const ime = options.japanese
     ? {

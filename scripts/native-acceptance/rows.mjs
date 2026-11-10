@@ -57,6 +57,48 @@ export class Row {
   }
 }
 
+/** Bounded native observations: absence alone cannot prove a click was missed. */
+export class ReviewTrace {
+  constructor(app, row) {
+    this.app = app;
+    this.row = row;
+    this.started = Date.now();
+    this.seen = false;
+    this.outcome = 'not-observed';
+    this.samples = 0;
+  }
+  async sample(phase) {
+    const root = await this.app.snapshot();
+    if (!root) throw new Error('The native review observation has no accessible tree');
+    const nodes = [...walk(root)];
+    const open = nodes.some((node) => node.role === 'dialog' && node.name === REVIEW);
+    this.seen ||= open;
+    this.outcome = open ? 'open' : this.seen ? 'opened-then-dismissed' : 'not-observed';
+    if (this.samples++ < 16)
+      this.row.note('link review lifecycle', {
+        phase,
+        ms: Date.now() - this.started,
+        outcome: this.outcome,
+        runControlVisible: nodes.some((node) => node.role === 'button' && node.name === 'Stop run'),
+      });
+    return open;
+  }
+}
+
+async function clickReviewedLink(app, name, row) {
+  const trace = new ReviewTrace(app, row);
+  await trace.sample('before-click');
+  // Resolve after idle, never reuse the live reply's old node or coordinates.
+  await app.click(await linkNamed(app, name));
+  try {
+    await until('the link review to appear', () => trace.sample('after-click'), 15_000);
+  } catch (error) {
+    row.note('link review outcome at timeout', trace.outcome);
+    throw error;
+  }
+  return trace;
+}
+
 /** The lane's shared state: the app, the model log, the screen reader, the output folder. */
 export class Lane {
   constructor({ app, native, requests, tokens, reader, shot, save, cli, frames }) {
@@ -95,15 +137,24 @@ export class Lane {
   async idle() {
     await until(
       'the run to finish',
-      async () => (await this.app.count('button', 'Stop run')) === 0,
+      async () => {
+        const nodes = [...walk(await this.app.snapshot())];
+        const composers = nodes.filter(
+          (node) => node.role === 'textbox' && node.name?.startsWith('Message '),
+        );
+        return (
+          !nodes.some((node) => node.role === 'button' && node.name === 'Stop run') &&
+          composers.length === 1 &&
+          composers[0].enabled === true
+        );
+      },
       90_000,
       500,
     );
-    await sleep(500);
   }
 
   /** Types into the real composer, presses Send, and waits for the reply to render. */
-  async send(familiar, text, role, name) {
+  async send(familiar, text, role, name, { complete = true } = {}) {
     await this.idle();
     await this.app.click(await this.composer(familiar));
     await this.app.type(text);
@@ -124,6 +175,9 @@ export class Lane {
       150_000,
       500,
     );
+    // A rendered live link is not a completed reply. Reacquire it only after
+    // the run and its transcript reload release the real composer.
+    if (complete) await this.idle();
   }
 
   /** Closes whatever review, sheet or menu a failed step left open. */
@@ -437,6 +491,59 @@ async function listen(lane, row, label, act) {
   return said;
 }
 
+/** #567 keeps the completion race under test instead of hiding it behind idle. */
+export async function linkCompletionRow(lane, familiar, finishReview) {
+  const row = new Row('567', 'Review opened while streaming, then invalidated at completion');
+  const { app } = lane;
+  await lane.attempt(row, async () => {
+    const browsers = browserSnapshot();
+    const trace = new ReviewTrace(app, row);
+    try {
+      await lane.send(
+        familiar,
+        '[[reviewrace]] Hold this link until it is reviewed.',
+        'link',
+        'Completion boundary',
+        { complete: false },
+      );
+      row.expect('run still active before the review', await app.count('button', 'Stop run'), 1);
+      await trace.sample('stream-held-before-click');
+      await app.click(await linkNamed(app, 'Completion boundary'));
+      await until('the held-stream review to appear', () =>
+        trace.sample('stream-held-after-click'),
+      );
+      row.expect('review observed before model completion', trace.outcome, 'open');
+      row.expect('held review address', (await reviewFacts(app)).address, ADDRESSES.query);
+      lane.shot('567-review-before-completion');
+      row.expect('one held model stream released', finishReview(), 1);
+      await until(
+        'the completion-invalidated review to close',
+        async () => !(await trace.sample('completion-released')),
+      );
+      await lane.idle();
+      row.expect('review lifecycle at completion', trace.outcome, 'opened-then-dismissed');
+      row.note('focus after completion invalidation', await app.focusedName());
+      row.expect('completion did not launch a browser', browserSnapshot(), browsers);
+      // A fresh settled target still opens normally, and dismisses back to it.
+      await clickReviewedLink(app, 'Completion boundary', row);
+      row.expect('fresh review address', (await reviewFacts(app)).address, ADDRESSES.query);
+      await app.key('escape');
+      await app.gone('dialog', REVIEW);
+      row.expect(
+        'focus after fresh review dismissal',
+        await app.focusedName(),
+        'Completion boundary',
+      );
+      row.expect('review without Open did not launch a browser', browserSnapshot(), browsers);
+      lane.shot('567-completed-and-dismissed');
+    } finally {
+      // An assertion or native-input failure must not leave the fixture held.
+      finishReview();
+    }
+  });
+  return row;
+}
+
 /** Rows 1, 2 and 9, and #515's browser rows, from one reply with three links. */
 export async function linkRows(lane, familiar, browser) {
   const { app, native } = lane;
@@ -454,7 +561,7 @@ export async function linkRows(lane, familiar, browser) {
     row1.note('model requests for the reply', lane.requests() - before);
     const launches = browserSnapshot();
 
-    await app.click(await linkNamed(app, 'Handoff check'));
+    await clickReviewedLink(app, 'Handoff check', row1);
     const facts = await reviewFacts(app);
     row1.check('primary click opens the review', Boolean(facts.review));
     row1.expect('review site', facts.host, 'example.com');
@@ -733,7 +840,7 @@ export async function linkRows(lane, familiar, browser) {
     // A sign-in name: offered to copy only, and nothing reaches the browser.
     await lane.send(familiar, '[[userinfo]] One more address.', 'link', 'Named login');
     const launches = browserSnapshot();
-    await app.click(await linkNamed(app, 'Named login'));
+    await clickReviewedLink(app, 'Named login', handoff);
     const facts = await reviewFacts(app);
     handoff.expect('buttons in the review of https://name@example.com/', facts.buttons, [
       'Cancel',

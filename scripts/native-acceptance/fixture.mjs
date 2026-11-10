@@ -16,6 +16,7 @@ export const USERINFO = 'https://name@example.com/';
 export const SLOW_LINES = 120;
 
 const EXTRA = {
+  reviewrace: `A held reply.\n\n[Completion boundary](${ADDRESSES.query})`,
   userinfo: `One more address.\n\n- [Named login](${USERINFO})`,
 };
 
@@ -34,7 +35,9 @@ function lastText(messages) {
 
 /** The newest token decides, as in the packaged fixture. */
 function tokenOf(messages) {
-  return [...lastText(messages).matchAll(/\[\[(links|table|other|slow|userinfo)\]\]/g)].at(-1)?.[1];
+  return [
+    ...lastText(messages).matchAll(/\[\[(links|table|other|slow|userinfo|reviewrace)\]\]/g),
+  ].at(-1)?.[1];
 }
 
 function events(res, model) {
@@ -79,6 +82,7 @@ function events(res, model) {
 
 /** Starts the endpoint on 127.0.0.1 and resolves to { port, close }. */
 export function startModelFixture({ log } = {}) {
+  const heldReviews = new Set();
   const server = createServer((req, res) => {
     let body = '';
     req.setEncoding('utf8');
@@ -133,6 +137,14 @@ export function startModelFixture({ log } = {}) {
         return;
       }
       const stream = events(res, parsed.model);
+      if (token === 'reviewrace') {
+        // No timer releases this reply: the native lane first observes its
+        // review, then explicitly permits the real engine process to finish.
+        stream.delta(text);
+        heldReviews.add(stream.finish);
+        res.on('close', () => heldReviews.delete(stream.finish));
+        return;
+      }
       if (token !== 'slow') {
         stream.delta(text);
         stream.finish();
@@ -158,6 +170,12 @@ export function startModelFixture({ log } = {}) {
     server.listen(0, '127.0.0.1', () => {
       resolve({
         port: server.address().port,
+        finishReview: () => {
+          const pending = [...heldReviews];
+          heldReviews.clear();
+          for (const finish of pending) finish();
+          return pending.length;
+        },
         close: () =>
           new Promise((done) => {
             server.closeAllConnections?.();
