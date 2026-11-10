@@ -149,12 +149,25 @@ test.each([true, false])(
     if (!complete) label.name = label.raw.name = '';
     const saved: Record<string, string> = {};
     const shots: string[] = [];
+    const keys: string[] = [];
+    const settingsFocus = { role: 'button', name: 'Model' };
+    let focus = { role: 'window', name: 'Astra — OpenCoven Chat' };
+    let reviewingSettings = false;
     const app = {
       one: async () => fixture.root,
       activate: async () => {},
       click: async () => {},
-      key: async () => {},
-      focused: async () => ({ role: 'button', name: 'Model' }),
+      key: async (key: string) => {
+        keys.push(key);
+        if (key === 'tab') focus = settingsFocus;
+        if (key === 'Insert+KP_Home') {
+          // Starting at the outer GTK frame only reviews the window title.
+          expect(focus).toEqual(settingsFocus);
+          reviewingSettings = true;
+        }
+        if (key === 'KP_Page_Up') expect(reviewingSettings).toBe(true);
+      },
+      focused: async () => focus,
     };
     const lane = {
       app,
@@ -166,7 +179,8 @@ test.each([true, false])(
         start: async () => {},
         stop: async () => {},
         mark: async () => 0,
-        since: async () => [settings.WIDTH_LABEL, settings.WIDTH_HINT, '400px'],
+        since: async () =>
+          reviewingSettings ? [settings.WIDTH_LABEL, settings.WIDTH_HINT, '400px'] : [],
       },
     };
     const row = new rows.Row('504-6', 'Inspector');
@@ -176,6 +190,13 @@ test.each([true, false])(
     expect(saved['settings-inspector-400.json']).toContain(settings.WIDTH_HINT);
     expect(saved['settings-orca-400.json']).toContain(settings.WIDTH_HINT);
     expect(shots).toEqual(['settings-width-400']);
+    expect(keys.slice(0, 2)).toEqual(['tab', 'Insert+KP_Home']);
+    expect(keys.slice(2).length).toBeGreaterThan(0);
+    expect(keys.slice(2).every((key) => key === 'KP_Page_Up')).toBe(true);
+    expect(row.observations).toContainEqual({
+      label: 'Orca Settings 400px native focus before flat review',
+      value: settingsFocus,
+    });
   },
 );
 
