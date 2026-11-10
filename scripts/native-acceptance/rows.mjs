@@ -19,6 +19,11 @@ import {
   walk,
 } from './driver.mjs';
 import { ADDRESSES, TABLE, USERINFO } from './fixture.mjs';
+import {
+  checkSettingsSpeech,
+  checkSettingsWidth,
+  settingsWidthEvidence,
+} from './settings-width.mjs';
 
 export const REVIEW = 'Open this link?';
 const GUIDE = 'https://docs.example.test/guide';
@@ -1406,40 +1411,45 @@ async function tabToSeparator(lane, familiar) {
  * reports is kept beside the check when it is missing, to tell an absent
  * value from one the tree does not carry.
  */
-async function settingsShowWidth(lane, row, label, width) {
+export async function settingsShowWidth(lane, row, label, width) {
   const settings = await lane.app.one('dialog', 'Settings');
   const nodes = [...walk(settings)];
   const shown = `${nodes.map((node) => String(node.value ?? node.name ?? '')).join(' ')} ${textIn(settings)}`;
-  const found = shown.match(/\d+\s*px/g) ?? [];
   const ok = new RegExp(`\\b${width}\\s*px`).test(shown);
-  row.check(label, ok, { widthsShown: found, text: shown.slice(0, 200) });
-  if (!ok && PLATFORM === 'linux') {
-    // The width is drawn just before Reset: what AT-SPI reports there, beside a
-    // screenshot of the same dialog, tells a value it does not expose from one
-    // the lane misread.
-    const reset = await lane.app.one('button', 'Reset inspector width', {
-      within: ['dialog', 'Settings'],
+  row.check(label, ok, { widthsShown: shown.match(/\d+\s*px/g) ?? [] });
+  // Retain the complete dialog even when assertions pass, including native
+  // descriptions and relations. The relevant Inspector group is kept too.
+  lane.save(`settings-tree-${width}.json`, JSON.stringify(settings.raw, null, 2));
+  lane.shot(`settings-width-${width}`);
+  if (PLATFORM === 'linux') {
+    const evidence = settingsWidthEvidence(settings, width);
+    lane.save(`settings-inspector-${width}.json`, JSON.stringify(evidence.subtree, null, 2));
+    row.note(`Settings ${width}px Inspector text`, evidence.text);
+    checkSettingsWidth(row, evidence, width);
+    const said = await listen(lane, row, `Orca Settings ${width}px`, async () => {
+      // WebKitGTK's dialog script does not bind ordinary Down to browse
+      // navigation. Use Orca's documented desktop flat-review commands:
+      // Insert+KP7 moves home; KP9 reads the next spatial line.
+      // https://help.gnome.org/orca/commands_flat_review.html
+      // Orca starts with the GTK frame as its focus. A real Tab moves its
+      // locus into the web dialog before building the flat-review context.
+      await lane.app.key('tab');
+      const focus = await lane.app.focused();
+      row.note(`Orca Settings ${width}px native focus before flat review`, {
+        role: focus?.role,
+        name: focus?.name,
+      });
+      await lane.app.key('Insert+KP_Home');
+      for (let index = 0; index < 32; index += 1) {
+        await lane.app.key('KP_Page_Up');
+        await sleep(200);
+      }
     });
-    if (reset?.frame) {
-      const at = [Math.round(reset.frame.x - 24), Math.round(reset.frame.y + reset.frame.h / 2)];
-      const probe = await lane.native.call({ cmd: 'at', at });
-      row.note(
-        `AT-SPI at ${at.join(',')}, just before Reset`,
-        probe.ok ? probe.chain : probe.error,
-      );
+    if (said) {
+      lane.save(`settings-orca-${width}.json`, JSON.stringify(said, null, 2));
+      checkSettingsSpeech(row, said, width);
     }
-    lane.shot(`settings-width-${width}`);
   }
-  if (!ok)
-    lane.save(
-      `settings-tree-${width}.txt`,
-      nodes
-        .map(
-          (node) =>
-            `${node.role} | ${node.name ?? ''} | ${node.value ?? ''} | ${node.raw?.text ?? ''} | children ${node.children.length}`,
-        )
-        .join('\n'),
-    );
 }
 
 /** Row 6: the separator through a real pointer that leaves the window, the keys, Settings, Reset, 1100px. */
@@ -1576,11 +1586,13 @@ export async function inspectorRow(lane, familiar, frames) {
     row.expect('no text selected during the drag', selectedDuring, '');
 
     await settingsGeneral(app);
-    await settingsShowWidth(lane, row, 'Settings > General shows the width', released.value);
+    row.expect('drag stages the 400px Settings check', released.value, 400);
+    await settingsShowWidth(lane, row, 'Settings > General shows the width', 400);
     await app.click(
       await app.one('button', 'Reset inspector width', { within: ['dialog', 'Settings'] }),
     );
     await sleep(400);
+    await settingsShowWidth(lane, row, 'Settings after Reset shows 360px', 360);
     await closeSettings(app);
     row.expect('Reset restores 360px', (await inspectorWidth(app)).value, 360);
 
