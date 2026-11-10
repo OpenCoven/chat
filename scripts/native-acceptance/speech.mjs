@@ -191,12 +191,28 @@ class Nvda extends LogReader {
   }
 }
 
+/** Orca logs voice settings as either a dictionary or a list of dictionaries. */
+export function orcaEntries(log) {
+  const found = [];
+  for (const line of log.split(/\r?\n/)) {
+    const match = /^(\d\d):(\d\d):(\d\d(?:\.\d+)?) - SPEECH OUTPUT: '(.*?)'(?: [[{].*)?$/.exec(
+      line,
+    );
+    if (match)
+      found.push({
+        at: Number(match[1]) * 3600 + Number(match[2]) * 60 + Number(match[3]),
+        text: match[4],
+      });
+  }
+  return found;
+}
+
 class Orca extends LogReader {
   name = 'Orca';
   sessions = 0;
   constructor(out) {
     // The utterance is quoted and followed by Orca's voice settings: 'text' {...}
-    super(join(out, 'orca-0.log'), /SPEECH OUTPUT: '(.*?)'(?: \{.*)?$/);
+    super(join(out, 'orca-0.log'), /SPEECH OUTPUT: '(.*?)'(?: [[{].*)?$/);
     this.out = out;
   }
   /**
@@ -205,18 +221,7 @@ class Orca extends LogReader {
    */
   entries() {
     if (!existsSync(this.path)) return [];
-    const found = [];
-    for (const line of readFileSync(this.path, 'utf8').split(/\r?\n/)) {
-      const match = /^(\d\d):(\d\d):(\d\d(?:\.\d+)?) - SPEECH OUTPUT: '(.*?)'(?: \{.*)?$/.exec(
-        line,
-      );
-      if (match)
-        found.push({
-          at: Number(match[1]) * 3600 + Number(match[2]) * 60 + Number(match[3]),
-          text: match[4],
-        });
-    }
-    return found;
+    return orcaEntries(readFileSync(this.path, 'utf8'));
   }
   mark() {
     const now = new Date();

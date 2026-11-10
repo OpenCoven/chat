@@ -1431,6 +1431,14 @@ export async function settingsShowWidth(lane, row, label, width) {
       // navigation. Use Orca's documented desktop flat-review commands:
       // Insert+KP7 moves home; KP9 reads the next spatial line.
       // https://help.gnome.org/orca/commands_flat_review.html
+      // Orca starts with the GTK frame as its focus. A real Tab moves its
+      // locus into the web dialog before building the flat-review context.
+      await lane.app.key('tab');
+      const focus = await lane.app.focused();
+      row.note(`Orca Settings ${width}px native focus before flat review`, {
+        role: focus?.role,
+        name: focus?.name,
+      });
       await lane.app.key('Insert+KP_Home');
       for (let index = 0; index < 32; index += 1) {
         await lane.app.key('KP_Page_Up');

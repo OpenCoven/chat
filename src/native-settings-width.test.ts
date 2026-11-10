@@ -154,6 +154,7 @@ test.each([true, false])(
       activate: async () => {},
       click: async () => {},
       key: async () => {},
+      focused: async () => ({ role: 'button', name: 'Model' }),
     };
     const lane = {
       app,
@@ -215,4 +216,23 @@ test('spatial Orca review retains every hint word when adjacent controls occur b
   const row = new rows.Row('504-6', 'Inspector speech');
   settings.checkSettingsSpeech(row, phrases, 400);
   expect(row.status).toBe('observed');
+});
+
+test('Orca parsing retains dictionary and list voice metadata, apostrophes and line-separated utterances', async () => {
+  const path = '../scripts/native-acceptance/speech.mjs';
+  const { orcaEntries } = await import(path);
+  expect(
+    orcaEntries(
+      [
+        "10:21:03.017458 - SPEECH OUTPUT: 'Inspector width' [{'established': False}]",
+        "10:21:03.018000 - SPEECH OUTPUT: 'Drag the inspector's left edge,' {'established': False}",
+        "10:21:03.019000 - SPEECH OUTPUT: '400px'",
+        "10:21:03.020000 - NOT SPEECH OUTPUT: 'ignore'",
+      ].join('\n'),
+    ),
+  ).toEqual([
+    { at: 37263.017458, text: 'Inspector width' },
+    { at: 37263.018, text: "Drag the inspector's left edge," },
+    { at: 37263.019, text: '400px' },
+  ]);
 });
