@@ -2565,13 +2565,7 @@ fn send_turn(
     // on, so the error itself carries what is known, as it always did.
     let Some((file, id)) = transcript.as_mut().zip(input_session.as_deref()) else {
         if !policy_verified {
-            let detail = stderr_report
-                .lines()
-                .find(|line| line.contains("cannot verify workspace write access on this host"));
-            return Err(detail.map_or_else(
-                || execution_policy::UNVERIFIED.into(),
-                |_| execution_policy::UNSUPPORTED.into(),
-            ));
+            return Err(execution_policy::admission_error(&stderr_report).into());
         }
         return Err(run.err().unwrap_or_else(|| NO_TERMINAL_RESULT.into()));
     };

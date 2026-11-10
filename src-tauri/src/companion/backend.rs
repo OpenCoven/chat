@@ -83,9 +83,12 @@ impl RunRecord {
                 "failed"
             };
             if inner.status == "failed" {
-                use crate::coven_runtime::execution_policy::{UNSUPPORTED, UNVERIFIED};
+                use crate::coven_runtime::execution_policy::{
+                    DIRECT_ANTHROPIC_REQUIRED, UNSUPPORTED, UNVERIFIED,
+                };
                 inner.error = Some(match result.as_ref().err().map(String::as_str) {
                     Some(UNSUPPORTED) => UNSUPPORTED,
+                    Some(DIRECT_ANTHROPIC_REQUIRED) => DIRECT_ANTHROPIC_REQUIRED,
                     Some(UNVERIFIED) => UNVERIFIED,
                     _ => "The run could not finish. Check Chat on your Mac.",
                 });

@@ -13,7 +13,18 @@ const LIMIT: u64 = 65_536;
 const FAILED: &str = "Chat could not load or save workspace access. Check the app's storage permissions and available disk space, then retry.";
 pub(crate) const UNVERIFIED: &str = "Workspace write access could not be verified. Update Coven and the selected engine to a version supporting Chat workspace access, then retry. Nothing will continue with read-only or unrestricted access.";
 
-pub(crate) const UNSUPPORTED: &str = "This engine cannot verify workspace write access on this Mac. Select Coven Code in Settings or update Coven and try again.";
+pub(crate) const UNSUPPORTED: &str = "This engine cannot verify workspace write access on this computer. Update the engine before continuing this chat, or start a new chat with a supported engine.";
+pub(crate) const DIRECT_ANTHROPIC_REQUIRED: &str = "This Coven Code build needs a direct Anthropic API key for workspace write access. Configure Anthropic in Coven before retrying.";
+
+pub(super) fn admission_error(stderr: &str) -> &'static str {
+    if stderr.contains("requires direct Anthropic credentials") {
+        DIRECT_ANTHROPIC_REQUIRED
+    } else if stderr.contains("cannot verify workspace write access on this host") {
+        UNSUPPORTED
+    } else {
+        UNVERIFIED
+    }
+}
 
 #[derive(Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -192,8 +203,20 @@ impl RunPolicy {
     pub(super) fn protect_authority_file(&self, path: &Path) -> Result<(), String> {
         // Guard the directory entry as well as the symlink target, if any.
         let mut locations = Vec::new();
-        if let Ok(target) = path.canonicalize() {
-            locations.push(target);
+        match path.canonicalize() {
+            Ok(target) => {
+                #[cfg(unix)]
+                {
+                    use std::os::unix::fs::MetadataExt;
+                    let metadata = fs::metadata(&target).map_err(|_| FAILED)?;
+                    if metadata.nlink() != 1 {
+                        return Err("A Coven project registry or grant file has multiple filesystem names. Remove its hard links before sending.".into());
+                    }
+                }
+                locations.push(target);
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(_) => return Err(FAILED.into()),
         }
         let mut ancestor = path.parent();
         while let Some(directory) = ancestor {
@@ -399,5 +422,33 @@ mod tests {
         )
         .unwrap();
         assert!(policy.protect_host_storage(&data).is_err());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_writable_alias_cannot_modify_coven_project_authority() {
+        let f = Fixture::new();
+        let workspace = f.folder("familiar");
+        let registry = f.folder("cave").join("project-permissions.json");
+        fs::write(&registry, b"fixture grant store").unwrap();
+        let policy = RunPolicy::resolve("r", &workspace, &workspace, &json!([]), &f.0).unwrap();
+        assert!(policy.protect_authority_file(&registry).is_ok());
+
+        fs::hard_link(&registry, workspace.join("alias")).unwrap();
+        let error = policy.protect_authority_file(&registry).unwrap_err();
+        assert!(error.contains("multiple filesystem names"));
+        assert_eq!(fs::read(&registry).unwrap(), b"fixture grant store");
+    }
+    #[test]
+    fn admission_errors_give_a_specific_next_step_without_exposing_stderr() {
+        assert_eq!(
+            admission_error("requires direct Anthropic credentials"),
+            DIRECT_ANTHROPIC_REQUIRED
+        );
+        assert_eq!(
+            admission_error("cannot verify workspace write access on this host"),
+            UNSUPPORTED
+        );
+        assert_eq!(admission_error("opaque engine failure"), UNVERIFIED);
     }
 }
