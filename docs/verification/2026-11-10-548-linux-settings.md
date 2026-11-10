@@ -1,6 +1,6 @@
 # #548 Linux Settings accessibility verification
 
-The published v0.0.9 Linux `.deb` satisfies #548's automated native acceptance: the Inspector width label, complete instruction hint, current value, Reset relationship and Orca-generated utterances are verified at 400px, 600px and after Reset to 360px. No product defect remained in this row, so no app change or fixed release is needed. PR [#572](https://github.com/OpenCoven/chat/pull/572) delivers stronger acceptance checks and this record; #548 remains open pending authorized review and disposition.
+The published v0.0.9 Linux `.deb` satisfies #548's automated native acceptance: the Inspector width label, complete instruction hint, current value, Reset relationship and Orca-generated utterances are verified at 400px, 600px and after Reset to 360px. No product defect remained in this row, so no app change or fixed release is needed. PR [#572](https://github.com/OpenCoven/chat/pull/572) delivers stronger acceptance checks and this record; #548 remains open until the protected merge and linked completion evidence are verified.
 
 ## Exact native evidence
 
@@ -61,7 +61,7 @@ Typecheck, production web build, changed-file Biome and Python syntax compilatio
 
 The first full local normal suite had 1,492 passes, 80 skips and 21 failures in unchanged `src/client-v1-conformance-workflow.test.ts`, requiring absent `pwsh`. The separately run heavy suite had 916 passes, 36 skips and five unchanged conformance failures: Node 24.22.0 differs from required 24.18.1, and four cases require absent `rustup`. Initial new-fixture normalization and strict optional-property type errors were corrected before final validation; their first logs remain retained. Local full suites are not described as green. Reproducing them locally requires the pinned Node/Rust toolchains and PowerShell on PATH; no assertion, timeout or protected lock was relaxed.
 
-The base was current main `af52a3fc6c60ad2d4858398133eaf64f6fd35105`. Work is isolated in `.worktrees/548-linux-settings-verification`, branch `test/548-linux-settings-verification`; existing owners and PRs #543/#476 were preserved. Root and create/remove write probes passed before edits. All six implementation commits have Good SSH signatures verified before push. The final documentation update changes no tested harness or product bytes. PR #572 is open and non-draft. No merge, release or issue closure is authorized or performed.
+The base was current main `af52a3fc6c60ad2d4858398133eaf64f6fd35105`. Work is isolated in `.worktrees/548-linux-settings-verification`, branch `test/548-linux-settings-verification`; existing owners and PRs #543/#476 were preserved. Root and create/remove write probes passed before edits. All six implementation commits have Good SSH signatures verified before push. The final documentation update changes no tested harness or product bytes. PR #572 is open and non-draft at this checkpoint. The user explicitly transferred #548 to this session and authorized protected delivery and issue closure under the original goal; no release is authorized. The prior session left the PR unmerged and the issue open, and its receipts are preserved.
 
 ## Receipts and limits
 
