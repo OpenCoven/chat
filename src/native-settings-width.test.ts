@@ -236,3 +236,29 @@ test('Orca parsing retains dictionary and list voice metadata, apostrophes and l
     { at: 37263.019, text: '400px' },
   ]);
 });
+
+test('Orca retains native multiline spatial speech and rejects truncated records without swallowing later events', async () => {
+  const path = '../scripts/native-acceptance/speech.mjs';
+  const { orcaEntries } = await import(path);
+  const log = [
+    "10:39:13.339761 - SPEECH OUTPUT: 'Drag the inspector's left edge, or focus its Resize inspector handle and use the  400px",
+    '                   400px Reset inspector width ',
+    "                  ' [{'established': False}]",
+    "10:39:13.753221 - SPEECH OUTPUT: 'arrow keys, Home and End. The conversation keeps at least 440px.' [{'established': False}]",
+    "10:39:14.000000 - SPEECH OUTPUT: 'truncated",
+    "10:39:14.100000 - SPEECH OUTPUT: 'Inspector width' [{'established': False}]",
+    "10:39:14.200000 - SPEECH OUTPUT: 'unfinished at end of file",
+  ].join('\n');
+  const entries = orcaEntries(log);
+  expect(entries).toHaveLength(3);
+  expect(entries[0].text).toContain("Drag the inspector's left edge");
+  expect(entries[0].text).toContain('400px Reset inspector width');
+  expect(entries[2].text).toBe('Inspector width');
+  const row = new rows.Row('504-6', 'Inspector speech');
+  settings.checkSettingsSpeech(
+    row,
+    entries.map((entry: { text: string }) => entry.text),
+    400,
+  );
+  expect(row.status).toBe('observed');
+});

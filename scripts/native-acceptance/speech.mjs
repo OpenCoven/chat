@@ -194,14 +194,24 @@ class Nvda extends LogReader {
 /** Orca logs voice settings as either a dictionary or a list of dictionaries. */
 export function orcaEntries(log) {
   const found = [];
-  for (const line of log.split(/\r?\n/)) {
-    const match = /^(\d\d):(\d\d):(\d\d(?:\.\d+)?) - SPEECH OUTPUT: '(.*?)'(?: [[{].*)?$/.exec(
-      line,
-    );
-    if (match)
+  const lines = log.split(/\r?\n/);
+  for (let index = 0; index < lines.length; index += 1) {
+    const match = /^(\d\d):(\d\d):(\d\d(?:\.\d+)?) - SPEECH OUTPUT: '(.*)$/.exec(lines[index]);
+    if (!match) continue;
+    let payload = match[4];
+    let utterance = /^(.*?)'(?: [[{].*)?$/.exec(payload);
+    // A spatial line can include newlines from inline native Text objects.
+    // Only indented continuation lines belong to this record; never consume
+    // a subsequent timestamped event or accept an unterminated utterance.
+    while (!utterance && /^[ \t]/.test(lines[index + 1] ?? '')) {
+      index += 1;
+      payload += `\n${lines[index]}`;
+      utterance = /^([\s\S]*?)'(?: [[{][^\r\n]*)?$/.exec(payload);
+    }
+    if (utterance)
       found.push({
         at: Number(match[1]) * 3600 + Number(match[2]) * 60 + Number(match[3]),
-        text: match[4],
+        text: utterance[1],
       });
   }
   return found;
