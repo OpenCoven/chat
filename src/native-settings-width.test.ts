@@ -24,7 +24,7 @@ type Node = {
   role: string;
   name: string;
   enabled: boolean;
-  value?: string;
+  value: string | undefined;
   raw: Raw;
   parent: Node | null;
   children: Node[];
