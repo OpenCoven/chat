@@ -92,10 +92,15 @@ test('the model completion gate holds a streamed link until the lane releases it
       }),
     });
     reader = response.body?.getReader();
-    const first = await reader?.read();
-    const text = new TextDecoder().decode(first?.value);
-    expect(text).toContain('Completion boundary');
-    expect(text).not.toContain('message_stop');
+    let text = '';
+    const decoder = new TextDecoder();
+    while (!text.includes('Completion boundary')) {
+      const chunk = await reader?.read();
+      expect(chunk?.done).toBe(false);
+      text += decoder.decode(chunk?.value, { stream: true });
+      expect(text.length).toBeLessThan(65_536);
+      expect(text).not.toContain('message_stop');
+    }
     expect(fixture.finishReview()).toBe(1);
     let rest = '';
     for (;;) {

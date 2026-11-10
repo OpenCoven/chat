@@ -86,6 +86,48 @@ export class ReviewTrace {
   }
 }
 
+/** Enforce completion focus, with an explicit native UIA measurement limit. */
+export async function verifyCompletionFocus(app, row, platform = PLATFORM) {
+  const focused = await app.focused();
+  row.note(
+    'focus after completion invalidation',
+    focused && {
+      role: focused.role,
+      name: focused.name,
+    },
+  );
+  if (platform === 'windows' && focused?.role === 'document') {
+    // UIA reports document for the noninteractive focused log. Prove native
+    // keyboard position using its unique first control instead of accepting
+    // arbitrary document focus as a successful Messages-focus measurement.
+    await app.one('button', 'Connection details', { within: ['group', 'Messages'] });
+    row.note(
+      'completion focus measurement',
+      'UIA reports document; native keyboard navigation must resume at the first transcript control',
+    );
+    await app.key('tab');
+    row.expect(
+      'Tab from completion reaches first transcript control',
+      await app.focusedName(),
+      'Connection details',
+    );
+    await app.key('tab', ['shift']);
+    row.expect(
+      'Shift+Tab returns to the transcript document',
+      (await app.focused())?.role,
+      'document',
+    );
+    await app.key('tab');
+    row.expect(
+      'Tab again reaches first transcript control',
+      await app.focusedName(),
+      'Connection details',
+    );
+    return;
+  }
+  row.expect('completion invalidation returns focus to Messages', focused?.name, 'Messages');
+}
+
 async function clickReviewedLink(app, name, row) {
   const trace = new ReviewTrace(app, row);
   await trace.sample('before-click');
@@ -523,7 +565,7 @@ export async function linkCompletionRow(lane, familiar, finishReview) {
       );
       await lane.idle();
       row.expect('review lifecycle at completion', trace.outcome, 'opened-then-dismissed');
-      row.note('focus after completion invalidation', await app.focusedName());
+      await verifyCompletionFocus(app, row);
       row.expect('completion did not launch a browser', browserSnapshot(), browsers);
       // A fresh settled target still opens normally, and dismisses back to it.
       await clickReviewedLink(app, 'Completion boundary', row);

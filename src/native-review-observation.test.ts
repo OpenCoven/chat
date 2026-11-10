@@ -51,3 +51,50 @@ test.each([null, { role: 'document', children: [] }])(
     expect(trace.outcome).toBe('open');
   },
 );
+
+test('native completion focus requires Messages rather than recording arbitrary focus', async () => {
+  expect(typeof rows.verifyCompletionFocus).toBe('function');
+  const good = new rows.Row('focus', 'focus');
+  await rows.verifyCompletionFocus(
+    { focused: async () => ({ role: 'log', name: 'Messages' }) },
+    good,
+    'mac',
+  );
+  expect(good.status).toBe('observed');
+  const bad = new rows.Row('focus', 'focus');
+  await rows.verifyCompletionFocus(
+    { focused: async () => ({ role: 'button', name: 'Open settings' }) },
+    bad,
+    'mac',
+  );
+  expect(bad.status).toBe('failed');
+});
+
+test.each([true, false])(
+  'Windows document focus must resume at the first transcript control: %s',
+  async (correct) => {
+    expect(typeof rows.verifyCompletionFocus).toBe('function');
+    let backward = true;
+    const keys: unknown[] = [];
+    const app = {
+      focused: async () =>
+        backward
+          ? { role: 'document', name: '' }
+          : { role: 'button', name: correct ? 'Connection details' : 'Copy message' },
+      focusedName: async () => (correct ? 'Connection details' : 'Copy message'),
+      one: async () => ({ role: 'button', name: 'Connection details' }),
+      key: async (key: string, modifiers: string[] = []) => {
+        keys.push([key, modifiers]);
+        backward = modifiers.includes('shift');
+      },
+    };
+    const row = new rows.Row('focus', 'focus');
+    await rows.verifyCompletionFocus(app, row, 'windows');
+    expect(row.status).toBe(correct ? 'observed' : 'failed');
+    expect(keys).toEqual([
+      ['tab', []],
+      ['tab', ['shift']],
+      ['tab', []],
+    ]);
+  },
+);
