@@ -10,7 +10,11 @@ const observationCommands = [
 
 declare global {
   interface Window {
-    __covenFixture: { calls: string[]; inputs?: unknown[]; finish?: () => void };
+    __covenFixture: {
+      calls: string[];
+      inputs?: unknown[];
+      finish?: (nextSessionId?: string) => void;
+    };
     /** Overrides the first familiar's name, for layout tests with long names. */
     __fixtureFamiliarName?: string;
     /** Addresses the window asked the host to open, in order. */
@@ -267,16 +271,33 @@ async function installRuntimeFixture(
                 });
                 return new Promise((resolve, reject) => {
                   rejectRun = reject;
-                  window.__covenFixture.finish = () => {
+                  window.__covenFixture.finish = (nextSessionId) => {
                     events.push({ type: 'result', session_id: session.id, is_error: false });
+                    const completedSession = nextSessionId
+                      ? { ...session, id: nextSessionId }
+                      : session;
+                    const completedEvents = nextSessionId
+                      ? events.map((event) => ({ ...event, session_id: nextSessionId }))
+                      : events;
                     state.heads[familiarId] = {
-                      session,
-                      events: [...(current?.events ?? []), ...events],
+                      session: completedSession,
+                      // A persisted transcript can contain non-rendered metadata absent
+                      // from live output; its index-based message IDs then change.
+                      events: [
+                        ...(nextSessionId
+                          ? [{ type: 'system', subtype: 'persisted-metadata' }]
+                          : []),
+                        ...(current?.events ?? []),
+                        ...completedEvents,
+                      ],
                     };
                     persist();
-                    callback({ index: events.length - 1, message: events[events.length - 1] });
-                    callback({ index: events.length, end: true });
-                    resolve({ runId: input.runId, events });
+                    callback({
+                      index: completedEvents.length - 1,
+                      message: completedEvents[completedEvents.length - 1],
+                    });
+                    callback({ index: completedEvents.length, end: true });
+                    resolve({ runId: input.runId, events: completedEvents });
                   };
                 });
               }
@@ -2115,5 +2136,51 @@ for (const colorScheme of ['light', 'dark'] as const) {
     await page.goto('/');
     await expect(page.getByRole('alert')).toContainText('Could not observe iPhone activity');
     expect(await contrastFailures(page)).toEqual([]);
+  });
+}
+
+for (const openedBeforeCompletion of [false, true]) {
+  test(`link completion boundary: ${openedBeforeCompletion ? 'observed review is dismissed' : 'located live target is replaced'}`, async ({
+    page,
+  }) => {
+    await installRuntimeFixture(
+      page,
+      true,
+      'See [Completion boundary](https://example.com/handoff-check?x=1).',
+    );
+    await page.goto('/');
+    const composer = page.getByRole('textbox', { name: 'Message Local familiar' });
+    await composer.fill('Show the link.');
+    await page.getByRole('button', { name: 'Send', exact: true }).click();
+    await expect(page.getByRole('button', { name: 'Stop run', exact: true })).toBeVisible();
+    const link = page.getByRole('link', { name: 'Completion boundary', exact: true });
+    const liveTarget = await link.elementHandle();
+    expect(liveTarget).not.toBeNull();
+    const review = page.getByRole('dialog', { name: 'Open this link?' });
+    if (openedBeforeCompletion) {
+      await link.click();
+      await expect(review).toBeVisible();
+      await expect(review.locator('.coven-link-review-address')).toHaveText(
+        'https://example.com/handoff-check?x=1',
+      );
+    }
+    await page.evaluate(() => window.__covenFixture.finish?.('completion-new-head'));
+    await expect(page.getByRole('button', { name: 'Stop run', exact: true })).toHaveCount(0);
+    await expect(composer).toBeEnabled();
+    await expect.poll(() => liveTarget?.evaluate((element) => element.isConnected)).toBe(false);
+    await expect(review).toHaveCount(0);
+    expect(await page.evaluate(() => window.__openedLinks ?? [])).toEqual([]);
+    if (openedBeforeCompletion)
+      await expect(page.getByRole('log', { name: 'Messages' })).toBeFocused();
+    // Reacquire after completion instead of acting on the removed target.
+    await link.click();
+    await expect(review).toBeVisible();
+    await expect(review.locator('.coven-link-review-address')).toHaveText(
+      'https://example.com/handoff-check?x=1',
+    );
+    await page.keyboard.press('Escape');
+    await expect(review).toHaveCount(0);
+    await expect(link).toBeFocused();
+    expect(await page.evaluate(() => window.__openedLinks ?? [])).toEqual([]);
   });
 }
