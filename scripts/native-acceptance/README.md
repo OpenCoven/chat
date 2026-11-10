@@ -65,9 +65,12 @@ drive the app.
     check is recorded as blocked, with the window's own reason.
   - The phone is a stand-in. The lane turns the companion on in Settings ›
     Devices, reads the private pairing link from its text box, and calls the
-    companion's API with the link's token, pinning the Mac's certificate to the
-    link's fingerprint. It shows what the Mac tells a paired phone, not what the
-    iPhone app shows; a physical iPhone stays a hand row on #573.
+    companion's API with the link's token. It trusts only the certificate in the
+    host's `iphone-companion/identity.json`, once that matches the link's
+    fingerprint, and checks the fingerprint again in the handshake, so the token
+    goes to no other server. A phone pins the fingerprint alone. It shows what
+    the Mac tells a paired phone, not what the iPhone app shows; a physical
+    iPhone stays a hand row on #573.
   - The engine signs in with an API key against the fixture, so none of these
     rows covers **Sign in with Claude**, and none uses a real model.
 - v0.0.8 results and the issues they produced (#544, #545, #546, #547, #548) are

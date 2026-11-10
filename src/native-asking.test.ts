@@ -15,7 +15,7 @@ const fixturePath = '../scripts/native-acceptance/fixture.mjs';
 const phonePath = '../scripts/native-acceptance/phone.mjs';
 const { askingRowsFor } = await import(approvalPath);
 const { startModelFixture, MOVED_ON } = await import(fixturePath);
-const { Phone, parsePairingLink } = await import(phonePath);
+const { Phone, companionIdentityPath, parsePairingLink } = await import(phonePath);
 
 const OFF = 'pub const X: u8 = 1;\nconst ASKING_ENABLED: bool = false;\n';
 const ON = OFF.replace('false;', 'true;');
@@ -225,50 +225,89 @@ describe('the phone stand-in', () => {
     );
   });
 
+  test('finds the identity where the host keeps it, on the platforms with a companion', () => {
+    expect(companionIdentityPath('mac', '/Users/r')).toBe(
+      '/Users/r/Library/Application Support/ai.opencoven.chat/iphone-companion/identity.json',
+    );
+    const xdg = process.env.XDG_DATA_HOME;
+    delete process.env.XDG_DATA_HOME;
+    try {
+      expect(companionIdentityPath('linux', '/home/r')).toBe(
+        '/home/r/.local/share/ai.opencoven.chat/iphone-companion/identity.json',
+      );
+    } finally {
+      if (xdg !== undefined) process.env.XDG_DATA_HOME = xdg;
+    }
+  });
+
   const openssl = spawnSync('openssl', ['version']).status === 0;
   test.skipIf(!openssl)(
-    "pins the Mac's certificate and sends what the companion's parser accepts",
+    "sends the token only to the Mac's certificate, in what the companion's parser accepts",
     async () => {
+      // Shaped like rcgen's: self-signed, one DNS name, no CA flag.
       const key = join(scratch, 'key.pem');
       const cert = join(scratch, 'cert.pem');
-      execFileSync('openssl', [
-        'req',
-        '-x509',
-        '-newkey',
-        'ec',
-        '-pkeyopt',
-        'ec_paramgen_curve:prime256v1',
-        '-nodes',
-        '-keyout',
-        key,
-        '-out',
-        cert,
-        '-days',
-        '1',
-        '-subj',
-        '/CN=companion-test',
-      ]);
+      const config = join(scratch, 'cert.cnf');
+      writeFileSync(
+        config,
+        '[req]\ndistinguished_name=dn\nprompt=no\n[dn]\nCN=rcgen self signed cert\n[ext]\nsubjectAltName=DNS:coven-chat.local\n',
+      );
+      const make = (keyOut: string, certOut: string) =>
+        execFileSync('openssl', [
+          'req',
+          '-x509',
+          '-newkey',
+          'ec',
+          '-pkeyopt',
+          'ec_paramgen_curve:prime256v1',
+          '-nodes',
+          '-keyout',
+          keyOut,
+          '-out',
+          certOut,
+          '-days',
+          '1',
+          '-config',
+          config,
+          '-extensions',
+          'ext',
+        ]);
+      make(key, cert);
       const pem = readFileSync(cert, 'utf8');
       const der = Buffer.from(pem.replace(/-----[^-]+-----|\s/g, ''), 'base64');
       const fingerprint = createHash('sha256').update(der).digest('hex');
+      const identity = join(scratch, 'identity.json');
+      writeFileSync(identity, JSON.stringify({ certificate: [...der] }));
+      // A second server with another certificate of the same name.
+      const otherKey = join(scratch, 'other-key.pem');
+      const otherCert = join(scratch, 'other-cert.pem');
+      make(otherKey, otherCert);
+
       const seen: { method: string; headers: IncomingHttpHeaders; body: string }[] = [];
-      const server = createServer({ key: readFileSync(key), cert: pem }, (req, res) => {
-        let body = '';
-        req.on('data', (chunk) => {
-          body += chunk;
+      const serve = (keyFile: string, certFile: string) =>
+        createServer({ key: readFileSync(keyFile), cert: readFileSync(certFile) }, (req, res) => {
+          let body = '';
+          req.on('data', (chunk) => {
+            body += chunk;
+          });
+          req.on('end', () => {
+            seen.push({ method: req.method ?? '', headers: req.headers, body });
+            res.writeHead(200, { 'content-type': 'application/json' });
+            res.end(JSON.stringify({ pendingApprovals: [] }));
+          });
         });
-        req.on('end', () => {
-          seen.push({ method: req.method ?? '', headers: req.headers, body });
-          res.writeHead(200, { 'content-type': 'application/json' });
-          res.end(JSON.stringify({ pendingApprovals: [] }));
-        });
-      });
-      await new Promise<void>((done) => server.listen(0, '127.0.0.1', () => done()));
-      const { port } = server.address() as AddressInfo;
-      const link = (print: string) =>
+      const listen = async (server: ReturnType<typeof createServer>) => {
+        await new Promise<void>((done) => server.listen(0, '127.0.0.1', () => done()));
+        return (server.address() as AddressInfo).port;
+      };
+      const mac = serve(key, cert);
+      const impostor = serve(otherKey, otherCert);
+      const link = (port: number, print: string) =>
         `coven-chat://pair?endpoint=${encodeURIComponent(`https://127.0.0.1:${port}`)}&token=${hex('c')}&fingerprint=${print}`;
       try {
-        const phone = new Phone(link(fingerprint));
+        const macPort = await listen(mac);
+        const impostorPort = await listen(impostor);
+        const phone = new Phone(link(macPort, fingerprint), { identity });
         const read = await phone.snapshot();
         expect(read).toMatchObject({ status: 200, json: { pendingApprovals: [] } });
         const answer = await phone.answer('approval-1', 'decline');
@@ -288,11 +327,19 @@ describe('the phone stand-in', () => {
           requestId: expect.stringMatching(/^[0-9a-f-]{36}$/),
         });
 
-        await expect(new Phone(link(hex('d'))).snapshot()).rejects.toThrow(
-          "the Mac's certificate does not match the pairing link",
+        // The same link pointed at another certificate: the handshake fails, and
+        // the server never sees a request, so never the token.
+        await expect(
+          new Phone(link(impostorPort, fingerprint), { identity }).snapshot(),
+        ).rejects.toThrow();
+        expect(seen).toHaveLength(2);
+        // A link whose fingerprint isn't the certificate on disk is refused outright.
+        expect(() => new Phone(link(macPort, hex('d')), { identity })).toThrow(
+          "the Mac's certificate on disk does not match the pairing link",
         );
       } finally {
-        await new Promise<void>((done) => server.close(() => done()));
+        await new Promise<void>((done) => mac.close(() => done()));
+        await new Promise<void>((done) => impostor.close(() => done()));
       }
     },
   );

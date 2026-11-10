@@ -9,7 +9,7 @@
 
 import { existsSync, readFileSync, rmSync } from 'node:fs';
 import { join, resolve } from 'node:path';
-import { sleep, until, walk } from './driver.mjs';
+import { PLATFORM, sleep, until, walk } from './driver.mjs';
 import {
   APPROVAL_DONE,
   APPROVAL_NO_NOTE,
@@ -18,7 +18,7 @@ import {
   APPROVAL_UNASKED,
   MOVED_ON,
 } from './fixture.mjs';
-import { Phone } from './phone.mjs';
+import { companionIdentityPath, Phone } from './phone.mjs';
 import { closeSettings, Row, shownText, textsIn } from './rows.mjs';
 
 export const ASKING_SOURCE = 'src-tauri/src/chat_approvals.rs';
@@ -150,11 +150,26 @@ async function pairingLink(lane, row) {
   return link;
 }
 
-/** The newest permission log lines, as Settings › Access shows them. */
+/** Pairs the phone stand-in through the window, trusting only the Mac's certificate. */
+async function pairPhone(lane, row) {
+  const link = await pairingLink(lane, row);
+  return new Phone(link, { identity: companionIdentityPath(PLATFORM) });
+}
+
+/**
+ * The permission log as Settings › Access shows it, one entry a line. WebKit
+ * gives an entry's time and its words as two texts. On Windows, Chromium's UI
+ * Automation keeps the time, a control of its own, and folds the words into the
+ * entry's name, so an entry reads as its name when that says more.
+ */
 async function windowLog(app) {
   await openSettingsSection(app, 'Access');
   const list = await app.one('list', 'Permission log, newest first', { timeout: 10_000 });
-  const lines = textsIn(list);
+  const lines = list.children.map((entry) => {
+    const texts = textsIn(entry).join(' ');
+    const name = String(entry.name ?? '').trim();
+    return name.length > texts.length ? name : texts;
+  });
   await closeSettings(app);
   return lines.join('\n');
 }
@@ -216,7 +231,7 @@ export async function approvalRows(lane, familiar) {
     await lane.idle();
     await lane.reset();
     try {
-      phone = new Phone(await pairingLink(lane, phoneRow));
+      phone = await pairPhone(lane, phoneRow);
     } catch (error) {
       // The companion is macOS and Linux only, and says so; anything else fails.
       if (!/requires macOS or Linux/.test(error.message)) throw error;
@@ -516,7 +531,7 @@ export async function askingOffRow(lane, familiar) {
     );
 
     try {
-      const phone = new Phone(await pairingLink(lane, row));
+      const phone = await pairPhone(lane, row);
       const snapshot = await phone.snapshot();
       row.expect('the paired phone reads the Mac', snapshot.status, 200);
       row.expect('requests the phone is told about', snapshot.json?.pendingApprovals?.length, 0);
