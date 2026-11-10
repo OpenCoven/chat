@@ -54,7 +54,7 @@ const SECTIONS: readonly Readonly<{
     id: 'access',
     label: 'Access',
     icon: 'folder-open',
-    blurb: 'Projects Coven declares, and what familiars were allowed to do.',
+    blurb: 'Familiar chats run with full access as your user account.',
   },
   { id: 'devices', label: 'Devices', icon: 'monitor', blurb: 'Your iPhone and remote screens.' },
   {
@@ -701,8 +701,8 @@ function FamiliarAccess({ familiar, onRefresh, refreshDisabled }: SettingsDialog
         >
           refresh
         </button>
-        . Every turn runs read-only unless you allow a familiar's request, and an allowed turn isn't
-        limited to these projects.
+        . Familiar chats can change files and run commands beyond these projects without asking for
+        permission.
       </p>
     </>
   );

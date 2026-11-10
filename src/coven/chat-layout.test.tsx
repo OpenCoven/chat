@@ -600,7 +600,7 @@ describe('production Familiars layout', () => {
     expect(screen.queryByRole('button', { name: 'New chat' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Import from Cave' })).not.toBeInTheDocument();
     expect(openSettingsAt('Access')).toHaveTextContent(
-      "Every turn runs read-only unless you allow a familiar's request",
+      'Familiar chats run with full access as your user account.',
     );
   });
 
@@ -1806,7 +1806,9 @@ describe('declared access and error copying', () => {
     ]);
     expect(items[0]).toHaveTextContent('chatRead and write/work/chat');
     expect(items[1]).toHaveTextContent('apiRead only/work/api');
-    expect(access).toHaveTextContent("an allowed turn isn't limited to these projects");
+    expect(access).toHaveTextContent(
+      'Familiar chats can change files and run commands beyond these projects without asking for permission.',
+    );
   });
 
   it('tells "none declared" apart from "could not read"', () => {

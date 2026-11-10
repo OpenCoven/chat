@@ -2,7 +2,8 @@
 // records what it observed. A failed expectation throws, and the row is
 // reported as failed with everything observed up to that point.
 
-import { existsSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 
 import {
@@ -1108,16 +1109,14 @@ export async function approvalRow(s, familiar) {
 }
 
 /**
- * Asking is switched off in this release (`ASKING_ENABLED` in
- * `src-tauri/src/chat_approvals.rs`). The fixture asks the real engine to write a
- * real file, and its reply says whether Chat's note reached the engine. A second
- * turn's reply carries a request block anyway, and the host's own log is read
- * back, because the window would hide a filed request while asking is off. So this
- * row fails if the note comes back, if a write lands, if anything is offered to
- * answer, or if anything is filed. `approvalRow` replaces it when asking comes back.
+ * Exercise actual writes and check that even a reply carrying a legacy request
+ * offers no approval. Use a disposable directory outside the workspace for
+ * full access. Published read-only builds retain their original expectation.
  */
-export async function askingOffRow(s, familiar) {
-  const row = new Row('asking-off', 'A read-only turn writes nothing and asks for nothing');
+export async function defaultAccessRow(s, familiar, fullAccess) {
+  const row = fullAccess
+    ? new Row('full-access', 'Familiar turns write outside the workspace without asking')
+    : new Row('asking-off', 'A read-only turn writes nothing and asks for nothing');
   const bodyHas = (text) =>
     s.execute('return document.body.innerText.includes(arguments[0]);', text);
   const nothingOffered = async (when) => {
@@ -1132,25 +1131,41 @@ export async function askingOffRow(s, familiar) {
       false,
     );
   };
+  let proofDirectory;
   try {
     await s.click(await s.one('button', familiar));
     await composerOf(s, familiar);
-    const folder = await familiarFolder(s);
-    row.note("the familiar's folder", folder);
-    const proof = resolve(join(folder, 'asking-off.txt'));
-    await send(s, familiar, `[[ask ${proof}]] Write the proof file.`, 'heading', APPROVAL_NO_NOTE);
-    row.expect('the read-only turn wrote the file', existsSync(proof), false);
-    await nothingOffered('after a refused write');
+    const workspace = await familiarFolder(s);
+    proofDirectory = fullAccess ? mkdtempSync(join(tmpdir(), 'chat-full-access-')) : undefined;
+    const folder = proofDirectory ?? workspace;
+    row.note("the familiar's folder", workspace);
+    row.note('proof folder', folder);
+    const checkWrite = (proof, label) => {
+      row.expect(label, existsSync(proof), fullAccess);
+      if (fullAccess)
+        row.expect('the proof file contents', readFileSync(proof, 'utf8'), 'allowed turn\n');
+    };
 
-    const unasked = resolve(join(folder, 'asking-off-unasked.txt'));
+    const proof = resolve(join(folder, 'default-access.txt'));
     await send(
       s,
       familiar,
-      `[[ask ${unasked}]] [[request anyway]] Write another.`,
+      `[[write ${encodeURIComponent(proof)}]] Write the proof file.`,
+      'heading',
+      APPROVAL_NO_NOTE,
+    );
+    checkWrite(proof, 'the first turn wrote the file');
+    await nothingOffered('after the first turn');
+
+    const unasked = resolve(join(folder, 'default-access-unasked.txt'));
+    await send(
+      s,
+      familiar,
+      `[[write ${encodeURIComponent(unasked)}]] [[request anyway]] Write another.`,
       'heading',
       APPROVAL_UNASKED,
     );
-    row.expect('the second read-only turn wrote the file', existsSync(unasked), false);
+    checkWrite(unasked, 'the continued turn wrote the file');
     await nothingOffered('after a reply carrying a request');
     row.expect(
       'the request block reads as prose',
@@ -1170,9 +1185,12 @@ export async function askingOffRow(s, familiar) {
       'Settings to show Access',
       async () => (await s.css('.coven-access-hero')).length === 1,
     );
-    // Text, not a list lookup: an empty log renders no list, with or without its
-    // section, and the section is what must be gone.
     const access = await settings.property('innerText');
+    row.expect(
+      'Settings reports default full access',
+      access.includes('Familiar chats run with full access as your user account.'),
+      fullAccess,
+    );
     row.expect(
       'Settings shows a permission log',
       access.toLowerCase().includes('permission log'),
@@ -1184,6 +1202,8 @@ export async function askingOffRow(s, familiar) {
     await snapshot(row.id);
     const open = await s.all('dialog', 'Settings').catch(() => []);
     if (open.length) await closeSettings(s).catch(() => {});
+  } finally {
+    if (proofDirectory) rmSync(proofDirectory, { recursive: true, force: true });
   }
   return row;
 }

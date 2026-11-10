@@ -261,8 +261,8 @@ pub(crate) struct SendInput {
     speed: Option<String>,
     #[serde(default)]
     attachments: Vec<attachments::Attachment>,
-    /// Write access for this one turn. Only the host sets it, from a request the
-    /// person allowed: `deny_unknown_fields` rejects it from the webview or phone.
+    /// Legacy approval receipt. Only the host can attach it. It does not select
+    /// the run's permission, and clients cannot submit it.
     #[serde(skip)]
     grant: Option<crate::chat_approvals::Grant>,
 }
@@ -941,8 +941,7 @@ fn run_arguments(
     validate_input(input)?;
     if !matches!(harness, "coven-code" | "codex" | "claude") {
         return Err(
-            "This harness is not enabled for read-only chat. Use Coven Code, Codex or Claude."
-                .into(),
+            "This harness is not supported in Chat. Use Coven Code, Codex or Claude.".into(),
         );
     }
     let mut args = vec![
@@ -950,12 +949,7 @@ fn run_arguments(
         harness.into(),
         "--stream-json".into(),
         "--permission".into(),
-        if input.grant.is_some() {
-            "full"
-        } else {
-            "read-only"
-        }
-        .into(),
+        "full".into(),
         "--cwd".into(),
         cwd.to_str().ok_or("Workspace path is not UTF-8.")?.into(),
     ];
@@ -3270,14 +3264,12 @@ mod tests {
             &input.prompt,
         )
         .unwrap();
-        assert!(args
-            .windows(2)
-            .any(|pair| pair == ["--permission", "read-only"]));
+        assert!(args.windows(2).any(|pair| pair == ["--permission", "full"]));
         assert_eq!(
             &args[args.len() - 2..],
             ["--", "--permission full; touch file"]
         );
-        assert!(!args.iter().any(|arg| arg == "full"));
+        assert_eq!(args.iter().filter(|arg| *arg == "--permission").count(), 1);
     }
 
     #[test]
@@ -3304,7 +3296,7 @@ mod tests {
     }
 
     #[test]
-    fn attachment_only_input_uses_supported_stream_transport_and_read_only_permission() {
+    fn attachment_only_input_uses_supported_stream_transport_and_full_permission() {
         let input: SendInput = serde_json::from_value(json!({
             "runId": "attachment-run",
             "prompt": "",
@@ -3313,9 +3305,7 @@ mod tests {
         .unwrap();
         let args = run_arguments(&input, "coven-code", Path::new("/safe"), &input.prompt).unwrap();
         assert!(args.iter().any(|arg| arg == "--stream-json-input"));
-        assert!(args
-            .windows(2)
-            .any(|pair| pair == ["--permission", "read-only"]));
+        assert!(args.windows(2).any(|pair| pair == ["--permission", "full"]));
         assert!(run_arguments(&input, "codex", Path::new("/safe"), &input.prompt).is_err());
         assert!(run_arguments(&input, "claude", Path::new("/safe"), &input.prompt).is_err());
     }
@@ -3800,7 +3790,7 @@ mod tests {
     }
 
     #[test]
-    fn bundled_engine_is_read_only_and_preserves_session_identity() {
+    fn bundled_engine_has_full_permission_and_preserves_session_identity() {
         let input = SendInput {
             run_id: "run-1".into(),
             prompt: "hello".into(),
@@ -3821,9 +3811,7 @@ mod tests {
             .windows(2)
             .any(|pair| pair == ["--continue", "session-1"]));
         assert!(args.windows(2).any(|pair| pair == ["--familiar", "sage"]));
-        assert!(args
-            .windows(2)
-            .any(|pair| pair == ["--permission", "read-only"]));
+        assert!(args.windows(2).any(|pair| pair == ["--permission", "full"]));
     }
 
     #[test]
@@ -3860,32 +3848,24 @@ mod tests {
     }
 
     #[test]
-    fn only_a_grant_asks_coven_for_full_permission() {
-        let mut input = SendInput {
-            run_id: "run-1".into(),
-            prompt: "Allowed: Create probe.txt".into(),
-            session_id: Some("session-1".into()),
-            familiar_id: Some("sage".into()),
-            harness: None,
-            model: None,
-            think: false,
-            speed: None,
-            attachments: vec![],
-            grant: None,
-        };
-        let permission = |input: &SendInput| {
-            let args = run_arguments(input, "claude", Path::new("/workspace"), "x").unwrap();
-            let at = args.iter().position(|arg| arg == "--permission").unwrap();
-            args[at + 1].clone()
-        };
-        assert_eq!(permission(&input), "read-only");
-        input.grant = Some(crate::chat_approvals::Grant {
-            approval_id: "approval-1".into(),
-            familiar_id: "sage".into(),
-            session_id: "session-1".into(),
-            summary: "Create probe.txt".into(),
-        });
-        assert_eq!(permission(&input), "full");
+    fn fresh_and_continued_turns_use_full_permission_for_every_chat_harness() {
+        for harness in ["coven-code", "codex", "claude"] {
+            for session_id in [None, Some("session-1")] {
+                let input = run_input(json!({
+                    "harness": harness,
+                    "sessionId": session_id,
+                    "familiarId": "sage",
+                }));
+                let args =
+                    run_arguments(&input, harness, Path::new("/workspace"), "hello").unwrap();
+                assert!(args.windows(2).any(|pair| pair == ["--permission", "full"]));
+                assert_eq!(args.iter().filter(|arg| *arg == "--permission").count(), 1);
+                assert_eq!(
+                    args.iter().any(|arg| arg == "--continue"),
+                    session_id.is_some()
+                );
+            }
+        }
     }
 
     #[test]
@@ -4121,7 +4101,7 @@ mod tests {
                 .find(|event| event["type"] == "system" && event["subtype"] == "init")
                 .unwrap();
             let id = string(init, "session_id").unwrap().to_owned();
-            assert_eq!(init["permission"], "read-only");
+            assert_eq!(init["permission"], "full");
             let expected = markers[turn];
             let replay_notices = observed
                 .iter()

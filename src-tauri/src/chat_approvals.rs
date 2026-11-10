@@ -1,10 +1,8 @@
-//! Familiars asking for permission, and the record of what happened next.
+//! Legacy permission requests and their audit log.
 //!
-//! Every Chat turn runs read-only. A familiar that needs more ends its reply
-//! with a `coven-permission-request` block. The host reads that block from the
-//! run's own output, never from the webview or the phone, and records it here.
-//! Only a person's Allow, in this window or on the paired iPhone, starts one
-//! turn with write access, and that turn logs each tool call it reports.
+//! Familiar chats run with full permission by default. The request protocol
+//! remains disabled. Keep old request blocks out of the transcript and retain
+//! access to the log for companion clients that can read it.
 //!
 //! The log is append-only and is also the state: a request stays open until the
 //! log records an answer, it expires, or the chat moves on. Allow spends the
@@ -139,11 +137,8 @@ pub(crate) struct Proposal {
     pub reason: Option<String>,
 }
 
-/// Whether a familiar can ask for permission in this release. While this is
-/// false, no turn is told it can ask, nothing is filed, nothing is shown, and no
-/// answer becomes a [`Grant`], so nothing in Chat can start a turn with full
-/// permission. `allow` and `pending` are private so that the window and the phone
-/// can only reach them through the checks below.
+/// Full-access chats do not use per-turn approvals. Stale clients cannot turn
+/// an answer to an earlier request into another run.
 const ASKING_ENABLED: bool = false;
 
 /// Only a window or a phone holding a request from a build that could ask sees this.
@@ -1032,10 +1027,8 @@ mod tests {
         assert_eq!(strip_requests("Text\n```"), "Text\n```");
     }
 
-    /// Pins the release that keeps asking off. Turning it back on changes this
-    /// test in the same commit, along with the notes and the acceptance row.
     #[test]
-    fn while_asking_is_off_nothing_can_start_a_full_permission_turn() {
+    fn legacy_requests_cannot_start_a_turn_with_default_full_access() {
         let data = Data::new();
         data.head("astra", "session-1");
         // A request a build that could ask left open on disk.

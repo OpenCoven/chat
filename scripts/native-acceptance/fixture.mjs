@@ -7,7 +7,9 @@ import { appendFileSync } from 'node:fs';
 import { createServer } from 'node:http';
 import {
   ADDRESSES,
+  approvalStep,
   replyFor as packagedReply,
+  sendModelStep,
   TABLE,
 } from '../packaged-acceptance/model-fixture.mjs';
 
@@ -117,6 +119,11 @@ export function startModelFixture({ log } = {}) {
             error: { type: 'not_found_error', message: 'Not served.' },
           }),
         );
+        return;
+      }
+      const writeStep = approvalStep(parsed.messages);
+      if (writeStep) {
+        sendModelStep(res, parsed.model, writeStep, parsed.stream);
         return;
       }
       const text = EXTRA[token] ?? packagedReply(parsed.messages);

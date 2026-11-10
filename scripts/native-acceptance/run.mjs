@@ -18,6 +18,7 @@ import { App, Native, outline, PLATFORM, screenshot, sleep, until } from './driv
 import { startModelFixture } from './fixture.mjs';
 import {
   cancelledRunRow,
+  fullAccessRow,
   inspectorRow,
   Lane,
   linkCompletionRow,
@@ -265,6 +266,9 @@ try {
   await lane.front();
   await lane.reset();
   rows.push(await cancelledRunRow(lane, FIRST));
+  if (!/^v0\.0\.[0-9](?:[-+]|$)/.test(facts.release ?? process.env.RELEASE ?? '')) {
+    rows.push(await fullAccessRow(lane, second ? SECOND : FIRST));
+  }
   shot('before-quit');
 
   // Quit as a person would, so the web view writes its storage out.

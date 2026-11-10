@@ -4,7 +4,11 @@
 // blocked, never as passed.
 
 import { spawnSync } from 'node:child_process';
+import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { isDeepStrictEqual } from 'node:util';
+import { APPROVAL_NO_NOTE, APPROVAL_UNASKED } from '../packaged-acceptance/model-fixture.mjs';
 import { addressBars, browserProcesses, quitBrowsers } from './browser.mjs';
 import {
   center,
@@ -1786,4 +1790,50 @@ export async function cancelledRunRow(lane, familiar) {
     row.expect('nothing sent after the cancel', lane.requests(), settled);
     await lane.clearComposer(familiar);
   });
+}
+
+/** Check the file on disk and the native window after each of two ordinary sends. */
+export async function fullAccessRow(lane, familiar) {
+  const row = new Row('full-access', 'Familiar turns write outside the workspace without asking');
+  const { app } = lane;
+  await lane.attempt(row, async () => {
+    const folder = mkdtempSync(join(tmpdir(), 'chat-native-full-access-'));
+    try {
+      await showFamiliars(lane, row);
+      await app.click(await app.one('button', familiar));
+      await lane.clearComposer(familiar);
+      for (const [name, prompt, heading] of [
+        ['first.txt', 'Write the proof file.', APPROVAL_NO_NOTE],
+        ['second.txt', '[[request anyway]] Write another.', APPROVAL_UNASKED],
+      ]) {
+        const proof = join(folder, name);
+        await lane.send(
+          familiar,
+          `[[write ${encodeURIComponent(proof)}]] ${prompt}`,
+          'heading',
+          heading,
+        );
+        row.expect(`${name} was written`, existsSync(proof), true);
+        if (existsSync(proof))
+          row.expect(`${name} contents`, readFileSync(proof, 'utf8'), 'allowed turn\n');
+        row.expect(`${name} offered Allow once`, await app.count('button', 'Allow once'), 0);
+        row.expect(`${name} offered Decline`, await app.count('button', 'Decline'), 0);
+      }
+      const visibleText = textIn(await app.snapshot());
+      row.expect(
+        'legacy request block appeared as prose',
+        visibleText.includes('coven-permission-request'),
+        false,
+      );
+      row.expect(
+        'sidebar reported an approval request',
+        visibleText.includes('Asks permission'),
+        false,
+      );
+      lane.shot('full-access-without-approval');
+    } finally {
+      rmSync(folder, { recursive: true, force: true });
+    }
+  });
+  return row;
 }
