@@ -15,19 +15,21 @@ const ownText = (node) => [node.name, node.value, node.raw?.text].map(clean);
 export function settingsWidthEvidence(settings, width) {
   if (!settings?.children?.length) throw new Error('Settings has no accessible tree');
   const all = [...walk(settings)];
-  const resets = all.filter(
+  const headings = all.filter((node) => node.role === 'heading' && /^inspector$/i.test(node.name));
+  const heading = headings.length === 1 ? headings[0] : null;
+  // WebKitGTK flattens the visual card groups into the General landmark.
+  // Select the native siblings from Inspector up to the next peer heading;
+  // otherwise unrelated values in General could satisfy the assertions.
+  const siblings = heading?.parent?.children ?? [];
+  const start = siblings.indexOf(heading);
+  let end = start + 1;
+  while (end < siblings.length && siblings[end].role !== 'heading') end += 1;
+  const selected = start >= 0 ? siblings.slice(start, end) : [];
+  const nodes = selected.flatMap((node) => [...walk(node)]);
+  const resets = nodes.filter(
     (node) => node.role === 'button' && node.name === 'Reset inspector width',
   );
   const reset = resets.length === 1 ? resets[0] : null;
-  // Keep assertions inside the Inspector group, so a number or instruction
-  // elsewhere in Settings cannot accidentally satisfy this row.
-  let group = reset?.parent;
-  while (group && group !== settings) {
-    if ([...walk(group)].some((node) => node.role === 'heading' && /^inspector$/i.test(node.name)))
-      break;
-    group = group.parent;
-  }
-  const nodes = group && group !== settings ? [...walk(group)] : [];
   const hasText = (text) => nodes.some((node) => ownText(node).includes(text));
   const values = nodes.filter((node) => ownText(node).includes(`${width}px`));
   const describedBy = reset?.raw?.relations?.['described-by'] ?? [];
@@ -47,7 +49,11 @@ export function settingsWidthEvidence(settings, width) {
     resetEnabled: reset?.enabled,
     relationship,
     describedBy,
-    subtree: group?.raw ?? settings.raw,
+    subtree: {
+      selection: 'Inspector heading through the next peer heading (excluded)',
+      nativeParentRole: heading?.parent?.raw?.role,
+      nodes: selected.map((node) => node.raw),
+    },
     text: nodes.map((node) => ownText(node).filter(Boolean).join(' | ')).filter(Boolean),
   };
 }
@@ -69,14 +75,19 @@ export function checkSettingsWidth(row, evidence, width) {
 
 export function checkSettingsSpeech(row, phrases, width) {
   // Whitespace changes and phrase boundaries are presentation; missing words
-  // are not. This checks Orca's generated utterances, not audible human review.
+  // are not. Flat review can interleave an adjacent control between wrapped
+  // instruction lines, so every hint word must occur in order. This checks
+  // generated utterances, not audible human review.
   const spoken = clean(phrases.join(' '));
   row.check(`Orca Settings ${width}px: label`, spoken.includes(WIDTH_LABEL), phrases);
-  row.check(
-    `Orca Settings ${width}px: complete instruction hint`,
-    spoken.includes(WIDTH_HINT),
-    phrases,
-  );
+  const words = spoken.split(' ');
+  let next = 0;
+  const completeHint = WIDTH_HINT.split(' ').every((word) => {
+    const found = words.indexOf(word, next);
+    next = found + 1;
+    return found >= 0;
+  });
+  row.check(`Orca Settings ${width}px: complete instruction hint`, completeHint, phrases);
   row.check(
     `Orca Settings ${width}px: current width`,
     new RegExp(`\\b${width}\\s*(?:px|pixels)\\b`).test(spoken),

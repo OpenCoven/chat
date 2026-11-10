@@ -1427,15 +1427,13 @@ export async function settingsShowWidth(lane, row, label, width) {
     row.note(`Settings ${width}px Inspector text`, evidence.text);
     checkSettingsWidth(row, evidence, width);
     const said = await listen(lane, row, `Orca Settings ${width}px`, async () => {
-      // Read the rendered row with Orca's native browsing keys. Start at its
-      // heading, then move through its wrapped label, hint, value and Reset.
-      await lane.app.click(
-        await lane.app.one('heading', /^inspector$/i, {
-          within: ['dialog', 'Settings'],
-        }),
-      );
-      for (let index = 0; index < 16; index += 1) {
-        await lane.app.key('down');
+      // WebKitGTK's dialog script does not bind ordinary Down to browse
+      // navigation. Use Orca's documented desktop flat-review commands:
+      // Insert+KP7 moves home; KP9 reads the next spatial line.
+      // https://help.gnome.org/orca/commands_flat_review.html
+      await lane.app.key('Insert+KP_Home');
+      for (let index = 0; index < 32; index += 1) {
+        await lane.app.key('KP_Next');
         await sleep(200);
       }
     });

@@ -75,7 +75,7 @@ for (const width of [400, 600, 360]) {
     const row = new rows.Row('504-6', 'Inspector');
     settings.checkSettingsWidth(row, evidence, width);
     expect(row.status).toBe('observed');
-    expect(evidence.subtree).toBe(fixture.raw.children[1]);
+    expect(evidence.subtree.nodes).toEqual(fixture.raw.children[1]?.children);
     expect(evidence.text.join(' ')).toContain(settings.WIDTH_HINT);
   });
 }
@@ -177,3 +177,42 @@ test.each([true, false])(
     expect(shots).toEqual(['settings-width-400']);
   },
 );
+
+test('flattened native General peers outside the Inspector heading range cannot satisfy its checks', () => {
+  const fixture = tree();
+  const group = fixture.root.children[1];
+  if (!group) throw new Error('Invalid fixture');
+  group.children.splice(1, 3);
+  group.children.push({
+    role: 'heading',
+    name: 'TOOL ACTIVITY',
+    enabled: true,
+    parent: group,
+    raw: { role: 'heading', name: 'TOOL ACTIVITY', children: [] },
+    value: undefined,
+    children: [],
+  });
+  group.children.push({
+    role: 'text',
+    name: `${settings.WIDTH_LABEL}`,
+    enabled: true,
+    parent: group,
+    raw: { role: 'text', name: '', text: settings.WIDTH_HINT, children: [] },
+    value: '400px',
+    children: [],
+  });
+  const evidence = settings.settingsWidthEvidence(fixture.root, 400);
+  expect(evidence.label).toBe(false);
+  expect(evidence.hint).toBe(false);
+  expect(evidence.width).toBe(false);
+});
+
+test('spatial Orca review retains every hint word when adjacent controls occur between wrapped lines', () => {
+  const phrases = [
+    settings.WIDTH_LABEL,
+    settings.WIDTH_HINT.replace('the arrow keys', 'the 400px Reset arrow keys'),
+  ];
+  const row = new rows.Row('504-6', 'Inspector speech');
+  settings.checkSettingsSpeech(row, phrases, 400);
+  expect(row.status).toBe('observed');
+});

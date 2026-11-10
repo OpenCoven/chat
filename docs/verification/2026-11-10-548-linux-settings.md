@@ -1,0 +1,47 @@
+# #548 Linux Settings accessibility verification
+
+The objective is to verify the Inspector width label, complete instruction hint, current value and Reset relationship in the published v0.0.9 Linux `.deb`, including Orca-generated utterances at 400px, 600px and after Reset to 360px. This work does not authorize a merge, publication or issue closure.
+
+## Baseline and scope
+
+Issue [#548](https://github.com/OpenCoven/chat/issues/548) remained open at entry. Its [latest published-build observation](https://github.com/OpenCoven/chat/issues/548#issuecomment-6734286108) proved the width values but explicitly left the label, hint and Orca Settings reading unverified. The original failure was recorded on v0.0.8; its results are preserved in the issue and are not replaced by later-version results.
+
+Base main was `af52a3fc6c60ad2d4858398133eaf64f6fd35105`. The isolated worktree is `.worktrees/548-linux-settings-verification`, branch `test/548-linux-settings-verification`. Existing worktree owners and PRs #543 and #476 were preserved. The primary repository root and create/remove temporary-file write probe passed before edits.
+
+No product code changes are included. Native row 504-6 now checks the complete Inspector group and saves both the full Settings tree and the Inspector subtree, including native descriptions and described-by targets, on passing and failing checks. Reset must describe its actual current width node, be enabled away from the default and be disabled at 360px. The existing pointer capture, keyboard and persisted-width checks remain, and Settings is explicitly observed at 400px, 360px after Reset, and 600px after narrow/wide recovery.
+
+The Linux check starts Orca around native browsing of the Settings Inspector row, retaining the utterances and requiring the label, complete instruction and current width. Orca uses its existing debug-log mode with no speech server on the runner; these are generated speech strings, not audio or human listening evidence. AT-SPI exposure and Orca output are separate assertions.
+
+## Execution ledger
+
+[Native run 42795280967](https://github.com/OpenCoven/chat/actions/runs/42795280967), attempt 1, was dispatched with `release=v0.0.9` on harness commit `f1d4e04c626f97b9cb8a0bac4688f756adafcbce`. Linux job [129758791308](https://github.com/OpenCoven/chat/actions/runs/42795280967/job/129758791308) completed with row 504-6 failed: all eighteen new AT-SPI/Reset assertions passed at 400px, 360px and 600px, while all nine Orca Settings assertions failed. The saved utterance was only `Settings dialog.` at each width. Other Linux rows passed. Artifact `13755261032` and the full first-job log are retained.
+
+The first Orca sequence clicked the Inspector heading and pressed ordinary Down. The debug log confirms WebKitGTK's dialog script had no binding for Down; this is a harness navigation failure, not evidence that the exposed text cannot be read. The corrected sequence uses the documented [Orca desktop flat-review commands](https://help.gnome.org/orca/commands_flat_review.html): Insert+KP7 to the first spatial line, followed by bounded KP9 next-line commands. Every hint word must occur in order; adjacent controls may occur between wrapped spatial lines, but no instruction word may be absent. The original native failure remains separate from the corrected run, which has not yet completed.
+
+WebKitGTK flattens the visual card containers into the General landmark. The final tree selection explicitly takes native peers from the Inspector heading up to the next peer heading, so unrelated General text cannot satisfy a row assertion. The full Settings tree is retained independently. Unit regressions cover this flattened shape and interleaved spatial speech.
+
+The first run's macOS arm64 and x64 jobs passed. Windows job `129758791037` passed the changed Inspector row and completion row 567, but failed unchanged 504-1's browser-process equality (initial Firefox processes exited) and row 515's later review observation (`not-observed` until timeout). Its artifact `13755155570`, traces and full log are retained under `run-42795280967-windows`; those failures are not relabelled as passes or diagnosed as missed clicks.
+The published installer must match `OpenCoven.Chat_0.0.9_amd64.deb`, SHA-256 `48f592f60c5c191845b79c0e774f059cc0564269045552388b111d06901b9d2c`, against the release's `SHA256SUMS` (SHA-256 `402fef0316cbda5ffa9efea9d59887ddff2e8f0684cde27476c2d958279ac336`). Expected values are not observations; checksum, fresh-profile and environment facts will be credited only after inspecting the resulting artifact.
+
+| Requirement | Current evidence |
+| --- | --- |
+| Exact published installer and fresh isolated profile | First native artifact verified: installer/manifest hashes match; fresh runner profile and setup observed |
+| 400px label, complete hint, value and Reset relation | First artifact proves all AT-SPI assertions; final harness run pending |
+| Reset restores 360px; accessible default and disabled Reset | First artifact proves all AT-SPI assertions; final harness run pending |
+| 600px complete row and enabled Reset after narrow/wide recovery | First artifact proves all AT-SPI assertions; final harness run pending |
+| Orca Settings utterances at each width | First navigation failed; corrected flat-review run pending |
+| Full trees, screenshots, environment and installer facts | First artifact inspected, including all three Settings screenshots; corrected run pending |
+| Product repair, if a defect is reproduced | No defect established by this work yet |
+| Human screen-reader acceptance | Not performed; automation does not substitute |
+
+## Local validation and first failures
+
+Thirty focused tests passed after the flat-review correction across the Settings, native review-observation and completion-fixture tests. The new integration regression fails when the explicit complete-row checks are removed, reproducing the old width-only acceptance gap; restoring those checks passes. Negative cases reject missing labels, truncated hints, wrong width or relationship targets, wrong Reset availability, unrelated text elsewhere in Settings, unavailable trees and incomplete Orca output. Both success and failure retain the full trees and speech evidence in the harness tests.
+
+Typecheck, production build and lint passed after correcting test-fixture types; lint retains the existing one warning and four informational diagnostics. Python syntax compilation of the native helper passed. The first full local normal suite had 1,492 passes, 80 skips and 21 failures in unchanged `src/client-v1-conformance-workflow.test.ts`, all requiring absent `pwsh`. The separately run heavy suite finished with 916 passes, 36 skips and five failures in unchanged `src/phase1-conformance.test.ts`: the Node version check requires 24.18.1 (this host has 24.22.0), and four cases require absent `rustup`. These local failures are retained, not described as green tests. Hosted [CI 42795493933](https://github.com/OpenCoven/chat/actions/runs/42795493933) on signed head `f784b944da360bed2a607d8ffb13f40bba6e9ab6` has passed Web normal and heavy suites, typecheck and lint, browser E2E, contract canary and Linux supervisor checks. Desktop build remains running at this checkpoint. The change from the native-tested `f1d4e04` to `f784b94` is a test-fixture type only; native harness and workflow bytes are identical.
+
+The first focused run exposed an incomplete synthetic node normalization in the new test fixture; it was corrected to carry the native text value. Initial typecheck also caught strict optional-property typing in that fixture; the corrected types pass. These were local test-authoring failures, not native product observations.
+
+## Checkpoint and receipts
+
+Durable receipts are under `.worktrees/548-linux-settings-verification/.artifacts/548/`: `checkpoint.md`, `release.json`, `native-run.json`, `native-linux-first.log`, `native-windows-first.log`, `flat-review-focused.log`, `typecheck-flat-review.log`, the first Linux and Windows artifact directories, `regression-red.log`, `regression-green.log`, `focused-first.log`, `typecheck.log`, `lint.log`, `build.log`, `full-tests-first.log` and `heavy.log`. The first two commits were signed with the existing SSH identity and verified with Good git signatures before push. PR [#572](https://github.com/OpenCoven/chat/pull/572) is open; native results and the terminal verification record remain required before this goal is complete.
