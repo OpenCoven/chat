@@ -3203,6 +3203,8 @@ describe('a familiar asking for permission', () => {
     render(<ChatLayout {...asking({ onPermissionLog })} />);
     const access = openSettingsAt('Access');
     const log = await within(access).findByRole('list', { name: /Permission log/ });
+    // jsdom infers the role from the <ol>; WebKit, without markers, doesn't (#573).
+    expect(log).toHaveAttribute('role', 'list');
     const lines = within(log)
       .getAllByRole('listitem')
       .map((item) => item.textContent);
