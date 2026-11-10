@@ -23,7 +23,12 @@ export type CovenFamiliar = {
   /** The host could not read the project registry or grants; access is unknown. */
   projectAccessUnavailable?: boolean;
   /** Saved host grant; a run must independently verify its effective access. */
-  savedAccess?: { access: 'workspace-write'; writableRoots: string[]; verified: false };
+  savedAccess?: {
+    access: 'workspace-write';
+    writableRoots: string[];
+    readOnlyRoots?: string[];
+    verified: false;
+  };
   accessError?: string;
 };
 export type CovenProjectAccess = {
@@ -175,16 +180,23 @@ function familiar(value: unknown): value is CovenFamiliar {
       (record(value.savedAccess) &&
         value.savedAccess.access === 'workspace-write' &&
         value.savedAccess.verified === false &&
-        Array.isArray(value.savedAccess.writableRoots) &&
-        value.savedAccess.writableRoots.length <= 1025 &&
-        value.savedAccess.writableRoots.every(
-          (root: unknown) => typeof root === 'string' && root.length > 0 && root.length <= 4096,
-        ))) &&
+        workspaceRoots(value.savedAccess.writableRoots) &&
+        (value.savedAccess.readOnlyRoots === undefined ||
+          workspaceRoots(value.savedAccess.readOnlyRoots)))) &&
     (value.projectAccessUnavailable === undefined || value.projectAccessUnavailable === true) &&
     (value.avatarUrl === undefined ||
       (typeof value.avatarUrl === 'string' &&
         value.avatarUrl.length <= 256 * 1024 &&
         /^data:image\/png;base64,[A-Za-z0-9+/]+={0,2}$/.test(value.avatarUrl)))
+  );
+}
+function workspaceRoots(value: unknown): value is string[] {
+  return (
+    Array.isArray(value) &&
+    value.length <= 1025 &&
+    value.every(
+      (root: unknown) => typeof root === 'string' && root.length > 0 && root.length <= 4096,
+    )
   );
 }
 function approval(value: unknown): value is CovenApproval {

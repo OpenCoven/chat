@@ -3245,6 +3245,7 @@ describe('saved workspace access', () => {
             savedAccess: {
               access: 'workspace-write',
               writableRoots: ['/projects/nova', '/projects/chat'],
+              readOnlyRoots: ['/projects/docs'],
               verified: false,
             },
           },
@@ -3255,6 +3256,9 @@ describe('saved workspace access', () => {
     expect(screen.getByText('/projects/nova')).toBeTruthy();
     expect(screen.getByText('/projects/chat')).toBeTruthy();
     expect(screen.getByText(/beyond them needs a separate approval/)).toBeTruthy();
+    expect(
+      screen.getByRole('list', { name: 'Read-only projects', hidden: true }),
+    ).toHaveTextContent('/projects/docs');
   });
 
   it('shows unavailable grants as an error instead of an empty access list', () => {

@@ -843,7 +843,7 @@ export function ChatApp({
     () => projectEvents(liveEvents ? [...events, ...liveEvents] : events),
     [events, liveEvents],
   );
-  const effectiveWritableRoots = useMemo(() => {
+  const effectiveWorkspaceRoots = useMemo(() => {
     if (!busy || (phoneRun?.familiarId ?? runFamiliarId) !== navigation.familiarId) return;
     const frames = liveEvents?.length ? liveEvents : phoneRun ? events : [];
     const init = frames.findLast((event) => event.type === 'system' && event.subtype === 'init');
@@ -857,7 +857,14 @@ export function ChatApp({
       Array.isArray(roots) &&
       roots.every((root) => typeof root === 'string')
     ) {
-      return roots as string[];
+      const readOnlyRoots = scope.readOnlyRoots;
+      return {
+        writableRoots: roots as string[],
+        readOnlyRoots:
+          Array.isArray(readOnlyRoots) && readOnlyRoots.every((root) => typeof root === 'string')
+            ? (readOnlyRoots as string[])
+            : [],
+      };
     }
   }, [busy, phoneRun, runFamiliarId, navigation.familiarId, liveEvents, events]);
   const messages = projection.messages;
@@ -911,7 +918,7 @@ export function ChatApp({
       screen={screen}
       onWindowTitle={onWindowTitle}
       messages={messages}
-      effectiveWritableRoots={effectiveWritableRoots}
+      effectiveWorkspaceRoots={effectiveWorkspaceRoots}
       familiarId={navigation.familiarId}
       sessionId={navigation.sessionId}
       draft={navigation.drafts[draftKey(navigation)] ?? ''}

@@ -17,6 +17,7 @@ import XCTest
   var failSend = false
   var delaySend = false
   var sendGate: CheckedContinuation<Run, Error>?
+  var onSendSuspended: (() -> Void)?
   var gate: CheckedContinuation<Snapshot, Error>?
   var delaySnapshot = false
   var failSnapshot = false
@@ -37,7 +38,12 @@ import XCTest
   }
   func send(_ request: SendRequest) async throws -> Run {
     sent.append(request)
-    if delaySend { return try await withCheckedThrowingContinuation { sendGate = $0 } }
+    if delaySend {
+      return try await withCheckedThrowingContinuation {
+        sendGate = $0
+        onSendSuspended?()
+      }
+    }
     if failSend { throw URLError(.networkConnectionLost) }
     return Run(
       id: request.requestId, familiarId: request.familiarId, status: "running", messages: [])
@@ -130,8 +136,10 @@ import XCTest
     await model.refresh()
     model.draft = "hello"
     api.delaySend = true
+    let suspended = expectation(description: "The companion send is waiting on its response")
+    api.onSendSuspended = { suspended.fulfill() }
     async let sending: Void = model.send()
-    await Task.yield()
+    await fulfillment(of: [suspended], timeout: 5)
     await model.allow(request)
     XCTAssertTrue(api.answers.isEmpty)
     api.sendGate?.resume(

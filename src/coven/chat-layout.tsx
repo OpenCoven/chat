@@ -115,7 +115,12 @@ export type ChatLayoutProps = Readonly<{
     harness?: string;
   }[];
   messages: readonly ChatMessage[];
-  effectiveWritableRoots?: readonly string[] | undefined;
+  effectiveWorkspaceRoots?:
+    | {
+        writableRoots: readonly string[];
+        readOnlyRoots: readonly string[];
+      }
+    | undefined;
   attachments?: readonly ChatAttachment[];
   attaching?: boolean;
   onAttach?: (files: File[]) => void;
@@ -763,6 +768,7 @@ export function ChatLayout(props: ChatLayoutProps) {
     if (drawers) setSidebar(false);
   }
   const familiar = props.familiars.find((item) => item.id === props.familiarId);
+  const workspaceRoots = props.effectiveWorkspaceRoots ?? familiar?.savedAccess;
   const session = props.sessions.find((item) => item.id === props.sessionId);
   const run = runOptions(preferences);
   // An existing chat keeps the harness it started on. Before the harness could
@@ -1667,10 +1673,10 @@ export function ChatLayout(props: ChatLayoutProps) {
               </div>
               {familiar?.accessError ? (
                 <output className="coven-composer-note">{familiar.accessError}</output>
-              ) : props.effectiveWritableRoots || familiar?.savedAccess ? (
+              ) : workspaceRoots ? (
                 <details className="coven-composer-context">
                   <summary>
-                    {props.effectiveWritableRoots
+                    {props.effectiveWorkspaceRoots
                       ? 'Workspace write access verified for this run'
                       : 'Saved workspace write access · checked at each send'}
                   </summary>
@@ -1678,17 +1684,25 @@ export function ChatLayout(props: ChatLayoutProps) {
                     The familiar may change files in these folders once access is verified. Access
                     beyond them needs a separate approval.
                   </p>
-                  <ul>
-                    {(
-                      props.effectiveWritableRoots ??
-                      familiar?.savedAccess?.writableRoots ??
-                      []
-                    ).map((root) => (
+                  <ul aria-label="Writable folders">
+                    {workspaceRoots.writableRoots.map((root) => (
                       <li key={root}>
                         <bdi>{root}</bdi>
                       </li>
                     ))}
                   </ul>
+                  {workspaceRoots.readOnlyRoots?.length ? (
+                    <>
+                      <p>Read-only projects</p>
+                      <ul aria-label="Read-only projects">
+                        {workspaceRoots.readOnlyRoots.map((root) => (
+                          <li key={root}>
+                            <bdi>{root}</bdi>
+                          </li>
+                        ))}
+                      </ul>
+                    </>
+                  ) : null}
                 </details>
               ) : null}
               {props.busy && (

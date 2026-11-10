@@ -13,14 +13,17 @@ struct SavedAccess: Codable, Equatable {
   let access: String
   let writableRoots: [String]
   let verified: Bool
-  enum CodingKeys: String, CodingKey { case access, writableRoots, verified }
+  let readOnlyRoots: [String]?
+  enum CodingKeys: String, CodingKey { case access, writableRoots, readOnlyRoots, verified }
   init(from decoder: Decoder) throws {
     let values = try decoder.container(keyedBy: CodingKeys.self)
     access = try values.decode(String.self, forKey: .access)
     writableRoots = try values.decode([String].self, forKey: .writableRoots)
     verified = try values.decode(Bool.self, forKey: .verified)
+    readOnlyRoots = try values.decodeIfPresent([String].self, forKey: .readOnlyRoots)
     guard access == "workspace-write", !verified, writableRoots.count <= 1025,
-      writableRoots.allSatisfy({ !$0.isEmpty && $0.utf8.count <= 4096 && $0.hasPrefix("/") && !$0.unicodeScalars.contains(where: { CharacterSet.controlCharacters.contains($0) }) })
+      (readOnlyRoots?.count ?? 0) <= 1025,
+      (writableRoots + (readOnlyRoots ?? [])).allSatisfy({ !$0.isEmpty && $0.utf8.count <= 4096 && $0.hasPrefix("/") && !$0.unicodeScalars.contains(where: { CharacterSet.controlCharacters.contains($0) }) })
     else {
       throw DecodingError.dataCorruptedError(forKey: .access, in: values, debugDescription: "Invalid saved workspace access")
     }
@@ -40,6 +43,7 @@ struct Message: Codable, Identifiable, Equatable {
 struct EffectiveAccess: Codable, Equatable {
   let access: String
   let writableRoots: [String]
+  var readOnlyRoots: [String]? = nil
   let enforced: Bool
   let runId: String
 }

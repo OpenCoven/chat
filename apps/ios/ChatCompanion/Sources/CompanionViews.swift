@@ -361,12 +361,20 @@ private struct Workspace: View {
       {
         DisclosureGroup("Workspace write access verified for this run") {
           ForEach(access.writableRoots, id: \.self) { root in Text(root).textSelection(.enabled) }
+          if let roots = access.readOnlyRoots, !roots.isEmpty {
+            Text("Read-only projects")
+            ForEach(roots, id: \.self) { root in Text(root).textSelection(.enabled) }
+          }
         }
         .font(.footnote).foregroundStyle(Palette.textSecondary)
       } else if let access = familiar?.savedAccess {
         DisclosureGroup("Saved workspace write access") {
           Text("Checked at each send. Access beyond these folders needs a separate approval.")
           ForEach(access.writableRoots, id: \.self) { root in Text(root).textSelection(.enabled) }
+          if let roots = access.readOnlyRoots, !roots.isEmpty {
+            Text("Read-only projects")
+            ForEach(roots, id: \.self) { root in Text(root).textSelection(.enabled) }
+          }
         }
         .font(.footnote).foregroundStyle(Palette.textSecondary)
       }

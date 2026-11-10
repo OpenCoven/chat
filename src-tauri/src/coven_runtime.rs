@@ -1110,7 +1110,7 @@ fn attach_saved_access(
             &home()?,
         )?;
         Ok(
-            json!({"access": policy.access, "writableRoots": policy.writable_roots, "verified": false}),
+            json!({"access": policy.access, "writableRoots": policy.writable_roots, "readOnlyRoots": policy.read_only_roots, "verified": false}),
         )
     })();
     match policy {
