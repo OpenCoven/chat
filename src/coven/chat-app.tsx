@@ -162,6 +162,7 @@ export function ChatApp({
   /** The requests the last read returned, and those this window declined. */
   const shownApprovals = useRef<CovenApproval[]>([]);
   const answeredHere = useRef(new Set<string>());
+  const quietRead = useRef(false);
   const [runStartedAt, setRunStartedAt] = useState(0);
   // How each familiar's most recent run in this window ended, and how long it took.
   const [lastRuns, setLastRuns] = useState<Record<string, LastRun>>({});
@@ -397,9 +398,13 @@ export function ChatApp({
   // biome-ignore lint/correctness/useExhaustiveDependencies: `reads` explicitly asks for the history again.
   useEffect(() => {
     const request = ++readId.current;
+    // A read for the phone's sake keeps the screen and the composer as they are,
+    // as one during a phone run does: the person may be typing here.
+    const quiet = Boolean(phoneRunRef.current) || quietRead.current;
+    quietRead.current = false;
     // Reading further back keeps what is on screen until the longer history
     // arrives; a different chat starts empty.
-    if (depth === 1 && (!phoneRunRef.current || readingSession.current !== navigation.sessionId)) {
+    if (depth === 1 && (!quiet || readingSession.current !== navigation.sessionId)) {
       setEvents([]);
       setPartial(false);
     }
@@ -409,7 +414,7 @@ export function ChatApp({
       if (available) setLoading(false);
       return;
     }
-    if (!phoneRunRef.current) setLoading(true);
+    if (!quiet) setLoading(true);
     const reading =
       depth > 1
         ? runtime.readSession(navigation.sessionId, depth)
@@ -442,37 +447,51 @@ export function ChatApp({
     };
   }, [runtime, available, navigation.sessionId, reads, depth]);
 
-  const refreshApprovals = useCallback(async () => {
-    const request = ++approvalReads.current;
-    try {
-      const next = await runtime.pendingApprovals();
-      if (approvalReads.current === request) {
-        const open = next.filter((item) => !allowing.current.has(item.id));
-        // A request this chat showed has closed without this window answering it:
-        // declined on the phone, replaced or expired. A phone's Decline writes a
-        // line into the chat, and this window shows it only once it reads again.
-        // Runs read the chat when they end, so they are left to do it.
-        const familiar = navigationRef.current.familiarId;
-        const closedElsewhere = shownApprovals.current.some(
-          (item) =>
-            item.familiarId === familiar &&
-            !answeredHere.current.has(item.id) &&
-            !open.some((still) => still.id === item.id),
-        );
-        for (const id of answeredHere.current)
-          if (!open.some((still) => still.id === id)) answeredHere.current.delete(id);
-        shownApprovals.current = open;
-        setApprovals(open);
-        if (closedElsewhere && !activeRun.current && !phoneRunRef.current)
-          setReads((value) => value + 1);
+  /**
+   * Reads the open requests. A request this chat showed that closes without this
+   * window answering it was declined on the phone, replaced by a phone message,
+   * or expired. Only a Decline writes a line into the chat, and an open chat
+   * shows that line once it reads again, so `reread` reads it then. A read
+   * locks the composer, so the reads a run sets off pass `reread: false`: a
+   * request that closes around a run was replaced by that run's own message,
+   * which writes nothing.
+   */
+  const refreshApprovals = useCallback(
+    async ({ reread = true } = {}) => {
+      const request = ++approvalReads.current;
+      try {
+        const next = await runtime.pendingApprovals();
+        if (approvalReads.current === request) {
+          const open = next.filter((item) => !allowing.current.has(item.id));
+          const isOpen = (id: string) => open.some((still) => still.id === id);
+          const familiar = navigationRef.current.familiarId;
+          const closedElsewhere = shownApprovals.current.some(
+            (item) =>
+              item.familiarId === familiar &&
+              !answeredHere.current.has(item.id) &&
+              !isOpen(item.id),
+          );
+          const runOver = !activeRun.current && !phoneRunRef.current;
+          // Still open once a run is over: the host refused the message that
+          // would have closed it, so it is the phone's to answer again.
+          for (const id of answeredHere.current)
+            if (!isOpen(id) || (!reread && runOver)) answeredHere.current.delete(id);
+          shownApprovals.current = open;
+          setApprovals(open);
+          if (reread && closedElsewhere && runOver) {
+            quietRead.current = true;
+            setReads((value) => value + 1);
+          }
+        }
+      } catch {
+        // The last known list stays. Answering re-checks on the host regardless.
       }
-    } catch {
-      // The last known list stays. Answering re-checks on the host regardless.
-    }
-  }, [runtime]);
+    },
+    [runtime],
+  );
   // biome-ignore lint/correctness/useExhaustiveDependencies: a request can only appear when a run ends, here or on the phone.
   useEffect(() => {
-    if (available) void refreshApprovals();
+    if (available) void refreshApprovals({ reread: false });
     else {
       shownApprovals.current = [];
       setApprovals([]);
@@ -518,6 +537,10 @@ export function ChatApp({
     ) {
       return;
     }
+    // This message closes the familiar's open requests as it starts, and writes
+    // nothing about them into the chat, so their closing needs no read.
+    for (const item of shownApprovals.current)
+      if (item.familiarId === current.familiarId) answeredHere.current.add(item.id);
     await runTurn({
       prompt,
       selectedFiles,
@@ -579,7 +602,7 @@ export function ChatApp({
     } finally {
       // A request the host refused to spend comes back here.
       allowing.current.delete(approval.id);
-      void refreshApprovals();
+      void refreshApprovals({ reread: false });
     }
   }
 
