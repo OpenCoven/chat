@@ -69,7 +69,8 @@ export class ReviewTrace {
   }
   async sample(phase) {
     const root = await this.app.snapshot();
-    if (!root) throw new Error('The native review observation has no accessible tree');
+    if (!root || !root.children?.length)
+      throw new Error('The native review observation has no accessible tree');
     const nodes = [...walk(root)];
     const open = nodes.some((node) => node.role === 'dialog' && node.name === REVIEW);
     this.seen ||= open;

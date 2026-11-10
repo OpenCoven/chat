@@ -9,7 +9,9 @@ test('review diagnostics distinguish observed dismissal from absence without gue
   const app = {
     snapshot: async () => ({
       role: 'document',
-      children: visible ? [{ role: 'dialog', name: rows.REVIEW, children: [] }] : [],
+      children: visible
+        ? [{ role: 'dialog', name: rows.REVIEW, children: [] }]
+        : [{ role: 'textbox', name: 'Message Astra', children: [] }],
     }),
   };
   const observations: { label: string; value: unknown }[] = [];
@@ -31,15 +33,21 @@ test('review diagnostics distinguish observed dismissal from absence without gue
   expect(JSON.stringify(observations)).not.toContain('http');
 });
 
-test('an unavailable accessibility tree cannot count as a dismissed review', async () => {
-  expect(typeof rows.ReviewTrace).toBe('function');
-  let available = true;
-  const app = {
-    snapshot: async () => (available ? { role: 'dialog', name: rows.REVIEW, children: [] } : null),
-  };
-  const trace = new rows.ReviewTrace(app, { note() {} });
-  await trace.sample('held-open');
-  available = false;
-  await expect(trace.sample('after-completion')).rejects.toThrow(/accessible tree/);
-  expect(trace.outcome).toBe('open');
-});
+test.each([null, { role: 'document', children: [] }])(
+  'an unavailable accessibility tree %j cannot count as a dismissed review',
+  async (unavailable) => {
+    expect(typeof rows.ReviewTrace).toBe('function');
+    let available = true;
+    const app = {
+      snapshot: async () =>
+        available
+          ? { role: 'document', children: [{ role: 'dialog', name: rows.REVIEW, children: [] }] }
+          : unavailable,
+    };
+    const trace = new rows.ReviewTrace(app, { note() {} });
+    await trace.sample('held-open');
+    available = false;
+    await expect(trace.sample('after-completion')).rejects.toThrow(/accessible tree/);
+    expect(trace.outcome).toBe('open');
+  },
+);
