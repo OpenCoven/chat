@@ -159,6 +159,9 @@ export function ChatApp({
   const approvalReads = useRef(0);
   /** Requests being allowed: the host may not have recorded the answer yet. */
   const allowing = useRef(new Set<string>());
+  /** The requests the last read returned, and those this window declined. */
+  const shownApprovals = useRef<CovenApproval[]>([]);
+  const answeredHere = useRef(new Set<string>());
   const [runStartedAt, setRunStartedAt] = useState(0);
   // How each familiar's most recent run in this window ended, and how long it took.
   const [lastRuns, setLastRuns] = useState<Record<string, LastRun>>({});
@@ -444,7 +447,24 @@ export function ChatApp({
     try {
       const next = await runtime.pendingApprovals();
       if (approvalReads.current === request) {
-        setApprovals(next.filter((item) => !allowing.current.has(item.id)));
+        const open = next.filter((item) => !allowing.current.has(item.id));
+        // A request this chat showed has closed without this window answering it:
+        // declined on the phone, replaced or expired. A phone's Decline writes a
+        // line into the chat, and this window shows it only once it reads again.
+        // Runs read the chat when they end, so they are left to do it.
+        const familiar = navigationRef.current.familiarId;
+        const closedElsewhere = shownApprovals.current.some(
+          (item) =>
+            item.familiarId === familiar &&
+            !answeredHere.current.has(item.id) &&
+            !open.some((still) => still.id === item.id),
+        );
+        for (const id of answeredHere.current)
+          if (!open.some((still) => still.id === id)) answeredHere.current.delete(id);
+        shownApprovals.current = open;
+        setApprovals(open);
+        if (closedElsewhere && !activeRun.current && !phoneRunRef.current)
+          setReads((value) => value + 1);
       }
     } catch {
       // The last known list stays. Answering re-checks on the host regardless.
@@ -453,7 +473,10 @@ export function ChatApp({
   // biome-ignore lint/correctness/useExhaustiveDependencies: a request can only appear when a run ends, here or on the phone.
   useEffect(() => {
     if (available) void refreshApprovals();
-    else setApprovals([]);
+    else {
+      shownApprovals.current = [];
+      setApprovals([]);
+    }
   }, [available, busy, phoneRun, refreshApprovals]);
   const watchingApprovals = available && approvals.length > 0;
   useEffect(() => {
@@ -543,6 +566,7 @@ export function ChatApp({
       : undefined;
     const { harness: _chatKeepsItsHarness, ...runOptions } = sendOptions(options, chatHarness);
     allowing.current.add(approval.id);
+    answeredHere.current.add(approval.id);
     setApprovals((previous) => previous.filter((item) => item.id !== approval.id));
     try {
       await runTurn({
@@ -561,6 +585,7 @@ export function ChatApp({
 
   async function declineApproval(approval: CovenApproval) {
     setAnsweringApproval(true);
+    answeredHere.current.add(approval.id);
     try {
       await runtime.decline(approval.id);
       // The chat now carries a line saying so.
