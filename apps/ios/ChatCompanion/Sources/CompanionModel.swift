@@ -222,9 +222,10 @@ import Observation
   /// The person's Allow, already confirmed. It runs like a send: the run outlives
   /// this request, and an uncertain delivery is checked by its ID, never repeated.
   func allow(_ approval: Approval) async {
-    guard canAllow, let api = client, approval.familiarId == selectedId else { return }
+    guard canAllow, let api = client, approval.familiarId == selectedId,
+      let roots = approval.writableRoots, !roots.isEmpty else { return }
     let answer = ApprovalAnswer(
-      requestId: UUID().uuidString.lowercased(), approvalId: approval.id, decision: "allow")
+      requestId: UUID().uuidString.lowercased(), approvalId: approval.id, decision: "allow", writableRoots: roots)
     let expected = generation
     pendingRunId = answer.requestId
     historyRunId = answer.requestId

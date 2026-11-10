@@ -353,6 +353,31 @@ private struct Workspace: View {
   private var composer: some View {
     VStack(alignment: .leading, spacing: 8) {
       if !model.error.isEmpty { errorCard }
+      if let error = familiar?.accessError {
+        Text(error).font(.footnote).foregroundStyle(Palette.textSecondary)
+      } else if let run = model.activeRun, run.running, run.familiarId == model.selectedId,
+        let access = run.effectiveAccess, access.enforced,
+        access.access == "workspace-write", access.runId == run.id
+      {
+        DisclosureGroup("Workspace write access verified for this run") {
+          ForEach(access.writableRoots, id: \.self) { root in Text(root).textSelection(.enabled) }
+          if let roots = access.readOnlyRoots, !roots.isEmpty {
+            Text("Read-only projects")
+            ForEach(roots, id: \.self) { root in Text(root).textSelection(.enabled) }
+          }
+        }
+        .font(.footnote).foregroundStyle(Palette.textSecondary)
+      } else if let access = familiar?.savedAccess {
+        DisclosureGroup("Saved workspace write access") {
+          Text("Checked at each send. Access beyond these folders needs a separate approval.")
+          ForEach(access.writableRoots, id: \.self) { root in Text(root).textSelection(.enabled) }
+          if let roots = access.readOnlyRoots, !roots.isEmpty {
+            Text("Read-only projects")
+            ForEach(roots, id: \.self) { root in Text(root).textSelection(.enabled) }
+          }
+        }
+        .font(.footnote).foregroundStyle(Palette.textSecondary)
+      }
       if let approval = model.approval {
         ApprovalCard(
           approval: approval, name: familiar?.displayName ?? "Your familiar",

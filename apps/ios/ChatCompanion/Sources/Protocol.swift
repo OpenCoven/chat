@@ -6,6 +6,28 @@ struct Familiar: Codable, Identifiable, Equatable {
   let displayName: String
   var description: String?
   var emoji: String?
+  var savedAccess: SavedAccess?
+  var accessError: String?
+}
+struct SavedAccess: Codable, Equatable {
+  let access: String
+  let writableRoots: [String]
+  let verified: Bool
+  let readOnlyRoots: [String]?
+  enum CodingKeys: String, CodingKey { case access, writableRoots, readOnlyRoots, verified }
+  init(from decoder: Decoder) throws {
+    let values = try decoder.container(keyedBy: CodingKeys.self)
+    access = try values.decode(String.self, forKey: .access)
+    writableRoots = try values.decode([String].self, forKey: .writableRoots)
+    verified = try values.decode(Bool.self, forKey: .verified)
+    readOnlyRoots = try values.decodeIfPresent([String].self, forKey: .readOnlyRoots)
+    guard access == "workspace-write", !verified, writableRoots.count <= 1025,
+      (readOnlyRoots?.count ?? 0) <= 1025,
+      (writableRoots + (readOnlyRoots ?? [])).allSatisfy({ !$0.isEmpty && $0.utf8.count <= 4096 && $0.hasPrefix("/") && !$0.unicodeScalars.contains(where: { CharacterSet.controlCharacters.contains($0) }) })
+    else {
+      throw DecodingError.dataCorruptedError(forKey: .access, in: values, debugDescription: "Invalid saved workspace access")
+    }
+  }
 }
 struct ChatSession: Codable, Identifiable, Equatable {
   let id: String
@@ -18,12 +40,20 @@ struct Message: Codable, Identifiable, Equatable {
   let role: String
   let text: String
 }
+struct EffectiveAccess: Codable, Equatable {
+  let access: String
+  let writableRoots: [String]
+  var readOnlyRoots: [String]? = nil
+  let enforced: Bool
+  let runId: String
+}
 struct Run: Codable, Identifiable, Equatable {
   let id: String
   let familiarId: String
   let status: String
   let messages: [Message]
   var error: String?
+  var effectiveAccess: EffectiveAccess? = nil
   var running: Bool { status == "running" }
 }
 /// A familiar's open request for write access. Older Macs don't send these.
@@ -34,6 +64,7 @@ struct Approval: Codable, Identifiable, Equatable {
   var reason: String?
   let requestedAt: Double
   let expiresAt: Double
+  var writableRoots: [String]? = nil
 }
 struct Snapshot: Codable {
   let version: Int
@@ -68,6 +99,7 @@ struct ApprovalAnswer: Codable, Equatable {
   let requestId: String
   let approvalId: String
   let decision: String
+  var writableRoots: [String]? = nil
 }
 struct ApprovalResult: Codable {
   let status: String

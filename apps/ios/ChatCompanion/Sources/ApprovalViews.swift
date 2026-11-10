@@ -23,10 +23,13 @@ struct ApprovalCard: View {
         Text(reason).font(.footnote).foregroundStyle(Palette.textSecondary)
           .fixedSize(horizontal: false, vertical: true)
       }
+      ForEach(approval.writableRoots ?? [], id: \.self) { root in
+        Text(root).font(.footnote).foregroundStyle(Palette.textSecondary)
+      }
       HStack(spacing: 10) {
         Button("Allow once") { confirming = true }
           .buttonStyle(.borderedProminent)
-          .disabled(!canAllow || answering)
+          .disabled(!canAllow || answering || approval.writableRoots?.isEmpty != false)
           .accessibilityIdentifier("approval-allow")
         Button("Decline", action: onDecline)
           .buttonStyle(.bordered)
@@ -51,7 +54,7 @@ struct ApprovalCard: View {
       Button("Not now", role: .cancel) {}
     } message: {
       Text(
-        "\(approval.summary)\n\n\(name) can change files and run commands on your Mac as you, for one turn. That access isn't limited to what's described here. Chat logs your answer and each tool call Coven reports."
+        "\(approval.summary)\n\nAllow these extra folders for the next reply:\n\((approval.writableRoots ?? []).joined(separator: "\n"))"
       )
     }
   }

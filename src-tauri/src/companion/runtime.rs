@@ -17,9 +17,16 @@ pub(crate) async fn companion_snapshot(app: AppHandle) -> Result<Value, String> 
     blocking(move || {
         let _permit = permit;
         let familiars = cli_json(&["familiars", "--json"])?;
+        let projects = familiar_projects::ProjectAccess::load().ok();
         let familiars = familiars.as_array().ok_or("Invalid familiars.")?.iter().map(|f| {
-            validate_id(string(f,"id")?)?;
-            Ok(json!({"id":string(f,"id")?,"name":string(f,"name")?,"displayName":string(f,"display_name")?,"description":f.get("description"),"emoji":f.get("emoji")}))
+            let id = string(f, "id")?;
+            validate_id(id)?;
+            let mut familiar = json!({"id":id,"name":string(f,"name")?,"displayName":string(f,"display_name")?,"description":f.get("description"),"emoji":f.get("emoji"),"workspace":f.get("workspace")});
+            attach_project_access(&mut familiar, projects.as_ref(), id);
+            attach_saved_access(&mut familiar, projects.as_ref(), id);
+            // The companion receives only the roots in this familiar's grant.
+            familiar.as_object_mut().ok_or("Invalid familiar.")?.remove("projectAccess");
+            Ok(familiar)
         }).collect::<Result<Vec<Value>,String>>()?;
         let sessions = {
             let _storage = crate::chat_lifecycle::STORAGE_LOCK.lock().map_err(|_| "Chat unavailable.")?;
@@ -95,6 +102,7 @@ pub(crate) fn companion_allow(
     app: AppHandle,
     request_id: String,
     approval_id: String,
+    writable_roots: Vec<String>,
 ) -> Result<Arc<crate::companion::backend::RunRecord>, String> {
     if !cfg!(unix) {
         return Err("Companion execution requires macOS or Linux.".into());
@@ -115,6 +123,7 @@ pub(crate) fn companion_allow(
         crate::chat_approvals::Device::Iphone,
         &request_id,
         crate::chat_approvals::now_ms(),
+        &writable_roots,
     )?;
     let request = crate::companion::backend::SendRequest {
         request_id,

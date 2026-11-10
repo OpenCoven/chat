@@ -83,13 +83,29 @@ impl RunRecord {
                 "failed"
             };
             if inner.status == "failed" {
-                inner.error = Some("The run could not finish. Check Chat on your Mac.");
+                use crate::coven_runtime::execution_policy::{
+                    DIRECT_ANTHROPIC_REQUIRED, UNSUPPORTED, UNVERIFIED,
+                };
+                inner.error = Some(match result.as_ref().err().map(String::as_str) {
+                    Some(UNSUPPORTED) => UNSUPPORTED,
+                    Some(DIRECT_ANTHROPIC_REQUIRED) => DIRECT_ANTHROPIC_REQUIRED,
+                    Some(UNVERIFIED) => UNVERIFIED,
+                    _ => "The run could not finish. Check Chat on your Mac.",
+                });
             }
         }
     }
     pub fn value(&self) -> Value {
         let inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
         let mut value = json!({"id":self.id,"familiarId":self.familiar_id,"status":inner.status,"messages":project_messages(&inner.events)});
+        if let Some(access) = inner.events.iter().find_map(|event| {
+            (event["type"] == "system"
+                && event["subtype"] == "init"
+                && event["effectiveAccess"]["enforced"] == true)
+                .then(|| event["effectiveAccess"].clone())
+        }) {
+            value["effectiveAccess"] = access;
+        }
         if let Some(error) = inner.error {
             value["error"] = json!(error);
         }
@@ -113,7 +129,12 @@ pub(super) trait Backend: Send + Sync {
     /// Spends an open request and starts its one turn with write access.
     /// The familiar an open request belongs to; `None` once it has closed.
     fn open_approval(&self, approval_id: &str) -> Result<Option<String>, String>;
-    fn allow(&self, request_id: String, approval_id: String) -> Result<Arc<RunRecord>, String>;
+    fn allow(
+        &self,
+        request_id: String,
+        approval_id: String,
+        writable_roots: Vec<String>,
+    ) -> Result<Arc<RunRecord>, String>;
     fn decline(&self, approval_id: &str) -> Result<(), String>;
     fn permission_log(&self) -> Result<Value, String>;
 }
@@ -151,8 +172,18 @@ impl Backend for NativeBackend {
     fn open_approval(&self, approval_id: &str) -> Result<Option<String>, String> {
         crate::coven_runtime::companion_open_approval(&self.app, approval_id)
     }
-    fn allow(&self, request_id: String, approval_id: String) -> Result<Arc<RunRecord>, String> {
-        crate::coven_runtime::companion_allow(self.app.clone(), request_id, approval_id)
+    fn allow(
+        &self,
+        request_id: String,
+        approval_id: String,
+        writable_roots: Vec<String>,
+    ) -> Result<Arc<RunRecord>, String> {
+        crate::coven_runtime::companion_allow(
+            self.app.clone(),
+            request_id,
+            approval_id,
+            writable_roots,
+        )
     }
     fn decline(&self, approval_id: &str) -> Result<(), String> {
         crate::coven_runtime::companion_decline(&self.app, approval_id)

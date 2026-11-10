@@ -371,6 +371,8 @@ impl Host {
                     request_id: String,
                     approval_id: String,
                     decision: String,
+                    #[serde(default)]
+                    writable_roots: Vec<String>,
                 }
                 let Ok(input) = serde_json::from_slice::<Answer>(&request.body) else {
                     return error(400, "Invalid approval answer.");
@@ -430,10 +432,11 @@ impl Host {
                             gate.receipts.remove(&input.request_id);
                             return error(503, "Cannot save the receipt. No run was started.");
                         }
-                        match self
-                            .backend
-                            .allow(input.request_id.clone(), input.approval_id)
-                        {
+                        match self.backend.allow(
+                            input.request_id.clone(),
+                            input.approval_id,
+                            input.writable_roots,
+                        ) {
                             Ok(run) => {
                                 let value = run.value();
                                 if gate.runs.len() >= 16 {

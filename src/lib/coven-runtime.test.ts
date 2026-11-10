@@ -343,3 +343,23 @@ describe('Coven runtime', () => {
     }
   });
 });
+
+it('keeps saved access separate from effective access and rejects forged native metadata', async () => {
+  const savedAccess = {
+    access: 'workspace-write',
+    writableRoots: ['/projects/nova'],
+    verified: false,
+  };
+  const familiar = { id: 'nova', name: 'nova', displayName: 'Nova', savedAccess };
+  const invoke = vi.fn().mockResolvedValue([familiar]);
+  const runtime = createCovenRuntime({ available: () => true, invoke });
+  expect(await runtime.listFamiliars()).toEqual([familiar]);
+  for (const altered of [
+    { ...savedAccess, verified: true },
+    { ...savedAccess, access: 'full' },
+    { ...savedAccess, writableRoots: [7] },
+  ]) {
+    invoke.mockResolvedValue([{ ...familiar, savedAccess: altered }]);
+    await expect(runtime.listFamiliars()).rejects.toThrow('invalid native result');
+  }
+});

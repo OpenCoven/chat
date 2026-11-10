@@ -1204,6 +1204,7 @@ describe('answering a familiar that asks for permission', () => {
     summary: 'Create probe.txt',
     requestedAt: 1,
     expiresAt: 2,
+    writableRoots: ['/projects/extra'],
   };
   beforeEach(() => {
     localStorage.clear();
@@ -1225,14 +1226,18 @@ describe('answering a familiar that asks for permission', () => {
     ).toBeInTheDocument();
   });
 
-  it('names only the request when allowing, and leaves the draft alone', async () => {
+  it('confirms the exact requested folders when allowing, and leaves the draft alone', async () => {
     const api = asking();
     await ready(api);
     draft('still typing');
     fireEvent.click(await screen.findByRole('button', { name: 'Allow Create probe.txt' }));
     await waitFor(() => expect(api.allow).toHaveBeenCalledOnce());
     const input = vi.mocked(api.allow).mock.calls[0]?.[0];
-    expect(input).toEqual({ approvalId: 'request-1', runId: expect.any(String) });
+    expect(input).toEqual({
+      approvalId: 'request-1',
+      runId: expect.any(String),
+      writableRoots: ['/projects/extra'],
+    });
     expect(api.send).not.toHaveBeenCalled();
     await waitFor(() => expect(screen.getByTestId('run-familiar')).toHaveTextContent('idle'));
     expect(screen.getByRole('textbox')).toHaveValue('still typing');
