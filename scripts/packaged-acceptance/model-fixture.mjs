@@ -96,7 +96,8 @@ function lastPrompt(messages) {
  */
 export function approvalStep(messages) {
   const prompt = lastPrompt(messages);
-  const proof = [...prompt.matchAll(/\[\[ask (\S+)\]\]/g)].at(-1)?.[1];
+  // A path can hold spaces (macOS's Application Support), so it runs to the `]]`.
+  const proof = [...prompt.matchAll(/\[\[ask ([^\]]+?)\]\]/g)].at(-1)?.[1];
   if (!proof) return undefined;
   const last = messages.at(-1)?.content;
   const result = Array.isArray(last)
@@ -121,7 +122,8 @@ export function approvalStep(messages) {
   };
 }
 
-function stream(res, model, { text, tool }) {
+/** Streams one step: a text reply, or one tool call the engine then runs. */
+export function streamStep(res, model, { text, tool }) {
   res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-cache' });
   const send = (event, data) => res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
   send('message_start', {
@@ -189,7 +191,7 @@ export function startModelFixture({ port = 0, log } = {}) {
         const step = approvalStep(parsed.messages) ?? { text: replyFor(parsed.messages) };
         const { text } = step;
         if (parsed.stream) {
-          stream(res, parsed.model, step);
+          streamStep(res, parsed.model, step);
         } else if (step.tool) {
           res.writeHead(200, { 'content-type': 'application/json' });
           res.end(

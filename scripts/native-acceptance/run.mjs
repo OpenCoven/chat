@@ -13,6 +13,7 @@ import { homedir, release } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
+import { ASKING_SOURCE, approvalRows, askingOffRow, askingRowsFor } from './approval.mjs';
 import { defaultBrowser, quitBrowsers } from './browser.mjs';
 import { App, Native, outline, PLATFORM, screenshot, sleep, until } from './driver.mjs';
 import { startModelFixture } from './fixture.mjs';
@@ -32,6 +33,7 @@ import { screenReader } from './speech.mjs';
 import { storageRow } from './storage.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
+const repo = resolve(here, '..', '..');
 const { values: options } = parseArgs({
   options: {
     app: { type: 'string' },
@@ -91,6 +93,38 @@ const logged = () =>
     .filter((entry) => entry.path === '/v1/messages');
 const requests = () => logged().length;
 const tokens = (name) => logged().filter((entry) => entry.token === name).length;
+const steps = (kind) => logged().filter((entry) => entry.step === kind).length;
+
+/**
+ * Reads the build's `ASKING_ENABLED` (#573): this checkout for a candidate, which
+ * the workflow switched on first when the run asked for `switched-on`, or the
+ * published release's tag. `askingRowsFor` decides which rows that means.
+ */
+function askingInBuild() {
+  const mode = process.env.NATIVE_ASKING || 'as-built';
+  const tag = process.env.RELEASE || '';
+  try {
+    let source;
+    if (tag) {
+      const ref = `refs/tags/${tag}`;
+      execFileSync('git', ['fetch', '--quiet', '--depth', '1', 'origin', `${ref}:${ref}`], {
+        cwd: repo,
+        stdio: 'ignore',
+        timeout: 120_000,
+      });
+      source = execFileSync('git', ['show', `${ref}:${ASKING_SOURCE}`], {
+        cwd: repo,
+        encoding: 'utf8',
+      });
+    } else {
+      source = readFileSync(join(repo, ASKING_SOURCE), 'utf8');
+    }
+    return askingRowsFor({ mode, tag, source });
+  } catch (error) {
+    return askingRowsFor({ mode, tag, error: String(error.message).split('\n')[0] });
+  }
+}
+const asking = askingInBuild();
 
 const native =
   PLATFORM === 'mac'
@@ -116,6 +150,7 @@ const facts = {
   os: `${process.platform} ${release()}`,
   node: process.version,
   ...(options.facts ? JSON.parse(readFileSync(options.facts, 'utf8').replace(/^\uFEFF/, '')) : {}),
+  asking,
 };
 const rows = [];
 const setup = new Row('setup', 'First-run setup through the window');
@@ -216,6 +251,7 @@ try {
     native,
     requests,
     tokens,
+    steps,
     reader,
     shot,
     save,
@@ -265,6 +301,18 @@ try {
   await lane.front();
   await lane.reset();
   rows.push(await cancelledRunRow(lane, FIRST));
+
+  // Asking for permission (#542, #573), last of the rows that send: its turns
+  // write real files and leave requests in the thread.
+  await lane.front();
+  await lane.reset();
+  if (asking.rows === 'asking') rows.push(...(await approvalRows(lane, FIRST)));
+  else if (asking.rows === 'asking-off') rows.push(await askingOffRow(lane, FIRST));
+  else {
+    const unknown = new Row('asking', 'Asking for permission, as built');
+    unknown.error = `not run: could not tell whether this build asks (${asking.reason})`;
+    rows.push(unknown);
+  }
   shot('before-quit');
 
   // Quit as a person would, so the web view writes its storage out.

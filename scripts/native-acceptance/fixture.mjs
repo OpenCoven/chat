@@ -1,23 +1,44 @@
 // The packaged suite's deterministic model stand-in, plus two replies the
 // native lane needs: one that streams slowly enough to cancel a real run while
 // it is still going (#504 row 7), and one carrying an address with a user name,
-// which the review must refuse to open (#515). Every word is synthetic.
+// which the review must refuse to open (#515). It also serves the packaged
+// suite's approval script (`approvalStep`), which asks the real engine to write a
+// real file, so the engine and not this fixture decides what each turn may do.
+// Every word is synthetic.
 
 import { appendFileSync } from 'node:fs';
 import { createServer } from 'node:http';
 import {
   ADDRESSES,
+  APPROVAL_DONE,
+  APPROVAL_NO_NOTE,
+  APPROVAL_REFUSED,
+  APPROVAL_SUMMARY,
+  APPROVAL_UNASKED,
+  approvalStep,
   replyFor as packagedReply,
+  streamStep,
   TABLE,
 } from '../packaged-acceptance/model-fixture.mjs';
 
-export { ADDRESSES, TABLE };
+export {
+  ADDRESSES,
+  APPROVAL_DONE,
+  APPROVAL_NO_NOTE,
+  APPROVAL_REFUSED,
+  APPROVAL_SUMMARY,
+  APPROVAL_UNASKED,
+  TABLE,
+};
 export const USERINFO = 'https://name@example.com/';
+/** The heading of an ordinary reply to a message sent while a request waits (#573). */
+export const MOVED_ON = 'Moving on';
 export const SLOW_LINES = 120;
 
 const EXTRA = {
   reviewrace: `A held reply.\n\n[Completion boundary](${ADDRESSES.query})`,
   userinfo: `One more address.\n\n- [Named login](${USERINFO})`,
+  moveon: `## ${MOVED_ON}\n\nNothing to write.`,
 };
 
 function lastText(messages) {
@@ -36,7 +57,7 @@ function lastText(messages) {
 /** The newest token decides, as in the packaged fixture. */
 function tokenOf(messages) {
   return [
-    ...lastText(messages).matchAll(/\[\[(links|table|other|slow|userinfo|reviewrace)\]\]/g),
+    ...lastText(messages).matchAll(/\[\[(links|table|other|slow|userinfo|reviewrace|moveon)\]\]/g),
   ].at(-1)?.[1];
 }
 
@@ -97,11 +118,16 @@ export function startModelFixture({ log } = {}) {
         parsed = {};
       }
       const path = (req.url ?? '').split('?')[0];
-      const token = tokenOf(parsed.messages);
+      const isMessage = req.method === 'POST' && path === '/v1/messages';
+      const step = isMessage ? approvalStep(parsed.messages) : undefined;
+      const token = tokenOf(parsed.messages) ?? (step ? 'ask' : undefined);
       if (log) {
+        // `step` says what an approval turn was served: `write` is a real Write
+        // call for the engine to run or refuse, `text` the turn's closing reply.
+        const served = step ? { step: step.tool ? 'write' : 'text' } : {};
         appendFileSync(
           log,
-          `${JSON.stringify({ at: Date.now(), method: req.method, path, token: token ?? null })}\n`,
+          `${JSON.stringify({ at: Date.now(), method: req.method, path, token: token ?? null, ...served })}\n`,
         );
       }
       if (req.method === 'POST' && path === '/v1/messages/count_tokens') {
@@ -115,6 +141,35 @@ export function startModelFixture({ log } = {}) {
           JSON.stringify({
             type: 'error',
             error: { type: 'not_found_error', message: 'Not served.' },
+          }),
+        );
+        return;
+      }
+      if (step) {
+        if (parsed.stream) {
+          streamStep(res, parsed.model, step);
+          return;
+        }
+        res.writeHead(200, { 'content-type': 'application/json' });
+        res.end(
+          JSON.stringify({
+            id: 'msg_fixture',
+            type: 'message',
+            role: 'assistant',
+            model: parsed.model,
+            content: step.tool
+              ? [
+                  {
+                    type: 'tool_use',
+                    id: `toolu_fixture_${Date.now()}`,
+                    name: step.tool.name,
+                    input: step.tool.input,
+                  },
+                ]
+              : [{ type: 'text', text: step.text }],
+            stop_reason: step.tool ? 'tool_use' : 'end_turn',
+            stop_sequence: null,
+            usage: { input_tokens: 1, output_tokens: 1 },
           }),
         );
         return;

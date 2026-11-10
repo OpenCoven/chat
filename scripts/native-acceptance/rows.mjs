@@ -144,8 +144,8 @@ async function clickReviewedLink(app, name, row) {
 
 /** The lane's shared state: the app, the model log, the screen reader, the output folder. */
 export class Lane {
-  constructor({ app, native, requests, tokens, reader, shot, save, cli, frames }) {
-    Object.assign(this, { app, native, requests, tokens, reader, shot, save, cli, frames });
+  constructor({ app, native, requests, tokens, steps, reader, shot, save, cli, frames }) {
+    Object.assign(this, { app, native, requests, tokens, steps, reader, shot, save, cli, frames });
   }
 
   composer(familiar) {
@@ -304,7 +304,7 @@ export function shownText(node) {
   return '';
 }
 
-function textsIn(node) {
+export function textsIn(node) {
   return [...walk(node)].map(shownText).filter(Boolean);
 }
 
@@ -916,7 +916,7 @@ async function settingsGeneral(app) {
   await sleep(400);
 }
 
-async function closeSettings(app) {
+export async function closeSettings(app) {
   await app.click(await app.one('button', 'Close settings'));
   await app.gone('dialog', 'Settings', { timeout: 3_000 }).catch(async () => {
     await app.key('escape');
