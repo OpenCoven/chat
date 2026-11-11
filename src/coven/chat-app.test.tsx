@@ -759,9 +759,7 @@ describe('canonical familiar controller', () => {
     draft('work');
     click('Send');
     await waitFor(() =>
-      expect(screen.getByRole('alert')).toHaveTextContent(
-        'Reopen the familiar before sending again',
-      ),
+      expect(screen.getByRole('alert')).toHaveTextContent('Refresh Coven before sending again'),
     );
     expect(screen.getByRole('textbox')).toBeDisabled();
     expect(api.send).toHaveBeenCalledOnce();
@@ -771,6 +769,56 @@ describe('canonical familiar controller', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Archive' }));
     await act(async () => {});
     expect(api.changeChatLifecycle).not.toHaveBeenCalled();
+  });
+
+  it('keeps other familiars usable while the recorded chat is unavailable and recovers its draft', async () => {
+    const api = runtime();
+    const unavailable = {
+      id: first.id,
+      familiarId: 'f',
+      title: 'Unavailable chat',
+      archived: false,
+      unavailable: true as const,
+    };
+    vi.mocked(api.listSessions)
+      .mockResolvedValueOnce([first, second])
+      .mockResolvedValueOnce([unavailable, second])
+      .mockResolvedValueOnce([unavailable, second]);
+    vi.mocked(api.send).mockRejectedValueOnce(new Error('Coven could not open the chat'));
+    await ready(api);
+    draft('retained message');
+    click('Send');
+    await waitFor(() =>
+      expect(screen.getByRole('alert')).toHaveTextContent("Coven couldn't load this chat"),
+    );
+    expect(screen.getByRole('textbox')).toBeDisabled();
+    expect(screen.getByRole('textbox')).toHaveValue('retained message');
+    expect(screen.getByTestId('head')).toHaveTextContent('one');
+
+    click('Other familiar');
+    await waitFor(() => expect(screen.getByRole('textbox')).toBeEnabled());
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    draft('send to the other familiar');
+    click('Send');
+    await waitFor(() => expect(api.send).toHaveBeenCalledTimes(2));
+    expect(vi.mocked(api.send).mock.calls[1]?.[0]).toMatchObject({
+      familiarId: 'g',
+      sessionId: 'two',
+    });
+
+    click('First familiar');
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Refresh' })).toBeEnabled());
+    click('Refresh');
+    await waitFor(() => expect(screen.getByRole('textbox')).toBeEnabled());
+    expect(screen.getByRole('textbox')).toHaveValue('retained message');
+    expect(screen.getByTestId('head')).toHaveTextContent('one');
+    click('Send');
+    await waitFor(() => expect(api.send).toHaveBeenCalledTimes(3));
+    expect(vi.mocked(api.send).mock.calls[2]?.[0]).toMatchObject({
+      familiarId: 'f',
+      sessionId: 'one',
+      prompt: 'retained message',
+    });
   });
 
   it('disables lifecycle controls when a manual refresh fails after a successful load', async () => {

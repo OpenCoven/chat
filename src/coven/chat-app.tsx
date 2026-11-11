@@ -11,7 +11,7 @@ import {
   type CovenRunEvent,
   type CovenRunResult,
   type CovenRuntime,
-  type CovenSession,
+  type CovenSessionHead,
   type CovenSetupStep,
   createCovenRuntime,
 } from '../lib/coven-runtime';
@@ -83,7 +83,7 @@ function draftKey(navigation: Navigation) {
 function selectCanonical(
   previous: Navigation,
   familiars: readonly CovenFamiliar[],
-  sessions: readonly CovenSession[],
+  sessions: readonly CovenSessionHead[],
   archived: boolean,
 ): Navigation {
   const eligible = familiars.filter(
@@ -124,7 +124,9 @@ export function ChatApp({
   const [navigation, setNavigation] = useState(saved.navigation);
   const navigationRef = useRef(navigation);
   const [familiars, setFamiliars] = useState<CovenFamiliar[]>([]);
-  const [sessions, setSessions] = useState<CovenSession[]>([]);
+  const [sessions, setSessions] = useState<CovenSessionHead[]>([]);
+  const selectedSession = sessions.find((session) => session.id === navigation.sessionId);
+  const chatUnavailable = selectedSession?.unavailable === true;
   const [events, setEvents] = useState<CovenRunEvent[]>([]);
   // The host holds only the newest part of this chat's history; nothing failed.
   const [partial, setPartial] = useState(false);
@@ -303,6 +305,7 @@ export function ChatApp({
           navigate({ ...current, sessionId: head.id });
           return;
         }
+        if (head.unavailable) return;
         request = ++readId.current;
         const result = await runtime.readSession(head.id, depthRef.current);
         if (
@@ -402,7 +405,7 @@ export function ChatApp({
     }
     readingSession.current = navigation.sessionId;
     setReadError('');
-    if (!available || !navigation.sessionId) {
+    if (!available || !navigation.sessionId || chatUnavailable) {
       if (available) setLoading(false);
       return;
     }
@@ -437,7 +440,7 @@ export function ChatApp({
     return () => {
       ++readId.current;
     };
-  }, [runtime, available, navigation.sessionId, reads, depth]);
+  }, [runtime, available, navigation.sessionId, chatUnavailable, reads, depth]);
 
   const refreshApprovals = useCallback(async () => {
     const request = ++approvalReads.current;
@@ -464,8 +467,10 @@ export function ChatApp({
 
   async function send(options: RunOptions) {
     const current = navigationRef.current;
+    const session = sessions.find((item) => item.id === current.sessionId);
     if (lifecyclePending.current) return;
-    if (sessions.some((session) => session.id === current.sessionId && session.archived)) {
+    if (session?.unavailable) return;
+    if (session?.archived) {
       setError('Restore this archived chat before sending a message.');
       return;
     }
@@ -479,9 +484,6 @@ export function ChatApp({
       );
       return;
     }
-    const chatHarness = current.sessionId
-      ? sessions.find((session) => session.id === current.sessionId)?.harness
-      : undefined;
     const key = draftKey(current);
     const prompt = current.drafts[key] ?? '';
     const selectedFiles = attachmentRef.current[key] ?? [];
@@ -508,7 +510,7 @@ export function ChatApp({
               : {}),
             ...(current.sessionId ? { sessionId: current.sessionId } : {}),
             ...(current.familiarId ? { familiarId: current.familiarId } : {}),
-            ...sendOptions(options, chatHarness),
+            ...sendOptions(options, session?.harness),
           },
           onEvent,
         ),
@@ -521,6 +523,7 @@ export function ChatApp({
    */
   async function allowApproval(approval: CovenApproval, options: RunOptions) {
     const current = navigationRef.current;
+    const session = sessions.find((item) => item.id === current.sessionId);
     if (
       lifecyclePending.current ||
       activeRun.current ||
@@ -528,6 +531,7 @@ export function ChatApp({
       selecting.current ||
       !available ||
       loading ||
+      session?.unavailable ||
       approval.familiarId !== current.familiarId
     ) {
       return;
@@ -538,10 +542,7 @@ export function ChatApp({
       );
       return;
     }
-    const chatHarness = current.sessionId
-      ? sessions.find((session) => session.id === current.sessionId)?.harness
-      : undefined;
-    const { harness: _chatKeepsItsHarness, ...runOptions } = sendOptions(options, chatHarness);
+    const { harness: _chatKeepsItsHarness, ...runOptions } = sendOptions(options, session?.harness);
     allowing.current.add(approval.id);
     setApprovals((previous) => previous.filter((item) => item.id !== approval.id));
     try {
@@ -675,7 +676,7 @@ export function ChatApp({
         } catch (failure) {
           if (lifetime.current === life) {
             setError(
-              `Could not reload this familiar's chat: ${errorText(failure)}. Reopen the familiar before sending again.`,
+              `Could not reload chats. Refresh Coven before sending again. ${errorText(failure)}`,
             );
             setAvailable(false);
           }
@@ -759,6 +760,7 @@ export function ChatApp({
     const current = navigationRef.current;
     if (
       !available ||
+      chatUnavailable ||
       !current.sessionId ||
       lifecyclePending.current ||
       activeRun.current ||
@@ -836,6 +838,10 @@ export function ChatApp({
     [events, liveEvents],
   );
   const messages = projection.messages;
+  const unavailableError =
+    available && chatUnavailable
+      ? "Coven couldn't load this chat. Refresh Coven to try again."
+      : '';
 
   return (
     <ChatLayout
@@ -850,12 +856,10 @@ export function ChatApp({
         setArchived(value);
         navigate(selectCanonical(navigationRef.current, familiars, sessions, value));
       }}
-      selectedArchived={sessions.some((item) => item.id === navigation.sessionId && item.archived)}
-      readOnly={sessions.some((item) => item.id === navigation.sessionId && item.archived)}
+      selectedArchived={Boolean(selectedSession?.archived)}
+      readOnly={Boolean(selectedSession?.archived)}
       lifecycleBusy={changingLifecycle}
-      // A failed refresh leaves the last known lists visible for context but
-      // never mutable: lifecycle stays locked until the runtime is available.
-      lifecycleLocked={!available}
+      lifecycleLocked={!available || chatUnavailable}
       onLifecycle={(next) => void changeLifecycle(next)}
       attachments={attachments[draftKey(navigation)] ?? []}
       attaching={attaching}
@@ -899,7 +903,8 @@ export function ChatApp({
         available &&
         Boolean(navigation.familiarId) &&
         !changingLifecycle &&
-        !sessions.some((item) => item.id === navigation.sessionId && item.archived)
+        !chatUnavailable &&
+        !selectedSession?.archived
       }
       busy={busy}
       runFamiliarId={phoneRun?.familiarId ?? runFamiliarId}
@@ -923,19 +928,26 @@ export function ChatApp({
       finished={finished}
       loading={loading}
       cancelling={cancelling}
-      error={error || runOutputs[draftKey(navigation)]?.error || ''}
+      error={error || unavailableError || runOutputs[draftKey(navigation)]?.error || ''}
       // A failed run restores what it was sent; the notice can send it again.
-      {...(runOutputs[draftKey(navigation)]?.error && !busy && retryKey === draftKey(navigation)
+      {...(runOutputs[draftKey(navigation)]?.error &&
+      !busy &&
+      !chatUnavailable &&
+      retryKey === draftKey(navigation)
         ? { onRetry: (options: RunOptions) => void send(options) }
         : {})}
-      onDismissError={() => {
-        setError('');
-        const key = draftKey(navigationRef.current);
-        setRunOutputs((previous) => {
-          const output = previous[key];
-          return output?.error ? { ...previous, [key]: { ...output, error: '' } } : previous;
-        });
-      }}
+      {...(error || !unavailableError
+        ? {
+            onDismissError: () => {
+              setError('');
+              const key = draftKey(navigationRef.current);
+              setRunOutputs((previous) => {
+                const output = previous[key];
+                return output?.error ? { ...previous, [key]: { ...output, error: '' } } : previous;
+              });
+            },
+          }
+        : {})}
       onFamiliar={(id) => {
         if (lifecyclePending.current) return;
         setError('');
