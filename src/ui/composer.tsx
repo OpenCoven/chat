@@ -97,6 +97,12 @@ export type ComposerProps = Readonly<{
   meta?: ReactNode;
   /** The details row's accessible name. */
   metaLabel?: string;
+  /**
+   * Turns off the field and every control that edits or sends the message. The
+   * details row stays usable: it describes the chat and opens settings, which
+   * a person may need while the message can't be edited.
+   */
+  disabled?: boolean | undefined;
   /** Escape in the field stops a run in flight; the Stop control names the key. */
   stopOnEscape?: boolean;
   /** Draws Send as its arrow alone; its name stays "Send". */
@@ -134,6 +140,7 @@ export function Composer({
   tools,
   meta,
   metaLabel = 'Details',
+  disabled = false,
   stopOnEscape = false,
   sendIcon = false,
 }: ComposerProps) {
@@ -188,6 +195,7 @@ export function Composer({
         maxRows={maxRows}
         placeholder={placeholder}
         aria-label={label}
+        disabled={disabled}
         onChange={(event) => onValueChange(event.target.value)}
         onKeyDown={handleKeyDown}
         className="oc-composer-field"
@@ -195,7 +203,8 @@ export function Composer({
       {attachments.length > 0 ? (
         <ul className="oc-composer-attachments" aria-label="Attachments">
           {attachments.map((attachment) => {
-            const remove = onRemoveAttachment ? () => onRemoveAttachment(attachment.id) : undefined;
+            const remove =
+              onRemoveAttachment && !disabled ? () => onRemoveAttachment(attachment.id) : undefined;
             return (
               <li key={attachment.id}>
                 {renderAttachment ? (
@@ -224,6 +233,7 @@ export function Composer({
               size="icon"
               aria-label="Attach file"
               title="Attach"
+              disabled={disabled}
               onClick={onAttach}
             >
               <Icon name={attachmentIcon} size={15} />
@@ -237,6 +247,7 @@ export function Composer({
               size="icon"
               aria-label="Commands"
               title="Commands  /"
+              disabled={disabled}
               onClick={onOpenCommands}
             >
               <Icon name="terminal-window" size={15} />
@@ -250,6 +261,7 @@ export function Composer({
             type="button"
             className="oc-composer-warning"
             title={warning.title}
+            disabled={disabled}
             onClick={warning.onClick}
           >
             <span className="oc-composer-warning-dot" aria-hidden="true" />
@@ -263,7 +275,7 @@ export function Composer({
           <SendControl
             running={running}
             density={density}
-            disabled={!running && !ready}
+            disabled={disabled || (!running && !ready)}
             onSend={onSend}
             onStop={onStop}
             options={commands}

@@ -1730,8 +1730,12 @@ export function ChatLayout(props: ChatLayoutProps) {
                   </FamButton>
                 </div>
               )}
-              <fieldset className="coven-composer-fieldset" disabled={composerDisabled}>
+              {/* Not a disabled fieldset: that would also turn off the details row's
+                Settings › Model button, which stays usable while the message can't be
+                edited. */}
+              <div className="coven-composer-wrap">
                 <Composer
+                  disabled={composerDisabled}
                   textareaRef={composerRef}
                   textareaProps={mentionCompletion.textareaProps}
                   onKeyDown={(event) => {
@@ -1893,7 +1897,7 @@ export function ChatLayout(props: ChatLayoutProps) {
                       hidden
                       aria-label="Select text attachments"
                       accept={ATTACHMENT_ACCEPT}
-                      disabled={props.busy || props.attaching}
+                      disabled={composerDisabled || props.busy}
                       onChange={(event) => {
                         onAttach?.(Array.from(event.target.files ?? []));
                         event.target.value = '';
@@ -1908,7 +1912,7 @@ export function ChatLayout(props: ChatLayoutProps) {
                     ) : null}
                   </>
                 ) : null}
-              </fieldset>
+              </div>
             </div>
           </div>
         </main>

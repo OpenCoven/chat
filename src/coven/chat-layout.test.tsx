@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { ScreenChannel, ScreenRelay } from '../lib/screen-relay';
 import {
@@ -3254,6 +3254,24 @@ describe('composer stop key, running copy and details row', () => {
     expect(RUNNING_PLACEHOLDER).not.toMatch(/queue/i);
     rerender(<ChatLayout {...running({ busy: false })} />);
     expect(field).toHaveAttribute('placeholder', 'Message Astra · @ familiar · # project');
+  });
+
+  it('keeps Settings › Model usable under the composer while the message cannot be edited', () => {
+    for (const state of [{ readOnly: true }, { attaching: true }, { loading: true }]) {
+      cleanup();
+      render(<ChatLayout {...running({ busy: false, ...state })} />);
+      expect(screen.getByRole('textbox', { name: 'Message Astra' })).toBeDisabled();
+      expect(screen.getByRole('button', { name: 'Send' })).toBeDisabled();
+      const details = within(screen.getByRole('group', { name: 'Chat details' }));
+      const settings = details.getByRole('button', { name: 'Model settings' });
+      expect(settings).toBeEnabled();
+      fireEvent.click(settings);
+      expect(
+        within(screen.getByRole('dialog', { name: 'Settings' })).getByRole('region', {
+          name: 'Model',
+        }),
+      ).toBeInTheDocument();
+    }
   });
 
   it('shows the real familiar, access, harness, model and workspace under the composer', () => {
