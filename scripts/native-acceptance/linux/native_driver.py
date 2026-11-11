@@ -80,6 +80,24 @@ def summary(node):
             item["url"] = node.queryDocument().getAttributeValue("DocURL")
         except Exception:
             pass
+    # Retain native described-by targets for Settings Reset (#548). Do not
+    # recursively summarize relations: relation graphs can contain cycles.
+    described_by = []
+    try:
+        for relation in node.getRelationSet():
+            if relation.getRelationType() != pyatspi.RELATION_DESCRIBED_BY:
+                continue
+            for index in range(relation.getNTargets()):
+                related = relation.getTarget(index)
+                attrs = dict(a.split(":", 1) for a in related.getAttributes() if ":" in a)
+                described_by.append({
+                    "role": related.getRoleName(), "id": attrs.get("id"),
+                    "name": related.name, "text": text_of(related),
+                })
+    except Exception as error:
+        item["relationError"] = str(error)
+    if described_by:
+        item["relations"] = {"described-by": described_by}
     states = node.getState()
     if states.contains(pyatspi.STATE_VERTICAL):
         item["orientation"] = "vertical"

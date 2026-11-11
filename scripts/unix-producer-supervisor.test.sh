@@ -157,7 +157,14 @@ printf '%s\n' \
 cat >"$trusted_tool_source/rustup" <<'EOF'
 #!/usr/bin/env bash
 set -Eeuo pipefail
-case "$(basename "$0"):$1" in
+if [[ "$1" == run ]]; then
+  [[ "$2" == 1.95.0 ]]
+  tool=$3
+  shift 3
+else
+  tool=rustup
+fi
+case "$tool:$1" in
   rustup:--install|cargo:--check) ;;
   rustc:--emit-record)
     printf '{"platform":"%s","schemaVersion":2}\n' \

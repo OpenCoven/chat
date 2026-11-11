@@ -19,6 +19,11 @@ import {
   walk,
 } from './driver.mjs';
 import { ADDRESSES, TABLE, USERINFO } from './fixture.mjs';
+import {
+  checkSettingsSpeech,
+  checkSettingsWidth,
+  settingsWidthEvidence,
+} from './settings-width.mjs';
 
 export const REVIEW = 'Open this link?';
 const GUIDE = 'https://docs.example.test/guide';
@@ -55,6 +60,91 @@ export class Row {
     if (this.blockers.length) return `partly blocked (${this.blockers.join('; ')})`;
     return 'observed';
   }
+}
+
+/** Bounded native observations: absence alone cannot prove a click was missed. */
+export class ReviewTrace {
+  constructor(app, row) {
+    this.app = app;
+    this.row = row;
+    this.started = Date.now();
+    this.seen = false;
+    this.outcome = 'not-observed';
+    this.samples = 0;
+  }
+  async sample(phase) {
+    const root = await this.app.snapshot();
+    if (!root || !root.children?.length)
+      throw new Error('The native review observation has no accessible tree');
+    const nodes = [...walk(root)];
+    const open = nodes.some((node) => node.role === 'dialog' && node.name === REVIEW);
+    this.seen ||= open;
+    this.outcome = open ? 'open' : this.seen ? 'opened-then-dismissed' : 'not-observed';
+    if (this.samples++ < 16)
+      this.row.note('link review lifecycle', {
+        phase,
+        ms: Date.now() - this.started,
+        outcome: this.outcome,
+        runControlVisible: nodes.some((node) => node.role === 'button' && node.name === 'Stop run'),
+      });
+    return open;
+  }
+}
+
+/** Enforce completion focus, with an explicit native UIA measurement limit. */
+export async function verifyCompletionFocus(app, row, platform = PLATFORM) {
+  const focused = await app.focused();
+  row.note(
+    'focus after completion invalidation',
+    focused && {
+      role: focused.role,
+      name: focused.name,
+    },
+  );
+  if (platform === 'windows' && focused?.role === 'document') {
+    // UIA reports document for the noninteractive focused log. Prove native
+    // keyboard position using its unique first control instead of accepting
+    // arbitrary document focus as a successful Messages-focus measurement.
+    await app.one('button', 'Connection details', { within: ['group', 'Messages'] });
+    row.note(
+      'completion focus measurement',
+      'UIA reports document; native keyboard navigation must resume at the first transcript control',
+    );
+    await app.key('tab');
+    row.expect(
+      'Tab from completion reaches first transcript control',
+      await app.focusedName(),
+      'Connection details',
+    );
+    await app.key('tab', ['shift']);
+    row.expect(
+      'Shift+Tab returns to the transcript document',
+      (await app.focused())?.role,
+      'document',
+    );
+    await app.key('tab');
+    row.expect(
+      'Tab again reaches first transcript control',
+      await app.focusedName(),
+      'Connection details',
+    );
+    return;
+  }
+  row.expect('completion invalidation returns focus to Messages', focused?.name, 'Messages');
+}
+
+async function clickReviewedLink(app, name, row) {
+  const trace = new ReviewTrace(app, row);
+  await trace.sample('before-click');
+  // Resolve after idle, never reuse the live reply's old node or coordinates.
+  await app.click(await linkNamed(app, name));
+  try {
+    await until('the link review to appear', () => trace.sample('after-click'), 15_000);
+  } catch (error) {
+    row.note('link review outcome at timeout', trace.outcome);
+    throw error;
+  }
+  return trace;
 }
 
 /** The lane's shared state: the app, the model log, the screen reader, the output folder. */
@@ -95,15 +185,24 @@ export class Lane {
   async idle() {
     await until(
       'the run to finish',
-      async () => (await this.app.count('button', 'Stop run')) === 0,
+      async () => {
+        const nodes = [...walk(await this.app.snapshot())];
+        const composers = nodes.filter(
+          (node) => node.role === 'textbox' && node.name?.startsWith('Message '),
+        );
+        return (
+          !nodes.some((node) => node.role === 'button' && node.name === 'Stop run') &&
+          composers.length === 1 &&
+          composers[0].enabled === true
+        );
+      },
       90_000,
       500,
     );
-    await sleep(500);
   }
 
   /** Types into the real composer, presses Send, and waits for the reply to render. */
-  async send(familiar, text, role, name) {
+  async send(familiar, text, role, name, { complete = true } = {}) {
     await this.idle();
     await this.app.click(await this.composer(familiar));
     await this.app.type(text);
@@ -124,6 +223,9 @@ export class Lane {
       150_000,
       500,
     );
+    // A rendered live link is not a completed reply. Reacquire it only after
+    // the run and its transcript reload release the real composer.
+    if (complete) await this.idle();
   }
 
   /** Closes whatever review, sheet or menu a failed step left open. */
@@ -437,6 +539,59 @@ async function listen(lane, row, label, act) {
   return said;
 }
 
+/** #567 keeps the completion race under test instead of hiding it behind idle. */
+export async function linkCompletionRow(lane, familiar, finishReview) {
+  const row = new Row('567', 'Review opened while streaming, then invalidated at completion');
+  const { app } = lane;
+  await lane.attempt(row, async () => {
+    const browsers = browserSnapshot();
+    const trace = new ReviewTrace(app, row);
+    try {
+      await lane.send(
+        familiar,
+        '[[reviewrace]] Hold this link until it is reviewed.',
+        'link',
+        'Completion boundary',
+        { complete: false },
+      );
+      row.expect('run still active before the review', await app.count('button', 'Stop run'), 1);
+      await trace.sample('stream-held-before-click');
+      await app.click(await linkNamed(app, 'Completion boundary'));
+      await until('the held-stream review to appear', () =>
+        trace.sample('stream-held-after-click'),
+      );
+      row.expect('review observed before model completion', trace.outcome, 'open');
+      row.expect('held review address', (await reviewFacts(app)).address, ADDRESSES.query);
+      lane.shot('567-review-before-completion');
+      row.expect('one held model stream released', finishReview(), 1);
+      await until(
+        'the completion-invalidated review to close',
+        async () => !(await trace.sample('completion-released')),
+      );
+      await lane.idle();
+      row.expect('review lifecycle at completion', trace.outcome, 'opened-then-dismissed');
+      await verifyCompletionFocus(app, row);
+      row.expect('completion did not launch a browser', browserSnapshot(), browsers);
+      // A fresh settled target still opens normally, and dismisses back to it.
+      await clickReviewedLink(app, 'Completion boundary', row);
+      row.expect('fresh review address', (await reviewFacts(app)).address, ADDRESSES.query);
+      await app.key('escape');
+      await app.gone('dialog', REVIEW);
+      row.expect(
+        'focus after fresh review dismissal',
+        await app.focusedName(),
+        'Completion boundary',
+      );
+      row.expect('review without Open did not launch a browser', browserSnapshot(), browsers);
+      lane.shot('567-completed-and-dismissed');
+    } finally {
+      // An assertion or native-input failure must not leave the fixture held.
+      finishReview();
+    }
+  });
+  return row;
+}
+
 /** Rows 1, 2 and 9, and #515's browser rows, from one reply with three links. */
 export async function linkRows(lane, familiar, browser) {
   const { app, native } = lane;
@@ -454,7 +609,7 @@ export async function linkRows(lane, familiar, browser) {
     row1.note('model requests for the reply', lane.requests() - before);
     const launches = browserSnapshot();
 
-    await app.click(await linkNamed(app, 'Handoff check'));
+    await clickReviewedLink(app, 'Handoff check', row1);
     const facts = await reviewFacts(app);
     row1.check('primary click opens the review', Boolean(facts.review));
     row1.expect('review site', facts.host, 'example.com');
@@ -733,7 +888,7 @@ export async function linkRows(lane, familiar, browser) {
     // A sign-in name: offered to copy only, and nothing reaches the browser.
     await lane.send(familiar, '[[userinfo]] One more address.', 'link', 'Named login');
     const launches = browserSnapshot();
-    await app.click(await linkNamed(app, 'Named login'));
+    await clickReviewedLink(app, 'Named login', handoff);
     const facts = await reviewFacts(app);
     handoff.expect('buttons in the review of https://name@example.com/', facts.buttons, [
       'Cancel',
@@ -1256,40 +1411,45 @@ async function tabToSeparator(lane, familiar) {
  * reports is kept beside the check when it is missing, to tell an absent
  * value from one the tree does not carry.
  */
-async function settingsShowWidth(lane, row, label, width) {
+export async function settingsShowWidth(lane, row, label, width) {
   const settings = await lane.app.one('dialog', 'Settings');
   const nodes = [...walk(settings)];
   const shown = `${nodes.map((node) => String(node.value ?? node.name ?? '')).join(' ')} ${textIn(settings)}`;
-  const found = shown.match(/\d+\s*px/g) ?? [];
   const ok = new RegExp(`\\b${width}\\s*px`).test(shown);
-  row.check(label, ok, { widthsShown: found, text: shown.slice(0, 200) });
-  if (!ok && PLATFORM === 'linux') {
-    // The width is drawn just before Reset: what AT-SPI reports there, beside a
-    // screenshot of the same dialog, tells a value it does not expose from one
-    // the lane misread.
-    const reset = await lane.app.one('button', 'Reset inspector width', {
-      within: ['dialog', 'Settings'],
+  row.check(label, ok, { widthsShown: shown.match(/\d+\s*px/g) ?? [] });
+  // Retain the complete dialog even when assertions pass, including native
+  // descriptions and relations. The relevant Inspector group is kept too.
+  lane.save(`settings-tree-${width}.json`, JSON.stringify(settings.raw, null, 2));
+  lane.shot(`settings-width-${width}`);
+  if (PLATFORM === 'linux') {
+    const evidence = settingsWidthEvidence(settings, width);
+    lane.save(`settings-inspector-${width}.json`, JSON.stringify(evidence.subtree, null, 2));
+    row.note(`Settings ${width}px Inspector text`, evidence.text);
+    checkSettingsWidth(row, evidence, width);
+    const said = await listen(lane, row, `Orca Settings ${width}px`, async () => {
+      // WebKitGTK's dialog script does not bind ordinary Down to browse
+      // navigation. Use Orca's documented desktop flat-review commands:
+      // Insert+KP7 moves home; KP9 reads the next spatial line.
+      // https://help.gnome.org/orca/commands_flat_review.html
+      // Orca starts with the GTK frame as its focus. A real Tab moves its
+      // locus into the web dialog before building the flat-review context.
+      await lane.app.key('tab');
+      const focus = await lane.app.focused();
+      row.note(`Orca Settings ${width}px native focus before flat review`, {
+        role: focus?.role,
+        name: focus?.name,
+      });
+      await lane.app.key('Insert+KP_Home');
+      for (let index = 0; index < 32; index += 1) {
+        await lane.app.key('KP_Page_Up');
+        await sleep(200);
+      }
     });
-    if (reset?.frame) {
-      const at = [Math.round(reset.frame.x - 24), Math.round(reset.frame.y + reset.frame.h / 2)];
-      const probe = await lane.native.call({ cmd: 'at', at });
-      row.note(
-        `AT-SPI at ${at.join(',')}, just before Reset`,
-        probe.ok ? probe.chain : probe.error,
-      );
+    if (said) {
+      lane.save(`settings-orca-${width}.json`, JSON.stringify(said, null, 2));
+      checkSettingsSpeech(row, said, width);
     }
-    lane.shot(`settings-width-${width}`);
   }
-  if (!ok)
-    lane.save(
-      `settings-tree-${width}.txt`,
-      nodes
-        .map(
-          (node) =>
-            `${node.role} | ${node.name ?? ''} | ${node.value ?? ''} | ${node.raw?.text ?? ''} | children ${node.children.length}`,
-        )
-        .join('\n'),
-    );
 }
 
 /** Row 6: the separator through a real pointer that leaves the window, the keys, Settings, Reset, 1100px. */
@@ -1426,11 +1586,13 @@ export async function inspectorRow(lane, familiar, frames) {
     row.expect('no text selected during the drag', selectedDuring, '');
 
     await settingsGeneral(app);
-    await settingsShowWidth(lane, row, 'Settings > General shows the width', released.value);
+    row.expect('drag stages the 400px Settings check', released.value, 400);
+    await settingsShowWidth(lane, row, 'Settings > General shows the width', 400);
     await app.click(
       await app.one('button', 'Reset inspector width', { within: ['dialog', 'Settings'] }),
     );
     await sleep(400);
+    await settingsShowWidth(lane, row, 'Settings after Reset shows 360px', 360);
     await closeSettings(app);
     row.expect('Reset restores 360px', (await inspectorWidth(app)).value, 360);
 
