@@ -13,6 +13,7 @@ import { homedir, release } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
+import { accessRow } from './access-row.mjs';
 import { defaultBrowser, quitBrowsers } from './browser.mjs';
 import { App, Native, outline, PLATFORM, screenshot, sleep, until } from './driver.mjs';
 import { startModelFixture } from './fixture.mjs';
@@ -265,6 +266,12 @@ try {
   await lane.front();
   await lane.reset();
   rows.push(await cancelledRunRow(lane, FIRST));
+  // Published releases before v0.0.10 don't have these controls.
+  if (!/^v0\.0\.[0-9](?:[-+]|$)/.test(facts.release ?? process.env.RELEASE ?? '')) {
+    await lane.front();
+    await lane.reset();
+    rows.push(await accessRow(lane, FIRST));
+  }
   shot('before-quit');
 
   // Quit as a person would, so the web view writes its storage out.
