@@ -3018,8 +3018,8 @@ describe('model settings', () => {
       'aria-pressed',
       'true',
     );
-    fireEvent.change(within(model).getByRole('textbox', { name: 'Model' }), {
-      target: { value: ' anthropic/claude-sonnet-5-5 ' },
+    fireEvent.change(within(model).getByRole('combobox', { name: 'Model' }), {
+      target: { value: 'claude-sonnet-5-5' },
     });
     fireEvent.click(within(model).getByRole('checkbox', { name: 'Think longer' }));
     const speed = within(model).getByRole('group', { name: 'Speed' });
@@ -3028,7 +3028,7 @@ describe('model settings', () => {
     expect(model).toHaveTextContent('Messages sent from your iPhone use the engine');
     expect(stored()).toMatchObject({
       harness: 'claude',
-      model: 'anthropic/claude-sonnet-5-5',
+      model: 'claude-sonnet-5-5',
       think: true,
       speed: 'thorough',
     });
@@ -3036,7 +3036,7 @@ describe('model settings', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Send' }));
     expect(props.onSend).toHaveBeenCalledExactlyOnceWith({
       harness: 'claude',
-      model: 'anthropic/claude-sonnet-5-5',
+      model: 'claude-sonnet-5-5',
       think: true,
       speed: 'thorough',
     });
@@ -3045,7 +3045,9 @@ describe('model settings', () => {
   it('says plainly when a model id could not be sent, until it is corrected or cleared', () => {
     render(<ChatLayout {...layoutProps()} ready />);
     const model = openSettingsAt('Model');
-    const field = within(model).getByRole('textbox', { name: 'Model' });
+    const picker = within(model).getByRole('combobox', { name: 'Model' });
+    fireEvent.change(picker, { target: { value: ':custom' } });
+    const field = within(model).getByRole('textbox', { name: 'Custom model ID' });
     fireEvent.change(field, { target: { value: '--model=x' } });
     expect(field).toHaveAttribute('aria-invalid', 'true');
     expect(field).toHaveAccessibleDescription(
@@ -3054,6 +3056,10 @@ describe('model settings', () => {
     fireEvent.change(field, { target: { value: '' } });
     expect(field).not.toHaveAttribute('aria-invalid');
     expect(model).toHaveTextContent("use the engine's default");
+    fireEvent.change(field, { target: { value: ' other/custom-model ' } });
+    expect(stored()).toMatchObject({ model: 'other/custom-model' });
+    fireEvent.change(picker, { target: { value: '' } });
+    expect(stored()).toMatchObject({ model: '' });
   });
 
   it('shows what a chat runs on, which opens Settings, and the model its latest run reported', () => {

@@ -299,6 +299,28 @@
   border-color: var(--color-danger);
 }
 
+.coven-model-controls {
+  display: grid;
+  gap: 8px;
+}
+
+.coven-model-select {
+  width: 100%;
+  min-height: 34px;
+  padding: 0 12px;
+  border: 1px solid var(--border-hairline);
+  border-radius: 10px;
+  background: var(--bg-sunken);
+  color: var(--text-primary);
+  font: inherit;
+  font-size: 13px;
+}
+
+.coven-model-select:focus-visible {
+  outline: 2px solid var(--ring-focus);
+  outline-offset: 2px;
+}
+
 /* A checkbox drawn as a switch. */
 .coven-switch {
   appearance: none;

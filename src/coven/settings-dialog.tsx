@@ -111,6 +111,7 @@ export type SettingsDialogProps = Readonly<{
   onClose: () => void;
   preferences: Preferences;
   onPreferences: (patch: Partial<Preferences>) => void;
+  chatHarness?: string | undefined;
   archivedFilter?: boolean | undefined;
   onArchivedFilter?: ((archived: boolean) => void) | undefined;
   archivedFilterDisabled?: boolean | undefined;
@@ -387,11 +388,41 @@ function Choices<T extends string>({
   );
 }
 
-function ModelSection({ preferences, onPreferences }: SettingsDialogProps) {
+const CODEX_MODELS = [
+  ['gpt-5.5', 'GPT-5.5'],
+  ['gpt-5.4', 'GPT-5.4'],
+  ['gpt-5.4-mini', 'GPT-5.4 Mini'],
+] as const;
+const CLAUDE_MODELS = [
+  ['claude-opus-5-5', 'Claude Opus 5.5'],
+  ['claude-sonnet-5-5', 'Claude Sonnet 5.5'],
+  ['claude-haiku-5-5', 'Claude Haiku 5.5'],
+] as const;
+const ENGINE_MODEL_GROUPS: Readonly<
+  Record<string, readonly { label: string; models: readonly (readonly [string, string])[] }[]>
+> = {
+  'coven-code': [
+    { label: 'OpenAI', models: CODEX_MODELS.map(([id, label]) => [`openai/${id}`, label]) },
+    {
+      label: 'Anthropic',
+      models: CLAUDE_MODELS.map(([id, label]) => [`anthropic/${id}`, label]),
+    },
+  ],
+  codex: [{ label: 'OpenAI', models: CODEX_MODELS }],
+  claude: [{ label: 'Anthropic', models: CLAUDE_MODELS }],
+};
+const CUSTOM_MODEL = ':custom';
+
+function ModelSection({ preferences, onPreferences, chatHarness }: SettingsDialogProps) {
   const modelId = useId();
+  const customId = useId();
   const modelErrorId = useId();
   const thinkId = useId();
+  const [editingCustom, setEditingCustom] = useState(false);
   const validModel = isValidModel(preferences.model);
+  const groups = ENGINE_MODEL_GROUPS[chatHarness ?? preferences.harness] ?? [];
+  const preset = groups.some(({ models }) => models.some(([id]) => id === preferences.model));
+  const custom = editingCustom || (preferences.model !== '' && !preset);
   return (
     <>
       <Group title="New chats">
@@ -417,7 +448,7 @@ function ModelSection({ preferences, onPreferences }: SettingsDialogProps) {
           htmlFor={modelId}
           hint={
             validModel ? (
-              "Leave it empty to use the engine's default, or enter the id your provider gives, such as openai/gpt-5.5."
+              "Choose Engine default to use the engine's default model, or enter a provider ID under Custom model."
             ) : (
               <span id={modelErrorId} className="coven-settings-row-error">
                 A model id starts with a letter or digit and uses only letters, digits and _ . / : +
@@ -426,21 +457,52 @@ function ModelSection({ preferences, onPreferences }: SettingsDialogProps) {
             )
           }
           control={
-            <span className="coven-access-filter coven-model-field">
-              <input
+            <div className="coven-model-controls">
+              <select
                 id={modelId}
-                type="text"
-                placeholder="Engine default"
-                spellCheck={false}
-                autoComplete="off"
-                autoCapitalize="off"
-                maxLength={MODEL_MAX}
-                value={preferences.model}
-                aria-invalid={validModel ? undefined : true}
-                aria-describedby={validModel ? undefined : modelErrorId}
-                onChange={(event) => onPreferences({ model: event.target.value.trim() })}
-              />
-            </span>
+                className="coven-model-select"
+                value={custom ? CUSTOM_MODEL : preferences.model}
+                onChange={(event) => {
+                  const model = event.target.value;
+                  setEditingCustom(model === CUSTOM_MODEL);
+                  if (model !== CUSTOM_MODEL) onPreferences({ model });
+                }}
+              >
+                <option value="">Engine default</option>
+                {groups.map(({ label, models }) => (
+                  <optgroup key={label} label={label}>
+                    {models.map(([id, name]) => (
+                      <option key={id} value={id}>
+                        {name}
+                      </option>
+                    ))}
+                  </optgroup>
+                ))}
+                <option value={CUSTOM_MODEL}>Custom model</option>
+              </select>
+              {custom ? (
+                <>
+                  <label className="coven-settings-row-label" htmlFor={customId}>
+                    Custom model ID
+                  </label>
+                  <span className="coven-access-filter coven-model-field">
+                    <input
+                      id={customId}
+                      type="text"
+                      placeholder="provider/model"
+                      spellCheck={false}
+                      autoComplete="off"
+                      autoCapitalize="off"
+                      maxLength={MODEL_MAX}
+                      value={preferences.model}
+                      aria-invalid={validModel ? undefined : true}
+                      aria-describedby={validModel ? undefined : modelErrorId}
+                      onChange={(event) => onPreferences({ model: event.target.value.trim() })}
+                    />
+                  </span>
+                </>
+              ) : null}
+            </div>
           }
         />
         <Row
