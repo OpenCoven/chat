@@ -177,6 +177,11 @@ jobs:
                 -e 's#https?://(azure[.]archive|archive|security)[.]ubuntu[.]com/ubuntu#https://mirrors.edge.kernel.org/ubuntu#g' "$sources"
             fi
           done
+          # Read the authenticated lists directly across repeated root APT calls.
+          printf 'Dir::Cache::pkgcache "";\nDir::Cache::srcpkgcache "";\n' | sudo tee /etc/apt/apt.conf.d/99-opencoven-package-cache > /dev/null
+          sudo rm -f /var/cache/apt/pkgcache.bin /var/cache/apt/srcpkgcache.bin
+          sudo apt-config dump | grep -F 'Dir::Cache::pkgcache "";'
+          sudo apt-config dump | grep -F 'Dir::Cache::srcpkgcache "";'
       - name: Build this commit as a candidate (not a release)
         if: inputs.release == ''
         run: |
