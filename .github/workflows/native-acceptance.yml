@@ -7,7 +7,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-22.04, ubuntu-24.04]
+        os: [ubuntu-24.04]
     runs-on: ${{ matrix.os }}
     timeout-minutes: 10
     steps:
@@ -31,6 +31,18 @@ jobs:
             gpgv --keyring /usr/share/keyrings/ubuntu-archive-keyring.gpg "$RUNNER_TEMP/InRelease"
           done
           sudo apt-get update
+          dpkg --print-architecture
+          dpkg-query -W build-essential libgtk-3-dev || true
+          sudo apt-cache policy build-essential libgtk-3-dev xvfb python3-pyatspi
+          sudo apt-cache dumpavail | awk '/^Package:/ {count++} END {print "AVAILABLE_PACKAGES", count}'
+          sudo ls -la /var/lib/apt/lists
+          sudo find /etc/apt/preferences.d -type f -exec cat {} \;
+          if [ "$VERSION_ID" = 24.04 ]; then
+            sudo DEBIAN_FRONTEND=noninteractive apt-get install -y \
+              xvfb openbox xdotool xclip at-spi2-core python3-pyatspi dbus-x11 \
+              orca speech-dispatcher ibus ibus-gtk3 imagemagick sqlite3 libfuse2t64
+            printf 'NATIVE_APT_INSTALL_OK Ubuntu %s\n' "$VERSION_ID"
+          fi
           fuse=libfuse2
           if [ "$VERSION_ID" = 24.04 ]; then fuse=libfuse2t64; fi
           sudo DEBIAN_FRONTEND=noninteractive apt-get install -y \
