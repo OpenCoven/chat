@@ -16,6 +16,7 @@ import { parseArgs } from 'node:util';
 import { defaultBrowser, quitBrowsers } from './browser.mjs';
 import { App, Native, outline, PLATFORM, screenshot, sleep, until } from './driver.mjs';
 import { startModelFixture } from './fixture.mjs';
+import { modelRow } from './model-row.mjs';
 import {
   cancelledRunRow,
   inspectorRow,
@@ -91,6 +92,7 @@ const logged = () =>
     .filter((entry) => entry.path === '/v1/messages');
 const requests = () => logged().length;
 const tokens = (name) => logged().filter((entry) => entry.token === name).length;
+const models = () => logged().map((entry) => entry.model ?? null);
 
 const native =
   PLATFORM === 'mac'
@@ -265,6 +267,12 @@ try {
   await lane.front();
   await lane.reset();
   rows.push(await cancelledRunRow(lane, FIRST));
+  // Published releases before v0.0.10 have a free-text Model field.
+  if (!/^v0\.0\.[0-9](?:[-+]|$)/.test(facts.release ?? process.env.RELEASE ?? '')) {
+    await lane.front();
+    await lane.reset();
+    rows.push(await modelRow(lane, FIRST, models));
+  }
   shot('before-quit');
 
   // Quit as a person would, so the web view writes its storage out.
