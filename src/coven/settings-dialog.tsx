@@ -120,6 +120,7 @@ export type SettingsDialogProps = Readonly<{
   connected: boolean;
   onRefresh: () => void;
   refreshDisabled: boolean;
+  onRefreshProjectAccess?: (() => Promise<void>) | undefined;
   /** The iPhone companion's opener, which owns its own dialog. */
   companion?: ReactNode;
   /** Reads the permission log, newest first. */
@@ -589,8 +590,30 @@ function AccessSection(props: SettingsDialogProps) {
   );
 }
 
-function FamiliarAccess({ familiar, onRefresh, refreshDisabled }: SettingsDialogProps) {
+function FamiliarAccess({
+  familiar,
+  onRefresh,
+  onRefreshProjectAccess,
+  refreshDisabled,
+}: SettingsDialogProps) {
   const [query, setQuery] = useState('');
+  const [refreshing, setRefreshing] = useState(false);
+  const [refreshError, setRefreshError] = useState('');
+  async function refreshAccess() {
+    if (!onRefreshProjectAccess) {
+      onRefresh();
+      return;
+    }
+    setRefreshing(true);
+    setRefreshError('');
+    try {
+      await onRefreshProjectAccess();
+    } catch {
+      setRefreshError('Could not refresh project access. Try again.');
+    } finally {
+      setRefreshing(false);
+    }
+  }
   if (!familiar) {
     return (
       <div className="coven-settings-empty">
@@ -632,10 +655,23 @@ function FamiliarAccess({ familiar, onRefresh, refreshDisabled }: SettingsDialog
             ) : null}
           </div>
         ) : null}
+        <button
+          type="button"
+          className="fr-btn fr-btn--secondary fr-btn--sm"
+          disabled={refreshDisabled || refreshing}
+          onClick={() => void refreshAccess()}
+        >
+          {refreshing ? 'Refreshing project access…' : 'Refresh project access'}
+        </button>
       </div>
+      {refreshError ? (
+        <p className="coven-settings-row-error" role="alert">
+          {refreshError}
+        </p>
+      ) : null}
       {all.length ? (
         <>
-          {all.length > 6 ? (
+          {all.length > 6 || query ? (
             <label className="coven-access-filter">
               <Icon name="magnifying-glass" size={13} />
               <input
@@ -648,38 +684,41 @@ function FamiliarAccess({ familiar, onRefresh, refreshDisabled }: SettingsDialog
               />
             </label>
           ) : null}
-          <ul
-            className="coven-access-list"
-            aria-label={`${familiar.name}'s declared project access`}
-          >
-            {shown.map((project) => (
-              <li key={`${project.path}:${project.access}`} className="coven-access-item">
-                <span className="coven-access-icon" aria-hidden="true">
-                  <Icon name="folder-open" size={14} />
-                </span>
-                <span className="coven-access-name">{project.name}</span>
-                <span
-                  className={cx(
-                    'coven-access-pill',
-                    project.access === 'write' && 'coven-access-pill--write',
-                  )}
-                >
-                  {project.access === 'write' ? 'Read and write' : 'Read only'}
-                </span>
-                <span className="coven-access-path" title={project.path}>
-                  {homeRelative(project.path)}
-                </span>
-                <CopyButton
-                  className="coven-access-copy"
-                  text={project.path}
-                  label={`Copy ${project.name} path`}
-                />
-              </li>
-            ))}
-            {shown.length === 0 ? (
-              <li className="coven-access-none">No projects match “{query.trim()}”.</li>
-            ) : null}
-          </ul>
+          {/* biome-ignore lint/a11y/noNoninteractiveTabindex: keyboard users must be able to focus and scroll the project list. */}
+          <section className="coven-access-scroll" aria-label="Project access list" tabIndex={0}>
+            <ul
+              className="coven-access-list"
+              aria-label={`${familiar.name}'s declared project access`}
+            >
+              {shown.map((project) => (
+                <li key={`${project.path}:${project.access}`} className="coven-access-item">
+                  <span className="coven-access-icon" aria-hidden="true">
+                    <Icon name="folder-open" size={14} />
+                  </span>
+                  <span className="coven-access-name">{project.name}</span>
+                  <span
+                    className={cx(
+                      'coven-access-pill',
+                      project.access === 'write' && 'coven-access-pill--write',
+                    )}
+                  >
+                    {project.access === 'write' ? 'Read and write' : 'Read only'}
+                  </span>
+                  <span className="coven-access-path" title={project.path}>
+                    {homeRelative(project.path)}
+                  </span>
+                  <CopyButton
+                    className="coven-access-copy"
+                    text={project.path}
+                    label={`Copy ${project.name} path`}
+                  />
+                </li>
+              ))}
+              {shown.length === 0 ? (
+                <li className="coven-access-none">No projects match “{query.trim()}”.</li>
+              ) : null}
+            </ul>
+          </section>
         </>
       ) : (
         <div className="coven-settings-empty">
@@ -692,17 +731,9 @@ function FamiliarAccess({ familiar, onRefresh, refreshDisabled }: SettingsDialog
         </div>
       )}
       <p className="coven-settings-footnote">
-        Chat shows access as Coven declares it. Change it in Coven, then{' '}
-        <button
-          type="button"
-          className="coven-settings-link"
-          disabled={refreshDisabled}
-          onClick={onRefresh}
-        >
-          refresh
-        </button>
-        . Every turn runs read-only unless you allow a familiar's request, and an allowed turn isn't
-        limited to these projects.
+        To edit grants, open the familiar's Projects tab in Coven Cave, then refresh project access
+        here. Every turn runs read-only unless you allow a familiar's request, and an allowed turn
+        isn't limited to these projects.
       </p>
     </>
   );
