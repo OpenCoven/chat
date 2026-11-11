@@ -7,7 +7,7 @@ import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { sleep, until, walk } from './driver.mjs';
+import { PLATFORM, sleep, until, walk } from './driver.mjs';
 import { Row, showFamiliars } from './rows.mjs';
 
 export const ACCESS_PROJECTS = 8;
@@ -89,15 +89,25 @@ async function closeSettings(app) {
   });
 }
 
-async function projectNames(app, list) {
-  const lists = await app.all('list', list, { within: ['dialog', 'Settings'] });
-  if (!lists.length) return [];
-  return [...walk(lists[0])]
-    .filter((node) => node.role === 'listitem')
-    .map((item) => {
-      const names = [...walk(item)].map((node) => String(node.value ?? node.name ?? ''));
-      return names.find((text) => /^Access project \d+$/.test(text)) ?? names.join(' ').trim();
-    });
+/** Every synthetic project name in `text`, once each and sorted. */
+export function namesIn(text) {
+  return [...new Set(String(text).match(/Access project \d+/g) ?? [])].sort();
+}
+
+/**
+ * The synthetic projects Settings shows. Each platform exposes a list item
+ * under its own role, and AT-SPI keeps inline text in its container, so the
+ * names are read from all of the dialog's text rather than from list items.
+ */
+async function projectNames(app) {
+  const dialogs = await app.all('dialog', 'Settings');
+  if (!dialogs.length) return [];
+  const text = [...walk(dialogs[0])]
+    .map((node) =>
+      [node.name, node.value, node.raw?.text].filter((part) => typeof part === 'string').join(' '),
+    )
+    .join(' ');
+  return namesIn(text);
 }
 
 export async function accessRow(lane, familiar) {
@@ -106,6 +116,13 @@ export async function accessRow(lane, familiar) {
     'Settings › Access: Refresh project access, and a project list the keyboard reaches',
   );
   const { app } = lane;
+  if (PLATFORM === 'windows') {
+    row.block(
+      'Cave metadata',
+      "Chat doesn't read Cave's project metadata on Windows: open_metadata is Unix-only (#587)",
+    );
+    return row;
+  }
   const files = caveFiles();
   if (files.reason) {
     row.block('Cave metadata', files.reason);
@@ -128,7 +145,7 @@ export async function accessRow(lane, familiar) {
       await showFamiliars(lane, row);
       await app.click(await app.one('button', familiar));
       await openSettingsAt(app, 'Access');
-      row.expect('projects listed before any grant', await projectNames(app, list), []);
+      row.expect('projects listed before any grant', await projectNames(app), []);
 
       folder = realpathSync(mkdtempSync(join(tmpdir(), 'chat-native-access-')));
       const metadata = caveMetadata(id, folder);
@@ -142,16 +159,22 @@ export async function accessRow(lane, familiar) {
       const shown = await until(
         `${ACCESS_PROJECTS} granted projects in Settings`,
         async () => {
-          const names = await projectNames(app, list);
+          const names = await projectNames(app);
           return names.length === ACCESS_PROJECTS ? names : null;
         },
         30_000,
         500,
-      ).catch(async () => projectNames(app, list));
+      ).catch(async () => projectNames(app));
       row.expect(
         'projects listed after Refresh project access',
         [...shown].sort(),
         metadata.projects.projects.map((project) => project.name).sort(),
+      );
+      row.note(
+        `lists named "${list}"`,
+        (await app.all(undefined, list, { within: ['dialog', 'Settings'] })).map(
+          (node) => node.role,
+        ),
       );
       row.expect('Settings stayed open on Access', await app.count('dialog', 'Settings'), 1);
       row.expect(
@@ -165,7 +188,7 @@ export async function accessRow(lane, familiar) {
       await app.click(await app.one('button', REFRESH, { within: ['dialog', 'Settings'] }));
       await until(
         'the list to settle after the second refresh',
-        async () => (await projectNames(app, list)).length === ACCESS_PROJECTS,
+        async () => (await projectNames(app)).length === ACCESS_PROJECTS,
         30_000,
         500,
       ).catch(() => undefined);
@@ -184,10 +207,10 @@ export async function accessRow(lane, familiar) {
       await app.click(await app.one('button', REFRESH, { within: ['dialog', 'Settings'] }));
       const cleared = await until(
         'the grants to go after they were removed',
-        async () => ((await projectNames(app, list)).length === 0 ? [] : null),
+        async () => ((await projectNames(app)).length === 0 ? [] : null),
         30_000,
         500,
-      ).catch(async () => projectNames(app, list));
+      ).catch(async () => projectNames(app));
       row.expect('projects listed after the grants were removed', cleared, []);
       await closeSettings(app);
     } finally {

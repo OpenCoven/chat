@@ -2,7 +2,7 @@ import { join } from 'node:path';
 import { expect, test } from 'vitest';
 
 const path = '../scripts/native-acceptance/access-row.mjs';
-const { caveFiles, caveMetadata, idOf } = await import(path);
+const { caveFiles, caveMetadata, idOf, namesIn } = await import(path);
 
 test('the synthetic grants give one familiar every project, the first writable', () => {
   const { projects, permissions } = caveMetadata('astra', '/work', 3);
@@ -34,4 +34,11 @@ test('a familiar is found by the name the window shows, not its id-like name', (
   const listed = [{ id: 'astra-1', name: 'astra', display_name: 'Astra' }];
   expect(idOf(listed, 'Astra')).toBe('astra-1');
   expect(idOf(listed, 'astra')).toBeUndefined();
+});
+
+test('project names are read from all of the dialog text, once each', () => {
+  const text =
+    'Access project 2 Read only Copy Access project 2 path Access project 1 Read and write';
+  expect(namesIn(text)).toEqual(['Access project 1', 'Access project 2']);
+  expect(namesIn('No project access is declared for Astra')).toEqual([]);
 });
