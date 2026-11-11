@@ -21,14 +21,29 @@ jobs:
           done
           printf 'Dir::Cache::pkgcache "";\nDir::Cache::srcpkgcache "";\n' | sudo tee /etc/apt/apt.conf.d/99-opencoven-package-cache > /dev/null
           sudo rm -f /var/cache/apt/pkgcache.bin /var/cache/apt/srcpkgcache.bin
+          sudo apt-config dump | grep -F 'Dir::Cache::pkgcache "";'
+          sudo apt-config dump | grep -F 'Dir::Cache::srcpkgcache "";'
+          source_hash=$(sha256sum /etc/apt/sources.list.d/ubuntu.sources | cut -d' ' -f1)
           sudo apt-get update
           sudo DEBIAN_FRONTEND=noninteractive apt-get install -y \
             xvfb openbox xdotool xclip at-spi2-core python3-pyatspi dbus-x11 \
             orca speech-dispatcher ibus ibus-gtk3 imagemagick sqlite3 libfuse2t64
+          test "$source_hash" = "$(sha256sum /etc/apt/sources.list.d/ubuntu.sources | cut -d' ' -f1)"
           echo NATIVE_APT_INSTALL_OK
           sudo DEBIAN_FRONTEND=noninteractive apt-get install -y \
             build-essential libayatana-appindicator3-dev libgtk-3-dev libssl-dev \
             libwebkit2gtk-4.1-dev librsvg2-dev patchelf libfuse2t64 file
           echo BUILD_APT_INSTALL_OK
-          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y ibus-anthy anthy
-          echo SECOND_NATIVE_APT_INSTALL_OK
+          test "$source_hash" = "$(sha256sum /etc/apt/sources.list.d/ubuntu.sources | cut -d' ' -f1)"
+          sudo apt-cache policy build-essential libgtk-3-dev ibus-anthy ibus-mozc
+          language_installed=false
+          for language in ibus-anthy ibus-mozc; do
+            if sudo DEBIAN_FRONTEND=noninteractive apt-get install -y "$language"; then
+              printf 'LANGUAGE_APT_INSTALL_OK %s\n' "$language"
+              language_installed=true
+              break
+            fi
+          done
+          test "$language_installed" = true
+          test "$source_hash" = "$(sha256sum /etc/apt/sources.list.d/ubuntu.sources | cut -d' ' -f1)"
+          echo ALL_APT_INSTALLS_OK
