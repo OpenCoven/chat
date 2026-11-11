@@ -3084,3 +3084,7 @@ The #558 protected run 42550212128 stopped on the unreviewed Windows image 20261
 
 
 The #558 native runner compatibility authority is f8d4dd4263c28fa5943426f53ee72910ec0caeae, tree 92a2e2fc9170ac6cc2b629da727e6ba4c7d17571. The separate repin reviews all 25 governed files and ten production deltas; only the protected workflow and trusted Unix supervisor differ from authority 3aa2ed6a4fcdee9db4470c4466ed8ead910273d1. The explicit pinned Rust dispatch and observed complete Windows image profile require a matching delivered SDK validator and fresh protected execution before acceptance.
+
+## v0.1.0 package-version authority
+
+The v0.1.0 release bump landed in merge commit `ef4d020710eb62f3f13ca88cf60dafd7f32082f4`, tree `248a691a9a80374ca421aaa479feb8c0905764d4`. The follow-up repin binds all 25 governed files and ten production deltas to that existing merge on main. Only `src-tauri/Cargo.toml` and `src-tauri/Cargo.lock` differ from the preceding authority, and their changes are the application package version from 0.0.9 to 0.1.0. The Chat, SDK, Cave, Coven, and evidence pins remain unchanged; this source-authority refresh does not claim a new protected SDK validation run.
