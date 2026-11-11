@@ -52,16 +52,20 @@ function familiarId(cli, shown) {
   return idOf(JSON.parse(listed.stdout), shown);
 }
 
-const alertText = async (app) =>
-  (await app.all('alert'))
-    .map((alert) =>
-      [...walk(alert)]
-        .map((node) => shownText(node) || node.name || '')
-        .join(' ')
-        .replace(/\s+/g, ' ')
-        .trim(),
-    )
-    .join(' | ');
+/**
+ * What an alert says. AT-SPI keeps inline text in the alert's own Text
+ * interface (`raw.text`), not in child nodes; the other platforms name
+ * the children.
+ */
+export function textOfAlert(alert) {
+  return [...walk(alert)]
+    .map((node) => [node.raw?.text, shownText(node) || node.name].filter(Boolean).join(' '))
+    .join(' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+const alertText = async (app) => (await app.all('alert')).map(textOfAlert).join(' | ');
 
 async function refreshCoven(lane) {
   await lane.front();

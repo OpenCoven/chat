@@ -2,7 +2,9 @@ import { join } from 'node:path';
 import { expect, test } from 'vitest';
 
 const path = '../scripts/native-acceptance/unavailable-row.mjs';
-const { chatDataDir, idOf, withUnreadableChat, withoutUnreadableChat } = await import(path);
+const { chatDataDir, idOf, textOfAlert, withUnreadableChat, withoutUnreadableChat } = await import(
+  path
+);
 
 test('the row stages an unreadable chat only for a familiar with no record', () => {
   const heads = { astra: 'one', sage: null };
@@ -38,4 +40,29 @@ test('a familiar is found by the name the window shows, not its id-like name', (
   expect(idOf(listed, 'Wren')).toBe('wren-2');
   expect(idOf(listed, 'wren')).toBeUndefined();
   expect(idOf([{ id: 'old', name: 'Old' }], 'Old')).toBe('old');
+});
+
+test("an alert's text is read from AT-SPI's container text as well as named children", () => {
+  const linux = {
+    role: 'alert',
+    name: '',
+    raw: {},
+    children: [
+      {
+        role: 'text',
+        name: '',
+        raw: { text: "Coven couldn't load this chat. Refresh Coven to try again." },
+        children: [],
+      },
+      { role: 'button', name: 'Copy error', raw: {}, children: [] },
+    ],
+  };
+  expect(textOfAlert(linux)).toContain("Coven couldn't load this chat");
+  const mac = {
+    raw: {},
+    children: [
+      { role: 'text', name: '', value: "Coven couldn't load this chat.", raw: {}, children: [] },
+    ],
+  };
+  expect(textOfAlert(mac)).toContain("Coven couldn't load this chat");
 });
