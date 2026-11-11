@@ -31,6 +31,20 @@ jobs:
             gpgv --keyring /usr/share/keyrings/ubuntu-archive-keyring.gpg "$RUNNER_TEMP/InRelease"
           done
           sudo apt-get update
+          sudo apt-config dump
+          sudo apt-get indextargets
+          sudo apt-cache policy
+          sudo apt-cache show build-essential libgtk-3-dev || true
+          while IFS= read -r package_list; do
+            case "$package_list" in
+              *Packages*)
+                if [ -f "$package_list" ]; then
+                  printf 'RETAINED_INDEX %s\n' "$package_list"
+                  sudo /usr/lib/apt/apt-helper cat-file "$package_list" | awk 'BEGIN {RS=""} /^Package: (build-essential|libgtk-3-dev)\n/ {print $0 "\n"}'
+                fi
+                ;;
+            esac
+          done < <(sudo apt-get indextargets --format '$(FILENAME)')
           dpkg --print-architecture
           dpkg-query -W build-essential libgtk-3-dev || true
           sudo apt-cache policy build-essential libgtk-3-dev xvfb python3-pyatspi
