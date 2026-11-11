@@ -6,6 +6,7 @@
 
 import { appendFileSync } from 'node:fs';
 import { createServer } from 'node:http';
+import { isAbsolute } from 'node:path';
 
 export const ADDRESSES = {
   query: 'https://example.com/handoff-check?x=1',
@@ -56,6 +57,11 @@ export function replyFor(messages) {
 
 export const APPROVAL_SUMMARY = 'Write the proof file';
 export const APPROVAL_DONE = 'The proof file is written.';
+/** Lowercase hex keeps path bytes intact through WebKitWebDriver key input. */
+export function writeProofPrompt(path, request) {
+  return `[[write ${Buffer.from(path, 'utf8').toString('hex')}]] ${request}`;
+}
+
 /** The allowed turn's reply when the engine refused the write anyway. */
 export const APPROVAL_REFUSED = 'The engine refused the write:';
 /** A heading, so a row can wait for it: this turn's prompt carried no note from Chat. */
@@ -99,7 +105,9 @@ export function approvalStep(messages) {
   const request = [...prompt.matchAll(/\[\[(ask|write) (\S+)\]\]/g)].at(-1);
   if (!request) return undefined;
   const [, operation, path] = request;
-  const proof = operation === 'write' ? decodeURIComponent(path) : path;
+  if (operation === 'write' && !/^(?:[0-9a-f]{2})+$/.test(path)) return undefined;
+  const proof = operation === 'write' ? Buffer.from(path, 'hex').toString('utf8') : path;
+  if (!isAbsolute(proof)) return undefined;
   const last = messages.at(-1)?.content;
   const result = Array.isArray(last)
     ? last.find((block) => block?.type === 'tool_result')

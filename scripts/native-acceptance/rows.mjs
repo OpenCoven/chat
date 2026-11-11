@@ -8,7 +8,11 @@ import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { isDeepStrictEqual } from 'node:util';
-import { APPROVAL_NO_NOTE, APPROVAL_UNASKED } from '../packaged-acceptance/model-fixture.mjs';
+import {
+  APPROVAL_NO_NOTE,
+  APPROVAL_UNASKED,
+  writeProofPrompt,
+} from '../packaged-acceptance/model-fixture.mjs';
 import { addressBars, browserProcesses, quitBrowsers } from './browser.mjs';
 import {
   center,
@@ -1807,12 +1811,7 @@ export async function fullAccessRow(lane, familiar) {
         ['second.txt', '[[request anyway]] Write another.', APPROVAL_UNASKED],
       ]) {
         const proof = join(folder, name);
-        await lane.send(
-          familiar,
-          `[[write ${encodeURIComponent(proof)}]] ${prompt}`,
-          'heading',
-          heading,
-        );
+        await lane.send(familiar, writeProofPrompt(proof, prompt), 'heading', heading);
         row.expect(`${name} was written`, existsSync(proof), true);
         if (existsSync(proof))
           row.expect(`${name} contents`, readFileSync(proof, 'utf8'), 'allowed turn\n');

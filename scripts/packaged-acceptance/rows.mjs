@@ -14,6 +14,7 @@ import {
   APPROVAL_SUMMARY,
   APPROVAL_UNASKED,
   TABLE,
+  writeProofPrompt,
 } from './model-fixture.mjs';
 import { readClipboard } from './platform.mjs';
 import { freshly, Key, Stop, sleep, until } from './webdriver.mjs';
@@ -1150,7 +1151,7 @@ export async function defaultAccessRow(s, familiar, fullAccess) {
     await send(
       s,
       familiar,
-      `[[write ${encodeURIComponent(proof)}]] Write the proof file.`,
+      writeProofPrompt(proof, 'Write the proof file.'),
       'heading',
       APPROVAL_NO_NOTE,
     );
@@ -1161,7 +1162,7 @@ export async function defaultAccessRow(s, familiar, fullAccess) {
     await send(
       s,
       familiar,
-      `[[write ${encodeURIComponent(unasked)}]] [[request anyway]] Write another.`,
+      writeProofPrompt(unasked, '[[request anyway]] Write another.'),
       'heading',
       APPROVAL_UNASKED,
     );
