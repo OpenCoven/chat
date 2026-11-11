@@ -401,12 +401,12 @@ const CLAUDE_MODELS = [
 const ENGINE_MODEL_GROUPS: Readonly<
   Record<string, readonly { label: string; models: readonly (readonly [string, string])[] }[]>
 > = {
+  // Coven Code takes "openai/…" to choose OpenAI and strips the prefix before
+  // sending, but sends an "anthropic/…" ID to Anthropic as written, so its
+  // Claude presets are the IDs Anthropic's API knows.
   'coven-code': [
     { label: 'OpenAI', models: CODEX_MODELS.map(([id, label]) => [`openai/${id}`, label]) },
-    {
-      label: 'Anthropic',
-      models: CLAUDE_MODELS.map(([id, label]) => [`anthropic/${id}`, label]),
-    },
+    { label: 'Anthropic', models: CLAUDE_MODELS },
   ],
   codex: [{ label: 'OpenAI', models: CODEX_MODELS }],
   claude: [{ label: 'Anthropic', models: CLAUDE_MODELS }],

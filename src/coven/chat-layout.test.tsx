@@ -3042,6 +3042,23 @@ describe('model settings', () => {
     });
   });
 
+  it("offers Coven Code's presets as IDs the engine sends to each provider as they are", () => {
+    render(<ChatLayout {...layoutProps()} ready />);
+    const model = openSettingsAt('Model');
+    const picker = within(model).getByRole('combobox', { name: 'Model' });
+    // The engine strips a provider prefix only for non-Anthropic providers;
+    // an "anthropic/" ID would reach Anthropic's API as written (#584).
+    expect(within(picker).getByRole('option', { name: 'Claude Sonnet 5.5' })).toHaveValue(
+      'claude-sonnet-5-5',
+    );
+    expect(within(picker).getByRole('option', { name: 'Claude Opus 5.5' })).toHaveValue(
+      'claude-opus-5-5',
+    );
+    expect(within(picker).getByRole('option', { name: 'GPT-5.5' })).toHaveValue('openai/gpt-5.5');
+    fireEvent.change(picker, { target: { value: 'claude-sonnet-5-5' } });
+    expect(stored()).toMatchObject({ harness: 'coven-code', model: 'claude-sonnet-5-5' });
+  });
+
   it('says plainly when a model id could not be sent, until it is corrected or cleared', () => {
     render(<ChatLayout {...layoutProps()} ready />);
     const model = openSettingsAt('Model');

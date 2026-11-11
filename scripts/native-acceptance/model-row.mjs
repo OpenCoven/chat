@@ -7,7 +7,7 @@ import { sleep, until, walk } from './driver.mjs';
 import { Row, showFamiliars } from './rows.mjs';
 
 export const PRESET = 'Claude Sonnet 5.5';
-/** What the engine sends for the Coven Code preset `anthropic/claude-sonnet-5-5`. */
+/** The ID Anthropic's API must receive for that preset, exactly as written. */
 export const PRESET_MODEL = 'claude-sonnet-5-5';
 const POPUP_ROLES = new Set(['AXPopUpButton', 'combo box', 'ComboBox', 'combobox']);
 
