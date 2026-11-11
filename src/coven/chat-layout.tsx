@@ -110,6 +110,8 @@ export type ChatLayoutProps = Readonly<{
     projectRoot?: string;
     /** The harness the chat runs on, which it keeps for good. */
     harness?: string;
+    /** Coven couldn't load this recorded chat; the error says so. */
+    unavailable?: boolean;
   }[];
   messages: readonly ChatMessage[];
   attachments?: readonly ChatAttachment[];
@@ -1601,7 +1603,9 @@ export function ChatLayout(props: ChatLayoutProps) {
                   <ThinkingIndicator label={liveRow} />
                 </div>
               ) : null}
-              {!props.messages.length && !props.loading && !runHere ? (
+              {/* A chat Coven couldn't load isn't a new one: its error says what
+                happened, and "the start of your conversation" would contradict it. */}
+              {!props.messages.length && !props.loading && !runHere && !session?.unavailable ? (
                 <div className="fr-thread-empty">
                   {familiar ? (
                     <FamiliarAvatar name={name} avatarUrl={familiar.avatarUrl} size={36} ring />

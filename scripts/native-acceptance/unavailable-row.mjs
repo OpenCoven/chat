@@ -65,7 +65,48 @@ export function textOfAlert(alert) {
     .trim();
 }
 
-const alertText = async (app) => (await app.all('alert')).map(textOfAlert).join(' | ');
+/**
+ * What AT-SPI reports drawn at `node`'s first line of text, from the deepest
+ * accessible up: what a screen reader's flat review finds there. Candidate run
+ * 43003020997 showed WebKitGTK exposing the alert without its message in the
+ * tree, while the message was on screen.
+ */
+async function textDrawnIn(app, node) {
+  const frame = node.frame;
+  if (PLATFORM !== 'linux' || !frame?.w || !frame?.h) return '';
+  const at = [
+    Math.round(frame.x + Math.min(40, frame.w / 4)),
+    Math.round(frame.y + Math.min(17, frame.h / 2)),
+  ];
+  const answer = await app.native.call({ cmd: 'at', at, pid: app.pid });
+  return (answer.chain ?? [])
+    .map((entry) => [entry.text, entry.name].filter(Boolean).join(' '))
+    .join(' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+/** Each node under `alert` as role, name and text, for a row that can't read it. */
+export function alertOutline(alert) {
+  return [...walk(alert)].map((node) =>
+    [
+      node.raw?.role ?? node.role,
+      node.name && `"${node.name}"`,
+      node.raw?.text && `text="${node.raw.text}"`,
+    ]
+      .filter(Boolean)
+      .join(' '),
+  );
+}
+
+async function alertText(app) {
+  const said = [];
+  for (const alert of await app.all('alert')) {
+    const text = textOfAlert(alert);
+    said.push(text.includes(UNREADABLE) ? text : `${text} ${await textDrawnIn(app, alert)}`.trim());
+  }
+  return said.join(' | ');
+}
 
 async function refreshCoven(lane) {
   await lane.front();
@@ -112,6 +153,15 @@ export async function unavailableRow(lane, familiar) {
         500,
       ).catch(async () => alertText(app));
       row.check(`${THIRD} says its chat couldn't load`, said.includes(UNREADABLE), said);
+      if (!said.includes(UNREADABLE))
+        row.note('alerts as the tree gives them', (await app.all('alert')).map(alertOutline));
+      const fresh = new RegExp(`start of your conversation with ${THIRD}`);
+      const shownAsNew = [...walk(await app.snapshot())].some((node) =>
+        [node.name, node.value, node.raw?.text].some(
+          (text) => typeof text === 'string' && fresh.test(text),
+        ),
+      );
+      row.expect(`${THIRD}'s chat is shown as a new conversation`, shownAsNew, false);
       const locked = await app.one('textbox', `Message ${THIRD}`);
       row.expect(`${THIRD}'s composer is enabled`, locked.enabled, false);
       lane.shot('unavailable-chat');

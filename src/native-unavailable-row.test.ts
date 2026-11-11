@@ -2,9 +2,8 @@ import { join } from 'node:path';
 import { expect, test } from 'vitest';
 
 const path = '../scripts/native-acceptance/unavailable-row.mjs';
-const { chatDataDir, idOf, textOfAlert, withUnreadableChat, withoutUnreadableChat } = await import(
-  path
-);
+const { alertOutline, chatDataDir, idOf, textOfAlert, withUnreadableChat, withoutUnreadableChat } =
+  await import(path);
 
 test('the row stages an unreadable chat only for a familiar with no record', () => {
   const heads = { astra: 'one', sage: null };
@@ -65,4 +64,14 @@ test("an alert's text is read from AT-SPI's container text as well as named chil
     ],
   };
   expect(textOfAlert(mac)).toContain("Coven couldn't load this chat");
+});
+
+test('an alert the row cannot read is recorded node by node', () => {
+  const alert = {
+    role: 'alert',
+    name: '',
+    raw: { role: 'notification' },
+    children: [{ role: 'button', name: 'Copy error', raw: { role: 'push button' }, children: [] }],
+  };
+  expect(alertOutline(alert)).toEqual(['notification', 'push button "Copy error"']);
 });
