@@ -101,7 +101,7 @@ export function startModelFixture({ log } = {}) {
       if (log) {
         appendFileSync(
           log,
-          `${JSON.stringify({ at: Date.now(), method: req.method, path, token: token ?? null })}\n`,
+          `${JSON.stringify({ at: Date.now(), method: req.method, path, token: token ?? null, model: parsed.model ?? null })}\n`,
         );
       }
       if (req.method === 'POST' && path === '/v1/messages/count_tokens') {

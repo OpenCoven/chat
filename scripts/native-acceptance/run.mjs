@@ -92,6 +92,7 @@ const logged = () =>
     .filter((entry) => entry.path === '/v1/messages');
 const requests = () => logged().length;
 const tokens = (name) => logged().filter((entry) => entry.token === name).length;
+const models = () => logged().map((entry) => entry.model ?? null);
 
 const native =
   PLATFORM === 'mac'
@@ -266,6 +267,12 @@ try {
   await lane.front();
   await lane.reset();
   rows.push(await cancelledRunRow(lane, FIRST));
+  // Published releases before v0.0.10 launch Coven Code without Coven's marker.
+  if (!/^v0\.0\.[0-9](?:[-+]|$)/.test(facts.release ?? process.env.RELEASE ?? '')) {
+    await lane.front();
+    await lane.reset();
+    rows.push(await engineHomeRow(lane, FIRST, models));
+  }
   shot('before-quit');
 
   // Quit as a person would, so the web view writes its storage out.
@@ -284,9 +291,6 @@ try {
   if (!exited) child.kill();
   await sleep(2_000);
   rows.push(storageRow());
-  // Published releases before v0.0.10 may start the engine in its standalone home.
-  if (!/^v0\.0\.[0-9](?:[-+]|$)/.test(facts.release ?? process.env.RELEASE ?? ''))
-    rows.push(engineHomeRow(requests));
 } catch (error) {
   setup.error = error.message;
   setup.note('error', error.message);
