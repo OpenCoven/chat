@@ -601,6 +601,18 @@ pub(crate) fn run_process(
     run_process_input(args, cwd, cancel, timeout, on_event, None, None)
 }
 
+/// Coven sets `COVEN_PARENT=coven` when it hands a run to its engine, and the
+/// engine then keeps its state in Coven's managed home. A streamed
+/// `coven run coven-code` from an older Coven does not set it, so the engine
+/// falls back to its standalone home and can't find its goal database there.
+fn mark_engine_launch(command: &mut Command, args: &[String]) {
+    if args.first().is_some_and(|arg| arg == "run")
+        && args.get(1).is_some_and(|arg| arg == "coven-code")
+    {
+        command.env("COVEN_PARENT", "coven");
+    }
+}
+
 fn run_process_input(
     args: &[String],
     cwd: Option<&Path>,
@@ -623,6 +635,7 @@ fn run_process_input(
         command.current_dir(home()?);
     }
     command.env("PATH", tool_search_path()?);
+    mark_engine_launch(&mut command, args);
     // The engine reaches a Claude subscription through Claude Code, which it
     // looks up on PATH alone; name it so a launch from Finder still finds it.
     if std::env::var_os("COVEN_CODE_CLAUDE_BIN").is_none() {
@@ -2556,6 +2569,26 @@ pub(crate) fn coven_runtime_cancel(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn coven_code_runs_use_covens_managed_engine_home() {
+        let marker = |args: &[&str]| {
+            let mut command = Command::new("coven");
+            let args: Vec<String> = args.iter().map(|arg| (*arg).to_owned()).collect();
+            mark_engine_launch(&mut command, &args);
+            command
+                .get_envs()
+                .find(|(key, _)| *key == "COVEN_PARENT")
+                .and_then(|(_, value)| value.map(|value| value.to_owned()))
+        };
+        assert_eq!(
+            marker(&["run", "coven-code", "--json", "--", "hello"]),
+            Some("coven".into())
+        );
+        assert_eq!(marker(&["run", "codex", "--json"]), None);
+        assert_eq!(marker(&["sessions", "--all", "--json"]), None);
+        assert_eq!(marker(&["coven-code"]), None);
+    }
 
     #[test]
     fn companion_can_poll_a_desktop_run_after_it_finishes() {
