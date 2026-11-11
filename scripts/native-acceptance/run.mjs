@@ -15,6 +15,7 @@ import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
 import { defaultBrowser, quitBrowsers } from './browser.mjs';
 import { App, Native, outline, PLATFORM, screenshot, sleep, until } from './driver.mjs';
+import { engineHomeRow } from './engine-home-row.mjs';
 import { startModelFixture } from './fixture.mjs';
 import {
   cancelledRunRow,
@@ -283,6 +284,9 @@ try {
   if (!exited) child.kill();
   await sleep(2_000);
   rows.push(storageRow());
+  // Published releases before v0.0.10 may start the engine in its standalone home.
+  if (!/^v0\.0\.[0-9](?:[-+]|$)/.test(facts.release ?? process.env.RELEASE ?? ''))
+    rows.push(engineHomeRow(requests));
 } catch (error) {
   setup.error = error.message;
   setup.note('error', error.message);
