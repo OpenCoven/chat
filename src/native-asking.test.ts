@@ -67,14 +67,28 @@ describe('switching asking on for a candidate', () => {
   const DECLINE = '      onDeclineApproval={(approval) => void declineApproval(approval)}\n';
   const LOG = '      onPermissionLog={() => runtime.permissionLog()}\n';
   const WINDOW = `    <ChatLayout\n${DECLINE}      archivedFilter={archived}\n`;
-  const run = (host: string, window: string) =>
-    spawnSync(process.execPath, [script, host, window], { encoding: 'utf8' });
+  const runtime = join(scratch, 'read-only-runtime.rs');
+  writeFileSync(runtime, '"--permission".into(), permission.into(),');
+  const run = (host: string, window: string, runtimePath = runtime) =>
+    spawnSync(process.execPath, [script, host, window, runtimePath], { encoding: 'utf8' });
   const files = (name: string, host: string, window: string) => {
     const paths = [join(scratch, `${name}.rs`), join(scratch, `${name}.tsx`)] as const;
     writeFileSync(paths[0], host);
     writeFileSync(paths[1], window);
     return paths;
   };
+
+  test('refuses to enable legacy asking in a full-access candidate without changing files', () => {
+    const [host, window] = files('full-access', OFF, WINDOW);
+    const fullRuntime = join(scratch, 'full-runtime.rs');
+    writeFileSync(fullRuntime, '"--permission".into(),\n"full".into(),');
+    const result = run(host, window, fullRuntime);
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain('full-access');
+    expect(result.stderr).toContain('as-built');
+    expect(readFileSync(host, 'utf8')).toBe(OFF);
+    expect(readFileSync(window, 'utf8')).toBe(WINDOW);
+  });
 
   test("undoes #562's two switches, and leaves an already switched-on checkout alone", () => {
     const [host, window] = files('off', OFF, WINDOW);

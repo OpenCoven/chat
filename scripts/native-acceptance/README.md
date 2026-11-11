@@ -28,6 +28,8 @@ drive the app.
 
 ## Status checkpoint
 
+Current full-access candidates and releases use the full-access row. Select `asking=as-built`; the legacy `switched-on` mode is refused before changing or building a full-access candidate. The historical asking modes below apply to builds that still use read-only ordinary turns.
+
 - Runs are dispatched for a published tag (`workflow_dispatch`, input
   `release`). While the lane was built, pushes to `test/504-native-acceptance`
   also ran it; that trigger is gone. Each lane uploads `results.md`,

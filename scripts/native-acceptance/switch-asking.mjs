@@ -15,6 +15,14 @@ const repo = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
 // Path arguments are for tests; the workflow passes none.
 const host = process.argv[2] ?? join(repo, 'src-tauri', 'src', 'chat_approvals.rs');
 const window = process.argv[3] ?? join(repo, 'src', 'coven', 'chat-app.tsx');
+const runtime = process.argv[4] ?? join(repo, 'src-tauri', 'src', 'coven_runtime.rs');
+
+// Full-access chats cannot be qualified by turning legacy approval prompts back on.
+// Refuse before either source file is changed or a misleading candidate is built.
+if (/"--permission"\.into\(\),\s*"full"\.into\(\)/.test(readFileSync(runtime, 'utf8'))) {
+  console.error('This is a full-access candidate. Use asking=as-built; nothing was changed.');
+  process.exit(1);
+}
 
 const OFF = 'const ASKING_ENABLED: bool = false;';
 const ON = 'const ASKING_ENABLED: bool = true;';
