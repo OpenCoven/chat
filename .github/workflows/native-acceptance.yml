@@ -1,29 +1,18 @@
-name: Ubuntu uncached dependency installation diagnostic
+name: Ubuntu APT source identity diagnostic
 on: workflow_dispatch
 permissions:
   contents: read
 jobs:
-  dependencies:
+  preserve-mirror-list:
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
-      - name: Install native and build dependencies from authenticated indexes without binary caches
+      - name: Preserve source identity and install native, build, and IME dependencies
         run: |
           set -euo pipefail
-          # Use an independent Ubuntu mirror when Canonical's DNS is unavailable.
-          # Keep Ubuntu's suites, components, signing keys and apt verification.
-          for sources in /etc/apt/sources.list /etc/apt/sources.list.d/*.list /etc/apt/sources.list.d/*.sources; do
-            if [ -f "$sources" ]; then
-              sudo sed -E -i \
-                -e 's#mirror[+]file:/etc/apt/apt-mirrors[.]txt#https://mirrors.edge.kernel.org/ubuntu#g' \
-                -e 's#https?://(azure[.]archive|archive|security)[.]ubuntu[.]com/ubuntu#https://mirrors.edge.kernel.org/ubuntu#g' "$sources"
-            fi
-          done
-          printf 'Dir::Cache::pkgcache "";\nDir::Cache::srcpkgcache "";\n' | sudo tee /etc/apt/apt.conf.d/99-opencoven-package-cache > /dev/null
-          sudo rm -f /var/cache/apt/pkgcache.bin /var/cache/apt/srcpkgcache.bin
-          sudo apt-config dump | grep -F 'Dir::Cache::pkgcache "";'
-          sudo apt-config dump | grep -F 'Dir::Cache::srcpkgcache "";'
+          test -f /etc/apt/apt-mirrors.txt
           source_hash=$(sha256sum /etc/apt/sources.list.d/ubuntu.sources | cut -d' ' -f1)
+          printf '%s\n' https://mirrors.edge.kernel.org/ubuntu | sudo tee /etc/apt/apt-mirrors.txt > /dev/null
           sudo apt-get update
           sudo DEBIAN_FRONTEND=noninteractive apt-get install -y \
             xvfb openbox xdotool xclip at-spi2-core python3-pyatspi dbus-x11 \
@@ -34,8 +23,7 @@ jobs:
             build-essential libayatana-appindicator3-dev libgtk-3-dev libssl-dev \
             libwebkit2gtk-4.1-dev librsvg2-dev patchelf libfuse2t64 file
           echo BUILD_APT_INSTALL_OK
-          test "$source_hash" = "$(sha256sum /etc/apt/sources.list.d/ubuntu.sources | cut -d' ' -f1)"
-          sudo apt-cache policy build-essential libgtk-3-dev ibus-anthy ibus-mozc
+          sudo apt-cache policy build-essential openbox ibus-anthy ibus-mozc
           language_installed=false
           for language in ibus-anthy ibus-mozc; do
             if sudo DEBIAN_FRONTEND=noninteractive apt-get install -y "$language"; then
@@ -47,3 +35,35 @@ jobs:
           test "$language_installed" = true
           test "$source_hash" = "$(sha256sum /etc/apt/sources.list.d/ubuntu.sources | cut -d' ' -f1)"
           echo ALL_APT_INSTALLS_OK
+  compare-root-command-forms:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Compare APT source discovery and simulated root commands
+        run: |
+          set -uo pipefail
+          # Use an independent Ubuntu mirror when Canonical's DNS is unavailable.
+          # Keep Ubuntu's suites, components, signing keys and apt verification.
+          for sources in /etc/apt/sources.list /etc/apt/sources.list.d/*.list /etc/apt/sources.list.d/*.sources; do
+            if [ -f "$sources" ]; then
+              sudo sed -E -i \
+                -e 's#mirror[+]file:/etc/apt/apt-mirrors[.]txt#https://mirrors.edge.kernel.org/ubuntu#g' \
+                -e 's#https?://(azure[.]archive|archive|security)[.]ubuntu[.]com/ubuntu#https://mirrors.edge.kernel.org/ubuntu#g' "$sources"
+            fi
+          done
+          sudo apt-get update
+          sudo apt-cache policy build-essential openbox
+          sudo apt-get -s install openbox build-essential
+          printf 'SIMULATION_NORMAL_STATUS %s\n' "$?"
+          sudo DEBIAN_FRONTEND=noninteractive apt-cache policy build-essential openbox
+          sudo DEBIAN_FRONTEND=noninteractive apt-get -s install openbox build-essential
+          printf 'SIMULATION_SUDO_ASSIGNMENT_STATUS %s\n' "$?"
+          sudo env DEBIAN_FRONTEND=noninteractive apt-cache policy build-essential openbox
+          sudo env DEBIAN_FRONTEND=noninteractive apt-get -s install openbox build-essential
+          printf 'SIMULATION_SUDO_ENV_STATUS %s\n' "$?"
+          sudo apt-get -o Dir::Etc::sourcelist=/etc/apt/sources.list.d/ubuntu.sources -o Dir::Etc::sourceparts=- -s install openbox build-essential
+          printf 'SIMULATION_EXPLICIT_SOURCE_STATUS %s\n' "$?"
+          sudo apt-get indextargets --format '$(FILENAME)'
+          sha256sum /etc/apt/sources.list.d/ubuntu.sources
+          cat /etc/apt/sources.list.d/ubuntu.sources
+          command -v strace || true
