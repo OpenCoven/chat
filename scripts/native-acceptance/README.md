@@ -39,6 +39,15 @@ drive the app.
   `<commit>`, not a published release". A candidate run checks a fix before a
   tag; it never stands in for the published installers, which are driven again
   once the release is out.
+- **Row 578 (Windows, MSI).** After every other row, `upgrade.mjs` installs the
+  published v0.0.8 MSI (checked against v0.0.8's `SHA256SUMS`) over the build
+  under test. In v0.0.8 it types a synthetic phrase into the composer during a
+  run, presses Stop run, selects the second familiar and quits. The phrase must
+  then be in `EBWebView\Default\Web Data`; if not, the row is blocked. It then
+  installs the build under test over v0.0.8, starts it, and quits. No `Web Data`
+  file may hold the phrase, the app must reopen on the second familiar (local
+  storage kept), and the transcript count must not change. It runs last because
+  v0.0.8 shows setup, with no text field, until Coven is installed.
 - v0.0.8 results and the issues they produced (#544, #545, #546, #547, #548) are
   recorded in `docs/verification/2026-10-18-rakazo-chat-ux.md`, section
   "Native OS-level automation on the published v0.0.8 installers".

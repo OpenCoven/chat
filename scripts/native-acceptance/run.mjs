@@ -6,6 +6,7 @@
 //
 //   node scripts/native-acceptance/run.mjs --app <installed binary> --out <dir>
 //     --lane <name> [--helper <macOS helper>] [--nvda <nvda.exe>] [--japanese <id> --latin <id>]
+//     [--upgrade-from <v0.0.8 MSI> --upgrade-to <this build's MSI> | --upgrade-blocked <why>]
 
 import { execFileSync, spawn } from 'node:child_process';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
@@ -30,6 +31,7 @@ import {
 } from './rows.mjs';
 import { screenReader } from './speech.mjs';
 import { storageRow } from './storage.mjs';
+import { autofillUpgradeRow } from './upgrade.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const { values: options } = parseArgs({
@@ -44,6 +46,9 @@ const { values: options } = parseArgs({
     'ime-on': { type: 'string' },
     'ime-off': { type: 'string' },
     facts: { type: 'string' },
+    'upgrade-from': { type: 'string' },
+    'upgrade-to': { type: 'string' },
+    'upgrade-blocked': { type: 'string' },
   },
 });
 if (!options.app || !options.out) {
@@ -123,6 +128,51 @@ rows.push(setup);
 let child;
 let reader;
 
+function spawnApp(logName) {
+  const started = spawn(options.app, [], {
+    env,
+    detached: PLATFORM !== 'windows',
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+  const appLog = [];
+  started.stdout.on('data', (chunk) => appLog.push(String(chunk)));
+  started.stderr.on('data', (chunk) => appLog.push(String(chunk)));
+  started.on('exit', () => writeFileSync(join(out, logName), appLog.join('')));
+  return started;
+}
+
+async function attach(started, screen) {
+  await until(
+    'the app window',
+    async () =>
+      (await native.call({ cmd: 'target', pid: started.pid })).ok &&
+      (await native.call({ cmd: 'windows' })).windows?.length,
+    90_000,
+    1_000,
+  );
+  const app = new App(native, started.pid);
+  app.screen = screen;
+  return app;
+}
+
+/** Quits as a person would, so the web view writes its storage out. */
+async function quit(app, started, front) {
+  await front();
+  if (PLATFORM === 'mac') await app.key('q', ['cmd']);
+  else await app.key('f4', ['alt']).catch(async () => app.key('F4', ['alt']));
+  const exited = await until(
+    'the app to quit',
+    async () => started.exitCode !== null || started.signalCode !== null,
+    30_000,
+    500,
+  )
+    .then(() => true)
+    .catch(() => false);
+  if (!exited) started.kill();
+  await sleep(2_000);
+  return exited;
+}
+
 async function setUp(app) {
   const phase = await until(
     'the setup screen or the chat',
@@ -179,26 +229,9 @@ try {
   facts.defaultBrowser = browser;
   quitBrowsers();
 
-  child = spawn(options.app, [], {
-    env,
-    detached: PLATFORM !== 'windows',
-    stdio: ['ignore', 'pipe', 'pipe'],
-  });
-  const appLog = [];
-  child.stdout.on('data', (chunk) => appLog.push(String(chunk)));
-  child.stderr.on('data', (chunk) => appLog.push(String(chunk)));
-  child.on('exit', () => writeFileSync(join(out, 'app.log'), appLog.join('')));
+  child = spawnApp('app.log');
   facts.appPid = child.pid;
-  await until(
-    'the app window',
-    async () =>
-      (await native.call({ cmd: 'target', pid: child.pid })).ok &&
-      (await native.call({ cmd: 'windows' })).windows?.length,
-    90_000,
-    1_000,
-  );
-  const app = new App(native, child.pid);
-  app.screen = screen;
+  const app = await attach(child, screen);
   await app.activate();
   await app.setFrame(FRAMES.wide).catch((error) => setup.note('setFrame', error.message));
   await sleep(2_000);
@@ -267,22 +300,38 @@ try {
   rows.push(await cancelledRunRow(lane, FIRST));
   shot('before-quit');
 
-  // Quit as a person would, so the web view writes its storage out.
-  await lane.front();
-  if (PLATFORM === 'mac') await app.key('q', ['cmd']);
-  else await app.key('f4', ['alt']).catch(async () => app.key('F4', ['alt']));
-  const exited = await until(
-    'the app to quit',
-    async () => child.exitCode !== null || child.signalCode !== null,
-    30_000,
-    500,
-  )
-    .then(() => true)
-    .catch(() => false);
-  setup.note('app quit by its own shortcut', exited);
-  if (!exited) child.kill();
-  await sleep(2_000);
+  setup.note('app quit by its own shortcut', await quit(app, child, () => lane.front()));
   rows.push(storageRow());
+
+  // Row 578 (Windows): last, because it installs v0.0.8 over this build.
+  if (options['upgrade-blocked']) {
+    const blocked = new Row('578', 'Autofill an earlier version saved is cleared on upgrade');
+    blocked.block('staging', options['upgrade-blocked']);
+    rows.push(blocked);
+  } else if (PLATFORM === 'windows' && options['upgrade-from'] && options['upgrade-to']) {
+    const launch = async (logName) => {
+      const started = spawnApp(logName);
+      const shown = await attach(started, screen);
+      await shown.activate();
+      await shown.setFrame(FRAMES.wide).catch(() => undefined);
+      await sleep(2_000);
+      return { app: shown, child: started };
+    };
+    rows.push(
+      await autofillUpgradeRow({
+        from: { path: options['upgrade-from'], label: 'published msi v0.0.8' },
+        to: { path: options['upgrade-to'], label: options.lane },
+        exe: options.app,
+        installedSha: facts.installedExeSha256,
+        launch,
+        quit: (shown, started) => quit(shown, started, () => shown.activate()),
+        native,
+        shot,
+        out,
+        familiars: [FIRST, SECOND],
+      }),
+    );
+  }
 } catch (error) {
   setup.error = error.message;
   setup.note('error', error.message);
