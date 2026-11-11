@@ -22,6 +22,20 @@ export function modelDropdown(nodes) {
   );
 }
 
+/**
+ * The option a closed dropdown shows. macOS (AXValue) and Windows (the Value
+ * pattern) report it as the value; AT-SPI keeps it in the combo box's text, or
+ * marks the chosen option selected.
+ */
+export function shownChoice(node) {
+  if (!node) return '';
+  if (node.value !== undefined && node.value !== null && String(node.value) !== '')
+    return String(node.value);
+  if (node.raw?.text) return String(node.raw.text).trim();
+  const picked = [...walk(node)].find((child) => child !== node && child.selected && child.name);
+  return picked?.name ?? '';
+}
+
 /** The models the engine requested since `before` requests had been made. */
 export function requestedSince(models, before) {
   return models.slice(before).filter(Boolean);
@@ -54,30 +68,46 @@ async function dropdown(app) {
   );
 }
 
-/** Picks `label` the way a person does: open the dropdown, choose the option. */
+const shown = async (app) => shownChoice(await dropdown(app));
+
+/**
+ * Picks `label` from the keyboard, as a person can on every platform: open the
+ * dropdown, type the option's name, press Return. A list that takes no typing
+ * (GTK's) is walked one option at a time instead, reading the choice back.
+ */
 async function choose(app, row, label) {
   await app.click(await dropdown(app));
-  const option = await until(
-    `the "${label}" option`,
-    async () =>
-      (await app.all(undefined, label)).find((node) =>
-        ['menuitem', 'option', 'listitem', 'list item', 'menu item'].includes(node.role),
-      ) ?? null,
-    5_000,
-    250,
-  ).catch(() => null);
-  if (option) {
-    await app.click(option);
-    row.note(`chose "${label}"`, `clicked its ${option.role}`);
-  } else {
-    // Some web views draw the open list where the tree can't see it; their
-    // dropdowns still take type-to-select from the keyboard.
-    await app.type(label);
-    await app.key('enter');
-    row.note(`chose "${label}"`, 'typed its name into the open dropdown');
-  }
   await sleep(500);
-  return String((await dropdown(app)).value ?? '');
+  await app.type(label);
+  await app.key('return');
+  await sleep(500);
+  if ((await shown(app)).includes(label)) {
+    row.note(`chose "${label}"`, 'typed its name into the open dropdown');
+    return shown(app);
+  }
+  const passed = [];
+  for (const direction of ['down', 'up']) {
+    // A list that opens with nothing highlighted spends one press on the
+    // current option, so only two presses that change nothing end the walk.
+    let stuck = 0;
+    for (let step = 0; step < 12 && stuck < 2; step += 1) {
+      const before = await shown(app);
+      await app.click(await dropdown(app));
+      await sleep(400);
+      await app.key(direction);
+      await app.key('return');
+      await sleep(400);
+      const now = await shown(app);
+      passed.push(now);
+      if (now.includes(label)) {
+        row.note(`chose "${label}"`, `pressed ${direction} through ${JSON.stringify(passed)}`);
+        return now;
+      }
+      stuck = now === before ? stuck + 1 : 0;
+    }
+  }
+  row.note(`could not choose "${label}"`, passed);
+  return shown(app);
 }
 
 export async function modelRow(lane, familiar, models) {
@@ -90,9 +120,9 @@ export async function modelRow(lane, familiar, models) {
     await showFamiliars(lane, row);
     await app.click(await app.one('button', familiar));
     await openSettingsAt(app, 'Model');
-    row.note('Model dropdown before', String((await dropdown(app)).value ?? ''));
-    const shown = await choose(app, row, PRESET);
-    row.check(`the dropdown shows "${PRESET}"`, shown.includes(PRESET), shown);
+    row.note('Model dropdown before', await shown(app));
+    const picked = await choose(app, row, PRESET);
+    row.check(`the dropdown shows "${PRESET}"`, picked.includes(PRESET), picked);
     lane.shot('model-preset');
     await closeSettings(app);
 
