@@ -30,6 +30,7 @@ import {
 } from './rows.mjs';
 import { screenReader } from './speech.mjs';
 import { storageRow } from './storage.mjs';
+import { unavailableRow } from './unavailable-row.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const { values: options } = parseArgs({
@@ -265,6 +266,12 @@ try {
   await lane.front();
   await lane.reset();
   rows.push(await cancelledRunRow(lane, FIRST));
+  // Published releases before v0.0.10 fail every familiar when one chat is missing.
+  if (!/^v0\.0\.[0-9](?:[-+]|$)/.test(facts.release ?? process.env.RELEASE ?? '')) {
+    await lane.front();
+    await lane.reset();
+    rows.push(await unavailableRow(lane, FIRST));
+  }
   shot('before-quit');
 
   // Quit as a person would, so the web view writes its storage out.
