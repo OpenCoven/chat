@@ -3088,3 +3088,7 @@ The #558 native runner compatibility authority is f8d4dd4263c28fa5943426f53ee729
 ## v0.1.0 package-version authority
 
 The v0.1.0 release bump landed in merge commit `ef4d020710eb62f3f13ca88cf60dafd7f32082f4`, tree `248a691a9a80374ca421aaa479feb8c0905764d4`. The follow-up repin binds all 25 governed files and ten production deltas to that existing merge on main. Only `src-tauri/Cargo.toml` and `src-tauri/Cargo.lock` differ from the preceding authority, and their changes are the application package version from 0.0.9 to 0.1.0. The Chat, SDK, Cave, Coven, and evidence pins remain unchanged; this source-authority refresh does not claim a new protected SDK validation run.
+
+## v0.1.1 package-version authority
+
+The v0.1.1 version content landed in merge commit `07d63f8d09ef8bbb7d70b128280687ccd081e834`, tree `63dd4a513e4ba0cbe0f6795f2666bd0064beab7c`. This follow-up repins all 25 governed files and ten production deltas to that existing main merge. Only the two Cargo application-version hashes change from the previous authority. The release tag must be created after this repin lands and must pass the trusted freshness guard before being pushed. Other repository and evidence pins remain unchanged, and no new protected SDK validation is claimed.
