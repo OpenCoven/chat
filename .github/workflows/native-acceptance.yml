@@ -1,31 +1,15 @@
-name: Ubuntu dependency installation diagnostic
+name: Ubuntu uncached dependency installation diagnostic
 on: workflow_dispatch
 permissions:
   contents: read
 jobs:
   dependencies:
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-24.04]
-    runs-on: ${{ matrix.os }}
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
-      - name: Verify signed indexes and install the required dependencies
+      - name: Install native and build dependencies from authenticated indexes without binary caches
         run: |
           set -euo pipefail
-          sources_snapshot() {
-            printf '\nSOURCE_SNAPSHOT %s\n' "$1"
-            for file in /etc/apt/sources.list /etc/apt/sources.list.d/*.list /etc/apt/sources.list.d/*.sources; do
-              if [ -f "$file" ]; then
-                readlink -f "$file"
-                stat -c '%n %i %y' "$file"
-                sha256sum "$file"
-                cat "$file"
-              fi
-            done
-          }
-          sources_snapshot ORIGINAL
           # Use an independent Ubuntu mirror when Canonical's DNS is unavailable.
           # Keep Ubuntu's suites, components, signing keys and apt verification.
           for sources in /etc/apt/sources.list /etc/apt/sources.list.d/*.list /etc/apt/sources.list.d/*.sources; do
@@ -35,63 +19,16 @@ jobs:
                 -e 's#https?://(azure[.]archive|archive|security)[.]ubuntu[.]com/ubuntu#https://mirrors.edge.kernel.org/ubuntu#g' "$sources"
             fi
           done
-          . /etc/os-release
-          for suite in "$VERSION_CODENAME" "$VERSION_CODENAME-security"; do
-            curl --proto '=https' --tlsv1.2 --fail --location --silent --show-error \
-              --connect-timeout 10 --max-time 30 --output "$RUNNER_TEMP/InRelease" \
-              "https://mirrors.edge.kernel.org/ubuntu/dists/$suite/InRelease"
-            gpgv --keyring /usr/share/keyrings/ubuntu-archive-keyring.gpg "$RUNNER_TEMP/InRelease"
-          done
-          sources_snapshot BEFORE_UPDATE
-          sudo apt-get update
-          sources_snapshot AFTER_UPDATE
-          sudo apt-config dump
-          sudo apt-get indextargets
-          sudo apt-cache policy
-          sudo apt-cache show build-essential libgtk-3-dev || true
-          while IFS= read -r package_list; do
-            case "$package_list" in
-              *Packages*)
-                if [ -f "$package_list" ]; then
-                  printf 'RETAINED_INDEX %s\n' "$package_list"
-                  sudo /usr/lib/apt/apt-helper cat-file "$package_list" | awk 'BEGIN {RS=""} /^Package: (build-essential|libgtk-3-dev)\n/ {print $0 "\n"}'
-                fi
-                ;;
-            esac
-          done < <(sudo apt-get indextargets --format '$(FILENAME)')
-          dpkg --print-architecture
-          dpkg-query -W build-essential libgtk-3-dev || true
-          sudo apt-cache policy build-essential libgtk-3-dev xvfb python3-pyatspi
-          sudo apt-cache dumpavail | awk '/^Package:/ {count++} END {print "AVAILABLE_PACKAGES", count}'
-          sudo ls -la /var/lib/apt/lists
-          sudo find /etc/apt/preferences.d -type f -exec cat {} \;
-          sources_snapshot BEFORE_UNCACHED_QUERIES
-          sudo apt-cache -o Dir::Cache::pkgcache= -o Dir::Cache::srcpkgcache= policy build-essential libgtk-3-dev openbox
-          sudo apt-get -o Dir::Cache::pkgcache= -o Dir::Cache::srcpkgcache= indextargets --format '$(FILENAME)'
-          for package_list in /var/lib/apt/lists/*kernel*Packages*; do
-            if [ -f "$package_list" ]; then
-              printf 'UBUNTU_RETAINED_INDEX %s\n' "$package_list"
-              sudo /usr/lib/apt/apt-helper cat-file "$package_list" | awk 'BEGIN {RS=""} /^Package: (build-essential|libgtk-3-dev)\n/ {print $0 "\n"}'
-            fi
-          done
-          stat -c '%n %s %y' /var/cache/apt/pkgcache.bin /var/cache/apt/srcpkgcache.bin || true
+          printf 'Dir::Cache::pkgcache "";\nDir::Cache::srcpkgcache "";\n' | sudo tee /etc/apt/apt.conf.d/99-opencoven-package-cache > /dev/null
           sudo rm -f /var/cache/apt/pkgcache.bin /var/cache/apt/srcpkgcache.bin
-          sources_snapshot AFTER_CACHE_CLEAR
-          sudo apt-cache policy build-essential libgtk-3-dev openbox
-          if [ "$VERSION_ID" = 24.04 ]; then
-            sudo DEBIAN_FRONTEND=noninteractive apt-get install -y \
-              xvfb openbox xdotool xclip at-spi2-core python3-pyatspi dbus-x11 \
-              orca speech-dispatcher ibus ibus-gtk3 imagemagick sqlite3 libfuse2t64
-            printf 'NATIVE_APT_INSTALL_OK Ubuntu %s\n' "$VERSION_ID"
-          fi
-          fuse=libfuse2
-          if [ "$VERSION_ID" = 24.04 ]; then fuse=libfuse2t64; fi
+          sudo apt-get update
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y \
+            xvfb openbox xdotool xclip at-spi2-core python3-pyatspi dbus-x11 \
+            orca speech-dispatcher ibus ibus-gtk3 imagemagick sqlite3 libfuse2t64
+          echo NATIVE_APT_INSTALL_OK
           sudo DEBIAN_FRONTEND=noninteractive apt-get install -y \
             build-essential libayatana-appindicator3-dev libgtk-3-dev libssl-dev \
-            libwebkit2gtk-4.1-dev librsvg2-dev patchelf "$fuse" file
-          if [ "$VERSION_ID" = 24.04 ]; then
-            sudo DEBIAN_FRONTEND=noninteractive apt-get install -y \
-              xvfb openbox xdotool xclip at-spi2-core python3-pyatspi dbus-x11 \
-              orca speech-dispatcher ibus ibus-gtk3 imagemagick sqlite3
-          fi
-          printf 'APT_INSTALL_OK Ubuntu %s with Ubuntu signature verification enabled\n' "$VERSION_ID"
+            libwebkit2gtk-4.1-dev librsvg2-dev patchelf libfuse2t64 file
+          echo BUILD_APT_INSTALL_OK
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y ibus-anthy anthy
+          echo SECOND_NATIVE_APT_INSTALL_OK
