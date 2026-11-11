@@ -2,7 +2,7 @@ import { join } from 'node:path';
 import { expect, test } from 'vitest';
 
 const path = '../scripts/native-acceptance/engine-home-row.mjs';
-const { HOME_MODELS, engineHomes, requestedSince, settingsFor } = await import(path);
+const { MANAGED_MODEL, engineHomes, requestedSince, settingsFor } = await import(path);
 
 test("the row compares Coven's managed engine home with the standalone one", () => {
   expect(engineHomes({}, '/home/r')).toEqual({
@@ -15,8 +15,9 @@ test("the row compares Coven's managed engine home with the standalone one", () 
   });
 });
 
-test('each home names a different model, in the shape Coven Code reads', () => {
-  expect(HOME_MODELS.managed).not.toBe(HOME_MODELS.standalone);
+test("the managed home names a model that isn't the engine's default", () => {
+  // Coven Code 0.8.0's DEFAULT_MODEL.
+  expect(MANAGED_MODEL).not.toBe('claude-opus-4-8');
   expect(settingsFor('claude-haiku-5-5')).toEqual({
     version: 1,
     config: { model: 'claude-haiku-5-5' },

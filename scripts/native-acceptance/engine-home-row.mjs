@@ -1,15 +1,18 @@
 // Coven Code run from Chat reads Coven's managed engine home (~/.coven/code),
-// not its standalone ~/.coven-code. Each home gets a settings file naming a
-// different model, and the model stand-in records which one the engine asked
-// for. Both homes must be absent at the start; the row removes what it made.
+// not its standalone ~/.coven-code. Only the managed home gets a settings file,
+// naming a model the engine wouldn't otherwise ask for; the model stand-in
+// records what the engine asked for. The standalone home must stay absent:
+// Coven Code also treats any ancestor's .coven-code/settings.json as project
+// settings, which win over the global file, so a file there would decide the
+// model whichever home the engine used. The row removes what it made.
 
 import { existsSync, mkdirSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { Row } from './rows.mjs';
 
-/** The model each home's settings name: the engine's request says which it read. */
-export const HOME_MODELS = { managed: 'claude-haiku-5-5', standalone: 'claude-opus-5-5' };
+/** The model the managed home's settings name; the engine's default differs. */
+export const MANAGED_MODEL = 'claude-haiku-5-5';
 
 /** The engine's two possible homes, as Coven Code resolves them. */
 export function engineHomes(env = process.env, home = homedir()) {
@@ -42,36 +45,27 @@ export async function engineHomeRow(lane, familiar, models) {
     row.block('engine home', `${present.join(', ')} already exist; the row won't replace them`);
     return row;
   }
-  const made = [];
   return lane.attempt(row, async () => {
     try {
-      for (const which of ['managed', 'standalone']) {
-        mkdirSync(homes[which], { recursive: true });
-        made.push(homes[which]);
-        writeFileSync(
-          join(homes[which], 'settings.json'),
-          JSON.stringify(settingsFor(HOME_MODELS[which])),
-        );
-        row.note(`${homes[which]}/settings.json names`, HOME_MODELS[which]);
-      }
+      mkdirSync(homes.managed, { recursive: true });
+      writeFileSync(
+        join(homes.managed, 'settings.json'),
+        JSON.stringify(settingsFor(MANAGED_MODEL)),
+      );
+      row.note(`${homes.managed}/settings.json names`, MANAGED_MODEL);
       const before = models().length;
       await lane.clearComposer(familiar);
       await lane.send(familiar, '[[table]] Show me the table.', 'button', 'Expand table');
       const requested = requestedSince(models(), before);
-      row.note('models the engine requested', requested);
       row.check(
-        `the engine used the managed home's ${HOME_MODELS.managed}`,
-        requested.length > 0 && requested.every((model) => model === HOME_MODELS.managed),
+        `the engine asked for the managed home's ${MANAGED_MODEL}`,
+        requested.length > 0 && requested.every((model) => model === MANAGED_MODEL),
         requested,
       );
-      row.expect(
-        `the engine used the standalone home's ${HOME_MODELS.standalone}`,
-        requested.includes(HOME_MODELS.standalone),
-        false,
-      );
-      for (const home of made) row.note(`${home} holds after the run`, readdirSync(home));
+      row.note(`${homes.managed} holds after the run`, readdirSync(homes.managed));
+      row.expect(`${homes.standalone} exists after the run`, existsSync(homes.standalone), false);
     } finally {
-      for (const home of made) rmSync(home, { recursive: true, force: true });
+      rmSync(homes.managed, { recursive: true, force: true });
     }
   });
 }
