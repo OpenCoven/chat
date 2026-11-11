@@ -29,7 +29,9 @@ or `sessionStorage`. The window keeps only your selected familiar and your Setti
 `localStorage`: display preferences, and the harness, model, reasoning and speed your messages ask
 for. Unsent drafts stay in memory. On Windows the window turns WebView2's general autofill off,
 and every text field is marked `autocomplete="off"`, so what you type is not kept in the web view's
-own autofill data either. The desktop host keeps the following in Chat's
+own autofill data either. Versions before v0.0.9 left that autofill on, so each time Chat starts on
+Windows it clears the web view's saved autofill data. It clears nothing else: your selected familiar
+and Settings stay. The desktop host keeps the following in Chat's
 local app data folder (on macOS, `~/Library/Application Support/ai.opencoven.chat`):
 
 - **Transcripts.** Chat saves one transcript per message you send, as
