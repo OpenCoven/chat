@@ -102,7 +102,9 @@ function lastPrompt(messages) {
  */
 export function approvalStep(messages) {
   const prompt = lastPrompt(messages);
-  const request = [...prompt.matchAll(/\[\[(ask|write) (\S+)\]\]/g)].at(-1);
+  // A path can hold spaces (macOS's Application Support), so it runs to the `]]`.
+  // `write` carries its path as lowercase hex (see `writeProofPrompt`).
+  const request = [...prompt.matchAll(/\[\[(ask|write) ([^\]]+?)\]\]/g)].at(-1);
   if (!request) return undefined;
   const [, operation, path] = request;
   if (operation === 'write' && !/^(?:[0-9a-f]{2})+$/.test(path)) return undefined;
@@ -131,7 +133,8 @@ export function approvalStep(messages) {
   };
 }
 
-function stream(res, model, { text, tool }) {
+/** Streams one step: a text reply, or one tool call the engine then runs. */
+export function streamStep(res, model, { text, tool }) {
   res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-cache' });
   const send = (event, data) => res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
   send('message_start', {
@@ -174,7 +177,7 @@ function stream(res, model, { text, tool }) {
 export function sendModelStep(res, model, step, streaming) {
   const { text } = step;
   if (streaming) {
-    stream(res, model, step);
+    streamStep(res, model, step);
   } else if (step.tool) {
     res.writeHead(200, { 'content-type': 'application/json' });
     res.end(

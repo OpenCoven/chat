@@ -562,7 +562,16 @@ function PermissionLog({ onPermissionLog, familiarName }: SettingsDialogProps) {
           call Coven reports from the allowed turn appear here.
         </p>
       ) : (
-        <ol className="coven-permission-log" aria-label="Permission log, newest first">
+        // WebKit, the window on macOS and Linux, drops the list role from a list
+        // drawn without markers unless the role is stated, so VoiceOver and Orca
+        // would read the log as loose lines.
+        // biome-ignore lint/a11y/useSemanticElements: it is an ol; WebKit needs the role stated too.
+        <ol
+          className="coven-permission-log"
+          // biome-ignore lint/a11y/noRedundantRoles: redundant everywhere but WebKit; see above.
+          role="list"
+          aria-label="Permission log, newest first"
+        >
           {log.entries.map((entry, index) => (
             <li
               key={`${entry.approvalId}-${entry.at}-${index}`}

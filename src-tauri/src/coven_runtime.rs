@@ -2161,9 +2161,22 @@ fn send_turn(
             );
         }
     }
-    let (harness, workspace, resumed) = if let Some(id) = &input.session_id {
+    if let Some(id) = &input.session_id {
         crate::chat_lifecycle::require_active(data, id)?;
         crate::chat_origin::require_chat_origin(data, id)?;
+    }
+    // A person who sends a message has moved on from whatever was waiting, even
+    // if this turn never gets as far as the engine. An allowed turn has already
+    // answered its own request. A log that can't be written can't spend a request
+    // either, so that failure leaves nothing to allow and needn't stop the message.
+    if input.grant.is_none() {
+        let _ = crate::chat_approvals::supersede(
+            data,
+            &selected_familiar,
+            crate::chat_approvals::now_ms(),
+        );
+    }
+    let (harness, workspace, resumed) = if let Some(id) = &input.session_id {
         let session = get_session(id)?;
         if let Some(requested) = &input.harness {
             if requested != string(&session, "harness")? {
@@ -3845,6 +3858,73 @@ mod tests {
         );
         assert_eq!(turn_text("Read this", true, None), "Read this");
         assert_eq!(turn_text("Hi", false, Some("replayed")), "replayed");
+    }
+
+    /// A person who sent a message has moved on, whether or not the message
+    /// got as far as the engine. The request must not come back afterwards.
+    #[test]
+    fn a_message_that_never_starts_still_closes_the_request() {
+        let data = std::env::temp_dir().join(uuid::Uuid::new_v4().to_string());
+        let transcripts = data.join("coven-transcripts");
+        std::fs::create_dir_all(&transcripts).unwrap();
+        std::fs::write(
+            transcripts.join("owned.jsonl"),
+            json!({"type":"user","source":"chat-input","session_id":"owned"}).to_string(),
+        )
+        .unwrap();
+        crate::chat_canonical::advance(&data, "f", None, "owned").unwrap();
+        let request = crate::chat_approvals::submit(
+            &data,
+            "f",
+            "owned",
+            "run-1",
+            crate::chat_approvals::Proposal {
+                summary: "Create probe.txt".into(),
+                reason: None,
+            },
+            crate::chat_approvals::now_ms(),
+        )
+        .unwrap();
+        let cancel = AtomicBool::new(true);
+        let mut no_events = |_| panic!("This turn must fail before it runs a model");
+        let error = send_local(
+            &data,
+            SendInput {
+                run_id: "correction".into(),
+                prompt: "Don't do that".into(),
+                session_id: Some("owned".into()),
+                familiar_id: Some("f".into()),
+                harness: None,
+                model: None,
+                think: false,
+                speed: None,
+                attachments: vec![],
+                grant: None,
+            },
+            &cancel,
+            &mut no_events,
+        );
+        assert!(error.is_err());
+        let open =
+            crate::chat_approvals::pending_behind_switch(&data, crate::chat_approvals::now_ms())
+                .unwrap();
+        // What Allow once would do with the card if it came back.
+        let spent = crate::chat_approvals::allow_behind_switch(
+            &data,
+            &request.id,
+            crate::chat_approvals::Device::Desktop,
+            "after-the-correction",
+            crate::chat_approvals::now_ms(),
+        );
+        std::fs::remove_dir_all(&data).unwrap();
+        assert!(
+            spent.is_err(),
+            "Allow still produced a grant after the person's message"
+        );
+        assert!(
+            open.iter().all(|approval| approval.id != request.id),
+            "the request is still open after the person's message"
+        );
     }
 
     #[test]

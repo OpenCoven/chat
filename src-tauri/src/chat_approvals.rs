@@ -25,6 +25,7 @@ const LOCK_FILE: &str = "permission-log.lock";
 const LOCK_TIMEOUT: Duration = Duration::from_secs(2);
 const LOG_ROTATE_BYTES: u64 = 2 * 1024 * 1024;
 const REQUEST_TTL_MS: u64 = 60 * 60 * 1000;
+const REQUEST_CLOCK_STEP_MS: u64 = 5 * 60 * 1000;
 const SUMMARY_LIMIT: usize = 200;
 const REASON_LIMIT: usize = 600;
 const DETAIL_LIMIT: usize = 240;
@@ -671,7 +672,7 @@ fn pending(data: &Path, now: u64) -> Result<Vec<Approval>, String> {
     };
     let mut open: Vec<&Entry> = Vec::new();
     for entry in &entries {
-        if entry.event == "requested" && now < entry.at.saturating_add(REQUEST_TTL_MS) {
+        if entry.event == "requested" && within_its_hour(entry.at, now) {
             open.push(entry);
         } else if is_answer(&entry.event) {
             open.retain(|request| request.approval_id != entry.approval_id);
@@ -692,6 +693,32 @@ fn pending(data: &Path, now: u64) -> Result<Vec<Approval>, String> {
     Ok(approvals)
 }
 
+/// For tests elsewhere in the crate that check the ledger behind the release
+/// switch. `pending` and `allow` stay private in every real build.
+#[cfg(test)]
+pub(crate) fn pending_behind_switch(data: &Path, now: u64) -> Result<Vec<Approval>, String> {
+    pending(data, now)
+}
+
+/// See `pending_behind_switch`.
+#[cfg(test)]
+pub(crate) fn allow_behind_switch(
+    data: &Path,
+    id: &str,
+    device: Device,
+    run_id: &str,
+    now: u64,
+) -> Result<Grant, String> {
+    allow(data, id, device, run_id, now)
+}
+
+/// Whether a request made at `at` is still within its hour. One dated well ahead
+/// of the clock was made while the clock was wrong, so correcting the clock can't
+/// be allowed to extend it. A small step back doesn't lose a request someone is reading.
+fn within_its_hour(at: u64, now: u64) -> bool {
+    now < at.saturating_add(REQUEST_TTL_MS) && at <= now.saturating_add(REQUEST_CLOCK_STEP_MS)
+}
+
 fn open_request(data: &Path, id: &str, now: u64) -> Result<Entry, String> {
     let entries = read_file(&data.join(LOG_FILE))?;
     let request = entries
@@ -704,7 +731,7 @@ fn open_request(data: &Path, id: &str, now: u64) -> Result<Entry, String> {
     {
         return Err("This request was already answered.".into());
     }
-    if now >= request.at.saturating_add(REQUEST_TTL_MS) {
+    if !within_its_hour(request.at, now) {
         return Err("This request expired. Ask the familiar again.".into());
     }
     Ok(request.clone())
@@ -1122,6 +1149,20 @@ mod tests {
     }
 
     #[test]
+    fn a_request_dated_ahead_of_the_clock_is_not_open() {
+        let data = Data::new();
+        data.head("astra", "session-1");
+        // Made while the clock ran fast; the correction must not extend its hour.
+        let made = 10 * REQUEST_TTL_MS;
+        let request = submit(&data.0, "astra", "session-1", "run-1", proposal(), made).unwrap();
+        let corrected = made - 2 * REQUEST_TTL_MS;
+        assert!(pending(&data.0, corrected).unwrap().is_empty());
+        assert!(allow(&data.0, &request.id, Device::Desktop, "run-2", corrected).is_err());
+        // Ordinary clock adjustment doesn't lose a request someone is reading.
+        assert_eq!(pending(&data.0, made - 1_000).unwrap().len(), 1);
+    }
+
+    #[test]
     fn a_request_dies_with_the_turn_it_belongs_to() {
         let data = Data::new();
         data.head("astra", "session-1");
@@ -1196,6 +1237,16 @@ mod tests {
 
     fn call(name: &str, detail: &str) -> (String, String) {
         (name.to_owned(), detail.to_owned())
+    }
+
+    #[test]
+    fn a_reply_line_shaped_like_a_call_is_logged_as_one() {
+        // Deliberate, since a false line costs less here than a missing one.
+        // SECURITY.md says so, because it means reply text can reach the log.
+        assert_eq!(
+            read_all(&[json!({"type":"text_delta","text":"✳ Note: secret\n"})]),
+            vec![call("Note", ": secret")]
+        );
     }
 
     #[test]
