@@ -58,12 +58,17 @@ export function caveFiles(env = process.env, home = homedir()) {
   };
 }
 
-export function familiarId(cli, name) {
+/** The id of the familiar the window shows as `shown` (Coven's `display_name`). */
+export function idOf(familiars, shown) {
+  return familiars.find((familiar) => (familiar.display_name ?? familiar.name) === shown)?.id;
+}
+
+export function familiarId(cli, shown) {
   const listed = spawnSync(cli, ['familiars', '--json'], { encoding: 'utf8', timeout: 60_000 });
   if (listed.status !== 0) throw new Error(`coven familiars --json failed: ${listed.stderr}`);
-  const found = JSON.parse(listed.stdout).find((familiar) => familiar.name === name);
-  if (!found?.id) throw new Error(`Coven lists no familiar named ${name}`);
-  return found.id;
+  const id = idOf(JSON.parse(listed.stdout), shown);
+  if (!id) throw new Error(`Coven lists no familiar shown as ${shown}`);
+  return id;
 }
 
 async function openSettingsAt(app, section) {

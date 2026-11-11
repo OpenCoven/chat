@@ -2,7 +2,7 @@ import { join } from 'node:path';
 import { expect, test } from 'vitest';
 
 const path = '../scripts/native-acceptance/access-row.mjs';
-const { caveFiles, caveMetadata } = await import(path);
+const { caveFiles, caveMetadata, idOf } = await import(path);
 
 test('the synthetic grants give one familiar every project, the first writable', () => {
   const { projects, permissions } = caveMetadata('astra', '/work', 3);
@@ -28,4 +28,10 @@ test('the row writes only where Chat reads Cave metadata by default', () => {
   expect(caveFiles({ COVEN_CAVE_HOME: '/elsewhere' }, '/home/runner')).toEqual({
     reason: 'COVEN_CAVE_HOME set on this runner',
   });
+});
+
+test('a familiar is found by the name the window shows, not its id-like name', () => {
+  const listed = [{ id: 'astra-1', name: 'astra', display_name: 'Astra' }];
+  expect(idOf(listed, 'Astra')).toBe('astra-1');
+  expect(idOf(listed, 'astra')).toBeUndefined();
 });
