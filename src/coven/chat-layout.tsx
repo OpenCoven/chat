@@ -1555,7 +1555,10 @@ export function ChatLayout(props: ChatLayoutProps) {
               ) : null}
               {props.error ? (
                 <div className="coven-error" role="alert">
-                  <span className="coven-error-text">{props.error}</span>
+                  {/* A paragraph, not a span: WebKitGTK gave AT-SPI a span laid out
+                    as a flex item without its text, so on Linux the alert held
+                    only its Copy error button (native run 43006448055). */}
+                  <p className="coven-error-text">{props.error}</p>
                   {props.onReloadChat && !props.loading ? (
                     <FamButton size="sm" className="coven-error-retry" onClick={props.onReloadChat}>
                       Reload chat

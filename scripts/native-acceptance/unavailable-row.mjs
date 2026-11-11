@@ -8,7 +8,7 @@ import { existsSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { PLATFORM, sleep, until, walk } from './driver.mjs';
-import { Row, showFamiliars, shownText } from './rows.mjs';
+import { listen, Row, showFamiliars, shownText } from './rows.mjs';
 
 export const THIRD = 'Wren';
 export const UNREADABLE = "Coven couldn't load this chat";
@@ -142,7 +142,16 @@ export async function unavailableRow(lane, familiar) {
       row.note('staged', `${THIRD}'s recorded chat is ${missing}, which Coven never issued`);
 
       await refreshCoven(lane);
-      await app.click(await app.one('button', THIRD, { timeout: 30_000 }));
+      const openThird = async () => app.click(await app.one('button', THIRD, { timeout: 30_000 }));
+      if (PLATFORM === 'linux') {
+        // What Orca says as the chat opens: the alert is how a Linux screen
+        // reader user learns why the composer is locked.
+        const spoken = await listen(lane, row, 'Orca', openThird);
+        if (spoken) {
+          row.note('Orca said', spoken);
+          row.note("Orca said the chat couldn't load", spoken.join(' ').includes(UNREADABLE));
+        }
+      } else await openThird();
       const said = await until(
         `"${UNREADABLE}" on ${THIRD}`,
         async () => {

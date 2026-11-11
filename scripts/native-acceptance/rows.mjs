@@ -503,7 +503,7 @@ async function waitForAddress(native, browser, address, timeout = 30_000, lane =
  * The reader runs only around the action, so its browse-mode keys never stand
  * between the lane's input and the app.
  */
-async function listen(lane, row, label, act) {
+export async function listen(lane, row, label, act) {
   const reader = lane.reader;
   if (!reader) {
     row.block(label, 'no screen reader is available on this runner');
