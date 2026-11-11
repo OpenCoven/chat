@@ -2,7 +2,7 @@ import { join } from 'node:path';
 import { expect, test } from 'vitest';
 
 const path = '../scripts/native-acceptance/unavailable-row.mjs';
-const { chatDataDir, withUnreadableChat, withoutUnreadableChat } = await import(path);
+const { chatDataDir, idOf, withUnreadableChat, withoutUnreadableChat } = await import(path);
 
 test('the row stages an unreadable chat only for a familiar with no record', () => {
   const heads = { astra: 'one', sage: null };
@@ -28,4 +28,14 @@ test('the record lives in the app-local data folder Chat uses', () => {
   expect(chatDataDir('linux', {}, '/home/r')).toBe(
     join('/home/r', '.local', 'share', 'ai.opencoven.chat'),
   );
+});
+
+test('a familiar is found by the name the window shows, not its id-like name', () => {
+  const listed = [
+    { id: 'astra', name: 'astra', display_name: 'Astra' },
+    { id: 'wren-2', name: 'wren', display_name: 'Wren' },
+  ];
+  expect(idOf(listed, 'Wren')).toBe('wren-2');
+  expect(idOf(listed, 'wren')).toBeUndefined();
+  expect(idOf([{ id: 'old', name: 'Old' }], 'Old')).toBe('old');
 });

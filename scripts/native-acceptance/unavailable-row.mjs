@@ -41,10 +41,15 @@ function rewrite(path, change) {
   renameSync(`${path}.native`, path);
 }
 
-function familiarIds(cli) {
+/** The id of the familiar the window shows as `shown` (Coven's `display_name`). */
+export function idOf(familiars, shown) {
+  return familiars.find((familiar) => (familiar.display_name ?? familiar.name) === shown)?.id;
+}
+
+function familiarId(cli, shown) {
   const listed = spawnSync(cli, ['familiars', '--json'], { encoding: 'utf8', timeout: 60_000 });
   if (listed.status !== 0) throw new Error(`coven familiars --json failed: ${listed.stderr}`);
-  return new Map(JSON.parse(listed.stdout).map((familiar) => [familiar.name, familiar.id]));
+  return idOf(JSON.parse(listed.stdout), shown);
 }
 
 const alertText = async (app) =>
@@ -85,7 +90,7 @@ export async function unavailableRow(lane, familiar) {
         `${THIRD} created with the installed CLI`,
         created.status === 0 ? 'yes' : created.stderr,
       );
-      const third = familiarIds(lane.cli).get(THIRD);
+      const third = familiarId(lane.cli, THIRD);
       if (!third) throw new Error(`Coven lists no familiar named ${THIRD}`);
       rewrite(record, (heads) => withUnreadableChat(heads, third, missing));
       staged = true;
@@ -133,7 +138,7 @@ export async function unavailableRow(lane, familiar) {
     } finally {
       if (staged) {
         rewrite(record, (heads) =>
-          withoutUnreadableChat(heads, familiarIds(lane.cli).get(THIRD), missing),
+          withoutUnreadableChat(heads, familiarId(lane.cli, THIRD), missing),
         );
         await refreshCoven(lane).catch(() => undefined);
       }
