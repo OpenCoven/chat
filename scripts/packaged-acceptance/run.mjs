@@ -14,9 +14,9 @@ import { parseArgs } from 'node:util';
 import { startModelFixture } from './model-fixture.mjs';
 import { registerRecorder } from './platform.mjs';
 import {
-  askingOffRow,
   composerOf,
   conversationLoaded,
+  defaultAccessRow,
   inspectorRow,
   launchEnvironmentRow,
   linkRows,
@@ -494,7 +494,8 @@ try {
   }
   rows.push(await switchRow(session, FIRST, SECOND));
   rows.push(await storageRow(session));
-  rows.push(await askingOffRow(session, FIRST));
+  const fullAccess = !/^v0\.0\.[0-9](?:[-+]|$)/.test(process.env.RELEASE ?? '');
+  rows.push(await defaultAccessRow(session, FIRST, fullAccess));
   rows.push(await rightClickRow(session, FIRST, opened));
 } catch (error) {
   setupRow.error = error.message;
