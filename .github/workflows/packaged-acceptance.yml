@@ -102,8 +102,18 @@ jobs:
           toolchain: 1.95.0
           targets: x86_64-unknown-linux-gnu
       - name: Install Linux build dependencies (as release.yml)
+        timeout-minutes: 10
         run: |
           set -euo pipefail
+          # Bypass the runner's Azure mirror, which can fail DNS for every package.
+          # Keep Ubuntu's suites, components, signing keys and apt verification.
+          for sources in /etc/apt/sources.list /etc/apt/sources.list.d/*.list /etc/apt/sources.list.d/*.sources; do
+            if [ -f "$sources" ]; then
+              sudo sed -i \
+                -e 's|mirror+file:/etc/apt/apt-mirrors.txt|https://archive.ubuntu.com/ubuntu|g' \
+                -e 's|http://azure.archive.ubuntu.com/ubuntu|https://archive.ubuntu.com/ubuntu|g' "$sources"
+            fi
+          done
           sudo apt-get update
           sudo apt-get install -y \
             build-essential \
