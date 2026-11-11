@@ -164,6 +164,19 @@ jobs:
         if: inputs.release == ''
         with:
           toolchain: 1.95.0
+      - name: Use the official Ubuntu HTTPS archive
+        timeout-minutes: 5
+        run: |
+          set -euo pipefail
+          # Bypass the runner's Azure mirror, which can fail DNS for every package.
+          # Keep Ubuntu's suites, components, signing keys and apt verification.
+          for sources in /etc/apt/sources.list /etc/apt/sources.list.d/*.list /etc/apt/sources.list.d/*.sources; do
+            if [ -f "$sources" ]; then
+              sudo sed -i \
+                -e 's|mirror+file:/etc/apt/apt-mirrors.txt|https://archive.ubuntu.com/ubuntu|g' \
+                -e 's|http://azure.archive.ubuntu.com/ubuntu|https://archive.ubuntu.com/ubuntu|g' "$sources"
+            fi
+          done
       - name: Build this commit as a candidate (not a release)
         if: inputs.release == ''
         run: |
