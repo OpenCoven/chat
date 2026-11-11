@@ -89,15 +89,13 @@ impl Backend for FixtureBackend {
                 }
                 let _ = worker.observe(json!({"type":"text_delta","text":part}));
             }
-            // Long enough for simulator UI acceptance to exercise Stop.
-            for _ in 0..100 {
-                if worker.cancel.load(Ordering::SeqCst) {
-                    worker.finish(&Err("Stopped".into()));
-                    return;
-                }
+            // The UI flow must exercise Stop, even when XCTest waits longer
+            // than ten seconds for the Send tap to settle on a hosted runner.
+            // Fixture shutdown also ends the worker when a test fails.
+            while !worker.cancel.load(Ordering::SeqCst) {
                 tokio::time::sleep(Duration::from_millis(100)).await;
             }
-            worker.finish(&Ok(json!({})));
+            worker.finish(&Err("Stopped".into()));
         });
         Ok(run)
     }
@@ -220,5 +218,39 @@ mod bind_tests {
                 Err(error) => assert!(error.contains("local network"), "{error}"),
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod stream_tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn ui_fixture_stream_remains_running_until_stop() {
+        let backend = FixtureBackend::default();
+        let run = backend
+            .start(SendRequest {
+                request_id: "slow-ui".into(),
+                familiar_id: "fixture".into(),
+                session_id: None,
+                prompt: "Hello from the iPhone".into(),
+            })
+            .unwrap();
+        // A hosted XCTest Send tap took fourteen seconds to return. The old
+        // ten-second fixture expired before the test could exercise Stop.
+        tokio::time::sleep(Duration::from_secs(12)).await;
+        assert!(
+            run.running(),
+            "the fixture finished before the person pressed Stop"
+        );
+        backend.stop(&run.id).unwrap();
+        tokio::time::timeout(Duration::from_secs(2), async {
+            while run.running() {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("Stop must finish the fixture run");
+        assert!(backend.active().is_none());
     }
 }
