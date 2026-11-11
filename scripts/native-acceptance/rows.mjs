@@ -461,6 +461,11 @@ async function linkNamed(app, name) {
   return await until(`link "${name}"`, async () => (await app.all('link', name)).at(-1), 15_000);
 }
 
+export async function centerLinkInTranscript(app, name) {
+  const link = await linkNamed(app, name);
+  return app.middle(link, () => linkNamed(app, name));
+}
+
 const browserSnapshot = () => browserProcesses().map((row) => `${row.browser}:${row.pid}`);
 
 async function waitForAddress(native, browser, address, timeout = 30_000, lane = null) {
@@ -556,7 +561,7 @@ export async function linkCompletionRow(lane, familiar, finishReview) {
       );
       row.expect('run still active before the review', await app.count('button', 'Stop run'), 1);
       await trace.sample('stream-held-before-click');
-      await app.click(await linkNamed(app, 'Completion boundary'));
+      await app.click(await centerLinkInTranscript(app, 'Completion boundary'));
       await until('the held-stream review to appear', () =>
         trace.sample('stream-held-after-click'),
       );

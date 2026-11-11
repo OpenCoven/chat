@@ -1,9 +1,22 @@
 import { describe, expect, test, vi } from 'vitest';
 
 const modulePath = '../scripts/native-acceptance/rows.mjs';
-const { Lane } = await import(modulePath);
+const { centerLinkInTranscript, Lane } = await import(modulePath);
 
 describe('native link completion boundary', () => {
+  test('centers a streamed link in the transcript before a native click', async () => {
+    const link = { role: 'link', name: 'Completion boundary' };
+    const refreshed = { ...link, frame: { x: 400, y: 450, w: 120, h: 20 } };
+    const app = {
+      all: vi.fn().mockResolvedValueOnce([link]).mockResolvedValueOnce([refreshed]),
+      middle: vi.fn(async (_node, find) => find()),
+    };
+
+    await expect(centerLinkInTranscript(app, 'Completion boundary')).resolves.toBe(refreshed);
+
+    expect(app.middle).toHaveBeenCalledWith(link, expect.any(Function));
+  });
+
   test('ordinary send waits after the reply is visible before returning a clickable link', async () => {
     let finish: () => void = () => {};
     const completion = new Promise<void>((resolve) => {
