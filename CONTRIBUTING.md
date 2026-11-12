@@ -149,11 +149,13 @@ listed authority path, coordinate with a maintainer before repinning.
 Authority changes normally land in two stages:
 
 1. Land the functional change without pointing the lock at an unreachable
-   topic-branch commit.
-2. After the canonical merge or squash commit is reachable, land a follow-up
-   pin that updates the relevant revisions, Git objects, digests, and lock-test
-   expectations. Documentation byte-count and digest rows change only when
-   their governed producer bytes change.
+   topic-branch commit. Merge it with a merge commit, not a squash: the
+   freshness guard (`scripts/phase1-authority-freshness.mjs`) accepts only a
+   merge commit as the authority.
+2. After that merge commit is reachable, land a follow-up pin that updates the
+   relevant revisions, Git objects, digests, and lock-test expectations.
+   Documentation byte-count and digest rows change only when their governed
+   producer bytes change.
 
 If you're not sure whether your change is pinned, say so in the pull request and a maintainer will
 help. Don't repin speculatively.
