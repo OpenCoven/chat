@@ -1,6 +1,6 @@
 # Coven mobile experience upgrade
 
-Status: proposed design, awaiting architecture selection and design approval. This document is not a claim that the features below exist or that a mobile build has shipped.
+Status: approved by Val in this session on 2026-11-12, including the recommended Mac-hosted architecture and native persistence choices. Service operator/deployment/APNs provisioning remain release dependencies. This document is not a claim that the features below exist or that a mobile build has shipped.
 
 Owner: this Codex session. Baseline: Chat `f7649d94f5b077acdd8ab95876532b49e472ef5f`, inspected 2026-11-12. Worktree: `/Users/buns/.codex/worktrees/9d79/chat`, created by the task's managed worktree tool. The primary checkout contains unrelated changes and a runtime merge conflict and remains untouched.
 
@@ -26,7 +26,7 @@ The Coven repository contains an opaque WebSocket rendezvous broker and authenti
 
 | Approach | User experience and tradeoff | Recommendation |
 | --- | --- | --- |
-| Mac-hosted execution with an end-to-end encrypted Coven relay | Existing familiars, files, history and Stop remain on the Mac; phone works over cellular while the Mac is awake and Chat is running. Requires relay integration and a small push service. | Recommended first architecture; selection remains pending. |
+| Mac-hosted execution with an end-to-end encrypted Coven relay | Existing familiars, files, history and Stop remain on the Mac; phone works over cellular while the Mac is awake and Chat is running. Requires relay integration and a small push service. | Approved first architecture. |
 | Separate always-on Coven execution service | Works when the Mac is off; requires another runtime, credentials, workspace synchronization, hosting and explicit ownership of those costs and data. | Separate architecture decision and project; do not assume this service already exists. |
 | Direct LAN/private VPN only | Least transport work, but VPN setup and current endpoint restrictions make it a poor default for the requested everyday mobile experience. | Keep LAN as a fast path, not the release's remote-access completion gate. |
 
@@ -104,7 +104,7 @@ Deployment requires an owned relay endpoint, an owned push endpoint, APNs key ID
 
 ## Delivery sequence and acceptance
 
-1. Approve the architecture and explicit native persistence/privacy choices. Record the accepted design and create bounded implementation issues, preserving existing #465 ownership and human gates.
+1. Architecture and explicit native persistence/privacy choices approved on 2026-11-12. Record the accepted design and create bounded implementation issues, preserving existing #465 ownership and human gates.
 2. Establish the shared authenticated transport interface and pairing migration, then LAN/relay handoff using real host requests and durable send receipts. A controlled broker is engineering evidence only.
 3. Implement native persistence and recovery, text/media transport, composer and share extension. Update product/privacy documentation with the behavior that actually ships.
 4. Implement and deploy the real push registration/provider path with operator-owned credentials, rate limits and revocation. Exercise actual APNs delivery to the release candidate.
