@@ -15,6 +15,7 @@ Newest first. Every release so far is a pre-release, because the major version i
 
 | Release | Published | What changed | Verification record |
 | --- | --- | --- | --- |
+| [v0.1.2](v0.1.2.md) | not yet published | A new composer, Esc stops a run, model and project-access controls in **Settings**, Windows clears old autofill entries | none yet |
 | [v0.1.1](v0.1.1.md) | 2026-11-11 | Aligns the released source with its conformance authority; carries v0.1.0's full-access chats | none |
 | [v0.1.0](v0.1.0.md) | 2026-11-11 | Familiar chats run with full access; **Settings › Access** explains it | none; native acceptance [run 43023336301](https://github.com/OpenCoven/chat/actions/runs/43023336301) |
 | [v0.0.9](v0.0.9.md) | 2026-11-09 | Five fixes the native acceptance lane found in v0.0.8, including Windows autofill | [2026-11-09](../verification/2026-11-09-release-v0.0.9.md) |
