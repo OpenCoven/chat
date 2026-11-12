@@ -52,10 +52,17 @@ export function listNotes(root = process.cwd()) {
     .sort(compareTags);
 }
 
-/** The release a tag's full changelog starts from, or null for the first. */
+const isPrerelease = (tag) => TAG.exec(tag)?.[4] !== undefined;
+
+/**
+ * The release a tag's full changelog starts from, or null for the first. A
+ * final release starts from the previous final release, not from its own
+ * candidates, so someone upgrading sees every change.
+ */
 export function previousTag(tag, tags) {
   const earlier = tags
     .filter((t) => !HISTORICAL.includes(t) && t !== tag && compareTags(t, tag) < 0)
+    .filter((t) => isPrerelease(tag) || !isPrerelease(t))
     .sort(compareTags);
   return earlier.at(-1) ?? null;
 }
@@ -69,7 +76,9 @@ export function changelogLine(previous, tag) {
  * Problems with one release's notes, as sentences that say what to change.
  * `previous` is the tag it follows (null for the first public release).
  */
-export function checkNotes(tag, markdown, { previous, index }) {
+export function checkNotes(tag, raw, { previous, index }) {
+  // GitHub shows CRLF and a byte-order mark the same as plain LF.
+  const markdown = raw.replace(/^\uFEFF/, '').replaceAll('\r\n', '\n');
   const problems = [];
   const indexed = index.includes(`](${tag}.md)`);
   if (!indexed) problems.push(`add a row for ${tag} to ${INDEX}`);

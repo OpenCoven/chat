@@ -144,6 +144,11 @@ PREVIOUS=v0.1.1   # the release before it
    corepack pnpm app:build   # local sanity build
    ```
 
+   `test:unit` runs the normal suite, then the heavy one. Without `pwsh`, or without the
+   exact pinned Node version, it stops at failures your change didn't cause.
+   **Local checks that fail without your change** in `docs/agents/working-here.md` lists
+   them. Hosted CI on the prep PR is the authority.
+
 ### Land
 
 5. **Land the prep PR, then the repin PR, then wait for `main` to pass.**
@@ -155,37 +160,50 @@ PREVIOUS=v0.1.1   # the release before it
      merges, the push CI on `main` fails at **Phase 1 authority is current** in **Web
      checks**. That failure is expected: it means the repin is due.
    - Open the repin PR from a branch such as `chore/$VERSION-authority-repin`. It is the only
-     PR that touches `phase1-conformance.lock.json`. It points the authority at the prep PR's
-     merge commit, refreshes the digests of the files that changed, updates the literal copy
-     in `src/phase1-conformance-lock.test.ts`, and adds a `## $VERSION package-version
-     authority` entry to `docs/phase1-conformance.md`. **The repin PR** in
-     `docs/phase1-conformance.md` has the rules, and #596 (v0.1.1) is a complete example.
-   - After the repin merges, wait until the `CI` run for that push to `main` passes, including
-     **Phase 1 authority is current**. Tag that commit, or a later one whose push CI passed;
-     never the prep PR's merge commit.
+     PR that touches `phase1-conformance.lock.json`. It points `harness.revision`,
+     `harnessAuthority.revision` and `harnessAuthority.tree` at the prep PR's merge commit,
+     refreshes every digest in `harnessAuthority.files` and
+     `harnessAuthority.productionDeltas` to that commit's tree, updates the literal copy in
+     `src/phase1-conformance-lock.test.ts`, and adds a `## $VERSION package-version authority`
+     entry to `docs/phase1-conformance.md`. **The repin PR** in `docs/phase1-conformance.md`
+     has the rules, and #596 (v0.1.1) is a complete example. Merge it with a merge commit
+     too.
+   - The repin PR's merge commit is the commit you tag. **Web checks** on it must pass, which
+     includes **Phase 1 authority is current**. `main` cancels a push run when a newer push
+     arrives, so a cancelled run is common. Only **Web checks** on this commit matters, and
+     if the run was cancelled before it finished, rerun that run.
 
      ```bash
-     gh api 'repos/OpenCoven/chat/actions/workflows/ci.yml/runs?branch=main&event=push&per_page=1' \
-       --jq '.workflow_runs[0] | "\(.head_sha) \(.status) \(.conclusion)"'
+     REPIN_PR=596   # your repin PR's number
+     COMMIT=$(gh api "repos/OpenCoven/chat/pulls/$REPIN_PR" --jq 'select(.merged) | .merge_commit_sha')
+     gh api "repos/OpenCoven/chat/commits/$COMMIT/check-runs?check_name=Web%20checks" \
+       --jq '.check_runs[] | "\(.status) \(.conclusion)"'   # must print: completed success
+     # only if it was cancelled before finishing:
+     RUN=$(gh api "repos/OpenCoven/chat/actions/workflows/ci.yml/runs?head_sha=$COMMIT&event=push" \
+       --jq '.workflow_runs[0].id')
+     gh api -X POST "repos/OpenCoven/chat/actions/runs/$RUN/rerun"
      ```
+
+     Anything merged after the repin isn't in this release. If a PR merged between the prep
+     PR and the repin, run the step 3 listing again and add it to the notes if it changes
+     what ships. Step 10 applies the notes file from `main`, so a follow-up PR to the notes
+     is enough.
 
 ### Tag
 
-6. **Check the updater key, then create a signed, annotated tag** on that commit (see § 2).
+6. **Check the updater key, then create a signed, annotated tag** on `COMMIT` from step 5
+   (see § 2).
 
    If `src-tauri/tauri.conf.json` has a `plugins.updater` section, `release-signing` must
    hold `TAURI_SIGNING_PRIVATE_KEY` and `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` (§ 3, § 4).
    `verify-tag` refuses the release otherwise. A tree without `plugins.updater` needs
    neither.
 
-   `COMMIT` is the newest `main` push whose CI passed. It is empty, and the second line
-   fails, if that run hasn't passed; go back to step 5. The second line must print the
-   version you are releasing.
+   The second line must print the version you are releasing. If it prints nothing, `COMMIT`
+   is unset or the repin isn't merged: go back to step 5.
 
    ```bash
    git fetch origin
-   COMMIT=$(gh api 'repos/OpenCoven/chat/actions/workflows/ci.yml/runs?branch=main&event=push&per_page=1' \
-     --jq '.workflow_runs[0] | select(.conclusion == "success") | .head_sha')
    test -n "$COMMIT" && git show "$COMMIT:package.json" | grep '"version"'
    git tag -s "$VERSION" -m "OpenCoven Chat $VERSION" "$COMMIT"
    git verify-tag "$VERSION"
@@ -221,9 +239,19 @@ PREVIOUS=v0.1.1   # the release before it
      release, § 4) to this version and read it back by the URL installed apps
      use.
 
-   If a build job fails on infrastructure (a network error reaching Apple, a package mirror,
-   or the npm registry), rerun the failed jobs on the same tag. Don't move or recreate the
-   tag (§ 6.3).
+   If the run fails, never move or recreate the tag (§ 6.3). Recover in one of two ways:
+
+   - **The failure is outside the workflow**, such as a network error reaching Apple, a
+     package mirror or the npm registry. Rerun the failed jobs of the same run.
+   - **The fix is a change to `release.yml`.** A rerun uses the workflow as it was at the tag,
+     so land the fix on `main`, then dispatch the workflow from `main` against the same tag.
+     It builds the tag's commit with `main`'s workflow (**Dry-run rehearsal** below). v0.1.1
+     was published this way, in run 43052837944, after #597 and #598 fixed the Linux build.
+
+     ```bash
+     gh api -X POST repos/OpenCoven/chat/actions/workflows/release.yml/dispatches \
+       -f ref=main -f "inputs[tag]=$VERSION" -f "inputs[dry_run]=false"
+     ```
 
 ### Verify
 

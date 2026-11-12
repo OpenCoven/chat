@@ -63,6 +63,19 @@ describe('release notes', () => {
     expect(previousTag('v0.1.2', tags)).toBe('v0.1.1');
   });
 
+  test('a release compares with the previous release, not its own candidates', () => {
+    // Someone coming from v0.1.1 wants every change, not only rc.2 → final.
+    const tags = ['v0.1.1', 'v0.1.2-rc.1', 'v0.1.2-rc.2', 'v0.1.2'];
+    expect(previousTag('v0.1.2', tags)).toBe('v0.1.1');
+    expect(previousTag('v0.1.2-rc.2', tags)).toBe('v0.1.2-rc.1');
+    expect(previousTag('v0.1.2-rc.1', tags)).toBe('v0.1.1');
+  });
+
+  test('reads notes saved with Windows line endings or a byte-order mark', () => {
+    const crlf = `﻿${ready('v0.1.2', 'v0.1.1').replaceAll('\n', '\r\n')}`;
+    expect(checkNotes('v0.1.2', crlf, { previous: 'v0.1.1', index: '](v0.1.2.md)' })).toEqual([]);
+  });
+
   test('accepts notes that follow the template', () => {
     expect(
       checkNotes('v0.1.2', ready('v0.1.2', 'v0.1.1'), {
