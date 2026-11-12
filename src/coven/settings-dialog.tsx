@@ -66,6 +66,12 @@ const SECTIONS: readonly Readonly<{
   { id: 'about', label: 'About', icon: 'info', blurb: 'This app and the Coven CLI it talks to.' },
 ];
 
+/** True on Windows, where Chat can't read Coven Cave's project metadata yet (#587). */
+export function isWindowsPlatform(): boolean {
+  const nav = typeof navigator === 'undefined' ? undefined : navigator;
+  return /^Win/.test(nav?.platform ?? '');
+}
+
 /** True on Apple platforms, where shortcuts read ⌘ and ⇧ rather than Ctrl and Shift. */
 export function isApplePlatform(): boolean {
   const nav = typeof navigator === 'undefined' ? undefined : navigator;
@@ -695,7 +701,9 @@ function FamiliarAccess({ familiar, onRefresh, refreshDisabled }: SettingsDialog
           <Icon name="folder-open" size={22} />
           <p>
             {familiar.projectAccessUnavailable
-              ? `Chat could not read Coven's project registry or grants, so ${familiar.name}'s declared access is unknown. Check them in Coven, then refresh.`
+              ? isWindowsPlatform()
+                ? `Chat can't read Coven Cave's project grants on Windows yet, so ${familiar.name}'s declared access is unknown. See ${familiar.name}'s Projects tab in Coven Cave.`
+                : `Chat could not read Coven's project registry or grants, so ${familiar.name}'s declared access is unknown. Check them in Coven, then refresh.`
               : `No project access is declared for ${familiar.name} in Coven's project registry or grants.`}
           </p>
         </div>
