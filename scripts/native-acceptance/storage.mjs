@@ -80,6 +80,21 @@ function files(root, found = []) {
   return found;
 }
 
+/** The web view's own storage files: on Linux, without Chat's files in the same folder. */
+export function browserFiles() {
+  return roots().browser.flatMap((root) => files(root).filter((path) => !appOwned(root, path)));
+}
+
+/** The files whose bytes hold a needle, as UTF-8 or as UTF-16. */
+export function containing(paths, needle) {
+  return paths.filter((path) => {
+    const bytes = readFileSync(path);
+    return (
+      bytes.includes(Buffer.from(needle, 'utf8')) || bytes.includes(Buffer.from(needle, 'utf16le'))
+    );
+  });
+}
+
 function sqliteItems(path) {
   try {
     const out = execFileSync(
@@ -249,13 +264,7 @@ export function storageRow() {
     }
     row.note('IndexedDB files', databases);
     for (const needle of NEEDLES) {
-      const hits = all.filter((path) => {
-        const bytes = readFileSync(path);
-        return (
-          bytes.includes(Buffer.from(needle, 'utf8')) ||
-          bytes.includes(Buffer.from(needle, 'utf16le'))
-        );
-      });
+      const hits = containing(all, needle);
       row.expect(`browser storage files containing "${needle}"`, hits, []);
       for (const path of hits)
         row.note(

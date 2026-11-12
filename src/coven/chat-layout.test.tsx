@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { ScreenChannel, ScreenRelay } from '../lib/screen-relay';
 import {
@@ -13,6 +13,7 @@ import {
   liveRowText,
   matchesFamiliar,
   PROMPT_LIMIT_BYTES,
+  RUNNING_PLACEHOLDER,
   runStatusText,
   sameBlock,
   toolTurnSummary,
@@ -1762,9 +1763,10 @@ describe('the clock', () => {
         runStartedAt={Date.now() - 75_000}
       />,
     );
-    expect(screen.getByText(/Astra is responding/)).toHaveTextContent('· 1m 15s');
+    const line = screen.getByText(/Astra is responding/).parentElement;
+    expect(line).toHaveTextContent('· 1m 15s');
     act(() => vi.advanceTimersByTime(5_000));
-    expect(screen.getByText(/Astra is responding/)).toHaveTextContent('· 1m 20s');
+    expect(line).toHaveTextContent('· 1m 20s');
   });
 
   it('ages the sidebar caption while the window sits open', () => {
@@ -1919,6 +1921,40 @@ describe('declared access and error copying', () => {
       "Chat could not read Coven's project registry or grants, so Bram's declared access is unknown.",
     );
     expect(access()).not.toHaveTextContent('No project access is declared');
+  });
+
+  it("says on Windows that Chat can't read Cave's grants there yet, instead of offering a refresh", () => {
+    // A refresh can't help on Windows: Chat has no safe reader there (#587).
+    Object.defineProperty(navigator, 'platform', { configurable: true, get: () => 'Win32' });
+    try {
+      render(
+        <ChatLayout
+          {...layoutProps()}
+          connected
+          ready
+          familiars={[{ id: 'b', name: 'Bram', projectAccessUnavailable: true }]}
+          familiarId="b"
+        />,
+      );
+      openSettingsAt('Access');
+      const access = screen.getByRole('region', { name: 'Access' });
+      const said = within(access).getByText(/Coven Cave's project grants on Windows/);
+      expect(said).toHaveTextContent(
+        "Chat can't read Coven Cave's project grants on Windows yet, so Bram's declared access is unknown. See Bram's Projects tab in Coven Cave.",
+      );
+      expect(said).not.toHaveTextContent('refresh');
+      expect(access).not.toHaveTextContent('No project access is declared');
+      // Nor does the footnote send the reader to a refresh that can't help.
+      expect(access).toHaveTextContent(
+        "To edit grants, open the familiar's Projects tab in Coven Cave.",
+      );
+      expect(access).not.toHaveTextContent('then refresh project access here');
+      expect(access).toHaveTextContent(
+        'Familiar chats can change files and run commands beyond these projects without asking for permission.',
+      );
+    } finally {
+      Reflect.deleteProperty(navigator, 'platform');
+    }
   });
 
   it('offers to copy an error notice', async () => {
@@ -2892,6 +2928,46 @@ describe('inspector resizing', () => {
     expect(handle()).toHaveAttribute('aria-valuenow', '360');
   });
 
+  it('gives the width once, in the value text or the description the reader speaks (#579)', () => {
+    // On v0.0.9 VoiceOver read "vertical splitter 360 pixels Resize inspector
+    // 360 pixels wide…": it speaks the value text and the description. NVDA
+    // does too. Orca speaks the name and the description only (#545).
+    const keys = 'Arrow keys resize it, Home and End reach the limits.';
+    const lanes = [
+      { platform: 'MacIntel', reader: 'VoiceOver', speaksValue: true },
+      { platform: 'Win32', reader: 'NVDA', speaksValue: true },
+      { platform: 'Linux x86_64', reader: 'Orca', speaksValue: false },
+    ];
+    for (const { platform, reader, speaksValue } of lanes) {
+      Object.defineProperty(navigator, 'platform', { configurable: true, get: () => platform });
+      try {
+        const { unmount } = render(<ChatLayout {...layoutProps()} ready />);
+        const separator = handle();
+        const heard = () => {
+          const id = separator.getAttribute('aria-describedby') ?? '';
+          const description = document.getElementById(id)?.textContent ?? '';
+          const value = speaksValue ? (separator.getAttribute('aria-valuetext') ?? '') : '';
+          return `${value} Resize inspector ${description}`;
+        };
+        for (const width of [360, 376]) {
+          if (width === 376) fireEvent.keyDown(separator, { key: 'ArrowLeft' });
+          expect({
+            reader,
+            times: heard().match(new RegExp(`\\b${width}\\b`, 'g'))?.length,
+          }).toEqual({ reader, times: 1 });
+          expect(separator).toHaveAttribute('aria-valuetext', `${width} pixels`);
+          expect(separator).toHaveAccessibleDescription(
+            speaksValue ? keys : `${width} pixels wide. ${keys}`,
+          );
+        }
+        unmount();
+      } finally {
+        Reflect.deleteProperty(navigator, 'platform');
+        localStorage.clear();
+      }
+    }
+  });
+
   it('offers no separator in the medium and compact drawers', () => {
     for (const width of [900, 390]) {
       const restore = mockViewport(width);
@@ -3125,6 +3201,23 @@ describe('model settings', () => {
     });
   });
 
+  it("offers Coven Code's presets as IDs the engine sends to each provider as they are", () => {
+    render(<ChatLayout {...layoutProps()} ready />);
+    const model = openSettingsAt('Model');
+    const picker = within(model).getByRole('combobox', { name: 'Model' });
+    // The engine strips a provider prefix only for non-Anthropic providers;
+    // an "anthropic/" ID would reach Anthropic's API as written (#584).
+    expect(within(picker).getByRole('option', { name: 'Claude Sonnet 5.5' })).toHaveValue(
+      'claude-sonnet-5-5',
+    );
+    expect(within(picker).getByRole('option', { name: 'Claude Opus 5.5' })).toHaveValue(
+      'claude-opus-5-5',
+    );
+    expect(within(picker).getByRole('option', { name: 'GPT-5.5' })).toHaveValue('openai/gpt-5.5');
+    fireEvent.change(picker, { target: { value: 'claude-sonnet-5-5' } });
+    expect(stored()).toMatchObject({ harness: 'coven-code', model: 'claude-sonnet-5-5' });
+  });
+
   it('says plainly when a model id could not be sent, until it is corrected or cleared', () => {
     render(<ChatLayout {...layoutProps()} ready />);
     const model = openSettingsAt('Model');
@@ -3215,6 +3308,324 @@ describe('model settings', () => {
       />,
     );
     expect(screen.queryByRole('button', { name: 'Attach file' })).not.toBeInTheDocument();
+  });
+});
+
+describe('composer stop key, running copy and details row', () => {
+  afterEach(() => localStorage.clear());
+
+  function running(overrides: Partial<ChatLayoutProps> = {}): ChatLayoutProps {
+    return {
+      ...layoutProps(),
+      familiars: [{ id: 'f', name: 'Astra', workspace: '/familiars/astra' }],
+      familiarId: 'f',
+      connected: true,
+      ready: true,
+      busy: true,
+      draft: 'Next question',
+      ...overrides,
+    };
+  }
+
+  it('stops the run on Escape from the composer', () => {
+    const props = running();
+    render(<ChatLayout {...props} />);
+    const field = screen.getByRole('textbox', { name: 'Message Astra' });
+    act(() => field.focus());
+    fireEvent.keyDown(field, { key: 'Escape' });
+    expect(props.onCancel).toHaveBeenCalledOnce();
+    // The draft is kept, and the visible control names the key.
+    expect(props.onDraft).not.toHaveBeenCalled();
+    const stop = screen.getByRole('button', { name: 'Stop run' });
+    expect(stop).toHaveAttribute('aria-keyshortcuts', 'Escape');
+    expect(stop).toHaveTextContent('esc · stop');
+  });
+
+  it('stops the run on Escape while nothing editable has focus', () => {
+    const props = running();
+    render(<ChatLayout {...props} />);
+    const log = screen.getByRole('log', { name: 'Messages' });
+    act(() => log.focus());
+    fireEvent.keyDown(log, { key: 'Escape' });
+    expect(props.onCancel).toHaveBeenCalledOnce();
+  });
+
+  it('does not stop on Escape without a run, while stopping, or with a modifier', () => {
+    const idle = running({ busy: false });
+    const { unmount } = render(<ChatLayout {...idle} />);
+    fireEvent.keyDown(document.body, { key: 'Escape' });
+    fireEvent.keyDown(screen.getByRole('textbox', { name: 'Message Astra' }), { key: 'Escape' });
+    expect(idle.onCancel).not.toHaveBeenCalled();
+    unmount();
+
+    const stopping = running({ cancelling: true });
+    const second = render(<ChatLayout {...stopping} />);
+    fireEvent.keyDown(document.body, { key: 'Escape' });
+    expect(stopping.onCancel).not.toHaveBeenCalled();
+    second.unmount();
+
+    const chord = running();
+    render(<ChatLayout {...chord} />);
+    fireEvent.keyDown(document.body, { key: 'Escape', metaKey: true });
+    expect(chord.onCancel).not.toHaveBeenCalled();
+  });
+
+  it('leaves Escape to an open dialog and to another text field', () => {
+    const props = running();
+    render(<ChatLayout {...props} />);
+    const search = screen.getByRole('searchbox');
+    act(() => search.focus());
+    fireEvent.keyDown(search, { key: 'Escape' });
+    expect(props.onCancel).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Open settings' }));
+    const dialog = screen.getByRole('dialog', { name: 'Settings' });
+    expect(dialog).toHaveAttribute('open');
+    fireEvent.keyDown(within(dialog).getAllByRole('button')[0] as HTMLElement, { key: 'Escape' });
+    expect(props.onCancel).not.toHaveBeenCalled();
+  });
+
+  it('leaves Escape to an open drawer', () => {
+    const listeners = new Set<() => void>();
+    Object.defineProperty(window, 'matchMedia', {
+      configurable: true,
+      writable: true,
+      value: (query: string) => {
+        const limit = Number(/max-width:\s*(\d+)px/.exec(query)?.[1] ?? Number.NaN);
+        return {
+          matches: Number.isFinite(limit) && 390 <= limit,
+          media: query,
+          addEventListener: (_: string, listener: () => void) => listeners.add(listener),
+          removeEventListener: (_: string, listener: () => void) => listeners.delete(listener),
+        } as unknown as MediaQueryList;
+      },
+    });
+    try {
+      const props = running();
+      const { container } = render(<ChatLayout {...props} />);
+      const shell = container.querySelector('.coven-chat');
+      fireEvent.click(screen.getByRole('button', { name: 'Show familiars' }));
+      expect(shell).toHaveAttribute('data-sidebar', 'open');
+      fireEvent.keyDown(window, { key: 'Escape' });
+      expect(shell).toHaveAttribute('data-sidebar', 'closed');
+      expect(props.onCancel).not.toHaveBeenCalled();
+      // With the drawer gone, the same key stops the run.
+      fireEvent.keyDown(window, { key: 'Escape' });
+      expect(props.onCancel).toHaveBeenCalledOnce();
+      // From the composer too, the drawer takes Escape before the run does.
+      fireEvent.click(screen.getByRole('button', { name: 'Show familiars' }));
+      fireEvent.keyDown(screen.getByRole('textbox', { name: 'Message Astra' }), {
+        key: 'Escape',
+      });
+      expect(shell).toHaveAttribute('data-sidebar', 'closed');
+      expect(props.onCancel).toHaveBeenCalledOnce();
+    } finally {
+      Reflect.deleteProperty(window, 'matchMedia');
+    }
+  });
+
+  it('says what happens to a message typed during a run', () => {
+    const { rerender } = render(<ChatLayout {...running()} />);
+    const field = screen.getByRole('textbox', { name: 'Message Astra' });
+    // The draft is not queued: Send comes back when the reply ends.
+    expect(field).toHaveAttribute('placeholder', RUNNING_PLACEHOLDER);
+    expect(RUNNING_PLACEHOLDER).toMatch(/send when the reply ends/);
+    expect(RUNNING_PLACEHOLDER).toMatch(/esc to stop/);
+    expect(RUNNING_PLACEHOLDER).not.toMatch(/queue/i);
+    rerender(<ChatLayout {...running({ busy: false })} />);
+    expect(field).toHaveAttribute('placeholder', 'Message Astra · @ familiar · # project');
+  });
+
+  it('keeps Settings › Model usable under the composer while the message cannot be edited', () => {
+    for (const state of [{ readOnly: true }, { attaching: true }, { loading: true }]) {
+      cleanup();
+      render(<ChatLayout {...running({ busy: false, ...state })} />);
+      expect(screen.getByRole('textbox', { name: 'Message Astra' })).toBeDisabled();
+      expect(screen.getByRole('button', { name: 'Send' })).toBeDisabled();
+      const details = within(screen.getByRole('group', { name: 'Chat details' }));
+      const settings = details.getByRole('button', { name: 'Model settings' });
+      expect(settings).toBeEnabled();
+      fireEvent.click(settings);
+      expect(
+        within(screen.getByRole('dialog', { name: 'Settings' })).getByRole('region', {
+          name: 'Model',
+        }),
+      ).toBeInTheDocument();
+    }
+  });
+
+  it('shows the real familiar, access, harness, model and workspace under the composer', () => {
+    const { rerender } = render(<ChatLayout {...running({ busy: false })} />);
+    let details = within(screen.getByRole('group', { name: 'Chat details' }));
+    expect(details.getByText('· Full access')).toBeInTheDocument();
+    expect(screen.getByRole('group', { name: 'Chat details' })).toHaveTextContent(
+      'Astra · Full access',
+    );
+    // A new chat starts on the Settings harness, and no model means the engine's own.
+    expect(details.getByText('Coven Code')).toBeInTheDocument();
+    expect(details.getByText('Engine default')).toBeInTheDocument();
+    expect(details.getByText('Familiar workspace: /familiars/astra')).toBeInTheDocument();
+
+    localStorage.setItem(
+      'opencoven.chat.preferences.v1',
+      JSON.stringify({ model: 'openai/gpt-5.5' }),
+    );
+    rerender(
+      <ChatLayout
+        {...running({ busy: false })}
+        key="with-chat"
+        sessions={[
+          {
+            id: 's',
+            title: 'Astra',
+            familiarId: 'f',
+            harness: 'claude',
+            projectRoot: '/projects/x',
+          },
+        ]}
+        sessionId="s"
+      />,
+    );
+    details = within(screen.getByRole('group', { name: 'Chat details' }));
+    // An existing chat keeps the harness it started on.
+    expect(details.getByText('Claude Code')).toBeInTheDocument();
+    expect(details.getByText('openai/gpt-5.5')).toBeInTheDocument();
+    expect(details.getByText('Chat project: /projects/x')).toBeInTheDocument();
+    // Cave's task and access controls stay out; the access is stated, not chosen.
+    expect(details.queryByText(/Create task/)).not.toBeInTheDocument();
+    expect(details.queryByRole('button', { name: /Full/ })).not.toBeInTheDocument();
+
+    fireEvent.click(details.getByRole('button', { name: 'Model settings' }));
+    expect(
+      within(screen.getByRole('dialog', { name: 'Settings' })).getByRole('region', {
+        name: 'Model',
+      }),
+    ).toBeInTheDocument();
+  });
+
+  it('leaves another chat alone: Escape here does not stop a run over there', () => {
+    const props = running({ runFamiliarId: 'other' });
+    render(<ChatLayout {...props} />);
+    const field = screen.getByRole('textbox', { name: 'Message Astra' });
+    fireEvent.keyDown(field, { key: 'Escape' });
+    fireEvent.keyDown(screen.getByRole('log', { name: 'Messages' }), { key: 'Escape' });
+    expect(props.onCancel).not.toHaveBeenCalled();
+    // This field isn't replying, and the control doesn't promise the key.
+    expect(field).not.toHaveAttribute('placeholder', RUNNING_PLACEHOLDER);
+    const stop = screen.getByRole('button', { name: 'Stop run' });
+    expect(stop).not.toHaveAttribute('aria-keyshortcuts');
+    expect(stop).not.toHaveTextContent('esc');
+  });
+
+  it('does not stop on a held key that started on something else', () => {
+    const props = running();
+    render(<ChatLayout {...props} />);
+    const field = screen.getByRole('textbox', { name: 'Message Astra' });
+    fireEvent.keyDown(screen.getByRole('log', { name: 'Messages' }), {
+      key: 'Escape',
+      repeat: true,
+    });
+    fireEvent.keyDown(field, { key: 'Escape', repeat: true });
+    expect(props.onCancel).not.toHaveBeenCalled();
+  });
+
+  it('gives the find bar Escape first, wherever focus is', () => {
+    const props = running();
+    render(<ChatLayout {...props} />);
+    fireEvent.keyDown(window, { key: 'f', metaKey: true });
+    const find = screen.getByRole('searchbox', { name: /find/i });
+    const next = screen.getByRole('button', { name: 'Close find' });
+    act(() => next.focus());
+    fireEvent.keyDown(next, { key: 'Escape' });
+    expect(find).not.toBeInTheDocument();
+    expect(props.onCancel).not.toHaveBeenCalled();
+
+    fireEvent.keyDown(window, { key: 'f', metaKey: true });
+    const again = screen.getByRole('searchbox', { name: /find/i });
+    act(() => (document.activeElement as HTMLElement | null)?.blur());
+    fireEvent.keyDown(document.body, { key: 'Escape' });
+    expect(again).not.toBeInTheDocument();
+    expect(props.onCancel).not.toHaveBeenCalled();
+
+    fireEvent.keyDown(window, { key: 'f', metaKey: true });
+    const third = screen.getByRole('searchbox', { name: /find/i });
+    const field = screen.getByRole('textbox', { name: 'Message Astra' });
+    act(() => field.focus());
+    fireEvent.keyDown(field, { key: 'Escape' });
+    expect(third).not.toBeInTheDocument();
+    expect(props.onCancel).not.toHaveBeenCalled();
+  });
+
+  it('puts focus back in the field after Escape stops the run from there', () => {
+    const props = running();
+    const { rerender } = render(<ChatLayout {...props} />);
+    const field = screen.getByRole('textbox', { name: 'Message Astra' });
+    act(() => field.focus());
+    fireEvent.keyDown(field, { key: 'Escape' });
+    expect(props.onCancel).toHaveBeenCalledOnce();
+    // A browser drops focus from a field that's turned off; jsdom doesn't, and it
+    // ignores blur() on a disabled field, so focus leaves before the field turns off.
+    act(() => field.blur());
+    expect(document.body).toHaveFocus();
+    rerender(<ChatLayout {...props} cancelling />);
+    expect(field).toBeDisabled();
+    rerender(<ChatLayout {...props} busy={false} cancelling={false} />);
+    expect(field).toBeEnabled();
+    expect(field).toHaveFocus();
+  });
+
+  it('does not take focus back if it moved on while the run was stopping', () => {
+    const props = running();
+    const { rerender } = render(<ChatLayout {...props} />);
+    const field = screen.getByRole('textbox', { name: 'Message Astra' });
+    act(() => field.focus());
+    fireEvent.keyDown(field, { key: 'Escape' });
+    rerender(<ChatLayout {...props} cancelling />);
+    const elsewhere = screen.getByRole('log', { name: 'Messages' });
+    act(() => elsewhere.focus());
+    rerender(<ChatLayout {...props} busy={false} cancelling={false} />);
+    expect(elsewhere).toHaveFocus();
+  });
+
+  it('keeps the ticking clock out of the status a screen reader announces', () => {
+    render(<ChatLayout {...running({ runStartedAt: Date.now() - 5_000 })} />);
+    const clock = screen.getByText(/· \d+s/);
+    expect(clock.closest('output, [role="status"], [aria-live]')).toBeNull();
+    expect(screen.getByText('Astra is responding…').closest('output')).not.toBeNull();
+  });
+
+  it('says what happens to a draft while the reply runs, where it can be read', () => {
+    const { rerender } = render(<ChatLayout {...running()} />);
+    expect(screen.getByText(/You can send it when the reply ends/)).toBeInTheDocument();
+    rerender(<ChatLayout {...running({ draft: '' })} />);
+    expect(screen.queryByText(/You can send it when the reply ends/)).not.toBeInTheDocument();
+    rerender(<ChatLayout {...running({ cancelling: true })} />);
+    expect(screen.queryByText(/You can send it when the reply ends/)).not.toBeInTheDocument();
+    rerender(<ChatLayout {...running({ runFamiliarId: 'other' })} />);
+    expect(screen.queryByText(/You can send it when the reply ends/)).not.toBeInTheDocument();
+  });
+
+  it('says every message runs with full access, during a run and between runs', () => {
+    // Chats run with full access (#576): the details row must not say read only.
+    const { rerender } = render(<ChatLayout {...running({ busy: false })} />);
+    const details = within(screen.getByRole('group', { name: 'Chat details' }));
+    const item = () => details.getByText('· Full access');
+    expect(item()).toHaveAttribute('data-access', 'full');
+    expect(item().closest('[title]')?.getAttribute('title')).toBe(
+      'Messages run with full access: Astra can change files and run commands under your user account without asking for permission.',
+    );
+    rerender(<ChatLayout {...running()} />);
+    expect(item()).toBeInTheDocument();
+    expect(screen.getByRole('group', { name: 'Chat details' })).not.toHaveTextContent(
+      /Read only|ask you to allow/,
+    );
+  });
+
+  it('reports no workspace, and names no familiar when none is selected', () => {
+    render(<ChatLayout {...layoutProps()} connected ready />);
+    const details = within(screen.getByRole('group', { name: 'Chat details' }));
+    expect(details.getByText('No workspace reported')).toBeInTheDocument();
+    expect(details.queryByText(/Read only/)).not.toBeInTheDocument();
   });
 });
 

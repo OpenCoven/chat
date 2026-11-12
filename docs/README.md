@@ -20,7 +20,7 @@ to the history table.
 | [mission-storage-design.md](mission-storage-design.md) | How Chat stores mission records (approved 2026-10-19, #155) |
 | [packaged-acceptance.md](packaged-acceptance.md) | The installed-app acceptance workflow and its rows |
 | [phase1-conformance.md](phase1-conformance.md) | The protected Phase 1 conformance lane and lock (long; read its status block first) |
-| [releasing.md](releasing.md) | How to cut, verify and roll back a release |
+| [releasing.md](releasing.md) | How to cut, verify and roll back a release: the whole path from prep PR to verification record |
 
 ## Dated snapshots and history
 
@@ -42,7 +42,8 @@ These are true as of their date. Refresh anything they say before you act on it.
 
 | Folder | What it holds |
 | --- | --- |
+| [agents/](agents/working-here.md) | What agents working here need to know: GitHub habits, CI gaps, flaky rows, local test quirks |
 | [superpowers/](superpowers/README.md) | Old plans and specs, each with a status. Don't follow one as a work order unless it says current. |
 | [design-audits/](design-audits/) | Design reviews; #533 tracks the 2026-10-24 audit's findings |
-| [release-notes/](release-notes/) | One page per published release |
+| [release-notes/](release-notes/) | One page per published release; [its index](release-notes/README.md) lists them and has the template |
 | [verification/](verification/) | Dated verification records for releases and fixes |

@@ -12,6 +12,9 @@ next to the other agents that are usually running here at the same time.
 3. **`README.md`**: the product-behavior contract. Read the part you're about to change before you
    change anything a user can see.
 4. **`CONTRIBUTING.md`**: pull request expectations, verification, and commit signing.
+5. **`docs/agents/working-here.md`**: what earlier sessions learned the hard way. GitHub API
+   habits, the `ci:full` label gap, known flaky CI rows, and local test failures that aren't
+   yours.
 
 `docs/agent-notes.md` explains the chat transport's continuity gap in depth. The
 `chat-app-orientation` skill (`.claude/skills/chat-app-orientation/SKILL.md`) is a short version of
@@ -35,6 +38,31 @@ there, not here. `CLAUDE.md` lists the other sibling checkouts that share this v
 - **Open work is in [GitHub issues](https://github.com/OpenCoven/chat/issues).** An issue's body
   and its latest owner comments hold the acceptance criteria. Don't treat a doc in this repo as a
   backlog.
+- **Each issue opens with a dated State block** (between `agent-state` comment markers): what's
+  done, the next action, and who takes it. When the state changes, edit the block in place
+  rather than adding another.
+- **When sources disagree, the newest wins, and you re-check.** An owner comment newer than the
+  State block overrides it. The State block and labels override the dated snapshot in
+  `docs/project-coordination.md`. If something looks contradictory, fix the stale one in the
+  same change, or ask on the issue.
+- **Labels say who acts next.** Every open issue carries one `area:*` label (`a11y`, `windows`,
+  `linux`, `macos`, `release`, `iphone`, `design`, `missions`) and at least one of these:
+
+  | Label | Meaning |
+  | --- | --- |
+  | `agent-ready` | An agent can take it end to end. Claim it first (below) |
+  | `in-progress` | Claimed or has an open PR. Read the claim before touching it |
+  | `needs-human` | A person must act: run installers, use a device, provision secrets. Agents prepare, not perform |
+  | `needs-decision` | An owner must choose. State the question; don't pick for them |
+  | `blocked:engine` | Waits on a coven-code release. Check its releases first |
+
+  To find work:
+
+  ```bash
+  gh api 'repos/OpenCoven/chat/issues?labels=agent-ready&state=open' --jq '.[] | "#\(.number) \(.title)"'
+  ```
+
+  New agent work uses the **Agent task** issue template (`.github/ISSUE_TEMPLATE/agent-task.md`).
 - **Releases:** `gh api repos/OpenCoven/chat/releases`. Another session may have released since
   you last looked, and older issues and plans name versions that have since been renumbered.
   Check before acting on any version number.
@@ -57,7 +85,7 @@ sessions from destroying each other's work:
 
    ```bash
    git fetch origin
-   git worktree add -b <type>/<short-name> .worktrees/<short-name> origin/main
+   git worktree add -b <type>/<issue>-<slug> .worktrees/<issue>-<slug> origin/main
    ```
 
 2. **Run `git worktree list` before any branch surgery.** Don't edit, reset, rebase, check out
@@ -71,6 +99,68 @@ sessions from destroying each other's work:
 5. **Persist your progress to a file** (an ignored path such as `.artifacts/<task>/` in your
    worktree) so a context reset, or the session that picks up after you, doesn't have to
    re-derive it.
+
+### Claim an issue before you start it
+
+GitHub shows every session as the same user, so claims are comments on the issue:
+
+1. **Check first.** Read the issue's latest comments and open PRs. If there is a claim with no
+   matching release comment and it isn't stale (step 6), pick other work or ask the claimant on
+   the issue.
+2. **Pick your names**, so the claim can state them: worktree `.worktrees/<issue>-<slug>` and
+   branch `<type>/<issue>-<slug>`. The slug is two to four words from the issue title in
+   kebab-case. The type is `fix` for a defect, `feat` for new behavior, `docs`, `test`, `ci`,
+   `refactor`, or `chore` for anything else.
+3. **Claim.** Post one comment, on a single line:
+
+   ```text
+   **Claimed** by <session name> (<Claude Code | Codex | Copilot>) on <YYYY-MM-DD>. Worktree `.worktrees/<issue>-<slug>`, branch `<type>/<issue>-<slug>`. Plan: <one sentence>.
+   ```
+
+   The session name is whatever peers can reach you by: the name Claude Code shows other
+   sessions, or a Codex task id. If your tool shows none, make up a short tag (tool, date and a
+   few random characters) and use it in every comment. Then swap the issue's `agent-ready` label
+   for `in-progress`, and edit the State block: today's date, and your session as **Who**.
+   `docs/agents/working-here.md` has the REST calls for both.
+4. **Create the worktree** with the names you claimed, using the `git worktree add` command at
+   the top of this section.
+5. **Release.** When you finish, or stop without finishing, post a **Released** comment saying
+   what landed (PR links) and what's left, and update the State block. If work remains, put
+   `agent-ready` back in place of `in-progress`. Don't make the next agent wait on a silent
+   claim.
+6. **Stale claims.** A claim is stale when it has no release comment and its branch, PR and issue
+   have had no commits, updates or comments for 3 days. Say so in a comment before taking the
+   work over.
+
+Work that has no issue gets one first, so there is somewhere to claim it.
+
+### Name worktrees after their issue
+
+Use `.worktrees/<issue>-<slug>` for the worktree and `<type>/<issue>-<slug>` for the branch, for
+example `.worktrees/123-example-slug` on `fix/123-example-slug`. Anyone can then match a
+worktree to its issue and claim. Record the worktrees your session creates in your progress
+file: with one shared account, that file is how you know which ones are yours.
+
+### Find stale worktrees, and remove only your own
+
+Run `git fetch origin` (it moves only `origin/*` refs, so it can't disturb anyone's work), then
+`node scripts/agent-worktrees.mjs`. It lists every worktree with its branch, PR state,
+uncommitted and unpushed changes, lock, running processes and idle time. It is read-only: it
+removes nothing and doesn't even refresh other worktrees' index files. Its verdicts:
+
+| Verdict | Meaning |
+| --- | --- |
+| `removable` | Work landed (merged, or PR closed), clean, nothing unpushed, unlocked, no process inside, idle 3+ days |
+| `check` | Landed, but recently active or named in `docs/project-coordination.md`. Ask before touching it |
+| `keep` | Uncommitted or unpushed work, locked, in use, or not landed |
+| `prunable` | The directory is gone. `git worktree prune` tidies the record |
+| `primary` | The primary checkout. Never remove it |
+
+Remove a worktree yourself (`git worktree remove <path>`) only if your progress file shows you
+created it and it is `removable`. Leave everyone else's alone, even a `removable` one. If you're
+asked to clean up, post the `removable` rows as a comment on the issue that owns each worktree
+(the one in its name or claim). A worktree with no owning issue goes in your report to Val.
+There's no need to report `check` or `keep` rows unless someone asks.
 
 ## Canonical UI file map
 
@@ -113,6 +203,7 @@ rooted here rather than burning turns on workarounds.
 
 ## Commits
 
-`main` requires signed commits. Sign every commit (`git commit -S`); `CONTRIBUTING.md` has the
-setup. Before pushing, run `git log -1 --show-signature` and confirm it reports a good signature.
-A commit that fails this check can't merge.
+`main` requires signed commits, so sign every commit and confirm the signature is good before you
+push. **Commit signing** in `docs/agents/working-here.md` has the exact commands. With an SSH key
+(the usual case here) the check needs an allowed signers file; without one it prints "No
+signature" even for a correctly signed commit. `CONTRIBUTING.md` has the general setup.

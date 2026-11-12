@@ -1422,6 +1422,14 @@ async function inspectorWidth(app) {
   };
 }
 
+/**
+ * How many times a reading gives the separator's width, as pixels or as its
+ * percentage of the range (#579).
+ */
+export function timesWidthSaid(spoken, width, percent) {
+  return (String(spoken).match(new RegExp(`\\b${width}\\b|\\b${percent}\\s?%`, 'g')) ?? []).length;
+}
+
 /** A press on the handle starts a drag and does not focus it, so focus arrives by Tab. */
 async function tabToSeparator(lane, familiar) {
   await lane.app.click(await lane.composer(familiar));
@@ -1533,6 +1541,13 @@ export async function inspectorRow(lane, familiar, frames) {
         /separator|splitter/i.test(spoken),
         spoken,
       );
+      // VoiceOver speaks the value text and the description, so the width
+      // belongs in only one of them; v0.0.9 said it three times (#579). NVDA
+      // goes on to read the rail aloud, so its count would not be the handle's.
+      if (PLATFORM === 'mac') {
+        const times = timesWidthSaid(spoken, 360, 25);
+        row.check(`${lane.reader.name} says the width once`, times === 1, { times, spoken });
+      }
     }
 
     await app.key('left');
@@ -1811,6 +1826,97 @@ export async function cancelledRunRow(lane, familiar) {
     const settled = lane.requests();
     await sleep(5_000);
     row.expect('nothing sent after the cancel', lane.requests(), settled);
+    await lane.clearComposer(familiar);
+  });
+}
+
+/** #543: Escape stops a real run from the composer and from the page. */
+export async function stopKeyRow(lane, familiar) {
+  const { app } = lane;
+  const row = new Row('543-1', 'Escape stops a real run and leaves the draft');
+  const DRAFT = 'Still here after the stop';
+  const words = async () => (await app.all('text')).map((n) => String(n.value ?? n.name));
+  const slowRun = async (prompt) => {
+    const slowSent = lane.tokens('slow');
+    await lane.idle();
+    await lane.clearComposer(familiar);
+    await app.click(await lane.composer(familiar));
+    await app.type(prompt);
+    await app.click(await app.one('button', 'Send'));
+    await app.one('button', 'Stop run', { timeout: 60_000 });
+    // Earlier runs left slow lines on the page, so wait for the model itself.
+    await until(
+      'the model to take the run',
+      async () => lane.tokens('slow') > slowSent,
+      60_000,
+      500,
+    );
+    await sleep(2_500);
+  };
+  return lane.attempt(row, async () => {
+    const slowBefore = lane.tokens('slow');
+
+    // From the composer, over a draft.
+    await slowRun('[[slow]] Stop me from the composer.');
+    await app.click(await lane.composer(familiar));
+    await app.type(DRAFT);
+    await sleep(600);
+    row.expect(
+      'the line about the draft shows during the run',
+      (await words()).some((text) => /You can send it when the reply ends/.test(text)),
+      true,
+    );
+    row.expect('Stop run stays on offer over a draft', await app.count('button', 'Stop run'), 1);
+    await app.key('escape');
+    await lane.idle();
+    row.expect(
+      'Escape from the composer stopped the run',
+      await app.count('button', 'Stop run'),
+      0,
+    );
+    row.expect('the draft stays', await lane.composerValue(familiar), DRAFT);
+    // The field stays off until Chat has read the chat again through the CLI.
+    await until(
+      'focus to come back to the composer',
+      async () => (await app.focused())?.name === `Message ${familiar}`,
+      20_000,
+      500,
+    ).catch(() => undefined);
+    row.expect('focus is back in the composer', (await app.focused())?.name, `Message ${familiar}`);
+
+    // From the Stop control, with the pointer. Reported, not judged: a pointer press
+    // moves focus differently on each web view.
+    await slowRun('[[slow]] Stop me from the Stop control.');
+    await app.click(await lane.composer(familiar));
+    await app.click(await app.one('button', 'Stop run'));
+    await lane.idle();
+    await until(
+      'focus to come back to the composer',
+      async () => (await app.focused())?.name === `Message ${familiar}`,
+      20_000,
+      500,
+    ).catch(() => undefined);
+    row.note(
+      'focus after pressing Stop run with the pointer',
+      (await app.focused())?.name ?? '(none)',
+    );
+
+    // From the page: a click in the conversation, away from the field.
+    await slowRun('[[slow]] Stop me from the page.');
+    // The newest line: earlier replies have scrolled out of the conversation's view.
+    const line = (await app.all('text'))
+      .filter((n) => /Slow line/.test(String(n.value ?? n.name)))
+      .at(-1);
+    await app.click(line);
+    row.note('focus before Escape', (await app.focused())?.name ?? '(none)');
+    await app.key('escape');
+    await lane.idle();
+    row.expect('Escape from the page stopped the run', await app.count('button', 'Stop run'), 0);
+
+    row.expect('slow runs sent to the model', lane.tokens('slow') - slowBefore, 3);
+    const settled = lane.requests();
+    await sleep(5_000);
+    row.expect('nothing sent after the stops', lane.requests(), settled);
     await lane.clearComposer(familiar);
   });
 }

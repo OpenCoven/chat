@@ -7,6 +7,7 @@ import {
   type RefObject,
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -73,6 +74,7 @@ import {
   useSettingsShortcut,
   useStepShortcut,
   useTypeToCompose,
+  useWindowEscape,
 } from './rail-shortcuts';
 import {
   activityTime,
@@ -263,6 +265,16 @@ export function composerCopy(connected: boolean, familiarName?: string, anyFamil
     placeholder: `Message ${familiarName} · @ familiar · # project`,
   };
 }
+
+/**
+ * The composer's placeholder while a run is active and the field is free. Chat
+ * does not queue a message: Stop takes Send's place and Enter does nothing
+ * until the run ends, so what is typed waits in the field to be sent then.
+ * Escape stops the run, in the field or anywhere a dialog, drawer or other
+ * field does not claim it (`useWindowEscape`).
+ */
+export const RUNNING_PLACEHOLDER = 'Replying… (send when the reply ends · esc to stop)';
+const DRAFT_WAITS_NOTE = 'Your message stays here. You can send it when the reply ends.';
 
 /**
  * What the end of the transcript says while a run is active and no prose is
@@ -911,6 +923,25 @@ export function ChatLayout(props: ChatLayoutProps) {
     },
   };
   const composerRef = useRef<HTMLTextAreaElement>(null);
+  // The field turns off while a run stops and while the chat is read again after a
+  // run, and that drops focus. If the field had it, give it back when the field comes
+  // on again, unless focus has already gone somewhere else. Chromium takes focus off
+  // a field the moment it's disabled, so this reads focus before that commit.
+  const giveFocusBack = useRef(false);
+  const fieldHasFocus =
+    composerRef.current !== null && document.activeElement === composerRef.current;
+  // biome-ignore lint/correctness/useExhaustiveDependencies: only the field turning off or on counts, not focus moving while it's on.
+  useLayoutEffect(() => {
+    if (composerDisabled) {
+      if (fieldHasFocus) giveFocusBack.current = true;
+      return;
+    }
+    if (!giveFocusBack.current) return;
+    giveFocusBack.current = false;
+    if (!document.activeElement || document.activeElement === document.body) {
+      composerRef.current?.focus();
+    }
+  }, [composerDisabled]);
   // Start typing anywhere in the shell and the words go to the familiar. The
   // first letter is appended here rather than left to the browser, so it is
   // neither lost to a controlled field nor delivered twice.
@@ -919,6 +950,9 @@ export function ChatLayout(props: ChatLayoutProps) {
     if (composerDisabled || !field) return false;
     props.onDraft(props.draft + key);
     field.focus();
+    // WebKit doesn't bring a focused field into view on its own, and a permission
+    // card in a small window can have pushed this one out of sight.
+    field.scrollIntoView?.({ block: 'nearest' });
     const end = props.draft.length + key.length;
     field.setSelectionRange(end, end);
     return true;
@@ -1040,6 +1074,11 @@ export function ChatLayout(props: ChatLayoutProps) {
     setFindOpen(false);
     transcriptRef.current?.focus();
   }
+  // Escape closes what's open before it touches the run: a drawer takes it first,
+  // then the find bar, wherever focus is. Only then does it stop a run, and only
+  // this chat's: a run in another chat stays with its own Stop control.
+  useWindowEscape(findOpen && !scrim, closeFind);
+  useWindowEscape(runHere && !props.cancelling && !scrim && !findOpen, props.onCancel);
   function stepFind(direction: 1 | -1) {
     if (!matches.length) return;
     setFindAt(
@@ -1687,14 +1726,23 @@ export function ChatLayout(props: ChatLayoutProps) {
                   onDecline={() => props.onDeclineApproval?.(approval)}
                 />
               ) : null}
-              <div className="coven-composer-context" title={workspace}>
-                {workspace ? `${workspaceLabel}: ${workspace}` : 'No workspace reported'}
-              </div>
               {props.busy && (
-                <output className="coven-run-status">
-                  {runStatusText(name, runName, runHere, props.cancelling, runningTool)}
+                <p className="coven-run-status">
+                  <output>
+                    {runStatusText(name, runName, runHere, props.cancelling, runningTool)}
+                  </output>
+                  {/* Beside the live region, not in it: it would be read out every second. */}
                   {elapsed ? <span className="coven-run-elapsed"> · {elapsed}</span> : null}
-                </output>
+                </p>
+              )}
+              {/* The placeholder says this until there's a draft to cover it. Always
+                  rendered during a run, so the words are announced when they appear. */}
+              {runHere && (
+                <p className="coven-run-note" aria-live="polite">
+                  {!props.cancelling && (props.draft.trim() || props.attachments?.length)
+                    ? DRAFT_WAITS_NOTE
+                    : null}
+                </p>
               )}
               {props.readOnly && (
                 <p className="coven-composer-note">
@@ -1708,21 +1756,37 @@ export function ChatLayout(props: ChatLayoutProps) {
                   </FamButton>
                 </div>
               )}
-              <fieldset className="coven-composer-fieldset" disabled={composerDisabled}>
+              {/* Not a disabled fieldset: that would also turn off the details row's
+                Settings › Model button, which stays usable while the message can't be
+                edited. */}
+              <div className="coven-composer-wrap">
                 <Composer
+                  disabled={composerDisabled}
                   textareaRef={composerRef}
                   textareaProps={mentionCompletion.textareaProps}
                   onKeyDown={(event) => {
                     quote.onComposerKeyDown(event);
                     if (!event.defaultPrevented) mentionCompletion.onKeyDown(event);
+                    if (event.key !== 'Escape' || event.defaultPrevented) return;
+                    // An open drawer takes Escape before the run does; the run keeps going.
+                    if (scrim) event.preventDefault();
+                    // So does the find bar, and focus stays in this field.
+                    else if (findOpen && !event.repeat && !event.nativeEvent.isComposing) {
+                      event.preventDefault();
+                      setFindOpen(false);
+                    }
                   }}
                   className="coven-compact-composer"
                   minRows={1}
                   attachmentIcon="plus"
+                  sendIcon
+                  stopOnEscape={runHere}
                   value={props.draft}
                   onValueChange={props.onDraft}
                   label={composer.label}
-                  placeholder={composer.placeholder}
+                  placeholder={
+                    runHere && !composerDisabled ? RUNNING_PLACEHOLDER : composer.placeholder
+                  }
                   onSend={() => props.onSend(run)}
                   {...(oversize
                     ? {
@@ -1733,7 +1797,16 @@ export function ChatLayout(props: ChatLayoutProps) {
                       }
                     : {})}
                   running={props.busy && !composerDisabled}
-                  onStop={props.onCancel}
+                  onStop={() => {
+                    // The Stop control goes away with the run, so its focus comes here too.
+                    if (
+                      composerRef.current
+                        ?.closest('[data-slot="composer"]')
+                        ?.contains(document.activeElement)
+                    )
+                      giveFocusBack.current = true;
+                    props.onCancel();
+                  }}
                   allowAttachmentOnly
                   attachments={(props.attachments ?? []).map((file) => ({
                     id: file.id,
@@ -1757,17 +1830,82 @@ export function ChatLayout(props: ChatLayoutProps) {
                   {...(!props.busy && props.onRemoveAttachment
                     ? { onRemoveAttachment: props.onRemoveAttachment }
                     : {})}
+                  tools={
+                    <ContextPicker
+                      key={`${props.familiarId}:${props.sessionId}`}
+                      familiars={props.familiars}
+                      familiarId={props.familiarId}
+                      value={props.draft}
+                      onValueChange={props.onDraft}
+                      textareaRef={composerRef}
+                      disabled={composerDisabled || props.busy}
+                    />
+                  }
+                  metaLabel="Chat details"
+                  meta={
+                    <>
+                      {familiar ? (
+                        <span
+                          className="coven-composer-meta-item coven-composer-meta-familiar"
+                          title={`Messages run with full access: ${name} can change files and run commands under your user account without asking for permission.`}
+                        >
+                          <span className="coven-composer-meta-avatar" aria-hidden="true">
+                            <FamiliarAvatar name={name} avatarUrl={familiar.avatarUrl} size={18} />
+                          </span>
+                          <span className="coven-composer-meta-text">{name}</span>
+                          <span className="coven-composer-meta-access" data-access="full">
+                            {' · Full access'}
+                          </span>
+                        </span>
+                      ) : null}
+                      <span
+                        className="coven-composer-meta-item"
+                        title={
+                          chatHarness
+                            ? `This chat runs on ${harnessLabel(chatHarness)}. A chat keeps what it started on.`
+                            : `A new chat starts on ${harnessLabel(run.harness)}.`
+                        }
+                      >
+                        <Icon name="terminal-window" size={13} />
+                        <span className="coven-sr-only">Runs on </span>
+                        <span className="coven-composer-meta-text">
+                          {harnessLabel(chatHarness ?? run.harness)}
+                        </span>
+                      </span>
+                      <span
+                        className="coven-composer-meta-item"
+                        title={
+                          run.model
+                            ? `Messages ask for ${run.model}.`
+                            : "Messages use the engine's default model."
+                        }
+                      >
+                        <Icon name="brain" size={13} />
+                        <span className="coven-sr-only">Model: </span>
+                        <span className="coven-composer-meta-text">
+                          {run.model || 'Engine default'}
+                        </span>
+                      </span>
+                      <span className="coven-composer-meta-item coven-composer-meta-workspace">
+                        <Icon name="folder-open" size={13} />
+                        <span className="coven-composer-context" title={workspace}>
+                          {workspace ? `${workspaceLabel}: ${workspace}` : 'No workspace reported'}
+                        </span>
+                      </span>
+                      <button
+                        type="button"
+                        className="coven-composer-meta-settings"
+                        aria-label="Model settings"
+                        aria-haspopup="dialog"
+                        title="Settings › Model"
+                        onClick={() => openSettings('model')}
+                      >
+                        <Icon name="sliders-horizontal" size={14} />
+                      </button>
+                    </>
+                  }
                 >
                   {mentionCompletion.suggestions}
-                  <ContextPicker
-                    key={`${props.familiarId}:${props.sessionId}`}
-                    familiars={props.familiars}
-                    familiarId={props.familiarId}
-                    value={props.draft}
-                    onValueChange={props.onDraft}
-                    textareaRef={composerRef}
-                    disabled={composerDisabled || props.busy}
-                  />
                 </Composer>
                 {onAttach ? (
                   <>
@@ -1778,7 +1916,7 @@ export function ChatLayout(props: ChatLayoutProps) {
                       hidden
                       aria-label="Select text attachments"
                       accept={ATTACHMENT_ACCEPT}
-                      disabled={props.busy || props.attaching}
+                      disabled={composerDisabled || props.busy}
                       onChange={(event) => {
                         onAttach?.(Array.from(event.target.files ?? []));
                         event.target.value = '';
@@ -1793,7 +1931,7 @@ export function ChatLayout(props: ChatLayoutProps) {
                     ) : null}
                   </>
                 ) : null}
-              </fieldset>
+              </div>
             </div>
           </div>
         </main>

@@ -195,6 +195,59 @@ for (const colorScheme of ['dark', 'light'] as const) {
   });
 }
 
+test('puts a permission request first in a narrow window, and typing finds the field', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 480, height: 520 });
+  await installRuntimeFixture(page, true, undefined, 1, undefined, false, true, [
+    {
+      id: 'request-narrow',
+      familiarId: 'fixture-familiar',
+      summary: 'Create notes.md in the project folder and add the agenda from this chat.',
+      reason: 'The read-only turn could not write the file, and the agenda needs saving now.',
+      requestedAt: Date.now(),
+      expiresAt: Date.now() + 3_600_000,
+    },
+  ]);
+  await page.goto('/');
+  // The card and the composer don't both fit here, so the answer comes first.
+  for (const name of ['Allow once', 'Decline']) {
+    await expect(page.getByRole('button', { name, exact: true })).toBeInViewport({ ratio: 1 });
+  }
+  const composer = page.getByRole('textbox', { name: 'Message Local familiar' });
+  await page.keyboard.type('x');
+  await expect(composer).toHaveValue('x');
+  await expect(composer).toBeFocused();
+  await expect(composer).toBeInViewport({ ratio: 1 });
+  const send = page.getByRole('button', { name: 'Send', exact: true });
+  await send.scrollIntoViewIfNeeded();
+  await expect(send).toBeInViewport({ ratio: 1 });
+});
+
+test('keeps the access word whole beside a long familiar name in a narrow window', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 480, height: 520 });
+  const name = 'Astra the Remarkably Long Named Familiar of the Northern Reach';
+  await page.addInitScript((familiar) => {
+    window.__fixtureFamiliarName = familiar;
+  }, name);
+  await installRuntimeFixture(page);
+  await page.goto('/');
+  await expect(page.getByRole('textbox', { name: `Message ${name}` })).toBeEnabled();
+  const access = page.locator('[data-access="full"]');
+  await expect(access).toContainText('Full access');
+  const fit = await access.evaluate((element) => {
+    const box = element.getBoundingClientRect();
+    const row = element.parentElement?.getBoundingClientRect();
+    return {
+      clipped: element.scrollWidth > element.clientWidth + 1,
+      insideRow: Boolean(row && box.left >= row.left - 1 && box.right <= row.right + 1),
+    };
+  });
+  expect(fit).toEqual({ clipped: false, insideRow: true });
+});
+
 test('keeps a long composer placeholder on one line in a narrow window', async ({ page }) => {
   await page.setViewportSize({ width: 480, height: 520 });
   const name = 'Astra the Remarkably Long Named Familiar of the Northern Reach';
@@ -561,6 +614,205 @@ test('cancellation retains the submitted draft instead of pretending success', a
   await expect(composer).toHaveValue('Keep this draft after cancellation');
   expect(await page.evaluate(() => window.__covenFixture.calls)).toContain('coven_runtime_cancel');
 });
+
+test('keeps focus in the composer through the read that follows a run', async ({ page }) => {
+  await page.addInitScript(() => {
+    window.__fixtureReadDelayMs = 700;
+  });
+  await installRuntimeFixture(page);
+  await page.goto('/');
+  const composer = page.getByRole('textbox', { name: 'Message Local familiar' });
+  await expect(composer).toBeEnabled();
+  const stop = page.getByRole('button', { name: 'Stop run', exact: true });
+
+  // Stopped with Escape from the field, in a chat with no reply yet.
+  await composer.fill('Stop me');
+  await page.getByRole('button', { name: 'Send', exact: true }).click();
+  await expect(stop).toBeVisible();
+  await composer.focus();
+  await page.keyboard.press('Escape');
+  await expect(stop).toHaveCount(0);
+  await expect(composer).toBeEnabled();
+  await expect(composer).toBeFocused();
+
+  // A run that ends by itself, with someone typing in the field as it does.
+  await page.getByRole('button', { name: 'Send', exact: true }).click();
+  await expect(stop).toBeVisible();
+  await composer.focus();
+  await page.keyboard.type('next');
+  await page.evaluate(() => window.__covenFixture.finish?.());
+  await expect(stop).toHaveCount(0);
+  await expect(composer).toBeEnabled();
+  await expect(composer).toBeFocused();
+  await page.keyboard.type(' question');
+  await expect(composer).toHaveValue(/next question$/);
+});
+
+test('Escape stops a run from the page and the composer, but not from a dialog', async ({
+  page,
+}) => {
+  await installRuntimeFixture(page);
+  await page.goto('/');
+  const composer = page.getByRole('textbox', { name: 'Message Local familiar' });
+  const stop = page.getByRole('button', { name: 'Stop run', exact: true });
+  const cancels = async () =>
+    (await page.evaluate(() => window.__covenFixture.calls)).filter(
+      (call) => call === 'coven_runtime_cancel',
+    ).length;
+  await expect(composer).toBeEnabled();
+  await composer.fill('Stop me from the page');
+  await page.getByRole('button', { name: 'Send', exact: true }).click();
+  await expect(stop).toHaveText('esc · stop');
+  await expect(stop).toHaveAttribute('aria-keyshortcuts', 'Escape');
+  await expect(composer).toHaveAttribute('placeholder', /send when the reply ends · esc to stop/);
+
+  // A dialog takes Escape for itself; the run goes on.
+  await page.getByRole('button', { name: 'Open settings' }).click();
+  await expect(page.getByRole('dialog', { name: 'Settings' })).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(page.getByRole('dialog', { name: 'Settings' })).toHaveCount(0);
+  await expect(stop).toBeVisible();
+  expect(await cancels()).toBe(0);
+
+  // Nothing editable has focus: Escape stops the run.
+  await page.getByRole('log', { name: 'Messages' }).focus();
+  await page.keyboard.press('Escape');
+  await expect(stop).toHaveCount(0);
+  expect(await cancels()).toBe(1);
+  await expect(composer).toHaveValue('Stop me from the page');
+
+  // In the composer, Escape stops the run too.
+  await composer.fill('Stop me from the composer');
+  await page.getByRole('button', { name: 'Send', exact: true }).click();
+  await expect(stop).toBeVisible();
+  await composer.focus();
+  await page.keyboard.press('Escape');
+  await expect(stop).toHaveCount(0);
+  expect(await cancels()).toBe(2);
+  await expect(composer).toHaveValue('Stop me from the composer');
+  // The field was turned off while the run stopped; focus comes back to it.
+  await expect(composer).toBeFocused();
+
+  // The same goes for the Stop control itself, reached from the keyboard.
+  await page.getByRole('button', { name: 'Send', exact: true }).click();
+  await expect(stop).toBeVisible();
+  await stop.focus();
+  await page.keyboard.press('Enter');
+  await expect(stop).toHaveCount(0);
+  expect(await cancels()).toBe(3);
+  await expect(composer).toBeFocused();
+});
+
+for (const colorScheme of ['dark', 'light'] as const) {
+  test(`says Full access during a run and between runs (${colorScheme})`, async ({ page }) => {
+    // Chats run with full access (#576). The turn stays open on its thinking dots, which
+    // would never let the contrast read settle, so motion is off.
+    await page.emulateMedia({ colorScheme, reducedMotion: 'reduce' });
+    await page.setViewportSize({ width: 1600, height: 900 });
+    await installRuntimeFixture(page);
+    await page.goto('/');
+    const composer = page.getByRole('textbox', { name: 'Message Local familiar' });
+    const details = page
+      .getByRole('region', { name: 'Message composer' })
+      .getByRole('group', { name: 'Chat details' });
+    await expect(composer).toBeEnabled();
+    await expect(details).toContainText('Local familiar · Full access');
+    await composer.fill('Keep this turn open');
+    await page.getByRole('button', { name: 'Send', exact: true }).click();
+    const stop = page.getByRole('button', { name: 'Stop run', exact: true });
+    await expect(stop).toBeVisible();
+    await expect(details).toContainText('Local familiar · Full access');
+    await page.mouse.move(2, 2);
+    // Retried: with motion off nothing tells the helper the first paint has settled, and a
+    // backdrop caught mid-repaint reads every text at about 1:1. A real failure still fails.
+    await expect.poll(() => contrastFailures(page), { timeout: 15_000 }).toEqual([]);
+    await page.getByRole('log', { name: 'Messages' }).focus();
+    await page.keyboard.press('Escape');
+    await expect(stop).toHaveCount(0);
+    await expect(details).toContainText('Local familiar · Full access');
+    await expect(details).not.toContainText(/Read only|Full permission/);
+  });
+
+  test(`lays the composer out as field, toolbar and details (${colorScheme})`, async ({
+    page,
+  }, testInfo) => {
+    await page.emulateMedia({ colorScheme });
+    await page.setViewportSize({ width: 1600, height: 900 });
+    await installRuntimeFixture(page);
+    await page.goto('/');
+    const composer = page.getByRole('textbox', { name: 'Message Local familiar' });
+    await expect(composer).toBeEnabled();
+    const frame = page.getByRole('region', { name: 'Message composer' });
+    const details = frame.getByRole('group', { name: 'Chat details' });
+    await expect(details).toContainText('Local familiar · Full access');
+    await expect(details).toContainText('Coven Code');
+    await expect(details).toContainText('Engine default');
+    await expect(details).toContainText('Familiar workspace: /fixture/familiars/0/workspace');
+    const field = await composer.boundingBox();
+    const send = await page.getByRole('button', { name: 'Send', exact: true }).boundingBox();
+    const context = await page
+      .getByRole('button', { name: 'Add context', exact: true })
+      .boundingBox();
+    const row = await details.boundingBox();
+    // The field first, the toolbar under it, then the details row.
+    expect((send?.y ?? 0) + 1).toBeGreaterThan((field?.y ?? 0) + (field?.height ?? 0));
+    expect(
+      Math.abs(
+        (send?.y ?? 0) + (send?.height ?? 0) / 2 - ((context?.y ?? 0) + (context?.height ?? 0) / 2),
+      ),
+    ).toBeLessThan(2);
+    expect((row?.y ?? 0) + 1).toBeGreaterThan((send?.y ?? 0) + (send?.height ?? 0));
+    await page.mouse.move(2, 2);
+    await page.locator('.fr-composer-inner').screenshot({
+      path: testInfo.outputPath(`composer-idle-${colorScheme}.png`),
+      animations: 'disabled',
+    });
+
+    await composer.fill('Show me the running composer');
+    await page.getByRole('button', { name: 'Send', exact: true }).click();
+    await expect(page.getByRole('button', { name: 'Stop run', exact: true })).toBeVisible();
+    await page.mouse.move(2, 2);
+    expect(await contrastFailures(page)).toEqual([]);
+    await page.locator('.fr-composer-inner').screenshot({
+      path: testInfo.outputPath(`composer-running-${colorScheme}.png`),
+      animations: 'disabled',
+    });
+
+    // At the narrowest window the row wraps or cuts; the page never scrolls sideways.
+    await page.setViewportSize({ width: 480, height: 520 });
+    await expect(page.getByRole('button', { name: 'Stop run', exact: true })).toBeInViewport();
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(
+      true,
+    );
+    expect(await frame.evaluate((node) => node.scrollWidth <= node.clientWidth)).toBe(true);
+    await page.locator('.fr-composer-inner').screenshot({
+      path: testInfo.outputPath(`composer-running-narrow-${colorScheme}.png`),
+      animations: 'disabled',
+    });
+    await page.evaluate(() => window.__covenFixture.finish?.());
+    await expect(page.getByRole('button', { name: 'Stop run', exact: true })).toHaveCount(0);
+
+    // A file card and the byte-limit warning fit the narrow box too.
+    const transfer = await page.evaluateHandle(() => {
+      const data = new DataTransfer();
+      data.items.add(new File(['notes'], 'notes.md', { type: 'text/markdown' }));
+      return data;
+    });
+    await page.locator('main.fr-thread').dispatchEvent('drop', { dataTransfer: transfer });
+    await expect(frame.getByText('notes.md')).toBeVisible();
+    await composer.fill('x'.repeat(32_769));
+    await expect(frame.getByText(/Message is 32,769 bytes/)).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Send', exact: true })).toBeInViewport();
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(
+      true,
+    );
+    expect(await frame.evaluate((node) => node.scrollWidth <= node.clientWidth)).toBe(true);
+    await page.locator('.fr-composer-inner').screenshot({
+      path: testInfo.outputPath(`composer-draft-narrow-${colorScheme}.png`),
+      animations: 'disabled',
+    });
+  });
+}
 
 test('keeps cancellation available after switching to another familiar', async ({ page }) => {
   await page.setViewportSize({ width: 820, height: 390 });

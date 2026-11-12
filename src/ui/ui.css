@@ -359,7 +359,7 @@
   overflow: hidden;
 }
 
-:where([data-slot="send-control"]) .oc-send-main {
+:where([data-slot="send-control"][data-options]) .oc-send-main {
   border-start-end-radius: 0;
   border-end-end-radius: 0;
 }
@@ -398,17 +398,28 @@
   border-color: color-mix(in oklch, var(--color-warning, oklch(0.76 0.08 78)) 50%, transparent);
 }
 
+/* The field first, then one toolbar row, then the host's details row. */
+.oc-composer-label {
+  display: block;
+  padding: 8px 12px 0;
+  font-size: 12px;
+  color: var(--text-secondary, #a2a1ab);
+}
+
+.oc-composer-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 8px;
+  min-width: 0;
+  padding: 0 8px 8px;
+}
+
 .oc-composer-bar {
   display: flex;
   align-items: center;
-  gap: 2px;
-  padding: 4px 6px 0 6px;
-}
-
-.oc-composer-label {
-  margin-left: 6px;
-  font-size: 12px;
-  color: var(--text-secondary, #a2a1ab);
+  gap: 4px;
+  min-width: 0;
 }
 
 .oc-composer-spacer {
@@ -481,9 +492,20 @@ textarea[data-slot="textarea"]:focus-visible {
 .oc-composer-footer {
   display: flex;
   align-items: center;
-  justify-content: space-between;
   gap: 8px;
-  padding: 4px 8px 8px 12px;
+  margin-inline-start: auto;
+}
+
+.oc-composer-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 12px;
+  min-width: 0;
+  padding: 6px 12px;
+  border-top: 1px solid var(--border-hairline, rgba(255, 255, 255, 0.08));
+  font-size: 11px;
+  color: var(--text-muted, #8e8d97);
 }
 
 .oc-composer-hint {

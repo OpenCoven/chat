@@ -9,6 +9,7 @@ declare global {
     };
     /** Overrides the first familiar's name, for layout tests with long names. */
     __fixtureFamiliarName?: string;
+    __fixtureReadDelayMs?: number;
     /** Addresses the window asked the host to open, in order. */
     __openedLinks?: unknown[];
   }
@@ -26,9 +27,11 @@ export async function installRuntimeFixture(
   // First-run setup's own answer. It normally follows `available`; a test of
   // the chat's disconnected state sets it so Coven goes missing after setup.
   setupComplete = available,
+  // Requests the host says are open. Allowing one holds its turn open until Stop.
+  approvals: Record<string, unknown>[] = [],
 ) {
   await page.addInitScript(
-    ({ ready, reply, population, stream, observerFailure, setupComplete }) => {
+    ({ ready, reply, population, stream, observerFailure, setupComplete, approvals }) => {
       const portrait = document.createElement('canvas');
       portrait.width = 2;
       portrait.height = 2;
@@ -154,6 +157,13 @@ export async function installRuntimeFixture(
                   (head) => head.session.id === args.id,
                 );
                 if (!selected) throw new Error('Unexpected session read.');
+                // A real read goes through the CLI and takes a moment; the composer
+                // is turned off until it's done.
+                if (window.__fixtureReadDelayMs) {
+                  return new Promise((resolve) =>
+                    setTimeout(() => resolve(selected), window.__fixtureReadDelayMs),
+                  );
+                }
                 return selected;
               }
               case 'setup_run': {
@@ -296,6 +306,13 @@ export async function installRuntimeFixture(
               case 'coven_runtime_cancel':
                 rejectRun?.(new Error('Coven run was cancelled.'));
                 return null;
+              case 'coven_runtime_approvals':
+                return approvals;
+              case 'coven_runtime_allow':
+                approvals.length = 0;
+                return new Promise((_, reject) => {
+                  rejectRun = reject;
+                });
               // The host would hand the address to the system; the fixture records it.
               case 'open_reviewed_link':
                 window.__openedLinks = [...(window.__openedLinks ?? []), args.address];
@@ -311,6 +328,6 @@ export async function installRuntimeFixture(
         },
       });
     },
-    { ready: available, reply, population, stream, observerFailure, setupComplete },
+    { ready: available, reply, population, stream, observerFailure, setupComplete, approvals },
   );
 }

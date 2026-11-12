@@ -73,6 +73,48 @@ export function useTypeToCompose(compose: (key: string) => boolean) {
   }, [compose]);
 }
 
+/**
+ * Escape from anywhere in the window: it closes the find bar, or stops this
+ * chat's run, as the composer's "esc · stop" control says. The host decides which
+ * by what it enables, and enables neither while a drawer is open, since Escape
+ * closes the drawer first. The key is left alone when something else has claimed
+ * it, while a dialog is open, and while another text field, a menu or a listbox
+ * has focus: those own Escape. The composer's own field handles the key itself
+ * and claims it.
+ */
+export function useWindowEscape(enabled: boolean, act: () => void) {
+  useEffect(() => {
+    if (!enabled) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (
+        event.key !== 'Escape' ||
+        event.defaultPrevented ||
+        event.isComposing ||
+        // A held key that closed something else isn't a second request.
+        event.repeat ||
+        event.metaKey ||
+        event.ctrlKey ||
+        event.altKey ||
+        event.shiftKey ||
+        document.querySelector('dialog[open], [role="dialog"][aria-modal="true"]')
+      )
+        return;
+      const active = document.activeElement;
+      if (
+        active instanceof HTMLElement &&
+        (active.isContentEditable ||
+          ['INPUT', 'TEXTAREA', 'SELECT'].includes(active.tagName) ||
+          active.closest('[role="dialog"], [role="menu"], [role="listbox"]'))
+      )
+        return;
+      event.preventDefault();
+      act();
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [enabled, act]);
+}
+
 /** Cmd/Ctrl+[ and Cmd/Ctrl+] step to the previous or next familiar in the list. */
 export function useStepShortcut(step: (direction: -1 | 1) => void) {
   useEffect(() => {

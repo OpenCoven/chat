@@ -1,4 +1,8 @@
-//! The window's right-click menu offers text actions only (#547).
+//! The main window's web view setup on Windows and Linux: its right-click
+//! menu offers text actions only (#547), and on Windows the autofill an
+//! earlier version let WebView2 save is cleared (#578).
+//!
+//! # The right-click menu
 //!
 //! Links in a reply carry no address of their own, so a menu has nothing to
 //! open. On macOS, WKWebView's menu already holds only text actions (Copy,
@@ -8,6 +12,16 @@
 //! window, and lose drafts that live only in memory. On those two platforms,
 //! every item that is not a text action is removed before the menu opens. A
 //! menu left with nothing in it does not open.
+//!
+//! # Saved autofill
+//!
+//! v0.0.8 and earlier left WebView2's general autofill on, and it saved the
+//! composer's text in the profile's `Web Data` (#546). v0.0.9 turned it off,
+//! which stops new entries but leaves the old ones on disk. Each time Chat
+//! starts on Windows it clears that one kind of saved data, and nothing else.
+//! Clearing on every launch needs no marker file and also clears anything an
+//! older version saved after a downgrade; with autofill off there is nothing
+//! new to lose. macOS and Linux never stored typed text this way.
 // The filter runs on Windows and Linux; macOS builds only its tests.
 #![cfg_attr(not(any(windows, target_os = "linux", test)), allow(dead_code))]
 
@@ -58,7 +72,21 @@ pub(crate) fn webview2_entry(name: &str, separator: bool) -> Entry {
     }
 }
 
-/// Installs the filter on the main window's web view. Nothing on macOS.
+/// WebView2's `COREWEBVIEW2_BROWSING_DATA_KINDS_GENERAL_AUTOFILL`: what text
+/// fields were filled with, kept to suggest it again. Passwords and the web
+/// view's storage are other kinds.
+#[cfg_attr(not(any(windows, test)), allow(dead_code))]
+pub(crate) const GENERAL_AUTOFILL: i32 = 1 << 10;
+
+/// What Chat clears from its web view each time it starts on Windows (#578):
+/// saved autofill only. Local storage, which keeps the selected familiar and
+/// Settings, is a different kind, so it stays. Transcripts are Chat's own
+/// files, outside the web view's profile.
+#[cfg_attr(not(any(windows, test)), allow(dead_code))]
+pub(crate) const CLEARED_AT_LAUNCH: i32 = GENERAL_AUTOFILL;
+
+/// Installs the filter on the main window's web view, and on Windows clears
+/// its saved autofill. Nothing on macOS.
 pub(crate) fn install<R: tauri::Runtime>(app: &tauri::App<R>) {
     #[cfg(any(windows, target_os = "linux"))]
     {
@@ -69,8 +97,14 @@ pub(crate) fn install<R: tauri::Runtime>(app: &tauri::App<R>) {
         };
         if let Err(error) = window.with_webview(|webview| {
             #[cfg(windows)]
-            if let Err(error) = webview2::install(&webview) {
-                eprintln!("Coven Chat: could not filter the right-click menu: {error}");
+            {
+                if let Err(error) = webview2::install(&webview) {
+                    eprintln!("Coven Chat: could not filter the right-click menu: {error}");
+                }
+                // A failure is logged by its code only, and Chat still starts.
+                if let Err(error) = webview2::clear_saved_autofill(&webview) {
+                    eprintln!("Coven Chat: could not clear saved autofill: {error}");
+                }
             }
             #[cfg(target_os = "linux")]
             webkitgtk::install(&webview);
@@ -84,15 +118,48 @@ pub(crate) fn install<R: tauri::Runtime>(app: &tauri::App<R>) {
 
 #[cfg(windows)]
 mod webview2 {
-    use super::{kept, webview2_entry};
+    use super::{kept, webview2_entry, CLEARED_AT_LAUNCH, GENERAL_AUTOFILL};
     use webview2_com::{
-        take_pwstr, ContextMenuRequestedEventHandler,
+        take_pwstr, ClearBrowsingDataCompletedHandler, ContextMenuRequestedEventHandler,
         Microsoft::Web::WebView2::Win32::{
-            ICoreWebView2_11, COREWEBVIEW2_CONTEXT_MENU_ITEM_KIND,
-            COREWEBVIEW2_CONTEXT_MENU_ITEM_KIND_SEPARATOR,
+            ICoreWebView2Profile2, ICoreWebView2_11, ICoreWebView2_13,
+            COREWEBVIEW2_BROWSING_DATA_KINDS, COREWEBVIEW2_BROWSING_DATA_KINDS_GENERAL_AUTOFILL,
+            COREWEBVIEW2_CONTEXT_MENU_ITEM_KIND, COREWEBVIEW2_CONTEXT_MENU_ITEM_KIND_SEPARATOR,
         },
     };
     use windows_core::{Interface, PWSTR};
+
+    // The value the tests check is WebView2's own.
+    const _: () = assert!(GENERAL_AUTOFILL == COREWEBVIEW2_BROWSING_DATA_KINDS_GENERAL_AUTOFILL.0);
+
+    /// Asks WebView2 to clear the profile's saved autofill. It finishes on its
+    /// own; only a failure is reported, and only by its code.
+    pub(super) fn clear_saved_autofill(
+        webview: &tauri::webview::PlatformWebview,
+    ) -> windows_core::Result<()> {
+        // SAFETY: as in `install`.
+        unsafe {
+            webview
+                .controller()
+                .CoreWebView2()?
+                .cast::<ICoreWebView2_13>()?
+                .Profile()?
+                .cast::<ICoreWebView2Profile2>()?
+                .ClearBrowsingData(
+                    COREWEBVIEW2_BROWSING_DATA_KINDS(CLEARED_AT_LAUNCH),
+                    &ClearBrowsingDataCompletedHandler::create(Box::new(
+                        |result: windows_core::Result<()>| {
+                            if let Err(error) = result {
+                                eprintln!(
+                                    "OpenCoven Chat: could not clear saved autofill: {error}"
+                                );
+                            }
+                            Ok(())
+                        },
+                    )),
+                )
+        }
+    }
 
     pub(super) fn install(webview: &tauri::webview::PlatformWebview) -> windows_core::Result<()> {
         // SAFETY: COM calls on the web view's own thread, which runs this
@@ -184,7 +251,47 @@ mod webkitgtk {
 
 #[cfg(test)]
 mod tests {
-    use super::{kept, webview2_entry, Entry};
+    use super::{kept, webview2_entry, Entry, CLEARED_AT_LAUNCH};
+
+    /// `COREWEBVIEW2_BROWSING_DATA_KINDS`, with the values WebView2 documents.
+    const FILE_SYSTEMS: i32 = 1 << 0;
+    const INDEXED_DB: i32 = 1 << 1;
+    const LOCAL_STORAGE: i32 = 1 << 2;
+    const WEB_SQL: i32 = 1 << 3;
+    const CACHE_STORAGE: i32 = 1 << 4;
+    const ALL_DOM_STORAGE: i32 = 1 << 5;
+    const COOKIES: i32 = 1 << 6;
+    const ALL_SITE: i32 = 1 << 7;
+    const GENERAL_AUTOFILL: i32 = 1 << 10;
+    const SETTINGS: i32 = 1 << 13;
+    const ALL_PROFILE: i32 = 1 << 14;
+
+    #[test]
+    fn launch_clears_the_autofill_v0_0_8_saved() {
+        // #578: v0.0.8 left what the composer held in Web Data's autofill.
+        assert_eq!(CLEARED_AT_LAUNCH & GENERAL_AUTOFILL, GENERAL_AUTOFILL);
+    }
+
+    #[test]
+    fn launch_keeps_local_storage_and_the_rest_of_the_profile() {
+        // Local storage holds opencoven.chat.navigation.v1 and
+        // opencoven.chat.preferences.v1: the selected familiar and Settings.
+        for kind in [
+            FILE_SYSTEMS,
+            INDEXED_DB,
+            LOCAL_STORAGE,
+            WEB_SQL,
+            CACHE_STORAGE,
+            ALL_DOM_STORAGE,
+            COOKIES,
+            ALL_SITE,
+            SETTINGS,
+            ALL_PROFILE,
+        ] {
+            assert_eq!(CLEARED_AT_LAUNCH & kind, 0, "kind {kind:#x} is cleared");
+        }
+        assert_eq!(CLEARED_AT_LAUNCH, GENERAL_AUTOFILL);
+    }
 
     fn webview2(items: &[&str]) -> Vec<Entry> {
         items
