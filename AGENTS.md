@@ -75,6 +75,68 @@ sessions from destroying each other's work:
    worktree) so a context reset, or the session that picks up after you, doesn't have to
    re-derive it.
 
+### Claim an issue before you start it
+
+GitHub shows every session as the same user, so claims are comments on the issue:
+
+1. **Check first.** Read the issue's latest comments and open PRs. If there is a claim with no
+   matching release comment and it isn't stale (step 6), pick other work or ask the claimant on
+   the issue.
+2. **Pick your names**, so the claim can state them: worktree `.worktrees/<issue>-<slug>` and
+   branch `<type>/<issue>-<slug>`. The slug is two to four words from the issue title in
+   kebab-case. The type is `fix` for a defect, `feat` for new behavior, `docs`, `test`, `ci`,
+   `refactor`, or `chore` for anything else.
+3. **Claim.** Post one comment, on a single line:
+
+   ```text
+   **Claimed** by <session name> (<Claude Code | Codex | Copilot>) on <YYYY-MM-DD>. Worktree `.worktrees/<issue>-<slug>`, branch `<type>/<issue>-<slug>`. Plan: <one sentence>.
+   ```
+
+   The session name is whatever peers can reach you by: the name Claude Code shows other
+   sessions, or a Codex task id. If your tool shows none, make up a short tag (tool, date and a
+   few random characters) and use it in every comment. Then swap the issue's `agent-ready` label
+   for `in-progress`, and edit the State block: today's date, and your session as **Who**.
+   `docs/agents/working-here.md` has the REST calls for both.
+4. **Create the worktree** with the names you claimed, using the `git worktree add` command at
+   the top of this section.
+5. **Release.** When you finish, or stop without finishing, post a **Released** comment saying
+   what landed (PR links) and what's left, and update the State block. If work remains, put
+   `agent-ready` back in place of `in-progress`. Don't make the next agent wait on a silent
+   claim.
+6. **Stale claims.** A claim is stale when it has no release comment and its branch, PR and issue
+   have had no commits, updates or comments for 3 days. Say so in a comment before taking the
+   work over.
+
+Work that has no issue gets one first, so there is somewhere to claim it.
+
+### Name worktrees after their issue
+
+Use `.worktrees/<issue>-<slug>` for the worktree and `<type>/<issue>-<slug>` for the branch, for
+example `.worktrees/123-example-slug` on `fix/123-example-slug`. Anyone can then match a
+worktree to its issue and claim. Record the worktrees your session creates in your progress
+file: with one shared account, that file is how you know which ones are yours.
+
+### Find stale worktrees, and remove only your own
+
+Run `git fetch origin` (it moves only `origin/*` refs, so it can't disturb anyone's work), then
+`node scripts/agent-worktrees.mjs`. It lists every worktree with its branch, PR state,
+uncommitted and unpushed changes, lock, running processes and idle time. It is read-only: it
+removes nothing and doesn't even refresh other worktrees' index files. Its verdicts:
+
+| Verdict | Meaning |
+| --- | --- |
+| `removable` | Work landed (merged, or PR closed), clean, nothing unpushed, unlocked, no process inside, idle 3+ days |
+| `check` | Landed, but recently active or named in `docs/project-coordination.md`. Ask before touching it |
+| `keep` | Uncommitted or unpushed work, locked, in use, or not landed |
+| `prunable` | The directory is gone. `git worktree prune` tidies the record |
+| `primary` | The primary checkout. Never remove it |
+
+Remove a worktree yourself (`git worktree remove <path>`) only if your progress file shows you
+created it and it is `removable`. Leave everyone else's alone, even a `removable` one. If you're
+asked to clean up, post the `removable` rows as a comment on the issue that owns each worktree
+(the one in its name or claim). A worktree with no owning issue goes in your report to Val.
+There's no need to report `check` or `keep` rows unless someone asks.
+
 ## Canonical UI file map
 
 Start here instead of grepping blind. `CLAUDE.md` has the directory-level map.
