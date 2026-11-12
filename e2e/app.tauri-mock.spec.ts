@@ -1205,6 +1205,9 @@ test('reserves full-height clickable rail tabs and widens the shared chat column
     await page.getByRole('button', { name: 'Close inspector', exact: true }).click();
   }
   await page.setViewportSize({ width: 360, height: 520 });
+  await expect(page.locator('.coven-chat')).toHaveAttribute('data-tier', 'compact');
+  await expect(page.locator('.coven-chat')).toHaveAttribute('data-sidebar', 'closed');
+  await expect(page.locator('.coven-chat')).toHaveAttribute('data-inspector', 'closed');
   await expect(left).toBeVisible();
   await expect(right).toBeVisible();
   await left.focus();
@@ -1404,48 +1407,14 @@ test('keeps reading position, workspace and run controls clear on large and smal
   await page.evaluate(() => window.__covenFixture.finish?.());
   await expect(field).toHaveValue('');
   await expect(page.getByText('Chat project: /fixture/workspace')).toBeVisible();
-  const pickerEvents: string[] = [];
-  await page.exposeFunction('recordPickerEvent', (event: string) => pickerEvents.push(event));
-  await page.evaluate(() => {
-    for (const type of ['pointerdown', 'pointerup', 'click', 'beforetoggle', 'toggle', 'focusin']) {
-      document.addEventListener(
-        type,
-        (event) => {
-          const target = event.target as HTMLElement;
-          const toggle = event as ToggleEvent;
-          void (
-            window as unknown as { recordPickerEvent: (event: string) => Promise<void> }
-          ).recordPickerEvent(
-            JSON.stringify({
-              type,
-              tag: target.tagName,
-              className: target.className,
-              text: target.textContent?.slice(0, 60),
-              state: toggle.newState,
-            }),
-          );
-        },
-        true,
-      );
-    }
-  });
   await page.setViewportSize({ width: 480, height: 520 });
+  // WebKit can return from resizing before matchMedia updates the React shell.
+  // Wait for the drawers to fold before choosing a pointer target in the composer.
+  await expect(page.locator('.coven-chat')).toHaveAttribute('data-tier', 'compact');
+  await expect(page.locator('.coven-chat')).toHaveAttribute('data-sidebar', 'closed');
+  await expect(page.locator('.coven-chat')).toHaveAttribute('data-inspector', 'closed');
   await page.getByRole('button', { name: 'Add context', exact: true }).click();
-  try {
-    await expect(page.getByRole('combobox')).toBeInViewport();
-  } catch (error) {
-    console.log('Context picker browser events:', pickerEvents);
-    console.log(
-      'Context picker state:',
-      await page.evaluate(() => ({
-        tier: document.querySelector('[data-tier]')?.getAttribute('data-tier'),
-        trigger: document.querySelector('.chat-context-trigger')?.outerHTML,
-        panel: document.querySelector('.chat-context-panel')?.outerHTML,
-        focus: document.activeElement?.outerHTML.slice(0, 300),
-      })),
-    );
-    throw error;
-  }
+  await expect(page.getByRole('combobox')).toBeInViewport();
   await expect(page.getByRole('button', { name: 'Close context picker' })).toBeInViewport();
   await page.screenshot({ path: testInfo.outputPath('context-small.png'), animations: 'disabled' });
   await page.getByRole('combobox').press('Escape');
