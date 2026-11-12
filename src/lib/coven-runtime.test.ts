@@ -95,6 +95,19 @@ describe('Coven runtime', () => {
     const invoke = vi.fn().mockResolvedValue([head]);
     const runtime = createCovenRuntime({ available: () => true, invoke });
     expect(await runtime.listSessions()).toEqual([head]);
+    const unavailable = {
+      id: 'two',
+      familiarId: 'g',
+      title: 'Unavailable chat',
+      archived: false,
+      unavailable: true,
+    };
+    invoke.mockResolvedValue([head, unavailable]);
+    expect(await runtime.listSessions()).toEqual([head, unavailable]);
+    invoke.mockResolvedValue([{ ...unavailable, archived: undefined }]);
+    await expect(runtime.listSessions()).rejects.toThrow('invalid');
+    invoke.mockResolvedValue({ session: { ...head, unavailable: true }, events: [] });
+    await expect(runtime.readSession('one')).rejects.toThrow('invalid');
     invoke.mockResolvedValue([head, { ...head, id: 'other' }]);
     await expect(runtime.listSessions()).rejects.toThrow('invalid');
     invoke.mockResolvedValue([{ ...head, familiarId: undefined }]);

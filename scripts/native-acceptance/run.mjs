@@ -14,10 +14,13 @@ import { homedir, release } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
+import { accessRow } from './access-row.mjs';
 import { ASKING_SOURCE, approvalRows, askingOffRow, askingRowsFor } from './approval.mjs';
 import { defaultBrowser, quitBrowsers } from './browser.mjs';
 import { App, Native, outline, PLATFORM, screenshot, sleep, until } from './driver.mjs';
+import { engineHomeRow } from './engine-home-row.mjs';
 import { startModelFixture } from './fixture.mjs';
+import { modelRow } from './model-row.mjs';
 import {
   cancelledRunRow,
   fullAccessRow,
@@ -33,6 +36,7 @@ import {
 } from './rows.mjs';
 import { screenReader } from './speech.mjs';
 import { storageRow } from './storage.mjs';
+import { unavailableRow } from './unavailable-row.mjs';
 import { autofillUpgradeRow } from './upgrade.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -99,6 +103,7 @@ const logged = () =>
     .filter((entry) => entry.path === '/v1/messages');
 const requests = () => logged().length;
 const tokens = (name) => logged().filter((entry) => entry.token === name).length;
+const models = () => logged().map((entry) => entry.model ?? null);
 const steps = (kind) => logged().filter((entry) => entry.step === kind).length;
 
 /**
@@ -335,6 +340,21 @@ try {
   await lane.front();
   await lane.reset();
   rows.push(await cancelledRunRow(lane, FIRST));
+  // Published releases before v0.1.2 don't have these changes.
+  if (!/^v0\.(?:0\.[0-9]+|1\.[01])(?:[-+]|$)/.test(facts.release ?? process.env.RELEASE ?? '')) {
+    await lane.front();
+    await lane.reset();
+    rows.push(await engineHomeRow(lane, FIRST, models));
+    await lane.front();
+    await lane.reset();
+    rows.push(await unavailableRow(lane, FIRST));
+    await lane.front();
+    await lane.reset();
+    rows.push(await accessRow(lane, FIRST));
+    await lane.front();
+    await lane.reset();
+    rows.push(await modelRow(lane, FIRST, models));
+  }
 
   // Asking for permission (#542, #573), last of the rows that send: its turns
   // write real files and leave requests in the thread. From v0.0.10 on, chats

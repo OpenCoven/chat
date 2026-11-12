@@ -75,6 +75,40 @@ describe('empty transcript copy', () => {
     expect(screen.queryByText(/Select a familiar/)).not.toBeInTheDocument();
   });
 
+  it("doesn't call a chat Coven couldn't load the start of a conversation", () => {
+    render(
+      <ChatLayout
+        {...layoutProps()}
+        familiars={[{ id: 'f', name: 'Wren' }]}
+        sessions={[{ id: 's', title: 'Wren', familiarId: 'f', unavailable: true }]}
+        familiarId="f"
+        sessionId="s"
+        connected
+        ready={false}
+        error="Coven couldn't load this chat. Refresh Coven to try again."
+      />,
+    );
+    expect(screen.getByRole('alert')).toHaveTextContent("Coven couldn't load this chat");
+    expect(screen.queryByText(/start of your conversation/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Send the first message/)).not.toBeInTheDocument();
+  });
+
+  it('puts an error in a paragraph, which AT-SPI exposes with its text', () => {
+    // On Linux, WebKitGTK exposed a span laid out as a flex item with no text,
+    // so the alert held only its Copy error button (native run 43006448055).
+    render(
+      <ChatLayout
+        {...layoutProps()}
+        familiars={[{ id: 'f', name: 'Wren' }]}
+        familiarId="f"
+        connected
+        error="Coven couldn't load this chat. Refresh Coven to try again."
+      />,
+    );
+    const alert = screen.getByRole('alert');
+    expect(within(alert).getByText(/Coven couldn't load this chat/).tagName).toBe('P');
+  });
+
   it.each([
     ['install-cli', 'Install the Coven CLI', 'npm install -g @opencoven/cli'],
     ['install-engine', 'Install the Coven engine', 'coven engine install'],
@@ -1796,6 +1830,10 @@ describe('declared access and error copying', () => {
     // The inspector sums it up and links to the full list in Settings.
     fireEvent.click(screen.getByRole('button', { name: /3 projects · 1 writable/ }));
     const access = screen.getByRole('region', { name: 'Access' });
+    expect(within(access).getByRole('region', { name: 'Project access list' })).toHaveAttribute(
+      'tabindex',
+      '0',
+    );
     const items = within(
       within(access).getByRole('list', { name: "Astra's declared project access" }),
     ).getAllByRole('listitem');
@@ -1809,6 +1847,23 @@ describe('declared access and error copying', () => {
     expect(access).toHaveTextContent(
       'Familiar chats can change files and run commands beyond these projects without asking for permission.',
     );
+  });
+
+  it('refreshes declared grants in Settings without refreshing the conversation', async () => {
+    const props = { ...layoutProps(), connected: true, familiarId: 'a' };
+    const refresh = vi.fn().mockResolvedValue(undefined);
+    render(
+      <ChatLayout
+        {...props}
+        familiars={[{ id: 'a', name: 'Astra' }]}
+        onRefreshProjectAccess={refresh}
+      />,
+    );
+    const access = openSettingsAt('Access');
+    fireEvent.click(within(access).getByRole('button', { name: 'Refresh project access' }));
+    await within(access).findByRole('button', { name: 'Refresh project access' });
+    expect(refresh).toHaveBeenCalledOnce();
+    expect(props.onRefresh).not.toHaveBeenCalled();
   });
 
   it('tells "none declared" apart from "could not read"', () => {
@@ -1838,6 +1893,40 @@ describe('declared access and error copying', () => {
       "Chat could not read Coven's project registry or grants, so Bram's declared access is unknown.",
     );
     expect(access()).not.toHaveTextContent('No project access is declared');
+  });
+
+  it("says on Windows that Chat can't read Cave's grants there yet, instead of offering a refresh", () => {
+    // A refresh can't help on Windows: Chat has no safe reader there (#587).
+    Object.defineProperty(navigator, 'platform', { configurable: true, get: () => 'Win32' });
+    try {
+      render(
+        <ChatLayout
+          {...layoutProps()}
+          connected
+          ready
+          familiars={[{ id: 'b', name: 'Bram', projectAccessUnavailable: true }]}
+          familiarId="b"
+        />,
+      );
+      openSettingsAt('Access');
+      const access = screen.getByRole('region', { name: 'Access' });
+      const said = within(access).getByText(/Coven Cave's project grants on Windows/);
+      expect(said).toHaveTextContent(
+        "Chat can't read Coven Cave's project grants on Windows yet, so Bram's declared access is unknown. See Bram's Projects tab in Coven Cave.",
+      );
+      expect(said).not.toHaveTextContent('refresh');
+      expect(access).not.toHaveTextContent('No project access is declared');
+      // Nor does the footnote send the reader to a refresh that can't help.
+      expect(access).toHaveTextContent(
+        "To edit grants, open the familiar's Projects tab in Coven Cave.",
+      );
+      expect(access).not.toHaveTextContent('then refresh project access here');
+      expect(access).toHaveTextContent(
+        'Familiar chats can change files and run commands beyond these projects without asking for permission.',
+      );
+    } finally {
+      Reflect.deleteProperty(navigator, 'platform');
+    }
   });
 
   it('offers to copy an error notice', async () => {
@@ -3020,8 +3109,8 @@ describe('model settings', () => {
       'aria-pressed',
       'true',
     );
-    fireEvent.change(within(model).getByRole('textbox', { name: 'Model' }), {
-      target: { value: ' anthropic/claude-sonnet-5-5 ' },
+    fireEvent.change(within(model).getByRole('combobox', { name: 'Model' }), {
+      target: { value: 'claude-sonnet-5-5' },
     });
     fireEvent.click(within(model).getByRole('checkbox', { name: 'Think longer' }));
     const speed = within(model).getByRole('group', { name: 'Speed' });
@@ -3030,7 +3119,7 @@ describe('model settings', () => {
     expect(model).toHaveTextContent('Messages sent from your iPhone use the engine');
     expect(stored()).toMatchObject({
       harness: 'claude',
-      model: 'anthropic/claude-sonnet-5-5',
+      model: 'claude-sonnet-5-5',
       think: true,
       speed: 'thorough',
     });
@@ -3038,16 +3127,35 @@ describe('model settings', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Send' }));
     expect(props.onSend).toHaveBeenCalledExactlyOnceWith({
       harness: 'claude',
-      model: 'anthropic/claude-sonnet-5-5',
+      model: 'claude-sonnet-5-5',
       think: true,
       speed: 'thorough',
     });
   });
 
+  it("offers Coven Code's presets as IDs the engine sends to each provider as they are", () => {
+    render(<ChatLayout {...layoutProps()} ready />);
+    const model = openSettingsAt('Model');
+    const picker = within(model).getByRole('combobox', { name: 'Model' });
+    // The engine strips a provider prefix only for non-Anthropic providers;
+    // an "anthropic/" ID would reach Anthropic's API as written (#584).
+    expect(within(picker).getByRole('option', { name: 'Claude Sonnet 5.5' })).toHaveValue(
+      'claude-sonnet-5-5',
+    );
+    expect(within(picker).getByRole('option', { name: 'Claude Opus 5.5' })).toHaveValue(
+      'claude-opus-5-5',
+    );
+    expect(within(picker).getByRole('option', { name: 'GPT-5.5' })).toHaveValue('openai/gpt-5.5');
+    fireEvent.change(picker, { target: { value: 'claude-sonnet-5-5' } });
+    expect(stored()).toMatchObject({ harness: 'coven-code', model: 'claude-sonnet-5-5' });
+  });
+
   it('says plainly when a model id could not be sent, until it is corrected or cleared', () => {
     render(<ChatLayout {...layoutProps()} ready />);
     const model = openSettingsAt('Model');
-    const field = within(model).getByRole('textbox', { name: 'Model' });
+    const picker = within(model).getByRole('combobox', { name: 'Model' });
+    fireEvent.change(picker, { target: { value: ':custom' } });
+    const field = within(model).getByRole('textbox', { name: 'Custom model ID' });
     fireEvent.change(field, { target: { value: '--model=x' } });
     expect(field).toHaveAttribute('aria-invalid', 'true');
     expect(field).toHaveAccessibleDescription(
@@ -3056,6 +3164,10 @@ describe('model settings', () => {
     fireEvent.change(field, { target: { value: '' } });
     expect(field).not.toHaveAttribute('aria-invalid');
     expect(model).toHaveTextContent("use the engine's default");
+    fireEvent.change(field, { target: { value: ' other/custom-model ' } });
+    expect(stored()).toMatchObject({ model: 'other/custom-model' });
+    fireEvent.change(picker, { target: { value: '' } });
+    expect(stored()).toMatchObject({ model: '' });
   });
 
   it('shows what a chat runs on, which opens Settings, and the model its latest run reported', () => {
