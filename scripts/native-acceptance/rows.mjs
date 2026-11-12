@@ -1422,6 +1422,14 @@ async function inspectorWidth(app) {
   };
 }
 
+/**
+ * How many times a reading gives the separator's width, as pixels or as its
+ * percentage of the range (#579).
+ */
+export function timesWidthSaid(spoken, width, percent) {
+  return (String(spoken).match(new RegExp(`\\b${width}\\b|\\b${percent}\\s?%`, 'g')) ?? []).length;
+}
+
 /** A press on the handle starts a drag and does not focus it, so focus arrives by Tab. */
 async function tabToSeparator(lane, familiar) {
   await lane.app.click(await lane.composer(familiar));
@@ -1533,6 +1541,13 @@ export async function inspectorRow(lane, familiar, frames) {
         /separator|splitter/i.test(spoken),
         spoken,
       );
+      // VoiceOver speaks the value text and the description, so the width
+      // belongs in only one of them; v0.0.9 said it three times (#579). NVDA
+      // goes on to read the rail aloud, so its count would not be the handle's.
+      if (PLATFORM === 'mac') {
+        const times = timesWidthSaid(spoken, 360, 25);
+        row.check(`${lane.reader.name} says the width once`, times === 1, { times, spoken });
+      }
     }
 
     await app.key('left');
