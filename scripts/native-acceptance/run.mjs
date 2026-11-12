@@ -16,6 +16,7 @@ import { parseArgs } from 'node:util';
 import { ASKING_SOURCE, approvalRows, askingOffRow, askingRowsFor } from './approval.mjs';
 import { defaultBrowser, quitBrowsers } from './browser.mjs';
 import { App, Native, outline, PLATFORM, screenshot, sleep, until } from './driver.mjs';
+import { engineHomeRow } from './engine-home-row.mjs';
 import { startModelFixture } from './fixture.mjs';
 import {
   cancelledRunRow,
@@ -95,6 +96,7 @@ const logged = () =>
     .filter((entry) => entry.path === '/v1/messages');
 const requests = () => logged().length;
 const tokens = (name) => logged().filter((entry) => entry.token === name).length;
+const models = () => logged().map((entry) => entry.model ?? null);
 const steps = (kind) => logged().filter((entry) => entry.step === kind).length;
 
 /**
@@ -305,6 +307,9 @@ try {
   rows.push(await cancelledRunRow(lane, FIRST));
   // Published releases before v0.1.2 don't have these changes.
   if (!/^v0\.(?:0\.[0-9]+|1\.[01])(?:[-+]|$)/.test(facts.release ?? process.env.RELEASE ?? '')) {
+    await lane.front();
+    await lane.reset();
+    rows.push(await engineHomeRow(lane, FIRST, models));
     await lane.front();
     await lane.reset();
     rows.push(await unavailableRow(lane, FIRST));

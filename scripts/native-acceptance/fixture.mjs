@@ -139,7 +139,7 @@ export function startModelFixture({ log } = {}) {
         const served = step ? { step: step.tool ? 'write' : 'text' } : {};
         appendFileSync(
           log,
-          `${JSON.stringify({ at: Date.now(), method: req.method, path, token: token ?? null, ...served })}\n`,
+          `${JSON.stringify({ at: Date.now(), method: req.method, path, token: token ?? null, model: parsed.model ?? null, ...served })}\n`,
         );
       }
       if (req.method === 'POST' && path === '/v1/messages/count_tokens') {
