@@ -179,13 +179,14 @@ jobs:
           set -euo pipefail
           version="${RELEASE#v}"
           case "${{ matrix.package }}" in
-            deb) asset="OpenCoven.Chat_${version}_amd64.deb" ;;
-            appimage) asset="OpenCoven.Chat_${version}_amd64.AppImage" ;;
+            deb) suffix="amd64.deb" ;;
+            appimage) suffix="amd64.AppImage" ;;
           esac
           mkdir -p "$RUNNER_TEMP/package"
           cd "$RUNNER_TEMP/package"
           base="https://github.com/OpenCoven/chat/releases/download/${RELEASE}"
           curl --proto '=https' --tlsv1.2 --fail --location --retry 3 -o SHA256SUMS "$base/SHA256SUMS"
+          asset="$(node "$GITHUB_WORKSPACE/scripts/release-installer.mjs" SHA256SUMS "$version" "$suffix")"
           curl --proto '=https' --tlsv1.2 --fail --location --retry 3 -o "$asset" "$base/$asset"
           grep -F "  ${asset}" SHA256SUMS | sha256sum -c -
       - name: Install the package
@@ -296,11 +297,12 @@ jobs:
         run: |
           set -euo pipefail
           version="${RELEASE#v}"
-          asset="OpenCoven.Chat_${version}_x64_en-US.msi"
+          suffix="x64_en-US.msi"
           mkdir -p "$RUNNER_TEMP/package"
           cd "$RUNNER_TEMP/package"
           base="https://github.com/OpenCoven/chat/releases/download/${RELEASE}"
           curl --proto '=https' --tlsv1.2 --fail --location --retry 3 -o SHA256SUMS "$base/SHA256SUMS"
+          asset="$(node "$GITHUB_WORKSPACE/scripts/release-installer.mjs" SHA256SUMS "$version" "$suffix")"
           curl --proto '=https' --tlsv1.2 --fail --location --retry 3 -o "$asset" "$base/$asset"
           grep -F "  ${asset}" SHA256SUMS | sha256sum -c -
       - name: Install tauri-driver

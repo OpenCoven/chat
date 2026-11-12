@@ -73,24 +73,14 @@
 }
 
 :where([data-slot="button"][data-variant="presence"]) {
-  background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.1), rgba(255, 255, 255, 0.03)),
-    color-mix(in oklch, var(--oc-presence) 26%, var(--bg-elevated, #232327));
-  border-color: color-mix(in oklch, var(--oc-presence) 45%, rgba(255, 255, 255, 0.12));
-  color: var(--text-primary, #f0eff4);
-  box-shadow:
-    0 1px 2px rgba(0, 0, 0, 0.5),
-    inset 0 1px 0 rgba(255, 255, 255, 0.16);
+  background: var(--oc-presence);
+  border-color: transparent;
+  color: var(--accent-presence-foreground, #0c0c0e);
+  box-shadow: none;
 }
 
 :where([data-slot="button"][data-variant="presence"]):hover {
-  background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.14), rgba(255, 255, 255, 0.04)),
-    color-mix(in oklch, var(--oc-presence) 34%, var(--bg-elevated, #232327));
-}
-
-:where([data-slot="button"][data-variant="presence"]):active {
-  transform: translateY(1px);
+  background: color-mix(in srgb, var(--oc-presence) 88%, var(--text-primary, #f0eff4));
 }
 
 :where([data-slot="button"][data-variant="outline"]) {
@@ -391,26 +381,17 @@
   display: grid;
   gap: 0;
   border: 1px solid var(--border-strong, rgba(255, 255, 255, 0.16));
-  border-radius: 10px;
-  background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.03), transparent 40%), var(--bg-raised, #1c1c1f);
-  box-shadow:
-    0 12px 32px -18px rgba(0, 0, 0, 0.9),
-    0 1px 2px rgba(0, 0, 0, 0.5),
-    inset 0 1px 0 rgba(255, 255, 255, 0.05);
+  border-radius: 14px;
+  background: var(--bg-raised, #1c1c1f);
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.08);
   transition:
     border-color 160ms,
-    box-shadow 240ms;
+    box-shadow 160ms;
 }
 
-/* A full-strength 2px ring (border plus 1px spread) keeps focus visible at 3:1. */
 :where([data-slot="composer"]):focus-within {
   border-color: var(--ring-focus, #a79bf5);
-  box-shadow:
-    0 0 0 1px var(--ring-focus, #a79bf5),
-    0 0 0 4px color-mix(in srgb, var(--ring-focus, #a79bf5) 12%, transparent),
-    0 16px 40px -16px rgba(0, 0, 0, 0.9),
-    inset 0 1px 0 rgba(255, 255, 255, 0.05);
+  box-shadow: 0 0 0 1px var(--ring-focus, #a79bf5);
 }
 
 :where([data-slot="composer"][data-tone="warning"]) {

@@ -111,6 +111,7 @@ export type SettingsDialogProps = Readonly<{
   onClose: () => void;
   preferences: Preferences;
   onPreferences: (patch: Partial<Preferences>) => void;
+  chatHarness?: string | undefined;
   archivedFilter?: boolean | undefined;
   onArchivedFilter?: ((archived: boolean) => void) | undefined;
   archivedFilterDisabled?: boolean | undefined;
@@ -120,6 +121,7 @@ export type SettingsDialogProps = Readonly<{
   connected: boolean;
   onRefresh: () => void;
   refreshDisabled: boolean;
+  onRefreshProjectAccess?: (() => Promise<void>) | undefined;
   /** The iPhone companion's opener, which owns its own dialog. */
   companion?: ReactNode;
   /** Reads the permission log, newest first. */
@@ -387,11 +389,41 @@ function Choices<T extends string>({
   );
 }
 
-function ModelSection({ preferences, onPreferences }: SettingsDialogProps) {
+const CODEX_MODELS = [
+  ['gpt-5.5', 'GPT-5.5'],
+  ['gpt-5.4', 'GPT-5.4'],
+  ['gpt-5.4-mini', 'GPT-5.4 Mini'],
+] as const;
+const CLAUDE_MODELS = [
+  ['claude-sonnet-5-5', 'Claude Sonnet 5.5'],
+  ['claude-sonnet-4-6', 'Claude Sonnet 4.6'],
+  ['claude-opus-4-6', 'Claude Opus 4.6'],
+] as const;
+const ENGINE_MODEL_GROUPS: Readonly<
+  Record<string, readonly { label: string; models: readonly (readonly [string, string])[] }[]>
+> = {
+  'coven-code': [
+    { label: 'OpenAI', models: CODEX_MODELS.map(([id, label]) => [`openai/${id}`, label]) },
+    {
+      label: 'Anthropic',
+      models: CLAUDE_MODELS.map(([id, label]) => [`anthropic/${id}`, label]),
+    },
+  ],
+  codex: [{ label: 'OpenAI', models: CODEX_MODELS }],
+  claude: [{ label: 'Anthropic', models: CLAUDE_MODELS }],
+};
+const CUSTOM_MODEL = ':custom';
+
+function ModelSection({ preferences, onPreferences, chatHarness }: SettingsDialogProps) {
   const modelId = useId();
+  const customId = useId();
   const modelErrorId = useId();
   const thinkId = useId();
+  const [editingCustom, setEditingCustom] = useState(false);
   const validModel = isValidModel(preferences.model);
+  const groups = ENGINE_MODEL_GROUPS[chatHarness ?? preferences.harness] ?? [];
+  const preset = groups.some(({ models }) => models.some(([id]) => id === preferences.model));
+  const custom = editingCustom || (preferences.model !== '' && !preset);
   return (
     <>
       <Group title="New chats">
@@ -417,7 +449,7 @@ function ModelSection({ preferences, onPreferences }: SettingsDialogProps) {
           htmlFor={modelId}
           hint={
             validModel ? (
-              "Leave it empty to use the engine's default, or enter the id your provider gives, such as openai/gpt-5.5."
+              "Choose Engine default to use the engine's default model, or enter a provider ID under Custom model."
             ) : (
               <span id={modelErrorId} className="coven-settings-row-error">
                 A model id starts with a letter or digit and uses only letters, digits and _ . / : +
@@ -426,21 +458,52 @@ function ModelSection({ preferences, onPreferences }: SettingsDialogProps) {
             )
           }
           control={
-            <span className="coven-access-filter coven-model-field">
-              <input
+            <div className="coven-model-controls">
+              <select
                 id={modelId}
-                type="text"
-                placeholder="Engine default"
-                spellCheck={false}
-                autoComplete="off"
-                autoCapitalize="off"
-                maxLength={MODEL_MAX}
-                value={preferences.model}
-                aria-invalid={validModel ? undefined : true}
-                aria-describedby={validModel ? undefined : modelErrorId}
-                onChange={(event) => onPreferences({ model: event.target.value.trim() })}
-              />
-            </span>
+                className="coven-model-select"
+                value={custom ? CUSTOM_MODEL : preferences.model}
+                onChange={(event) => {
+                  const model = event.target.value;
+                  setEditingCustom(model === CUSTOM_MODEL);
+                  if (model !== CUSTOM_MODEL) onPreferences({ model });
+                }}
+              >
+                <option value="">Engine default</option>
+                {groups.map(({ label, models }) => (
+                  <optgroup key={label} label={label}>
+                    {models.map(([id, name]) => (
+                      <option key={id} value={id}>
+                        {name}
+                      </option>
+                    ))}
+                  </optgroup>
+                ))}
+                <option value={CUSTOM_MODEL}>Custom model</option>
+              </select>
+              {custom ? (
+                <>
+                  <label className="coven-settings-row-label" htmlFor={customId}>
+                    Custom model ID
+                  </label>
+                  <span className="coven-access-filter coven-model-field">
+                    <input
+                      id={customId}
+                      type="text"
+                      placeholder="provider/model"
+                      spellCheck={false}
+                      autoComplete="off"
+                      autoCapitalize="off"
+                      maxLength={MODEL_MAX}
+                      value={preferences.model}
+                      aria-invalid={validModel ? undefined : true}
+                      aria-describedby={validModel ? undefined : modelErrorId}
+                      onChange={(event) => onPreferences({ model: event.target.value.trim() })}
+                    />
+                  </span>
+                </>
+              ) : null}
+            </div>
           }
         />
         <Row
@@ -598,8 +661,30 @@ function AccessSection(props: SettingsDialogProps) {
   );
 }
 
-function FamiliarAccess({ familiar, onRefresh, refreshDisabled }: SettingsDialogProps) {
+function FamiliarAccess({
+  familiar,
+  onRefresh,
+  onRefreshProjectAccess,
+  refreshDisabled,
+}: SettingsDialogProps) {
   const [query, setQuery] = useState('');
+  const [refreshing, setRefreshing] = useState(false);
+  const [refreshError, setRefreshError] = useState('');
+  async function refreshAccess() {
+    if (!onRefreshProjectAccess) {
+      onRefresh();
+      return;
+    }
+    setRefreshing(true);
+    setRefreshError('');
+    try {
+      await onRefreshProjectAccess();
+    } catch {
+      setRefreshError('Could not refresh project access. Try again.');
+    } finally {
+      setRefreshing(false);
+    }
+  }
   if (!familiar) {
     return (
       <div className="coven-settings-empty">
@@ -641,10 +726,23 @@ function FamiliarAccess({ familiar, onRefresh, refreshDisabled }: SettingsDialog
             ) : null}
           </div>
         ) : null}
+        <button
+          type="button"
+          className="fr-btn fr-btn--secondary fr-btn--sm"
+          disabled={refreshDisabled || refreshing}
+          onClick={() => void refreshAccess()}
+        >
+          {refreshing ? 'Refreshing project access…' : 'Refresh project access'}
+        </button>
       </div>
+      {refreshError ? (
+        <p className="coven-settings-row-error" role="alert">
+          {refreshError}
+        </p>
+      ) : null}
       {all.length ? (
         <>
-          {all.length > 6 ? (
+          {all.length > 6 || query ? (
             <label className="coven-access-filter">
               <Icon name="magnifying-glass" size={13} />
               <input
@@ -657,38 +755,41 @@ function FamiliarAccess({ familiar, onRefresh, refreshDisabled }: SettingsDialog
               />
             </label>
           ) : null}
-          <ul
-            className="coven-access-list"
-            aria-label={`${familiar.name}'s declared project access`}
-          >
-            {shown.map((project) => (
-              <li key={`${project.path}:${project.access}`} className="coven-access-item">
-                <span className="coven-access-icon" aria-hidden="true">
-                  <Icon name="folder-open" size={14} />
-                </span>
-                <span className="coven-access-name">{project.name}</span>
-                <span
-                  className={cx(
-                    'coven-access-pill',
-                    project.access === 'write' && 'coven-access-pill--write',
-                  )}
-                >
-                  {project.access === 'write' ? 'Read and write' : 'Read only'}
-                </span>
-                <span className="coven-access-path" title={project.path}>
-                  {homeRelative(project.path)}
-                </span>
-                <CopyButton
-                  className="coven-access-copy"
-                  text={project.path}
-                  label={`Copy ${project.name} path`}
-                />
-              </li>
-            ))}
-            {shown.length === 0 ? (
-              <li className="coven-access-none">No projects match “{query.trim()}”.</li>
-            ) : null}
-          </ul>
+          {/* biome-ignore lint/a11y/noNoninteractiveTabindex: keyboard users must be able to focus and scroll the project list. */}
+          <section className="coven-access-scroll" aria-label="Project access list" tabIndex={0}>
+            <ul
+              className="coven-access-list"
+              aria-label={`${familiar.name}'s declared project access`}
+            >
+              {shown.map((project) => (
+                <li key={`${project.path}:${project.access}`} className="coven-access-item">
+                  <span className="coven-access-icon" aria-hidden="true">
+                    <Icon name="folder-open" size={14} />
+                  </span>
+                  <span className="coven-access-name">{project.name}</span>
+                  <span
+                    className={cx(
+                      'coven-access-pill',
+                      project.access === 'write' && 'coven-access-pill--write',
+                    )}
+                  >
+                    {project.access === 'write' ? 'Read and write' : 'Read only'}
+                  </span>
+                  <span className="coven-access-path" title={project.path}>
+                    {homeRelative(project.path)}
+                  </span>
+                  <CopyButton
+                    className="coven-access-copy"
+                    text={project.path}
+                    label={`Copy ${project.name} path`}
+                  />
+                </li>
+              ))}
+              {shown.length === 0 ? (
+                <li className="coven-access-none">No projects match “{query.trim()}”.</li>
+              ) : null}
+            </ul>
+          </section>
         </>
       ) : (
         <div className="coven-settings-empty">
@@ -701,7 +802,8 @@ function FamiliarAccess({ familiar, onRefresh, refreshDisabled }: SettingsDialog
         </div>
       )}
       <p className="coven-settings-footnote">
-        Chat shows access as Coven declares it. Change it in Coven, then{' '}
+        Chat shows access as Coven declares it. To edit grants, open the familiar's Projects tab in
+        Coven Cave, then{' '}
         <button
           type="button"
           className="coven-settings-link"

@@ -925,13 +925,20 @@ describe('Phase 1 specification guards', () => {
     expect(metadata).toContain('env!("OPENCOVEN_APP_IDENTIFIER")');
   });
 
-  it('pins Playwright to a dedicated fresh preview server', () => {
-    const playwrightConfig = readText('playwright.config.ts');
+  it('pins Playwright to a dedicated fresh preview server', async () => {
+    const { default: playwrightConfig } = await import('../playwright.config');
     const packageManifest = readJson<PackageManifest>('package.json');
-
-    expect(playwrightConfig).toContain("const previewUrl = 'http://127.0.0.1:4174';");
-    expect(playwrightConfig).toMatch(/reuseExistingServer:\s*false/);
-    expect(playwrightConfig).toMatch(/command:\s*'corepack pnpm build && corepack pnpm preview'/);
+    expect(playwrightConfig.use?.baseURL).toBe('http://127.0.0.1:4174');
+    expect(playwrightConfig.webServer).toMatchObject({
+      url: 'http://127.0.0.1:4174',
+      reuseExistingServer: false,
+      command:
+        'corepack pnpm build && corepack pnpm exec vite preview --host 127.0.0.1 --port 4174 --strictPort',
+    });
+    expect(playwrightConfig.projects?.map((project) => project.name)).toEqual([
+      'chromium',
+      'webkit',
+    ]);
     expect(packageManifest.scripts?.['install:clean']).toBe(
       'corepack pnpm install --frozen-lockfile',
     );

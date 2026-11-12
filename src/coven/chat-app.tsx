@@ -622,6 +622,26 @@ export function ChatApp({
     }
   }
 
+  async function refreshProjectAccess() {
+    const life = lifetime.current;
+    const familiarId = navigationRef.current.familiarId;
+    const refreshed = await runtime.listFamiliars();
+    if (lifetime.current !== life) return;
+    const next = refreshed.find((item) => item.id === familiarId);
+    if (!next) throw new Error('Coven could not find this familiar.');
+    setFamiliars((current) =>
+      current.map((familiar) => {
+        if (familiar.id !== familiarId) return familiar;
+        const { projectAccessUnavailable: _unavailable, ...rest } = familiar;
+        return {
+          ...rest,
+          projectAccess: next.projectAccess ?? [],
+          ...(next.projectAccessUnavailable ? { projectAccessUnavailable: true } : {}),
+        };
+      }),
+    );
+  }
+
   async function runTurn(turn: {
     /** The turn isn't the composer's: its draft stays, and a failure offers no resend. */
     keepsDraft?: boolean;
@@ -893,6 +913,7 @@ export function ChatApp({
 
   return (
     <ChatLayout
+      onRefreshProjectAccess={refreshProjectAccess}
       approvals={approvals}
       answeringApproval={answeringApproval}
       onAllowApproval={(approval, options) => void allowApproval(approval, options)}

@@ -11,22 +11,9 @@
   padding: 0;
   border: 1px solid var(--border-strong);
   border-radius: 20px;
-  background:
-    radial-gradient(
-      120% 70% at 0% 0%,
-      color-mix(in oklch, var(--accent-presence) 9%, transparent),
-      transparent 60%
-    ),
-    radial-gradient(
-      90% 60% at 100% 100%,
-      color-mix(in oklch, var(--accent-violet, var(--accent-presence)) 6%, transparent),
-      transparent 70%
-    ), var(--bg-panel);
+  background: var(--bg-panel);
   color: var(--text-primary);
-  box-shadow:
-    0 40px 120px rgba(0, 0, 0, 0.6),
-    0 0 0 1px rgba(255, 255, 255, 0.04) inset,
-    0 1px 0 rgba(255, 255, 255, 0.06) inset;
+  box-shadow: 0 24px 72px rgba(0, 0, 0, 0.28);
   overflow: hidden;
 }
 
@@ -49,6 +36,7 @@
 .coven-settings-frame {
   display: grid;
   grid-template-columns: 212px minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr);
   height: 100%;
 }
 
@@ -117,14 +105,8 @@
 }
 
 .coven-settings-nav-item[aria-current="page"] {
-  background:
-    linear-gradient(
-      90deg,
-      color-mix(in oklch, var(--accent-presence) 14%, transparent),
-      transparent 80%
-    ), var(--bg-elevated);
+  background: var(--bg-hover);
   color: var(--text-primary);
-  box-shadow: 0 0 0 1px var(--border-hairline) inset;
 }
 
 .coven-settings-nav-item[aria-current="page"]::before {
@@ -136,7 +118,7 @@
   width: 2px;
   border-radius: 2px;
   background: var(--accent-presence);
-  box-shadow: 0 0 10px var(--accent-presence);
+  box-shadow: none;
 }
 
 .coven-settings-nav-item:focus-visible {
@@ -161,6 +143,7 @@
   display: grid;
   grid-template-rows: auto minmax(0, 1fr);
   min-width: 0;
+  min-height: 0;
 }
 
 .coven-settings-head {
@@ -233,11 +216,9 @@
 
 .coven-settings-card {
   border: 1px solid var(--border-hairline);
-  border-radius: 14px;
-  background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.03), transparent 50%),
-    color-mix(in srgb, var(--bg-elevated) 55%, transparent);
-  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.03) inset;
+  border-radius: 12px;
+  background: var(--bg-raised);
+  overflow: hidden;
 }
 
 .coven-settings-row {
@@ -297,6 +278,29 @@
 
 .coven-model-field:has(input[aria-invalid="true"]) {
   border-color: var(--color-danger);
+}
+
+.coven-model-controls {
+  display: grid;
+  gap: 8px;
+}
+
+.coven-model-select {
+  width: 100%;
+  min-height: 34px;
+  padding: 0 12px;
+  border: 1px solid var(--border-hairline);
+  border-radius: 10px;
+  background: var(--bg-sunken);
+  color: var(--text-primary);
+  font: inherit;
+  font-size: 13px;
+}
+
+.coven-model-select:focus-visible,
+.coven-access-scroll:focus-visible {
+  outline: 2px solid var(--ring-focus);
+  outline-offset: 2px;
 }
 
 /* A checkbox drawn as a switch. */
@@ -509,13 +513,19 @@
   font-size: 13px;
 }
 
+.coven-access-scroll {
+  max-height: min(22rem, 42vh);
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+  border: 1px solid var(--border-hairline);
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--bg-elevated) 45%, transparent);
+}
+
 .coven-access-list {
   margin: 0;
   padding: 4px;
   list-style: none;
-  border: 1px solid var(--border-hairline);
-  border-radius: 14px;
-  background: color-mix(in srgb, var(--bg-elevated) 45%, transparent);
 }
 
 /* Name and access share the first line; the path gets the full second line. */

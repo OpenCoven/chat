@@ -35,7 +35,15 @@ export async function contrastFailures(page: Page, { minimum = 20 } = {}): Promi
         continue;
       const range = document.createRange();
       range.selectNodeContents(node);
-      const rect = range.getBoundingClientRect();
+      const textRect = range.getBoundingClientRect();
+      const elementRect = element.getBoundingClientRect();
+      // A clamped description still has a full-text Range. Measure only the
+      // visible element so hidden lines cannot sample other UI behind them.
+      const left = Math.max(textRect.left, elementRect.left, 0);
+      const top = Math.max(textRect.top, elementRect.top, 0);
+      const right = Math.min(textRect.right, elementRect.right, innerWidth);
+      const bottom = Math.min(textRect.bottom, elementRect.bottom, innerHeight);
+      const rect = { left, top, width: right - left, height: bottom - top, bottom };
       if (rect.width < 2 || rect.height < 2 || rect.bottom <= 0 || rect.top >= innerHeight)
         continue;
       let opacity = 1;
@@ -51,12 +59,34 @@ export async function contrastFailures(page: Page, { minimum = 20 } = {}): Promi
     return found;
   });
   expect(texts.length).toBeGreaterThanOrEqual(minimum);
-  const hide = await page.addStyleTag({
-    content:
-      '*, *::placeholder { color: transparent !important; -webkit-text-fill-color: transparent !important; text-shadow: none !important; caret-color: transparent !important; }',
+  // Freeze transitions before changing text colors, otherwise WebKit can
+  // capture partially hidden glyphs as background pixels and report 1:1.
+  const freeze = await page.addStyleTag({
+    content: '*, *::before, *::after { transition: none !important; animation: none !important; }',
   });
-  const backdrop = (await page.screenshot()).toString('base64');
-  await hide.evaluate((element) => (element as HTMLElement).remove());
+  const paint = () =>
+    page.evaluate(
+      () =>
+        new Promise<void>((resolve) => {
+          requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
+        }),
+    );
+  let hide: Awaited<ReturnType<Page['addStyleTag']>> | undefined;
+  let backdrop: string;
+  try {
+    await paint();
+    hide = await page.addStyleTag({
+      content:
+        '*, *::placeholder { color: transparent !important; -webkit-text-fill-color: transparent !important; text-shadow: none !important; caret-color: transparent !important; }',
+    });
+    await paint();
+    backdrop = (await page.screenshot()).toString('base64');
+  } finally {
+    await hide?.evaluate((element) => (element as HTMLElement).remove());
+    await paint();
+    await freeze.evaluate((element) => (element as HTMLElement).remove());
+    await paint();
+  }
   const failures = await page.evaluate(
     async ({ image, texts }) => {
       const picture = new Image();

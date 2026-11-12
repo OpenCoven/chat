@@ -83,7 +83,7 @@ export function SendControl({
         title="Send  ⏎ · newline  ⇧⏎"
       >
         Send
-        <Icon name="arrow-up-bold" size={13} />
+        <Icon name="arrow-up" size={13} />
       </Button>
       {options && options.length > 0 && onSelectOption ? (
         <CompletionPalette trigger={caret} commands={options} onSelect={onSelectOption} />

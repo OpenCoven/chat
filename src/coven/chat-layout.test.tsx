@@ -1269,6 +1269,32 @@ describe('inspector detail rows', () => {
 });
 
 describe('sidebar search', () => {
+  it('clears a populated search, announces its results, and returns focus without changing chats', () => {
+    const props = layoutProps();
+    render(
+      <ChatLayout
+        {...props}
+        connected
+        familiarId="a"
+        familiars={[
+          { id: 'a', name: 'Alder' },
+          { id: 'b', name: 'Birch' },
+        ]}
+      />,
+    );
+    const search = screen.getByRole('searchbox', { name: 'Search familiars' });
+    fireEvent.change(search, { target: { value: 'Bir' } });
+    expect(screen.getByRole('status', { name: 'Familiar search results' })).toHaveTextContent(
+      '1 familiar',
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Clear familiar search' }));
+    expect(search).toHaveValue('');
+    expect(search).toHaveFocus();
+    expect(screen.getByRole('button', { name: 'Alder' })).toBeVisible();
+    expect(screen.getByRole('button', { name: 'Birch' })).toBeVisible();
+    expect(props.onFamiliar).not.toHaveBeenCalled();
+  });
+
   it('offers to clear a search that matches nothing', () => {
     render(<ChatLayout {...layoutProps()} connected familiars={[{ id: 'a', name: 'Astra' }]} />);
     expect(screen.queryByRole('button', { name: 'Clear search' })).not.toBeInTheDocument();
@@ -1830,6 +1856,10 @@ describe('declared access and error copying', () => {
     // The inspector sums it up and links to the full list in Settings.
     fireEvent.click(screen.getByRole('button', { name: /3 projects · 1 writable/ }));
     const access = screen.getByRole('region', { name: 'Access' });
+    expect(within(access).getByRole('region', { name: 'Project access list' })).toHaveAttribute(
+      'tabindex',
+      '0',
+    );
     const items = within(
       within(access).getByRole('list', { name: "Astra's declared project access" }),
     ).getAllByRole('listitem');
@@ -1843,6 +1873,23 @@ describe('declared access and error copying', () => {
     expect(access).toHaveTextContent(
       'Familiar chats can change files and run commands beyond these projects without asking for permission.',
     );
+  });
+
+  it('refreshes declared grants in Settings without refreshing the conversation', async () => {
+    const props = { ...layoutProps(), connected: true, familiarId: 'a' };
+    const refresh = vi.fn().mockResolvedValue(undefined);
+    render(
+      <ChatLayout
+        {...props}
+        familiars={[{ id: 'a', name: 'Astra' }]}
+        onRefreshProjectAccess={refresh}
+      />,
+    );
+    const access = openSettingsAt('Access');
+    fireEvent.click(within(access).getByRole('button', { name: 'Refresh project access' }));
+    await within(access).findByRole('button', { name: 'Refresh project access' });
+    expect(refresh).toHaveBeenCalledOnce();
+    expect(props.onRefresh).not.toHaveBeenCalled();
   });
 
   it('tells "none declared" apart from "could not read"', () => {
@@ -2305,11 +2352,11 @@ describe('window title', () => {
       onWindowTitle,
     };
     const { rerender } = render(<ChatLayout {...base} />);
-    expect(onWindowTitle).toHaveBeenLastCalledWith('OpenCoven Chat');
+    expect(onWindowTitle).toHaveBeenLastCalledWith('Coven Chat');
     rerender(<ChatLayout {...base} familiarId="a" />);
-    expect(onWindowTitle).toHaveBeenLastCalledWith('Astra — OpenCoven Chat');
+    expect(onWindowTitle).toHaveBeenLastCalledWith('Astra — Coven Chat');
     rerender(<ChatLayout {...base} familiarId="a" finished={{ b: 'reply' }} />);
-    expect(onWindowTitle).toHaveBeenLastCalledWith('(1) Astra — OpenCoven Chat');
+    expect(onWindowTitle).toHaveBeenLastCalledWith('(1) Astra — Coven Chat');
     const calls = onWindowTitle.mock.calls.length;
     rerender(<ChatLayout {...base} familiarId="a" finished={{ b: 'reply' }} draft="typing" />);
     expect(onWindowTitle).toHaveBeenCalledTimes(calls);
@@ -3054,8 +3101,8 @@ describe('model settings', () => {
       'aria-pressed',
       'true',
     );
-    fireEvent.change(within(model).getByRole('textbox', { name: 'Model' }), {
-      target: { value: ' anthropic/claude-sonnet-5-5 ' },
+    fireEvent.change(within(model).getByRole('combobox', { name: 'Model' }), {
+      target: { value: 'claude-sonnet-5-5' },
     });
     fireEvent.click(within(model).getByRole('checkbox', { name: 'Think longer' }));
     const speed = within(model).getByRole('group', { name: 'Speed' });
@@ -3064,7 +3111,7 @@ describe('model settings', () => {
     expect(model).toHaveTextContent('Messages sent from your iPhone use the engine');
     expect(stored()).toMatchObject({
       harness: 'claude',
-      model: 'anthropic/claude-sonnet-5-5',
+      model: 'claude-sonnet-5-5',
       think: true,
       speed: 'thorough',
     });
@@ -3072,7 +3119,7 @@ describe('model settings', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Send' }));
     expect(props.onSend).toHaveBeenCalledExactlyOnceWith({
       harness: 'claude',
-      model: 'anthropic/claude-sonnet-5-5',
+      model: 'claude-sonnet-5-5',
       think: true,
       speed: 'thorough',
     });
@@ -3081,7 +3128,9 @@ describe('model settings', () => {
   it('says plainly when a model id could not be sent, until it is corrected or cleared', () => {
     render(<ChatLayout {...layoutProps()} ready />);
     const model = openSettingsAt('Model');
-    const field = within(model).getByRole('textbox', { name: 'Model' });
+    const picker = within(model).getByRole('combobox', { name: 'Model' });
+    fireEvent.change(picker, { target: { value: ':custom' } });
+    const field = within(model).getByRole('textbox', { name: 'Custom model ID' });
     fireEvent.change(field, { target: { value: '--model=x' } });
     expect(field).toHaveAttribute('aria-invalid', 'true');
     expect(field).toHaveAccessibleDescription(
@@ -3090,6 +3139,10 @@ describe('model settings', () => {
     fireEvent.change(field, { target: { value: '' } });
     expect(field).not.toHaveAttribute('aria-invalid');
     expect(model).toHaveTextContent("use the engine's default");
+    fireEvent.change(field, { target: { value: ' other/custom-model ' } });
+    expect(stored()).toMatchObject({ model: 'other/custom-model' });
+    fireEvent.change(picker, { target: { value: '' } });
+    expect(stored()).toMatchObject({ model: '' });
   });
 
   it('shows what a chat runs on, which opens Settings, and the model its latest run reported', () => {

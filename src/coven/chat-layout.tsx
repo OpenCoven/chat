@@ -164,6 +164,7 @@ export type ChatLayoutProps = Readonly<{
   onDeclineApproval?: (approval: CovenApproval) => void;
   /** Reads the permission log for Settings › Access. */
   onPermissionLog?: () => Promise<PermissionLogEntry[]>;
+  onRefreshProjectAccess?: () => Promise<void>;
   loading: boolean;
   cancelling: boolean;
   error: string;
@@ -742,8 +743,8 @@ export function ChatLayout(props: ChatLayoutProps) {
     if (!sidebar) openSidebar();
     setSearchFocus((n) => n + 1);
   });
-  function openSettings(section: SettingsSection = 'general') {
-    settingsOpener.current = activeControl();
+  function openSettings(section: SettingsSection = 'general', opener = activeControl()) {
+    settingsOpener.current = opener;
     setSettings(section);
   }
   const onSettingsShortcut = useCallback(() => {
@@ -1174,7 +1175,7 @@ export function ChatLayout(props: ChatLayoutProps) {
           ) : null}
           <span className="coven-rail-tab-label">Familiars</span>
           <span className="coven-rail-tab-cue" aria-hidden="true">
-            ›
+            <Icon name="caret-right" size={14} />
           </span>
         </button>
         <button
@@ -1191,7 +1192,7 @@ export function ChatLayout(props: ChatLayoutProps) {
         >
           <span className="coven-rail-tab-label">{familiar?.name || 'Details'}</span>
           <span className="coven-rail-tab-cue" aria-hidden="true">
-            ‹
+            <Icon name="caret-left" size={14} />
           </span>
         </button>
         <aside
@@ -1223,10 +1224,10 @@ export function ChatLayout(props: ChatLayoutProps) {
                 aria-keyshortcuts={SETTINGS_SHORTCUT}
                 aria-haspopup="dialog"
                 className="coven-sidebar-settings"
-                onClick={() => openSettings()}
+                onClick={(event) => openSettings('general', event.currentTarget)}
               />
             </div>
-            <label className="coven-agent-search">
+            <div className="coven-agent-search">
               <Icon name="magnifying-glass" size={14} />
               <input
                 ref={searchRef}
@@ -1254,7 +1255,26 @@ export function ChatLayout(props: ChatLayoutProps) {
                   }
                 }}
               />
-            </label>
+              {query ? (
+                <FamIconButton
+                  icon="x"
+                  size="sm"
+                  label="Clear familiar search"
+                  onClick={() => {
+                    setQuery('');
+                    searchRef.current?.focus();
+                  }}
+                />
+              ) : null}
+            </div>
+            <output
+              className={query ? 'coven-search-results' : 'coven-sr-only'}
+              aria-label="Familiar search results"
+              aria-live="polite"
+              aria-atomic="true"
+            >
+              {query ? `${agents.length} ${agents.length === 1 ? 'familiar' : 'familiars'}` : ''}
+            </output>
             <div className="fr-conv-scroll">
               <div className="fr-conv-list" ref={listRef}>
                 {agents.map((item, index) => {
@@ -1411,7 +1431,7 @@ export function ChatLayout(props: ChatLayoutProps) {
             )}
             <div className="fr-thread-header-actions">
               <FamIconButton
-                icon="squares-four"
+                icon="monitor"
                 label={screenOpen ? 'Hide screen' : 'Show screen'}
                 title={screenOpen ? 'Hide the remote screen' : 'View a remote screen over VNC'}
                 aria-pressed={screenOpen}
@@ -1426,7 +1446,7 @@ export function ChatLayout(props: ChatLayoutProps) {
                 title={SETTINGS_HINT}
                 aria-keyshortcuts={SETTINGS_SHORTCUT}
                 aria-haspopup="dialog"
-                onClick={() => openSettings()}
+                onClick={(event) => openSettings('general', event.currentTarget)}
               />
               <FamIconButton
                 icon="arrow-clockwise"
@@ -1617,7 +1637,9 @@ export function ChatLayout(props: ChatLayoutProps) {
                     {familiar ? `Chat with ${name}` : 'No familiar selected'}
                   </span>
                   {familiar?.description ? (
-                    <span className="coven-thread-empty-purpose">{familiar.description}</span>
+                    <span className="coven-thread-empty-purpose" title={familiar.description}>
+                      {familiar.description}
+                    </span>
                   ) : null}
                   <span className="fr-empty-text">
                     {emptyThreadText(props.connected, familiar?.name, props.familiars.length > 0)}
@@ -1890,7 +1912,7 @@ export function ChatLayout(props: ChatLayoutProps) {
                               ? `This chat runs on ${harnessLabel(chatHarness)}. A chat keeps what it started on.`
                               : `${name}'s chat will start on ${harnessLabel(run.harness)}.`
                           }
-                          onClick={() => openSettings('model')}
+                          onClick={(event) => openSettings('model', event.currentTarget)}
                         >
                           {harnessLabel(chatHarness ?? run.harness)}
                           <span aria-hidden="true"> ›</span>
@@ -1916,7 +1938,7 @@ export function ChatLayout(props: ChatLayoutProps) {
                           type="button"
                           className="coven-access-summary"
                           aria-haspopup="dialog"
-                          onClick={() => openSettings('access')}
+                          onClick={(event) => openSettings('access', event.currentTarget)}
                         >
                           {accessSummary(projectAccess, familiar.projectAccessUnavailable)}
                           <span aria-hidden="true"> ›</span>
@@ -2019,6 +2041,7 @@ export function ChatLayout(props: ChatLayoutProps) {
             }}
             preferences={preferences}
             onPreferences={setPreferences}
+            chatHarness={chatHarness}
             archivedFilter={props.archivedFilter}
             onArchivedFilter={props.onArchivedFilter}
             archivedFilterDisabled={props.lifecycleBusy}
@@ -2036,6 +2059,7 @@ export function ChatLayout(props: ChatLayoutProps) {
             connected={props.connected}
             onRefresh={props.onRefresh}
             refreshDisabled={Boolean(props.busy || props.loading || props.lifecycleBusy)}
+            onRefreshProjectAccess={props.onRefreshProjectAccess}
             companion={<CompanionPanel />}
             onPermissionLog={props.onPermissionLog}
             familiarName={(id) => props.familiars.find((item) => item.id === id)?.name ?? id}

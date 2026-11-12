@@ -63,14 +63,8 @@
   overflow: hidden;
   border: 0;
   border-radius: 0;
-  background:
-    linear-gradient(90deg, rgba(255, 255, 255, 0.045), transparent 55%),
-    linear-gradient(180deg, rgba(255, 255, 255, 0.035), transparent 45%), var(--coven-rail-tab-bg);
-  box-shadow:
-    inset 1px 0 rgba(255, 255, 255, 0.07),
-    inset -1px 0 rgba(0, 0, 0, 0.5);
-  backdrop-filter: blur(8px);
-  -webkit-backdrop-filter: blur(8px);
+  background: var(--coven-rail-tab-bg);
+  box-shadow: none;
   color: var(--text-secondary);
   cursor: pointer;
   transition:
@@ -657,7 +651,14 @@
 
 /* The familiar's purpose under the empty thread's heading. */
 .coven-thread-empty-purpose {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  max-width: 48ch;
+  overflow: hidden;
+  overflow-wrap: anywhere;
   font-size: 13px;
+  line-height: 1.5;
   color: var(--text-primary);
   text-wrap: balance;
 }
@@ -1207,5 +1208,48 @@
 @media (prefers-reduced-motion: reduce) {
   .coven-inspector-resizer::after {
     transition: none;
+  }
+}
+
+/* Calm surfaces and consistent controls across the desktop shell. */
+.coven-chat .fr-grain {
+  display: none;
+}
+
+.coven-chat .coven-agent-search {
+  gap: 8px;
+  min-height: 36px;
+  padding: 4px 4px 4px 10px;
+  border-radius: 10px;
+  background: var(--bg-sunken);
+}
+
+.coven-agent-search input::-webkit-search-cancel-button {
+  -webkit-appearance: none;
+}
+
+.coven-search-results {
+  display: block;
+  padding: 0 16px 8px;
+  color: var(--text-muted);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+.coven-chat .oc-send-main {
+  min-width: 76px;
+  border-radius: 8px;
+}
+
+.coven-chat .coven-rail-tab-cue {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+@media (pointer: coarse) {
+  .coven-chat :is(.fr-btn, .fr-icon-btn, .oc-button, .coven-settings-close) {
+    min-width: 44px;
+    min-height: 44px;
   }
 }

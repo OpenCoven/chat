@@ -1,8 +1,8 @@
-<p align="center"><img src="assets/brand/chat-app-icon-rounded.svg" width="96" height="96" alt="OpenCoven Chat logo: the OpenCoven crown inside a speech bubble"></p>
+<p align="center"><img src="assets/brand/chat-app-icon-rounded.svg" width="96" height="96" alt="Coven Chat logo: the OpenCoven crown inside a speech bubble"></p>
 
-# OpenCoven Chat
+# Coven Chat
 
-OpenCoven Chat is a desktop app for chatting with your familiars through the Coven CLI installed
+Coven Chat is a desktop app for chatting with your familiars through the Coven CLI installed
 on your computer. Each familiar has one ongoing chat, and the window shows real runs as they
 happen. You don't need Cave, a Cave pairing, or a separate demo build.
 
@@ -33,7 +33,7 @@ it with the arrow and page keys without focusing a control inside it.
 The interface follows your system's light or dark appearance. Both palettes hold all visible text
 to WCAG AA contrast, checked on the rendered app in each scheme.
 
-The window title names the familiar you're viewing, such as `Astra — OpenCoven Chat`. When runs
+The window title names the familiar you're viewing, such as `Astra — Coven Chat`. When runs
 have ended in other chats you haven't opened yet, the title leads with a count, so a window in the
 background shows that a reply is waiting.
 

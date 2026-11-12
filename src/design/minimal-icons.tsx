@@ -20,9 +20,11 @@ export type IconName =
   | 'archive'
   | 'arrow-clockwise'
   | 'arrow-counter-clockwise'
+  | 'arrow-up'
   | 'arrow-up-bold'
   | 'books'
   | 'brain'
+  | 'caret-left'
   | 'caret-down'
   | 'caret-right'
   | 'caret-up'
@@ -104,6 +106,7 @@ const GLYPHS: Record<IconName, ReactNode> = {
       <path d="M4.6 10.2a7.8 7.8 0 1 1-.4 3.6" />
     </>
   ),
+  'arrow-up': <path d="M12 20V4m-7 7 7-7 7 7" />,
   'arrow-up-bold': <path d="M12 3.6 20 11.4h-4.4v9H8.4v-9H4z" />,
   books: (
     <>
@@ -119,6 +122,7 @@ const GLYPHS: Record<IconName, ReactNode> = {
       <path d="M12 5.4V18" />
     </>
   ),
+  'caret-left': <path d="m14.6 6.4-5.4 5.6 5.4 5.6" />,
   'caret-down': <path d="m6.4 9.4 5.6 5.4 5.6-5.4" />,
   'caret-right': <path d="m9.4 6.4 5.4 5.6-5.4 5.6" />,
   'caret-up': <path d="m6.4 14.6 5.6-5.4 5.6 5.4" />,
@@ -427,7 +431,7 @@ export function Icon({ name, size }: IconProps) {
       height={size}
       fill={filled ? 'currentColor' : 'none'}
       stroke={filled ? 'none' : 'currentColor'}
-      strokeWidth={1.7}
+      strokeWidth={1.6}
       strokeLinecap="round"
       strokeLinejoin="round"
       aria-hidden="true"

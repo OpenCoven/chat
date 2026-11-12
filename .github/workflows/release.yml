@@ -1222,8 +1222,8 @@ jobs:
               $name = $installer.VersionInfo.ProductName
               $version = $installer.VersionInfo.ProductVersion
             }
-            if ($name -ne 'OpenCoven Chat') {
-              throw "$($installer.Name) names product '$name', expected 'OpenCoven Chat'."
+            if ($name -ne 'Coven Chat') {
+              throw "$($installer.Name) names product '$name', expected 'Coven Chat'."
             }
             if ($version -ne $env:EXPECTED_VERSION) {
               throw "$($installer.Name) reports version '$version', expected $env:EXPECTED_VERSION."
@@ -1433,7 +1433,7 @@ jobs:
           args=(
             "${TAG}"
             --repo "${{ github.repository }}"
-            --title "OpenCoven Chat ${VERSION}"
+            --title "Coven Chat ${VERSION}"
             --verify-tag
             --draft
           )
@@ -1454,7 +1454,7 @@ jobs:
           else
             windows_note='**Windows:** the `.msi` and `.exe` installers are not code-signed yet, so Windows SmartScreen shows "Windows protected your PC" the first time one runs. Check the download against `SHA256SUMS` first, then choose **More info** and **Run anyway**.'
           fi
-          notes="Automated release of OpenCoven Chat ${VERSION}.
+          notes="Automated release of Coven Chat ${VERSION}.
 
           Verify downloads against \`SHA256SUMS\` in the folder that holds them:
 
@@ -1499,7 +1499,7 @@ jobs:
           if ! gh release view updater --repo "${REPO}" >/dev/null 2>&1; then
             gh release create updater --repo "${REPO}" --target "${SHA}" \
               --title "Auto-update feed" --prerelease --latest=false \
-              --notes "Installed copies of OpenCoven Chat read latest.json from this release to find updates. The release workflow replaces it after each published release. Do not delete this release or its asset: installed apps would stop finding updates. See docs/releasing.md § 4 and § 6.1."
+              --notes "Installed copies of Coven Chat read latest.json from this release to find updates. The release workflow replaces it after each published release. Do not delete this release or its asset: installed apps would stop finding updates. See docs/releasing.md § 4 and § 6.1."
           fi
           gh release upload updater release/latest.json --repo "${REPO}" --clobber
           # Read back what installed apps will fetch, by the URL they use. The
