@@ -1,6 +1,6 @@
 [package]
 name = "opencoven-chat"
-version = "0.0.9"
+version = "0.1.1"
 description = "OpenCoven Chat desktop scaffold"
 edition = "2021"
 rust-version = "1.95.0"
@@ -39,7 +39,7 @@ fs2 = "=0.4.3"
 getrandom = "=0.4.3"
 httparse = "=1.10.1"
 rcgen = { version = "=0.14.10", default-features = false, features = ["crypto", "aws_lc_rs"] }
-rustls = "=0.23.45"
+rustls = "=0.23.46"
 subtle = "=2.6.1"
 tokio-rustls = "=0.26.5"
 hmac = "=0.12.1"

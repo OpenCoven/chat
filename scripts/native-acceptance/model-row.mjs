@@ -112,7 +112,7 @@ async function choose(app, row, label) {
 
 export async function modelRow(lane, familiar, models) {
   const row = new Row(
-    'v010-model',
+    'v012-model',
     'Settings › Model: a preset from the dropdown is the model the engine uses',
   );
   const { app } = lane;

@@ -277,11 +277,7 @@ assistant replies. When a capability is unavailable, Chat says so instead of sim
 Installing Coven doesn't configure a model provider, so complete any provider setup your CLI needs
 before you start a run.
 
-New chats run on Coven's bundled `coven-code` engine unless **Settings › Model** says Codex or
-Claude Code. Every run has explicit read-only permissions. Chat doesn't grant write access or
-simulate approval controls. The native runtime supports macOS, Linux, and
-Windows. Every run's process tree is contained (as a process group on macOS and Linux, and as a
-kill-on-close job on Windows), so **Stop** ends the Coven CLI together with everything it started.
+New chats run on Coven's bundled `coven-code` engine unless **Settings › Model** says Codex or Claude Code. Familiar chats run with full access under the desktop user's account, including sends from a paired iPhone. Familiars can change files and run commands without per-turn approval. The native runtime supports macOS, Linux, and Windows. Every run's process tree is contained (as a process group on macOS and Linux, and as a kill-on-close job on Windows), so **Stop** ends the Coven CLI together with everything it started.
 
 The frozen SDK artifacts stay pinned. Chat doesn't expand their existing health and conformance
 contracts into undocumented chat methods, and the standalone runtime doesn't fall back to Cave.
