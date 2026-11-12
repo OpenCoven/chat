@@ -70,13 +70,15 @@ $webview = (Get-ItemProperty 'HKLM:\SOFTWARE\WOW6432Node\Microsoft\EdgeUpdate\Cl
 # it, and looks for what v0.0.8 saved in the web view's autofill.
 $upgrade = @()
 $upgradeFact = 'not run'
+# Releases before v0.1.2 don't clear it, so the row runs on candidates and on
+# v0.1.2 or later.
 try {
-  $newer = if ($env:CANDIDATE_INSTALLER) { $true } else { [version]$Release.TrimStart('v') -gt [version]'0.0.8' }
-} catch { $newer = $true }
+  $clears = if ($env:CANDIDATE_INSTALLER) { $true } else { [version]($Release.TrimStart('v') -replace '[-+].*$', '') -ge [version]'0.1.2' }
+} catch { $clears = $true }
 if ($Installer -ne 'msi') {
   $upgradeFact = 'not run: the upgrade row drives MSIs only'
-} elseif (-not $newer) {
-  $upgradeFact = "not run: $Release is not newer than v0.0.8"
+} elseif (-not $clears) {
+  $upgradeFact = "not run: $Release is older than v0.1.2, the first release that clears it"
 } else {
   try {
     $old = 'OpenCoven.Chat_0.0.8_x64_en-US.msi'

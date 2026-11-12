@@ -56,6 +56,8 @@ local app data folder (on macOS, `~/Library/Application Support/ai.opencoven.cha
   result; Chat reads those from Coven. On macOS and Linux only your user account
   can read it. Removing a finished mission removes its record.
 
+Familiar chats run with the desktop user's filesystem and command permissions. Chat uses the same policy for messages sent from the window and from a paired iPhone. Pairing links allow their holders to read conversations and start these runs. **Forget paired phones** rotates the credentials used by all paired phones.
+
 The window can't reach the operating system keyring. Only the Cave adapter and the
 installation-identity commands use it, and the window can call neither
 (`src-tauri/capabilities/default.json`). Reports showing that conversation data reaches browser

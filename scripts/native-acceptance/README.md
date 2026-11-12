@@ -15,9 +15,11 @@ the ones published (this is also why the lane is not blocked by #532).
 `SHA256SUMS`, install it on a fresh runner user (an empty profile), record the
 runner, then run `run.mjs`. `.github/workflows/native-acceptance.yml` runs them.
 
-The model is the one stand-in: `fixture.mjs` extends the packaged suite's
-deterministic endpoint with a slow streaming reply (row 7) and an address with a
-sign-in name (#515). Every word the app shows is synthetic.
+The model is a stand-in: `fixture.mjs` extends the packaged suite's
+deterministic endpoint with a slow streaming reply (row 7), an address with a
+sign-in name (#515), and the packaged suite's approval script, which asks the
+real engine to write a real file. Every word the app shows is synthetic. The
+asking rows also pair a stand-in phone (`phone.mjs`); see below.
 
 Results are **native OS-level automation** on CI runners. They are never
 hand-run results, and a row the lane could not stage is reported as blocked,
@@ -25,6 +27,8 @@ not passed. Installer rows stay with #520; this lane only installs in order to
 drive the app.
 
 ## Status checkpoint
+
+Current full-access candidates and releases use the full-access row. Select `asking=as-built`; the legacy `switched-on` mode is refused before changing or building a full-access candidate. The historical asking modes below apply to builds that still use read-only ordinary turns.
 
 - Runs are dispatched for a published tag (`workflow_dispatch`, input
   `release`). While the lane was built, pushes to `test/504-native-acceptance`
@@ -39,6 +43,38 @@ drive the app.
   `<commit>`, not a published release". A candidate run checks a fix before a
   tag; it never stands in for the published installers, which are driven again
   once the release is out.
+- **Asking for permission (#542, #573).** The `asking` input picks the rows.
+  `as-built`, the default, reads the build's `ASKING_ENABLED` switch in
+  `src-tauri/src/chat_approvals.rs` (this checkout for a candidate, the tag for
+  a published release) and drives rows `542-1` to `542-4` when it is on, or
+  `asking-off` when it is off. `switched-on` builds a candidate with asking on
+  for that run only: `switch-asking.mjs` undoes #562's two switches, the host's
+  `ASKING_ENABLED` and the window's permission log in Settings › Access.
+  `run.mjs` refuses it for a published release, and the build stays on the
+  runner. `rows-on-as-built`
+  drives `542-1` to `542-4` whatever the build says, which is how they are seen
+  to fail on a build with asking off.
+  - `542-1`: **Allow once** lets exactly one write land. The read-only turn's
+    file is absent, the allowed turn's holds one write, the next turn has to ask
+    again, and the phone allowing the spent request is refused with nothing run.
+  - `542-2`: **Decline** in the window, then on the phone, lands nothing and
+    runs nothing.
+  - `542-3`: sending a new message closes the waiting request, and a late allow
+    from the phone is refused.
+  - `542-4`: what a paired phone is told matches the window at each step, and
+    the permission log reads the same in Settings › Access and to the phone.
+  - The companion runs only on macOS and Linux, so on Windows every phone
+    check is recorded as blocked, with the window's own reason.
+  - The phone is a stand-in. The lane turns the companion on in Settings ›
+    Devices, reads the private pairing link from its text box, and calls the
+    companion's API with the link's token. It trusts only the certificate in the
+    host's `iphone-companion/identity.json`, once that matches the link's
+    fingerprint, and checks the fingerprint again in the handshake, so the token
+    goes to no other server. A phone pins the fingerprint alone. It shows what
+    the Mac tells a paired phone, not what the iPhone app shows; a physical
+    iPhone stays a hand row on #573.
+  - The engine signs in with an API key against the fixture, so none of these
+    rows covers **Sign in with Claude**, and none uses a real model.
 - **Row 578 (Windows, MSI).** After every other row, `upgrade.mjs` installs the
   published v0.0.8 MSI (checked against v0.0.8's `SHA256SUMS`) over the build
   under test. In v0.0.8 it types a synthetic phrase into the composer during a

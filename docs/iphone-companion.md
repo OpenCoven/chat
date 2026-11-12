@@ -1,11 +1,6 @@
 # iPhone companion
 
-The iPhone companion, **Coven Chat** on your home screen (source in
-`apps/ios/ChatCompanion`), connects to a running Mac Chat app on the same
-private IPv4 network. Coven runs on the Mac, with the same read-only
-permissions and the same one-run-at-a-time limit as the desktop. You don't
-need Cave. This supersedes earlier plans that routed the phone
-through Cave.
+The iPhone companion, **Coven Chat** on your home screen (source in `apps/ios/ChatCompanion`), connects to a running Mac Chat app on the same private IPv4 network. Coven runs on the Mac with the same full access and one-run-at-a-time limit as desktop chats. Familiar runs can change files and run commands as the desktop user without per-turn approval. You don't need Cave. This supersedes earlier plans that routed the phone through Cave.
 
 ## Connect
 
@@ -18,13 +13,7 @@ through Cave.
    **Enter pairing link**, paste it and choose **Connect**. A link opened from
    elsewhere fills the field but still waits for **Connect**.
 
-A link grants access to Chat conversations and read-only agent runs. It contains
-an HTTPS address, a random bearer token and the SHA-256 fingerprint of the Mac's
-certificate. Before sending credentials, the phone checks that the Mac presents
-that exact certificate. Bonjour (local network discovery) only supplies
-addresses to try. Credentials stay in the phone's Keychain on that device alone
-and never sync to your other devices. Conversation data and drafts stay in
-memory on the phone; Chat continues to save history on the Mac.
+A link grants access to Chat conversations and full-access familiar runs on the Mac. It contains an HTTPS address, a random bearer token and the SHA-256 fingerprint of the Mac's certificate. Before sending credentials, the phone checks that the Mac presents that exact certificate. Bonjour (local network discovery) supplies addresses to try. Credentials stay in the phone's Keychain on that device alone and never sync to your other devices. Conversation data and drafts stay in memory on the phone. Chat continues to save history on the Mac.
 
 **Turn off** closes the listener and its connections without revoking pairing.
 Turn it on again to let saved phones back in. **Forget paired phones** rotates
@@ -66,10 +55,7 @@ is empty, to edit it as a new message. Pull down to refresh.
 **⋯ › Connection Details** shows the Mac's address, the certificate fingerprint
 the phone checks, and the app version.
 
-Both devices share one runtime. While a run is going, whichever device started
-it, a second send can't start another. Archived chats are readable; restore one
-on the Mac before sending. Attachments, write approvals, remote shell and push
-notifications aren't part of this version.
+Both devices share one runtime. While a run is going, whichever device started it, a second send can't start another. Archived chats are readable. Restore one on the Mac before sending. Attachments, remote shell and push notifications aren't part of this version.
 
 A connection failure never automatically sends the message again. After
 reconnecting, the phone checks the Mac's receipt for the original request. If
