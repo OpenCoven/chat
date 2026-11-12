@@ -99,7 +99,9 @@ file access.
 **Settings › Access** lists that same declared access, write grants first, and says plainly that
 Chat neither enforces nor extends it. The **Access** row in the inspector's Overview opens it. When
 no access is declared, it says so. When Chat couldn't read the registry or grants, it says that
-instead, so an unreadable store never looks like an empty one.
+instead, so an unreadable store never looks like an empty one. Chat can't read them on Windows yet:
+there, Settings says so whenever Coven Cave has project metadata, and points to the familiar's
+**Projects** tab in Coven Cave.
 
 You can also type **`@name`** or **`#project`** directly in your message for inline suggestions.
 Use the arrow keys to choose and **Tab** to confirm, or **Escape** to dismiss. The optional
