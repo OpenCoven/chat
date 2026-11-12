@@ -56,6 +56,7 @@ every surface at 4.5:1 in both schemes. Keep it green when a value moves.
 | Text on a solid lavender fill | `--accent-presence-foreground` | `#0c0c0e` | `#ffffff` |
 | Keyboard focus ring | `--ring-focus` | `#a79bf5` | `#5b45d6` |
 | Danger | `--color-danger` | `oklch(0.66 0.11 24)` | `oklch(0.52 0.17 25)` |
+| Text on a solid danger fill | `--color-danger-foreground` | `#0c0c0e` | `#ffffff` |
 | Warning | `--color-warning` | `oklch(0.76 0.08 78)` | `oklch(0.52 0.12 70)` |
 | Success | `--color-success` | `#a2a1ab` | `#4a4955` |
 
@@ -124,6 +125,15 @@ of any of them needs a role decision first, recorded in `action-roles.ts`.
 The destructive gap is recorded, not filled: adding `.fr-btn--danger` is a
 design change with its own contrast check, and belongs in a change that
 also decides what `.coven-delete-confirm` becomes.
+
+The composer draws both of its actions after Cave's composer, in these roles
+(`src/coven/chat-app.css`, composer section). Send stays `presence`, drawn as
+a 32px square with a lavender outline over an 18% tint, not Cave's solid
+fill. Stop during a run stays `destructive`, drawn as a solid
+`--color-danger` pill labelled "esc · stop" in `--color-danger-foreground`.
+That label holds 4.5:1 in both schemes (`familiars-shell.css.test.ts`). The
+solid fill is the composer's alone; every other `destructive` button keeps
+the tint.
 
 ## Historical layers, named
 

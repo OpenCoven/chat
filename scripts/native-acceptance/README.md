@@ -16,10 +16,10 @@ the ones published (this is also why the lane is not blocked by #532).
 runner, then run `run.mjs`. `.github/workflows/native-acceptance.yml` runs them.
 
 The model is a stand-in: `fixture.mjs` extends the packaged suite's
-deterministic endpoint with a slow streaming reply (row 7), an address with a
-sign-in name (#515), and the packaged suite's approval script, which asks the
-real engine to write a real file. Every word the app shows is synthetic. The
-asking rows also pair a stand-in phone (`phone.mjs`); see below.
+deterministic endpoint with a slow streaming reply (rows 7 and 543-1), an
+address with a sign-in name (#515), and the packaged suite's approval script,
+which asks the real engine to write a real file. Every word the app shows is
+synthetic. The asking rows also pair a stand-in phone (`phone.mjs`); see below.
 
 Results are **native OS-level automation** on CI runners. They are never
 hand-run results, and a row the lane could not stage is reported as blocked,

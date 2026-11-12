@@ -24,6 +24,7 @@
   --ring-focus: #a79bf5;
   --color-warning: oklch(0.76 0.08 78);
   --color-danger: oklch(0.66 0.11 24);
+  --color-danger-foreground: #0c0c0e;
   --color-success: #a2a1ab;
   --font-inter: "Inter Variable", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   --font-jetbrains-mono: "JetBrains Mono Variable", ui-monospace, SFMono-Regular, Menlo, monospace;
@@ -75,6 +76,7 @@
     --ring-focus: #5b45d6;
     --color-warning: oklch(0.52 0.12 70);
     --color-danger: oklch(0.52 0.17 25);
+    --color-danger-foreground: #ffffff;
     --color-success: #4a4955;
   }
 

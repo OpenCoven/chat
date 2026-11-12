@@ -31,6 +31,7 @@ import {
   quoteRow,
   Row,
   showFamiliars,
+  stopKeyRow,
   switchRow,
   tableRow,
 } from './rows.mjs';
@@ -354,6 +355,9 @@ try {
     await lane.front();
     await lane.reset();
     rows.push(await modelRow(lane, FIRST, models));
+    await lane.front();
+    await lane.reset();
+    rows.push(await stopKeyRow(lane, FIRST));
   }
 
   // Asking for permission (#542, #573), last of the rows that send: its turns

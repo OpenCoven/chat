@@ -88,6 +88,7 @@ what its window does. CI's `.deb` is built in the CI image (Ubuntu 24.04) and it
 | 5 Tables at 480×520, Larger text | The sheet fits and scrolls across; both **Copy table Markdown** buttons put the exact source on the clipboard; the review opens above the sheet; Escape closes the review, then the sheet; focus returns to the link, then **Expand table** | |
 | 6 Inspector resize | Arrow keys step 16px; Home and End reach the ends; Settings → General shows the width and **Reset**; after a trip to 1000px wide the rail stays folded (widening never forces it open, by design) and **Show inspector** reopens it at the stored 600px; an in-window drag (recorded, not judged) | Pointer capture through a drag that leaves the window; the separator read aloud |
 | 7 Quote through a cancelled run | | All of it |
+| 543-1 Escape stops a real run | | All of it |
 | 8 Preference-only storage | Judged against `SECURITY.md`: local storage holds only `opencoven.chat.preferences.v1` (with a numeric `inspectorWidth`) and `opencoven.chat.navigation.v1` (`familiarId` and `sessionId`). Nothing is in session storage or IndexedDB, and no address, table, passage or draft text is stored anywhere | |
 | 9 IPv6 | `https://[::1]:8080/x` shows site `[::1]:8080`; Copy and Open use exactly that address | |
 | #515 handoff | **Open** hands the operating system exactly the reviewed address, once, for a query string, a plain address and IPv6 | The browser's own address bar, with the browser closed and with it running |
