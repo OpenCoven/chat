@@ -316,7 +316,10 @@ pub(crate) fn companion_active_run(
     state
         .companion_active()
         .filter(|run| run.phone_origin.load(std::sync::atomic::Ordering::SeqCst))
-        .map_or(Value::Null, |run| run.window_notice("running", None))
+        .map_or(
+            Value::Null,
+            |r| json!({"runId":r.id,"familiarId":r.familiar_id,"status":"running"}),
+        )
 }
 fn cancel_phone_run(app: &tauri::AppHandle) {
     if let Some(run) = app

@@ -9,8 +9,6 @@ export type CompanionRunEvent = {
   status: 'running' | 'completed' | 'failed' | 'stopped';
   event?: CovenRunEvent | null;
   error?: string;
-  /** The host's word on this turn's access: true only when a grant started it. */
-  fullPermission?: boolean;
 };
 export type ObserveCompanionRuns = (
   receive: (value: CompanionRunEvent) => void,
@@ -27,8 +25,7 @@ function valid(value: unknown): value is CompanionRunEvent {
         v.event !== null &&
         'type' in v.event &&
         typeof v.event.type === 'string')) &&
-    (v.error === undefined || typeof v.error === 'string') &&
-    (v.fullPermission === undefined || typeof v.fullPermission === 'boolean')
+    (v.error === undefined || typeof v.error === 'string')
   );
 }
 export async function observeCompanionRuns(

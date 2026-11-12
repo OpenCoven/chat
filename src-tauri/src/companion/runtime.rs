@@ -177,15 +177,12 @@ fn companion_run(
     );
     *record.base_session.lock().map_err(|_| "Run unavailable.")? = request.session_id.clone();
     record.phone_origin.store(true, Ordering::SeqCst);
-    record
-        .full_permission
-        .store(grant.is_some(), Ordering::SeqCst);
     state.remember_companion(record.clone())?;
     let worker_record = record.clone();
     tauri::async_runtime::spawn_blocking(move || {
         let _registration = registration;
         let emit = |status: &str, event: Option<Value>| {
-            let _ = app.emit("companion-run", worker_record.window_notice(status, event));
+            let _ = app.emit("companion-run",json!({"runId":request.request_id,"familiarId":request.familiar_id,"status":status,"event":event}));
         };
         emit("running", None);
         let result = (|| {
@@ -271,25 +268,6 @@ fn history_projection(
 #[cfg(test)]
 mod tests {
     use super::*;
-    #[test]
-    fn the_window_hears_a_phone_turns_access_from_the_host() {
-        let run = crate::companion::backend::RunRecord::new(
-            "active".into(),
-            "familiar".into(),
-            Arc::new(AtomicBool::new(false)),
-        );
-        let notice = run.window_notice("running", None);
-        assert_eq!(notice["runId"], "active");
-        assert_eq!(notice["familiarId"], "familiar");
-        assert_eq!(notice["status"], "running");
-        assert_eq!(notice["fullPermission"], false);
-        // Only a grant sets this, and it is what the window shows while the turn runs.
-        run.full_permission.store(true, Ordering::SeqCst);
-        let event = json!({"type":"text_delta","text":"hi"});
-        let notice = run.window_notice("running", Some(event.clone()));
-        assert_eq!(notice["fullPermission"], true);
-        assert_eq!(notice["event"], event);
-    }
     #[test]
     fn active_history_excludes_sessionless_events_by_turn_provenance() {
         let run = crate::companion::backend::RunRecord::new(

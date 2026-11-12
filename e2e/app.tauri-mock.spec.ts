@@ -553,8 +553,8 @@ test('keeps the access word whole beside a long familiar name in a narrow window
   await installRuntimeFixture(page);
   await page.goto('/');
   await expect(page.getByRole('textbox', { name: `Message ${name}` })).toBeEnabled();
-  const access = page.locator('[data-access="read-only"]');
-  await expect(access).toContainText('Read only');
+  const access = page.locator('[data-access="full"]');
+  await expect(access).toContainText('Full access');
   const fit = await access.evaluate((element) => {
     const box = element.getBoundingClientRect();
     const row = element.parentElement?.getBoundingClientRect();
@@ -1022,36 +1022,33 @@ test('Escape stops a run from the page and the composer, but not from a dialog',
 });
 
 for (const colorScheme of ['dark', 'light'] as const) {
-  test(`says Full permission only during the allowed turn (${colorScheme})`, async ({ page }) => {
-    // The turn stays open on its thinking dots, which would never let the contrast read settle.
+  test(`says Full access during a run and between runs (${colorScheme})`, async ({ page }) => {
+    // Chats run with full access (#576). The turn stays open on its thinking dots, which
+    // would never let the contrast read settle, so motion is off.
     await page.emulateMedia({ colorScheme, reducedMotion: 'reduce' });
     await page.setViewportSize({ width: 1600, height: 900 });
-    await installRuntimeFixture(page, true, undefined, 1, undefined, false, true, [
-      {
-        id: 'request-1',
-        familiarId: 'fixture-familiar',
-        summary: 'Create probe.txt',
-        requestedAt: Date.now(),
-        expiresAt: Date.now() + 3_600_000,
-      },
-    ]);
+    await installRuntimeFixture(page);
     await page.goto('/');
+    const composer = page.getByRole('textbox', { name: 'Message Local familiar' });
     const details = page
       .getByRole('region', { name: 'Message composer' })
       .getByRole('group', { name: 'Chat details' });
-    await expect(details).toContainText('Local familiar · Read only');
-    await page.getByRole('button', { name: 'Allow once', exact: true }).click();
+    await expect(composer).toBeEnabled();
+    await expect(details).toContainText('Local familiar · Full access');
+    await composer.fill('Keep this turn open');
+    await page.getByRole('button', { name: 'Send', exact: true }).click();
     const stop = page.getByRole('button', { name: 'Stop run', exact: true });
     await expect(stop).toBeVisible();
-    await expect(details).toContainText('Local familiar · Full permission');
+    await expect(details).toContainText('Local familiar · Full access');
     await page.mouse.move(2, 2);
     // Retried: with motion off nothing tells the helper the first paint has settled, and a
     // backdrop caught mid-repaint reads every text at about 1:1. A real failure still fails.
     await expect.poll(() => contrastFailures(page), { timeout: 15_000 }).toEqual([]);
-    // The card has gone, and the key still reaches the run.
+    await page.getByRole('log', { name: 'Messages' }).focus();
     await page.keyboard.press('Escape');
     await expect(stop).toHaveCount(0);
-    await expect(details).toContainText('Local familiar · Read only');
+    await expect(details).toContainText('Local familiar · Full access');
+    await expect(details).not.toContainText(/Read only|Full permission/);
   });
 
   test(`lays the composer out as field, toolbar and details (${colorScheme})`, async ({
@@ -1065,7 +1062,7 @@ for (const colorScheme of ['dark', 'light'] as const) {
     await expect(composer).toBeEnabled();
     const frame = page.getByRole('region', { name: 'Message composer' });
     const details = frame.getByRole('group', { name: 'Chat details' });
-    await expect(details).toContainText('Local familiar · Read only');
+    await expect(details).toContainText('Local familiar · Full access');
     await expect(details).toContainText('Coven Code');
     await expect(details).toContainText('Engine default');
     await expect(details).toContainText('Familiar workspace: /fixture/familiars/0/workspace');

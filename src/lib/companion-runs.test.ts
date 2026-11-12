@@ -1,5 +1,5 @@
 import { expect, it, vi } from 'vitest';
-import { type CompanionRunEvent, observeCompanionRuns } from './companion-runs';
+import { observeCompanionRuns } from './companion-runs';
 
 it('subscribes before reading and ignores a stale active-run snapshot', async () => {
   let deliver: (event: { payload: unknown }) => void = () => {};
@@ -43,21 +43,4 @@ it('accepts native terminal events with a null event payload', async () => {
   deliver({ payload: { runId: 'one', familiarId: 'astra', status: 'completed', event: null } });
   expect(received).toHaveBeenCalledOnce();
   stop();
-});
-
-it("carries the host's word on full permission, and refuses a malformed one", async () => {
-  const received: CompanionRunEvent[] = [];
-  let emit: (event: { payload: unknown }) => void = () => {};
-  await observeCompanionRuns((value) => received.push(value), {
-    available: () => true,
-    invoke: async () => null,
-    listen: async (_name, callback) => {
-      emit = callback;
-      return () => {};
-    },
-  });
-  const base = { runId: 'r', familiarId: 'f', status: 'running' };
-  emit({ payload: { ...base, fullPermission: true } });
-  emit({ payload: { ...base, fullPermission: 'yes' } });
-  expect(received).toEqual([{ ...base, fullPermission: true }]);
 });

@@ -32,8 +32,6 @@ pub(crate) struct RunRecord {
     pub familiar_id: String,
     pub cancel: Arc<AtomicBool>,
     pub phone_origin: AtomicBool,
-    /// Set from the host's own grant, before the run starts.
-    pub full_permission: AtomicBool,
     inner: Mutex<RunContent>,
     pub base_session: Mutex<Option<String>>,
     pub parent_session: Mutex<Option<String>>,
@@ -51,7 +49,6 @@ impl RunRecord {
             familiar_id,
             cancel,
             phone_origin: AtomicBool::new(false),
-            full_permission: AtomicBool::new(false),
             base_session: Mutex::new(None),
             parent_session: Mutex::new(None),
             inner: Mutex::new(RunContent {
@@ -100,16 +97,6 @@ impl RunRecord {
     }
     pub fn running(&self) -> bool {
         self.inner.lock().is_ok_and(|r| r.status == "running")
-    }
-    /// What the Mac's window is told about a phone's run.
-    pub fn window_notice(&self, status: &str, event: Option<Value>) -> Value {
-        json!({
-            "runId": self.id,
-            "familiarId": self.familiar_id,
-            "status": status,
-            "event": event,
-            "fullPermission": self.full_permission.load(Ordering::SeqCst),
-        })
     }
 }
 
