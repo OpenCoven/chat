@@ -41,9 +41,10 @@ if [ -z "${LANE_INNER:-}" ]; then
     log "checksum: $checksum"
   else
     version="${release#v}"
-    if [ "$kind" = appimage ]; then asset="OpenCoven.Chat_${version}_amd64.AppImage"; else asset="OpenCoven.Chat_${version}_amd64.deb"; fi
+    if [ "$kind" = appimage ]; then suffix="amd64.AppImage"; else suffix="amd64.deb"; fi
     base="https://github.com/OpenCoven/chat/releases/download/${release}"
     curl --proto '=https' --tlsv1.2 --fail --location --retry 3 -o "$work/SHA256SUMS" "$base/SHA256SUMS" || exit 1
+    asset="$(node "$here/../release-installer.mjs" "$work/SHA256SUMS" "$version" "$suffix")" || exit 1
     curl --proto '=https' --tlsv1.2 --fail --location --retry 3 -o "$work/$asset" "$base/$asset" || exit 1
     checksum="$(cd "$work" && grep -F "  ${asset}" SHA256SUMS | sha256sum -c - 2>&1)"
     log "checksum: $checksum"

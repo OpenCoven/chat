@@ -29,9 +29,11 @@ if ($env:CANDIDATE_INSTALLER) {
   $sourceLabel = "candidate $Installer built from $commit, not a published release"
 } else {
   $version = $Release.TrimStart('v')
-  $asset = if ($Installer -eq 'msi') { "OpenCoven.Chat_${version}_x64_en-US.msi" } else { "OpenCoven.Chat_${version}_x64-setup.exe" }
+  $suffix = if ($Installer -eq 'msi') { 'x64_en-US.msi' } else { 'x64-setup.exe' }
   $base = "https://github.com/OpenCoven/chat/releases/download/$Release"
   Invoke-WebRequest -UseBasicParsing -Uri "$base/SHA256SUMS" -OutFile (Join-Path $work 'SHA256SUMS')
+  $asset = & node (Join-Path $PSScriptRoot '../release-installer.mjs') (Join-Path $work 'SHA256SUMS') $version $suffix
+  if ($LASTEXITCODE -ne 0) { throw 'Could not identify the published installer.' }
   Invoke-WebRequest -UseBasicParsing -Uri "$base/$asset" -OutFile (Join-Path $work $asset)
   $expected = (Get-Content (Join-Path $work 'SHA256SUMS') | Where-Object { $_ -match "  $([regex]::Escape($asset))$" }) -replace '\s.*$', ''
   $sha = (Get-FileHash -Algorithm SHA256 (Join-Path $work $asset)).Hash.ToLowerInvariant()
@@ -55,6 +57,9 @@ if ($Installer -eq 'msi') {
 }
 Log "installer exit: $($p.ExitCode)"
 $exe = @(
+  "$env:LOCALAPPDATA\Programs\Coven Chat\opencoven-chat.exe",
+  "$env:LOCALAPPDATA\Coven Chat\opencoven-chat.exe",
+  "$env:ProgramFiles\Coven Chat\opencoven-chat.exe",
   "$env:LOCALAPPDATA\Programs\OpenCoven Chat\opencoven-chat.exe",
   "$env:LOCALAPPDATA\OpenCoven Chat\opencoven-chat.exe",
   "$env:ProgramFiles\OpenCoven Chat\opencoven-chat.exe"

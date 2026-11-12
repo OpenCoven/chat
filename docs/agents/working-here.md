@@ -98,10 +98,7 @@ Compare against an unchanged worktree before chasing any of these as a regressio
   `corepack pnpm@10.34.0 --ignore-workspace test:unit:heavy` on its own.
 - **`src/phase1-conformance.test.ts`** (heavy) needs the exact Node version in `.node-version`
   and `rustup` on `PATH`. A newer Node or a toolchain without rustup fails it.
-- **Playwright WebKit** skips buttons on Tab (Safari's default keyboard setting), so walk focus in
-  Chromium. WebKit also doesn't deliver the suite's synthetic file drop, and its
-  `Range.getBoundingClientRect()` ignores the right-to-left overflow shift, so check text
-  position by screenshot. The e2e suite runs Chromium only.
+- **Playwright WebKit** skips buttons on Tab (Safari's default keyboard setting), so the cross-browser suite uses Option+Tab in WebKit. Its clipboard permissions and RTL Range geometry checks remain Chromium-only, with explicit WebKit skips. The e2e suite runs Chromium and WebKit, and rendered captures provide the text-position check.
 - `e2e/design-review/` is a capture harness for rendered design checks. Run it with
   `--config e2e/design-review/playwright.config.ts`.
 

@@ -73,7 +73,7 @@ describe('desktop host bridge', () => {
 
   it('labels the browser preview fallback explicitly', () => {
     expect(previewAppIdentity()).toEqual({
-      name: 'OpenCoven Chat (preview)',
+      name: 'Coven Chat (preview)',
       identifier: 'preview-only',
       phase: 'phase-1-read-only-production-preview',
     });

@@ -335,7 +335,7 @@ fn builder() -> tauri::Builder<tauri::Wry> {
 pub fn run() {
     builder()
         .build(tauri::generate_context!())
-        .expect("error while building OpenCoven Chat")
+        .expect("error while building Coven Chat")
         .run(|app, event| {
             if let tauri::RunEvent::ExitRequested { api, code, .. } = event {
                 use tauri::Manager;

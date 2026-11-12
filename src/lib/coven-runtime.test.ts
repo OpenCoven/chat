@@ -253,7 +253,7 @@ describe('Coven runtime', () => {
     const runtime = createCovenRuntime({ available: () => false, invoke });
     expect(await runtime.status()).toEqual({
       available: false,
-      error: 'Local Coven requires the desktop app. Install Coven CLI and open OpenCoven Chat.',
+      error: 'Local Coven requires the desktop app. Install Coven CLI and open Coven Chat.',
     });
     await expect(runtime.listSessions()).rejects.toThrow('desktop app');
     expect(invoke).not.toHaveBeenCalled();

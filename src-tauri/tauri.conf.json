@@ -1,6 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "OpenCoven Chat",
+  "productName": "Coven Chat",
   "version": "0.1.1",
   "identifier": "ai.opencoven.chat",
   "build": {
@@ -14,7 +14,7 @@
     "windows": [
       {
         "label": "main",
-        "title": "OpenCoven Chat",
+        "title": "Coven Chat",
         "width": 1180,
         "height": 780,
         "minWidth": 480,
@@ -31,13 +31,20 @@
   },
   "bundle": {
     "active": true,
-    "targets": ["app", "dmg", "msi", "nsis", "appimage", "deb"],
+    "targets": [
+      "app",
+      "dmg",
+      "msi",
+      "nsis",
+      "appimage",
+      "deb"
+    ],
     "createUpdaterArtifacts": false,
     "publisher": "OpenCoven",
     "copyright": "Copyright (c) 2026 OpenCoven",
     "category": "public.app-category.social-networking",
     "shortDescription": "Desktop chat client for OpenCoven familiars.",
-    "longDescription": "OpenCoven Chat brings your local Coven CLI sessions and familiars into one desktop conversation interface.",
+    "longDescription": "Coven Chat brings your local Coven CLI sessions and familiars into one desktop conversation interface.",
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
@@ -51,7 +58,24 @@
     },
     "linux": {
       "deb": {
-        "depends": []
+        "depends": [],
+        "provides": [
+          "opencoven-chat"
+        ],
+        "conflicts": [
+          "opencoven-chat"
+        ],
+        "replaces": [
+          "opencoven-chat"
+        ]
+      }
+    },
+    "windows": {
+      "wix": {
+        "upgradeCode": "a2a06b97-15fc-5a57-98c4-22c77ca45ea2"
+      },
+      "nsis": {
+        "template": "installer/installer.nsi"
       }
     }
   }

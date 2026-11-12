@@ -1,6 +1,6 @@
-# Releasing OpenCoven Chat
+# Releasing Coven Chat
 
-You release the **OpenCoven Chat** desktop app (`ai.opencoven.chat`) by pushing
+You release the **Coven Chat** desktop app (`ai.opencoven.chat`) by pushing
 a **signed, annotated `v*` tag**. The `.github/workflows/release.yml` pipeline
 does the rest: it verifies the tag, builds installers for macOS, Windows and
 Linux (signed and notarized on macOS), checksums them, and
@@ -205,7 +205,7 @@ PREVIOUS=v0.1.1   # the release before it
    ```bash
    git fetch origin
    test -n "$COMMIT" && git show "$COMMIT:package.json" | grep '"version"'
-   git tag -s "$VERSION" -m "OpenCoven Chat $VERSION" "$COMMIT"
+   git tag -s "$VERSION" -m "Coven Chat $VERSION" "$COMMIT"
    git verify-tag "$VERSION"
    ```
 
@@ -318,7 +318,7 @@ carries a **GPG or SSH signature**. The workflow rejects anything else.
 Create a signed tag (`VERSION` is set at the top of § 1):
 
 ```bash
-git tag -s "$VERSION" -m "OpenCoven Chat $VERSION"
+git tag -s "$VERSION" -m "Coven Chat $VERSION"
 ```
 
 `-s` signs with your configured signing key. To check which format and key Git
@@ -671,7 +671,7 @@ Per release, the workflow publishes:
   `shasum -a 256 -c --ignore-missing SHA256SUMS` (§ 1, step 9).
 - **Updater signatures** (when the updater is on, § 4): a `.sig` beside the
   `.msi`, `-setup.exe`, `.AppImage` and `.deb`, and each Mac's
-  `<target>-OpenCoven.Chat.app.tar.gz` with its `.sig`.
+  `<target>-Coven.Chat.app.tar.gz` with its `.sig`.
 - **`latest.json`**: the updater feed for this version, **only when the updater
   is on** (§ 4). Apps read the copy on the `updater` release, not this one.
   Absent from every release up to v0.0.5.
@@ -728,7 +728,7 @@ Deleting the release leaves the tag in place, where it can still be referenced.
 Keeping the release and marking it withdrawn is clearer:
 
 ```bash
-gh release edit "$VERSION" --prerelease --title "OpenCoven Chat $VERSION (WITHDRAWN: do not use)"
+gh release edit "$VERSION" --prerelease --title "Coven Chat $VERSION (WITHDRAWN: do not use)"
 ```
 
 ### 6.3 Delete or supersede the tag

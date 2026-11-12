@@ -10,7 +10,7 @@ import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
-export const PRODUCT_NAME = 'OpenCoven Chat';
+export const PRODUCT_NAME = 'Coven Chat';
 export const IDENTIFIER = 'ai.opencoven.chat';
 export const DEFAULT_WINDOW = { width: 1180, height: 780 };
 // The implemented and documented minimum (README, responsive tiers). The
@@ -92,6 +92,19 @@ export function verifyPackage({ conf, capabilities, cargo, exists }) {
   if (conf.productName !== PRODUCT_NAME)
     fail(`productName is ${conf.productName}, not ${PRODUCT_NAME}.`);
   if (conf.identifier !== IDENTIFIER) fail(`identifier is ${conf.identifier}, not ${IDENTIFIER}.`);
+  if (
+    conf.bundle?.windows?.wix?.upgradeCode?.toLowerCase() !== 'a2a06b97-15fc-5a57-98c4-22c77ca45ea2'
+  )
+    fail('Keep the legacy MSI install identity: pin the OpenCoven Chat UpgradeCode.');
+  if (
+    conf.bundle?.windows?.nsis?.template !== 'installer/installer.nsi' ||
+    !exists('installer/installer.nsi')
+  )
+    fail('Keep the legacy NSIS install identity: use the versioned migration template.');
+  for (const field of ['provides', 'conflicts', 'replaces']) {
+    if (!conf.bundle?.linux?.deb?.[field]?.includes('opencoven-chat'))
+      fail(`Keep the legacy Debian install identity: ${field} must include opencoven-chat.`);
+  }
 
   const windows = conf.app?.windows ?? [];
   const main = windows.find((window) => window.label === 'main');
