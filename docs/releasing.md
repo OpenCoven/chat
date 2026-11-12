@@ -37,33 +37,54 @@ remote as history, and the version is not reused (§ 6.3).
 
 ## 1. Release checklist
 
-Run through this in order. First set `VERSION` to the tag you are releasing.
-The commands in this document use it, so run them in the same shell:
+A release is two pull requests, a signed tag, and checks on what was published. Do the steps
+in order, and start each stage only when the one before it is done.
+
+| Stage | Steps | Done when |
+| --- | --- | --- |
+| Prepare | 1–4 | The prep PR is ready: the version bump, the release notes, and the docs that name the version, all checked locally |
+| Land | 5 | The prep PR and the repin PR are merged, and `main`'s push CI passes, including **Phase 1 authority is current** |
+| Tag | 6–8 | The signed tag is pushed and the `Release` run has published the release |
+| Verify | 9–11 | Downloads match `SHA256SUMS`, the Releases page shows the notes file exactly, and native acceptance passed against the published installers |
+| Record | 12–13 | The verification record is merged, the issues the release settles are updated, and the release is announced |
+
+First set `VERSION` to the tag you are releasing and `PREVIOUS` to the release before it. The
+commands in this document use both, so run them in the same shell:
 
 ```bash
-VERSION=v0.0.6   # the tag you are releasing
+VERSION=v0.1.2    # the tag you are releasing
+PREVIOUS=v0.1.1   # the release before it
 ```
 
-1. **Start from a clean, up-to-date `main`.**
+### Prepare
+
+1. **Start from an up-to-date `main` in a worktree of your own.** Other sessions work in this
+   repository at the same time, so never release from the primary checkout (`AGENTS.md` →
+   **Working alongside other agents**).
 
    ```bash
-   git checkout main
-   git pull --ff-only
+   git fetch origin
+   git worktree add -b "release/$VERSION" ".worktrees/release-$VERSION" origin/main
+   cd ".worktrees/release-$VERSION"
    git status   # must be clean
    ```
 
-2. **Bump the version in all three manifests to the same value.** The release
-   workflow fails if these disagree with the tag. Update:
+2. **Bump the version in all four places to the same value.** The release workflow fails if
+   these disagree with the tag. Update:
 
    - `package.json` → `"version"`
    - `src-tauri/tauri.conf.json` → `"version"`
    - `src-tauri/Cargo.toml` → `[package] version`
+   - `src-tauri/Cargo.lock` → the `opencoven-chat` entry. Let Cargo write it after the other
+     three; the diff is one line.
 
    ```bash
+   cargo metadata --manifest-path src-tauri/Cargo.toml --format-version 1 --offline > /dev/null
    # each must show $VERSION without the leading v
    node -p "require('./package.json').version"
    node -p "require('./src-tauri/tauri.conf.json').version"
    grep -m1 '^version' src-tauri/Cargo.toml
+   grep -A1 '^name = "opencoven-chat"' src-tauri/Cargo.lock
    ```
 
    **Verify the package contract.** The release workflow runs this before any
@@ -86,8 +107,32 @@ VERSION=v0.0.6   # the tag you are releasing
    (`bundle.active: true` with the platform targets), otherwise `tauri build`
    produces no installers.
 
-3. **Land the bump through a pull request** (see branch protection in § 7).
-   Don't tag off an unmerged branch.
+3. **Write the release notes and update the docs that name the version**, in the same PR.
+
+   - Write `docs/release-notes/$VERSION.md` from the template in
+     `docs/release-notes/README.md`, and add the release's row to the table there. The notes
+     become the release's body on the Releases page, so write them for someone deciding
+     whether to install.
+   - List what landed since the previous release. Each line is a merged PR and its title,
+     the raw material for the notes:
+
+     ```bash
+     git log --merges --first-parent --format='%s: %b' "$PREVIOUS"..origin/main \
+       | sed 's/^Merge pull request //'
+     ```
+
+   - Check the docs that describe what ships. `README.md` is the product-behavior contract:
+     every behavior change in that list should already be in it, so read the changed parts
+     against the notes. Update `docs/iphone-companion.md` if the iPhone companion builds that
+     work with this version changed. `SECURITY.md` names no version and changes only with the
+     support policy.
+
+   - Check the notes. The check prints `Release notes for $VERSION are ready.`, or names each
+     part to fix:
+
+     ```bash
+     node scripts/release-notes.mjs "$VERSION"
+     ```
 
 4. **Verify locally that the app builds and tests pass.**
 
@@ -99,17 +144,50 @@ VERSION=v0.0.6   # the tag you are releasing
    corepack pnpm app:build   # local sanity build
    ```
 
-5. **Check the updater key.** If `src-tauri/tauri.conf.json` has a
-   `plugins.updater` section, `release-signing` must hold
-   `TAURI_SIGNING_PRIVATE_KEY` and `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`
-   (§ 3, § 4). `verify-tag` refuses the release otherwise. A tree without
-   `plugins.updater` needs neither.
+### Land
 
-6. **Create a signed, annotated tag** on the merge commit (see § 2):
+5. **Land the prep PR, then the repin PR, then wait for `main` to pass.**
+
+   - Open the prep PR from `release/$VERSION` (see branch protection in § 7). Don't tag off an
+     unmerged branch. Merge it with a merge commit, not a squash: the repin names that commit.
+   - `src-tauri/Cargo.toml` and `src-tauri/Cargo.lock` are governed files (`CONTRIBUTING.md` →
+     **The conformance lock**), so the bump moves the conformance authority. After the prep PR
+     merges, the push CI on `main` fails at **Phase 1 authority is current** in **Web
+     checks**. That failure is expected: it means the repin is due.
+   - Open the repin PR from a branch such as `chore/$VERSION-authority-repin`. It is the only
+     PR that touches `phase1-conformance.lock.json`. It points the authority at the prep PR's
+     merge commit, refreshes the digests of the files that changed, updates the literal copy
+     in `src/phase1-conformance-lock.test.ts`, and adds a `## $VERSION package-version
+     authority` entry to `docs/phase1-conformance.md`. **The repin PR** in
+     `docs/phase1-conformance.md` has the rules, and #596 (v0.1.1) is a complete example.
+   - After the repin merges, wait until the `CI` run for that push to `main` passes, including
+     **Phase 1 authority is current**. Tag that commit, or a later one whose push CI passed;
+     never the prep PR's merge commit.
+
+     ```bash
+     gh api 'repos/OpenCoven/chat/actions/workflows/ci.yml/runs?branch=main&event=push&per_page=1' \
+       --jq '.workflow_runs[0] | "\(.head_sha) \(.status) \(.conclusion)"'
+     ```
+
+### Tag
+
+6. **Check the updater key, then create a signed, annotated tag** on that commit (see § 2).
+
+   If `src-tauri/tauri.conf.json` has a `plugins.updater` section, `release-signing` must
+   hold `TAURI_SIGNING_PRIVATE_KEY` and `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` (§ 3, § 4).
+   `verify-tag` refuses the release otherwise. A tree without `plugins.updater` needs
+   neither.
+
+   `COMMIT` is the newest `main` push whose CI passed. It is empty, and the second line
+   fails, if that run hasn't passed; go back to step 5. The second line must print the
+   version you are releasing.
 
    ```bash
-   git checkout main && git pull --ff-only
-   git tag -s "$VERSION" -m "OpenCoven Chat $VERSION"
+   git fetch origin
+   COMMIT=$(gh api 'repos/OpenCoven/chat/actions/workflows/ci.yml/runs?branch=main&event=push&per_page=1' \
+     --jq '.workflow_runs[0] | select(.conclusion == "success") | .head_sha')
+   test -n "$COMMIT" && git show "$COMMIT:package.json" | grep '"version"'
+   git tag -s "$VERSION" -m "OpenCoven Chat $VERSION" "$COMMIT"
    git verify-tag "$VERSION"
    ```
 
@@ -143,6 +221,12 @@ VERSION=v0.0.6   # the tag you are releasing
      release, § 4) to this version and read it back by the URL installed apps
      use.
 
+   If a build job fails on infrastructure (a network error reaching Apple, a package mirror,
+   or the npm registry), rerun the failed jobs on the same tag. Don't move or recreate the
+   tag (§ 6.3).
+
+### Verify
+
 9. **Verify the published release**: download an installer and `SHA256SUMS`,
    then check the installer against it. Run this in the folder that holds both.
    `--ignore-missing` skips the installers you did not download; without it,
@@ -155,17 +239,46 @@ VERSION=v0.0.6   # the tag you are releasing
 10. **Publish the release notes.** The workflow writes a fixed body: a line
     naming the version, the `shasum` command, whether the Windows installers
     are signed, and whether the release has a `latest.json`. It reads nothing
-    from `docs/release-notes/`. The human-written notes live there, and you
-    apply them yourself:
+    from `docs/release-notes/`, so apply the notes file from step 3 yourself,
+    then confirm that the Releases page shows exactly that file:
 
     ```bash
     gh release edit "$VERSION" --notes-file "docs/release-notes/$VERSION.md"
+    gh release view "$VERSION" --json body --template '{{.body}}' \
+      | diff - "docs/release-notes/$VERSION.md" && echo "notes match"
     ```
 
     Do this even for a pre-release. The generated body does not say what
-    changed, and the Releases page is where people look first.
+    changed, and the Releases page is where people look first. To correct published notes
+    later, change the file in a PR and run both commands again once it merges.
 
-11. **Announce** the release per the usual OpenCoven channels.
+11. **Run native acceptance against the published installers.** It installs the release's
+    own installers on macOS, Windows and Linux and drives them through the window:
+
+    ```bash
+    gh api -X POST repos/OpenCoven/chat/actions/workflows/native-acceptance.yml/dispatches \
+      -f ref=main -f "inputs[release]=$VERSION"
+    ```
+
+    It's done when every lane passes. Rerun a failed job once if the failure matches a known
+    flake (**CI** in `docs/agents/working-here.md`) and record the tally. A real failure in a
+    published release is a new issue and a fix in the next release, not a reason to move the
+    tag (§ 6.3).
+
+### Record
+
+12. **Write the verification record, and update the issues the release settles.**
+
+    - Add `docs/verification/<date>-release-$VERSION.md`, following
+      `docs/verification/2026-11-09-release-v0.0.9.md`: the bump, repin, tag, release run and
+      release; `SHA256SUMS` as published; native acceptance by lane with run links; and what
+      was not verified. Link it from the release's row in `docs/release-notes/README.md`.
+    - For each issue the release resolves, post the published-release evidence, then close
+      the issue or update its State block (`AGENTS.md` → **Where current work lives**).
+      Native-acceptance rows that waited for this version now run against it; note their
+      first result on their issues.
+
+13. **Announce** the release per the usual OpenCoven channels.
 
 ---
 
