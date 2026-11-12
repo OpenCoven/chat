@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'vitest';
 import {
   classifyWorktree,
+  coordinationNames,
   parseCwdList,
   parseWorktreeList,
   type WorktreeFacts,
@@ -52,7 +53,10 @@ describe('worktree audit', () => {
   });
 
   test('calls a landed, clean, idle worktree removable', () => {
-    expect(classifyWorktree(landedAndIdle).verdict).toBe('removable');
+    expect(classifyWorktree(landedAndIdle)).toEqual({
+      verdict: 'removable',
+      reasons: ['landed (head is in origin/main)', 'clean and idle'],
+    });
     expect(classifyWorktree({ ...landedAndIdle, merged: false, prState: 'closed' }).verdict).toBe(
       'removable',
     );
@@ -84,10 +88,25 @@ describe('worktree audit', () => {
     expect(recent.reasons.join()).toContain('active 1.0 day(s) ago');
     const retained = classifyWorktree({ ...landedAndIdle, retained: true });
     expect(retained.verdict).toBe('check');
-    expect(retained.reasons.join()).toContain('docs/project-coordination.md');
+    expect(retained.reasons).toEqual([
+      'landed (head is in origin/main)',
+      'named in docs/project-coordination.md',
+    ]);
     expect(classifyWorktree({ ...landedAndIdle, idleDays: 5 }, { idleDays: 7 }).verdict).toBe(
       'check',
     );
+  });
+
+  test('names worktrees the way the coordination index does, never by a bare folder name', () => {
+    expect(coordinationNames('/repo/.worktrees/533-rendered-pass', '/repo', '/home/me')).toEqual([
+      '.worktrees/533-rendered-pass',
+      '`533-rendered-pass`',
+    ]);
+    expect(coordinationNames('/home/me/.codex/worktrees/67d4/chat', '/repo', '/home/me')).toEqual([
+      '~/.codex/worktrees/67d4/chat',
+      '/home/me/.codex/worktrees/67d4/chat',
+    ]);
+    expect(coordinationNames('/elsewhere/chat', '/repo', '/home/me')).toEqual(['/elsewhere/chat']);
   });
 
   test('reports a vanished directory as prunable', () => {

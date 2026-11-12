@@ -10,6 +10,9 @@
 // docs/project-coordination.md doesn't retain it and that no peer session owns
 // it (AGENTS.md -> Working alongside other agents).
 //
+// Run `git fetch origin` first: merge state is read from origin/main. Fetching
+// only moves origin/* refs, so it can't disturb another session's work.
+//
 //   node scripts/agent-worktrees.mjs              # table, with PR state from GitHub
 //   node scripts/agent-worktrees.mjs --json       # machine-readable
 //   node scripts/agent-worktrees.mjs --offline    # skip GitHub; merge state from git only
@@ -17,7 +20,7 @@
 
 import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync, statSync } from 'node:fs';
-import { basename, join } from 'node:path';
+import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -64,21 +67,34 @@ export function classifyWorktree(facts, { idleDays = 3 } = {}) {
   if (facts.locked) reasons.push('locked');
   if (facts.dirty > 0) reasons.push(`${facts.dirty} uncommitted path(s)`);
   if (facts.unpushed > 0) reasons.push(`${facts.unpushed} commit(s) on no remote`);
-  if (facts.retained) reasons.push('named in docs/project-coordination.md; check it first');
+  if (facts.retained) reasons.push('named in docs/project-coordination.md');
   const landed = facts.merged || facts.prState === 'merged' || facts.prState === 'closed';
-  if (!landed) {
+  if (landed) {
+    reasons.unshift(
+      facts.merged ? 'landed (head is in origin/main)' : `landed (PR ${facts.prState})`,
+    );
+  } else {
     reasons.push(facts.prState === 'open' ? 'PR open' : 'work not merged and no closed PR');
   }
   if (facts.idleDays < idleDays) reasons.push(`active ${facts.idleDays.toFixed(1)} day(s) ago`);
-  if (reasons.length === 0) {
-    return { verdict: 'removable', reasons: ['work landed; clean and idle'] };
+  if (reasons.length === 1 && landed) {
+    return { verdict: 'removable', reasons: [...reasons, 'clean and idle'] };
   }
   const blocking = facts.inUse || facts.locked || facts.dirty > 0 || facts.unpushed > 0;
   return { verdict: blocking || !landed ? 'keep' : 'check', reasons };
 }
 
+// GIT_OPTIONAL_LOCKS=0 stops `git status` from refreshing other worktrees'
+// index files: the audit stays read-only and can't reset the idle clock it reads.
+const READ_ONLY_GIT = { ...process.env, GIT_OPTIONAL_LOCKS: '0' };
+
 function git(cwd, args) {
-  return execFileSync('git', args, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
+  return execFileSync('git', args, {
+    cwd,
+    encoding: 'utf8',
+    env: READ_ONLY_GIT,
+    stdio: ['ignore', 'pipe', 'ignore'],
+  });
 }
 
 function tryGit(cwd, args) {
@@ -121,6 +137,21 @@ function runningCwds() {
   }
 }
 
+/**
+ * The names docs/project-coordination.md would use for a worktree: the
+ * `.worktrees/<name>` path and a backticked `<name>` for worktrees under the
+ * primary checkout, and the `~/...` path for any other. A bare folder name is
+ * not enough: every external Codex checkout is called `chat`.
+ */
+export function coordinationNames(path, primaryPath, home = '') {
+  const under = `${primaryPath}/.worktrees/`;
+  if (path.startsWith(under)) {
+    const name = path.slice(under.length);
+    return [`.worktrees/${name}`, `\`${name}\``];
+  }
+  return home && path.startsWith(`${home}/`) ? [`~${path.slice(home.length)}`, path] : [path];
+}
+
 /** Gathers facts for every worktree and classifies each one. */
 export function auditWorktrees({ root = process.cwd(), offline = false, idleDays = 3 } = {}) {
   const common = git(root, ['rev-parse', '--path-format=absolute', '--git-common-dir']).trim();
@@ -150,9 +181,17 @@ export function auditWorktrees({ root = process.cwd(), offline = false, idleDays
       merged: false,
       prState: 'none',
       idleDays: Number.POSITIVE_INFINITY,
-      retained: !primary && coordinationText.includes(basename(worktree.path)),
+      retained:
+        !primary &&
+        coordinationNames(worktree.path, primaryPath, process.env.HOME).some((name) =>
+          coordinationText.includes(name),
+        ),
     };
     if (!primary && !missing) {
+      // Read the index timestamp before anything else runs git in this worktree.
+      const adminDir = tryGit(worktree.path, ['rev-parse', '--path-format=absolute', '--git-dir']);
+      const index = adminDir ? join(adminDir, 'index') : '';
+      const touched = index && existsSync(index) ? statSync(index).mtimeMs : 0;
       const status = tryGit(worktree.path, ['status', '--porcelain']) ?? '';
       facts.dirty = status ? status.split('\n').length : 0;
       facts.unpushed = Number(
@@ -161,9 +200,6 @@ export function auditWorktrees({ root = process.cwd(), offline = false, idleDays
       facts.merged =
         tryGit(root, ['merge-base', '--is-ancestor', worktree.head, 'origin/main']) !== null;
       const committed = Date.parse(tryGit(worktree.path, ['log', '-1', '--format=%cI']) ?? '');
-      const adminDir = tryGit(worktree.path, ['rev-parse', '--path-format=absolute', '--git-dir']);
-      const index = adminDir ? join(adminDir, 'index') : '';
-      const touched = index && existsSync(index) ? statSync(index).mtimeMs : 0;
       const last = Math.max(Number.isNaN(committed) ? 0 : committed, touched);
       facts.idleDays = last > 0 ? Math.max(0, now - last) / DAY_MS : Number.POSITIVE_INFINITY;
       facts.prState = offline ? 'unknown' : prStateFor(repo, owner, worktree.branch);

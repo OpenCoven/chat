@@ -25,6 +25,7 @@ export type WorktreeClassification = { verdict: WorktreeVerdict; reasons: string
 
 export function parseWorktreeList(porcelain: string): WorktreeEntry[];
 export function parseCwdList(lsofOutput: string): string[];
+export function coordinationNames(path: string, primaryPath: string, home?: string): string[];
 export function classifyWorktree(
   facts: WorktreeFacts,
   options?: { idleDays?: number },
