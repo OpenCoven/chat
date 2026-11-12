@@ -90,6 +90,12 @@
   min-width: 0;
 }
 
+/* Keeps the look of the bare <code> it replaced: no muted step-paragraph color. */
+.coven-onboarding-command .coven-onboarding-command-text {
+  min-width: 0;
+  color: inherit;
+}
+
 .coven-onboarding-command code {
   overflow-wrap: anywhere;
   user-select: all;
