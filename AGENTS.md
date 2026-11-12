@@ -38,6 +38,31 @@ there, not here. `CLAUDE.md` lists the other sibling checkouts that share this v
 - **Open work is in [GitHub issues](https://github.com/OpenCoven/chat/issues).** An issue's body
   and its latest owner comments hold the acceptance criteria. Don't treat a doc in this repo as a
   backlog.
+- **Each issue opens with a dated State block** (between `agent-state` comment markers): what's
+  done, the next action, and who takes it. When the state changes, edit the block in place
+  rather than adding another.
+- **When sources disagree, the newest wins, and you re-check.** An owner comment newer than the
+  State block overrides it. The State block and labels override the dated snapshot in
+  `docs/project-coordination.md`. If something looks contradictory, fix the stale one in the
+  same change, or ask on the issue.
+- **Labels say who acts next.** Every open issue carries one `area:*` label (`a11y`, `windows`,
+  `linux`, `macos`, `release`, `iphone`, `design`, `missions`) and at least one of these:
+
+  | Label | Meaning |
+  | --- | --- |
+  | `agent-ready` | An agent can take it end to end. Claim it first (below) |
+  | `in-progress` | Claimed or has an open PR. Read the claim before touching it |
+  | `needs-human` | A person must act: run installers, use a device, provision secrets. Agents prepare, not perform |
+  | `needs-decision` | An owner must choose. State the question; don't pick for them |
+  | `blocked:engine` | Waits on a coven-code release. Check its releases first |
+
+  To find work:
+
+  ```bash
+  gh api 'repos/OpenCoven/chat/issues?labels=agent-ready&state=open' --jq '.[] | "#\(.number) \(.title)"'
+  ```
+
+  New agent work uses the **Agent task** issue template (`.github/ISSUE_TEMPLATE/agent-task.md`).
 - **Releases:** `gh api repos/OpenCoven/chat/releases`. Another session may have released since
   you last looked, and older issues and plans name versions that have since been renumbered.
   Check before acting on any version number.
@@ -60,7 +85,7 @@ sessions from destroying each other's work:
 
    ```bash
    git fetch origin
-   git worktree add -b <type>/<short-name> .worktrees/<short-name> origin/main
+   git worktree add -b <type>/<issue>-<slug> .worktrees/<issue>-<slug> origin/main
    ```
 
 2. **Run `git worktree list` before any branch surgery.** Don't edit, reset, rebase, check out
@@ -178,6 +203,7 @@ rooted here rather than burning turns on workarounds.
 
 ## Commits
 
-`main` requires signed commits. Sign every commit (`git commit -S`); `CONTRIBUTING.md` has the
-setup. Before pushing, run `git log -1 --show-signature` and confirm it reports a good signature.
-A commit that fails this check can't merge.
+`main` requires signed commits, so sign every commit and confirm the signature is good before you
+push. **Commit signing** in `docs/agents/working-here.md` has the exact commands. With an SSH key
+(the usual case here) the check needs an allowed signers file; without one it prints "No
+signature" even for a correctly signed commit. `CONTRIBUTING.md` has the general setup.
