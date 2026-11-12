@@ -3092,3 +3092,7 @@ The v0.1.0 release bump landed in merge commit `ef4d020710eb62f3f13ca88cf60dafd7
 ## v0.1.1 package-version authority
 
 The v0.1.1 version content landed in merge commit `07d63f8d09ef8bbb7d70b128280687ccd081e834`, tree `63dd4a513e4ba0cbe0f6795f2666bd0064beab7c`. This follow-up repins all 25 governed files and ten production deltas to that existing main merge. Only the two Cargo application-version hashes change from the previous authority. The release tag must be created after this repin lands and must pass the trusted freshness guard before being pushed. Other repository and evidence pins remain unchanged, and no new protected SDK validation is claimed.
+
+## November 2026 dependency security authority
+
+The dependency security patch in PR #599 landed in merge commit `40ac93ccc604b1933cb8dc26c7cf06a05e5bb442`, tree `58fdbeea4698b141819406a33aa0b5feea88aeed`. This follow-up binds all 25 governed files and ten production deltas to that existing main merge. Only the Cargo manifest and lockfile identities change from the preceding authority, reflecting rustls 0.23.46. All other repository, tool and evidence pins remain unchanged. This source-authority refresh does not claim a new protected SDK validation run.
