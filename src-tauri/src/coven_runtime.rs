@@ -261,8 +261,8 @@ pub(crate) struct SendInput {
     speed: Option<String>,
     #[serde(default)]
     attachments: Vec<attachments::Attachment>,
-    /// Write access for this one turn. Only the host sets it, from a request the
-    /// person allowed: `deny_unknown_fields` rejects it from the webview or phone.
+    /// Legacy approval receipt. Only the host can attach it. It does not select
+    /// the run's permission, and clients cannot submit it.
     #[serde(skip)]
     grant: Option<crate::chat_approvals::Grant>,
 }
@@ -941,8 +941,7 @@ fn run_arguments(
     validate_input(input)?;
     if !matches!(harness, "coven-code" | "codex" | "claude") {
         return Err(
-            "This harness is not enabled for read-only chat. Use Coven Code, Codex or Claude."
-                .into(),
+            "This harness is not supported in Chat. Use Coven Code, Codex or Claude.".into(),
         );
     }
     let mut args = vec![
@@ -950,12 +949,7 @@ fn run_arguments(
         harness.into(),
         "--stream-json".into(),
         "--permission".into(),
-        if input.grant.is_some() {
-            "full"
-        } else {
-            "read-only"
-        }
-        .into(),
+        "full".into(),
         "--cwd".into(),
         cwd.to_str().ok_or("Workspace path is not UTF-8.")?.into(),
     ];
@@ -2182,9 +2176,22 @@ fn send_turn(
             );
         }
     }
-    let (harness, workspace, resumed) = if let Some(id) = &input.session_id {
+    if let Some(id) = &input.session_id {
         crate::chat_lifecycle::require_active(data, id)?;
         crate::chat_origin::require_chat_origin(data, id)?;
+    }
+    // A person who sends a message has moved on from whatever was waiting, even
+    // if this turn never gets as far as the engine. An allowed turn has already
+    // answered its own request. A log that can't be written can't spend a request
+    // either, so that failure leaves nothing to allow and needn't stop the message.
+    if input.grant.is_none() {
+        let _ = crate::chat_approvals::supersede(
+            data,
+            &selected_familiar,
+            crate::chat_approvals::now_ms(),
+        );
+    }
+    let (harness, workspace, resumed) = if let Some(id) = &input.session_id {
         let session = get_session(id)?;
         if let Some(requested) = &input.harness {
             if requested != string(&session, "harness")? {
@@ -3348,14 +3355,12 @@ mod tests {
             &input.prompt,
         )
         .unwrap();
-        assert!(args
-            .windows(2)
-            .any(|pair| pair == ["--permission", "read-only"]));
+        assert!(args.windows(2).any(|pair| pair == ["--permission", "full"]));
         assert_eq!(
             &args[args.len() - 2..],
             ["--", "--permission full; touch file"]
         );
-        assert!(!args.iter().any(|arg| arg == "full"));
+        assert_eq!(args.iter().filter(|arg| *arg == "--permission").count(), 1);
     }
 
     #[test]
@@ -3382,7 +3387,7 @@ mod tests {
     }
 
     #[test]
-    fn attachment_only_input_uses_supported_stream_transport_and_read_only_permission() {
+    fn attachment_only_input_uses_supported_stream_transport_and_full_permission() {
         let input: SendInput = serde_json::from_value(json!({
             "runId": "attachment-run",
             "prompt": "",
@@ -3391,9 +3396,7 @@ mod tests {
         .unwrap();
         let args = run_arguments(&input, "coven-code", Path::new("/safe"), &input.prompt).unwrap();
         assert!(args.iter().any(|arg| arg == "--stream-json-input"));
-        assert!(args
-            .windows(2)
-            .any(|pair| pair == ["--permission", "read-only"]));
+        assert!(args.windows(2).any(|pair| pair == ["--permission", "full"]));
         assert!(run_arguments(&input, "codex", Path::new("/safe"), &input.prompt).is_err());
         assert!(run_arguments(&input, "claude", Path::new("/safe"), &input.prompt).is_err());
     }
@@ -3878,7 +3881,7 @@ mod tests {
     }
 
     #[test]
-    fn bundled_engine_is_read_only_and_preserves_session_identity() {
+    fn bundled_engine_has_full_permission_and_preserves_session_identity() {
         let input = SendInput {
             run_id: "run-1".into(),
             prompt: "hello".into(),
@@ -3899,9 +3902,7 @@ mod tests {
             .windows(2)
             .any(|pair| pair == ["--continue", "session-1"]));
         assert!(args.windows(2).any(|pair| pair == ["--familiar", "sage"]));
-        assert!(args
-            .windows(2)
-            .any(|pair| pair == ["--permission", "read-only"]));
+        assert!(args.windows(2).any(|pair| pair == ["--permission", "full"]));
     }
 
     #[test]
@@ -3937,33 +3938,92 @@ mod tests {
         assert_eq!(turn_text("Hi", false, Some("replayed")), "replayed");
     }
 
+    /// A person who sent a message has moved on, whether or not the message
+    /// got as far as the engine. The request must not come back afterwards.
     #[test]
-    fn only_a_grant_asks_coven_for_full_permission() {
-        let mut input = SendInput {
-            run_id: "run-1".into(),
-            prompt: "Allowed: Create probe.txt".into(),
-            session_id: Some("session-1".into()),
-            familiar_id: Some("sage".into()),
-            harness: None,
-            model: None,
-            think: false,
-            speed: None,
-            attachments: vec![],
-            grant: None,
-        };
-        let permission = |input: &SendInput| {
-            let args = run_arguments(input, "claude", Path::new("/workspace"), "x").unwrap();
-            let at = args.iter().position(|arg| arg == "--permission").unwrap();
-            args[at + 1].clone()
-        };
-        assert_eq!(permission(&input), "read-only");
-        input.grant = Some(crate::chat_approvals::Grant {
-            approval_id: "approval-1".into(),
-            familiar_id: "sage".into(),
-            session_id: "session-1".into(),
-            summary: "Create probe.txt".into(),
-        });
-        assert_eq!(permission(&input), "full");
+    fn a_message_that_never_starts_still_closes_the_request() {
+        let data = std::env::temp_dir().join(uuid::Uuid::new_v4().to_string());
+        let transcripts = data.join("coven-transcripts");
+        std::fs::create_dir_all(&transcripts).unwrap();
+        std::fs::write(
+            transcripts.join("owned.jsonl"),
+            json!({"type":"user","source":"chat-input","session_id":"owned"}).to_string(),
+        )
+        .unwrap();
+        crate::chat_canonical::advance(&data, "f", None, "owned").unwrap();
+        let request = crate::chat_approvals::submit(
+            &data,
+            "f",
+            "owned",
+            "run-1",
+            crate::chat_approvals::Proposal {
+                summary: "Create probe.txt".into(),
+                reason: None,
+            },
+            crate::chat_approvals::now_ms(),
+        )
+        .unwrap();
+        let cancel = AtomicBool::new(true);
+        let mut no_events = |_| panic!("This turn must fail before it runs a model");
+        let error = send_local(
+            &data,
+            SendInput {
+                run_id: "correction".into(),
+                prompt: "Don't do that".into(),
+                session_id: Some("owned".into()),
+                familiar_id: Some("f".into()),
+                harness: None,
+                model: None,
+                think: false,
+                speed: None,
+                attachments: vec![],
+                grant: None,
+            },
+            &cancel,
+            &mut no_events,
+        );
+        assert!(error.is_err());
+        let open =
+            crate::chat_approvals::pending_behind_switch(&data, crate::chat_approvals::now_ms())
+                .unwrap();
+        // What Allow once would do with the card if it came back.
+        let spent = crate::chat_approvals::allow_behind_switch(
+            &data,
+            &request.id,
+            crate::chat_approvals::Device::Desktop,
+            "after-the-correction",
+            crate::chat_approvals::now_ms(),
+        );
+        std::fs::remove_dir_all(&data).unwrap();
+        assert!(
+            spent.is_err(),
+            "Allow still produced a grant after the person's message"
+        );
+        assert!(
+            open.iter().all(|approval| approval.id != request.id),
+            "the request is still open after the person's message"
+        );
+    }
+
+    #[test]
+    fn fresh_and_continued_turns_use_full_permission_for_every_chat_harness() {
+        for harness in ["coven-code", "codex", "claude"] {
+            for session_id in [None, Some("session-1")] {
+                let input = run_input(json!({
+                    "harness": harness,
+                    "sessionId": session_id,
+                    "familiarId": "sage",
+                }));
+                let args =
+                    run_arguments(&input, harness, Path::new("/workspace"), "hello").unwrap();
+                assert!(args.windows(2).any(|pair| pair == ["--permission", "full"]));
+                assert_eq!(args.iter().filter(|arg| *arg == "--permission").count(), 1);
+                assert_eq!(
+                    args.iter().any(|arg| arg == "--continue"),
+                    session_id.is_some()
+                );
+            }
+        }
     }
 
     #[test]
@@ -4199,7 +4259,7 @@ mod tests {
                 .find(|event| event["type"] == "system" && event["subtype"] == "init")
                 .unwrap();
             let id = string(init, "session_id").unwrap().to_owned();
-            assert_eq!(init["permission"], "read-only");
+            assert_eq!(init["permission"], "full");
             let expected = markers[turn];
             let replay_notices = observed
                 .iter()

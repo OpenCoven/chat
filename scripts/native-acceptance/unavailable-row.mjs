@@ -117,7 +117,7 @@ async function refreshCoven(lane) {
 
 export async function unavailableRow(lane, familiar) {
   const row = new Row(
-    'v010-unavailable',
+    'v012-unavailable',
     "A familiar whose chat Coven can't load stays locked; the others still send",
   );
   const { app } = lane;
