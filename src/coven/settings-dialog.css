@@ -49,6 +49,7 @@
 .coven-settings-frame {
   display: grid;
   grid-template-columns: 212px minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr);
   height: 100%;
 }
 
@@ -161,6 +162,7 @@
   display: grid;
   grid-template-rows: auto minmax(0, 1fr);
   min-width: 0;
+  min-height: 0;
 }
 
 .coven-settings-head {
@@ -531,13 +533,24 @@
   font-size: 13px;
 }
 
+.coven-access-scroll {
+  max-height: min(22rem, 42vh);
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+  border: 1px solid var(--border-hairline);
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--bg-elevated) 45%, transparent);
+}
+
+.coven-access-scroll:focus-visible {
+  outline: 2px solid var(--ring-focus);
+  outline-offset: 2px;
+}
+
 .coven-access-list {
   margin: 0;
   padding: 4px;
   list-style: none;
-  border: 1px solid var(--border-hairline);
-  border-radius: 14px;
-  background: color-mix(in srgb, var(--bg-elevated) 45%, transparent);
 }
 
 /* Name and access share the first line; the path gets the full second line. */

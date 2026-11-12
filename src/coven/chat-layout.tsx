@@ -110,6 +110,8 @@ export type ChatLayoutProps = Readonly<{
     projectRoot?: string;
     /** The harness the chat runs on, which it keeps for good. */
     harness?: string;
+    /** Coven couldn't load this recorded chat; the error says so. */
+    unavailable?: boolean;
   }[];
   messages: readonly ChatMessage[];
   attachments?: readonly ChatAttachment[];
@@ -162,6 +164,7 @@ export type ChatLayoutProps = Readonly<{
   onDeclineApproval?: (approval: CovenApproval) => void;
   /** Reads the permission log for Settings › Access. */
   onPermissionLog?: () => Promise<PermissionLogEntry[]>;
+  onRefreshProjectAccess?: () => Promise<void>;
   loading: boolean;
   cancelling: boolean;
   error: string;
@@ -1553,7 +1556,10 @@ export function ChatLayout(props: ChatLayoutProps) {
               ) : null}
               {props.error ? (
                 <div className="coven-error" role="alert">
-                  <span className="coven-error-text">{props.error}</span>
+                  {/* A paragraph, not a span: WebKitGTK gave AT-SPI a span laid out
+                    as a flex item without its text, so on Linux the alert held
+                    only its Copy error button (native run 43006448055). */}
+                  <p className="coven-error-text">{props.error}</p>
                   {props.onReloadChat && !props.loading ? (
                     <FamButton size="sm" className="coven-error-retry" onClick={props.onReloadChat}>
                       Reload chat
@@ -1601,7 +1607,9 @@ export function ChatLayout(props: ChatLayoutProps) {
                   <ThinkingIndicator label={liveRow} />
                 </div>
               ) : null}
-              {!props.messages.length && !props.loading && !runHere ? (
+              {/* A chat Coven couldn't load isn't a new one: its error says what
+                happened, and "the start of your conversation" would contradict it. */}
+              {!props.messages.length && !props.loading && !runHere && !session?.unavailable ? (
                 <div className="fr-thread-empty">
                   {familiar ? (
                     <FamiliarAvatar name={name} avatarUrl={familiar.avatarUrl} size={36} ring />
@@ -2030,6 +2038,7 @@ export function ChatLayout(props: ChatLayoutProps) {
             connected={props.connected}
             onRefresh={props.onRefresh}
             refreshDisabled={Boolean(props.busy || props.loading || props.lifecycleBusy)}
+            onRefreshProjectAccess={props.onRefreshProjectAccess}
             companion={<CompanionPanel />}
             onPermissionLog={props.onPermissionLog}
             familiarName={(id) => props.familiars.find((item) => item.id === id)?.name ?? id}
