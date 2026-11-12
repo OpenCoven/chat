@@ -12,6 +12,9 @@ next to the other agents that are usually running here at the same time.
 3. **`README.md`**: the product-behavior contract. Read the part you're about to change before you
    change anything a user can see.
 4. **`CONTRIBUTING.md`**: pull request expectations, verification, and commit signing.
+5. **`docs/agents/working-here.md`**: what earlier sessions learned the hard way. GitHub API
+   habits, the `ci:full` label gap, known flaky CI rows, and local test failures that aren't
+   yours.
 
 `docs/agent-notes.md` explains the chat transport's continuity gap in depth. The
 `chat-app-orientation` skill (`.claude/skills/chat-app-orientation/SKILL.md`) is a short version of
