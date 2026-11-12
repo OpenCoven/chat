@@ -1214,6 +1214,14 @@ fn sweep_once(
 }
 
 fn visible_sessions(data: &Path, value: &Value) -> Result<Value, String> {
+    visible_sessions_with_lookup(data, value, get_session)
+}
+
+fn visible_sessions_with_lookup(
+    data: &Path,
+    value: &Value,
+    mut lookup: impl FnMut(&str) -> Result<Value, String>,
+) -> Result<Value, String> {
     let lifecycle = crate::chat_lifecycle::load(data)?;
     let mut sessions = Vec::new();
     for session in value
@@ -1227,7 +1235,14 @@ fn visible_sessions(data: &Path, value: &Value) -> Result<Value, String> {
             sessions.push(normalize_session(session)?);
         }
     }
-    crate::chat_canonical::project(data, &sessions).map(Value::Array)
+    let deadline = Instant::now() + READ_TIMEOUT;
+    crate::chat_canonical::project(data, &sessions, |id| {
+        if Instant::now() >= deadline || !crate::chat_origin::has_chat_origin(data, id).ok()? {
+            return None;
+        }
+        normalize_session(&lookup(id).ok()?).ok()
+    })
+    .map(Value::Array)
 }
 
 #[tauri::command]
@@ -2746,6 +2761,69 @@ mod tests {
         fs::remove_file(data.join("chat-canonical-v1.json")).unwrap();
         fs::remove_dir(transcripts).unwrap();
         fs::remove_dir(data).unwrap();
+    }
+
+    #[test]
+    fn session_listing_recovers_an_omitted_head_and_isolates_unavailable_chats() {
+        let data = std::env::temp_dir().join(format!("opencoven-origin-{}", uuid::Uuid::new_v4()));
+        let transcripts = data.join("coven-transcripts");
+        fs::create_dir_all(&transcripts).unwrap();
+        let session = |id, familiar, updated| {
+            json!({"id":id,"familiar_id":familiar,"harness":"coven-code","status":"completed",
+                "updated_at":updated,"project_root":"/work"})
+        };
+        let old = session("old", "f", "2026-09-01");
+        let head = session("head", "f", "2026-09-02");
+        let other = session("other", "g", "2026-09-03");
+        let wrong_owner = session("head", "h", "2026-09-02");
+        for id in ["old", "head", "other"] {
+            fs::write(
+                transcripts.join(format!("{id}.jsonl")),
+                json!({"type":"user","source":"chat-input","session_id":id}).to_string(),
+            )
+            .unwrap();
+        }
+        let all = json!({"sessions":[old,head,other]});
+        visible_sessions_with_lookup(&data, &all, |_| panic!("all heads were listed")).unwrap();
+        let incomplete = json!({"sessions":[old,other,wrong_owner]});
+        let original = fs::read(data.join("chat-canonical-v1.json")).unwrap();
+        let recovered = visible_sessions_with_lookup(&data, &incomplete, |id| {
+            assert_eq!(id, "head");
+            Ok(head.clone())
+        })
+        .unwrap();
+        assert_eq!(recovered[0]["id"], "other");
+        assert_eq!(recovered[1]["id"], "head");
+        assert_eq!(recovered[1]["familiarId"], "f");
+        assert!(recovered[1].get("unavailable").is_none());
+
+        for lookup_result in [
+            Err("Coven did not find the head".into()),
+            Ok(wrong_owner),
+            Ok(old),
+        ] {
+            let partial =
+                visible_sessions_with_lookup(&data, &incomplete, |_| lookup_result.clone())
+                    .unwrap();
+            assert_eq!(partial.as_array().unwrap().len(), 2);
+            assert_eq!(partial[0], recovered[0]);
+            assert_eq!(
+                partial[1],
+                json!({"id":"head","familiarId":"f","title":"Unavailable chat","unavailable":true,"archived":false})
+            );
+            assert_eq!(
+                fs::read(data.join("chat-canonical-v1.json")).unwrap(),
+                original
+            );
+        }
+
+        fs::remove_file(transcripts.join("head.jsonl")).unwrap();
+        let unowned = visible_sessions_with_lookup(&data, &incomplete, |_| {
+            panic!("a lookup cannot replace proof of Chat origin")
+        })
+        .unwrap();
+        assert_eq!(unowned[1]["unavailable"], true);
+        fs::remove_dir_all(data).unwrap();
     }
 
     #[test]

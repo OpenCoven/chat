@@ -75,6 +75,40 @@ describe('empty transcript copy', () => {
     expect(screen.queryByText(/Select a familiar/)).not.toBeInTheDocument();
   });
 
+  it("doesn't call a chat Coven couldn't load the start of a conversation", () => {
+    render(
+      <ChatLayout
+        {...layoutProps()}
+        familiars={[{ id: 'f', name: 'Wren' }]}
+        sessions={[{ id: 's', title: 'Wren', familiarId: 'f', unavailable: true }]}
+        familiarId="f"
+        sessionId="s"
+        connected
+        ready={false}
+        error="Coven couldn't load this chat. Refresh Coven to try again."
+      />,
+    );
+    expect(screen.getByRole('alert')).toHaveTextContent("Coven couldn't load this chat");
+    expect(screen.queryByText(/start of your conversation/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Send the first message/)).not.toBeInTheDocument();
+  });
+
+  it('puts an error in a paragraph, which AT-SPI exposes with its text', () => {
+    // On Linux, WebKitGTK exposed a span laid out as a flex item with no text,
+    // so the alert held only its Copy error button (native run 43006448055).
+    render(
+      <ChatLayout
+        {...layoutProps()}
+        familiars={[{ id: 'f', name: 'Wren' }]}
+        familiarId="f"
+        connected
+        error="Coven couldn't load this chat. Refresh Coven to try again."
+      />,
+    );
+    const alert = screen.getByRole('alert');
+    expect(within(alert).getByText(/Coven couldn't load this chat/).tagName).toBe('P');
+  });
+
   it.each([
     ['install-cli', 'Install the Coven CLI', 'npm install -g @opencoven/cli'],
     ['install-engine', 'Install the Coven engine', 'coven engine install'],

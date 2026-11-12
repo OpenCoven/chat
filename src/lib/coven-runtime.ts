@@ -39,6 +39,16 @@ export type CovenSession = {
   updatedAt: string;
   projectRoot: string;
 };
+export type CovenSessionHead =
+  | (CovenSession & { unavailable?: never })
+  | {
+      unavailable: true;
+      id: string;
+      familiarId: string;
+      title: string;
+      archived: boolean;
+      harness?: never;
+    };
 export type CovenRunEvent = { type: string; [key: string]: unknown };
 export type CovenSessionRead = {
   session: CovenSession;
@@ -94,7 +104,7 @@ export type ChatLifecycle = 'active' | 'archived' | 'deleted';
 export interface CovenRuntime {
   status(): Promise<CovenStatus>;
   listFamiliars(): Promise<CovenFamiliar[]>;
-  listSessions(): Promise<CovenSession[]>;
+  listSessions(): Promise<CovenSessionHead[]>;
   /** Depth 2-4 re-reads the chat with that many times the usual history budget. */
   readSession(id: string, depth?: number): Promise<CovenSessionRead>;
   send(input: CovenSendInput, onEvent?: (event: CovenRunEvent) => void): Promise<CovenRunResult>;
@@ -115,10 +125,24 @@ function record(value: unknown): value is Record<string, unknown> {
 function session(value: unknown): value is CovenSession {
   return (
     record(value) &&
+    value.unavailable === undefined &&
     (value.archived === undefined || typeof value.archived === 'boolean') &&
     ['id', 'title', 'harness', 'status', 'updatedAt', 'projectRoot'].every(
       (key) => typeof value[key] === 'string',
     )
+  );
+}
+function sessionHead(value: unknown): value is CovenSessionHead {
+  return (
+    record(value) &&
+    typeof value.familiarId === 'string' &&
+    value.familiarId.length > 0 &&
+    (session(value) ||
+      (value.unavailable === true &&
+        typeof value.id === 'string' &&
+        typeof value.title === 'string' &&
+        typeof value.archived === 'boolean' &&
+        value.harness === undefined))
   );
 }
 function event(value: unknown): value is CovenRunEvent {
@@ -259,12 +283,9 @@ export function createCovenRuntime(
     async listSessions() {
       return checked(
         await call('coven_runtime_sessions'),
-        (v): v is CovenSession[] =>
+        (v): v is CovenSessionHead[] =>
           Array.isArray(v) &&
-          v.every(
-            (item) =>
-              session(item) && typeof item.familiarId === 'string' && item.familiarId.length > 0,
-          ) &&
+          v.every(sessionHead) &&
           new Set(v.map((item) => item.familiarId)).size === v.length,
       );
     },

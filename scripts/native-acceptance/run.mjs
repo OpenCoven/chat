@@ -33,6 +33,7 @@ import {
 } from './rows.mjs';
 import { screenReader } from './speech.mjs';
 import { storageRow } from './storage.mjs';
+import { unavailableRow } from './unavailable-row.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const repo = resolve(here, '..', '..');
@@ -309,6 +310,9 @@ try {
     await lane.front();
     await lane.reset();
     rows.push(await engineHomeRow(lane, FIRST, models));
+    await lane.front();
+    await lane.reset();
+    rows.push(await unavailableRow(lane, FIRST));
   }
 
   // Asking for permission (#542, #573), last of the rows that send: its turns
