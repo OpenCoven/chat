@@ -95,7 +95,7 @@ sessions, or attachments must be verified in `app:dev`.
 - **Conversation content never touches browser storage** (see `SECURITY.md`).
   Drafts are per-familiar and in-memory only.
 - **Worktrees:** `git fetch origin`, then
-  `git worktree add -b <type>/<name> .worktrees/<short-name> origin/main`.
+  `git worktree add -b <type>/<issue>-<slug> .worktrees/<issue>-<slug> origin/main`.
   Several are live and some are `locked`. Run `git worktree list` before any
   branch surgery. Never work in the primary checkout, never touch another
   session's worktree, branch, PR or stash entry: `AGENTS.md` → **Working
