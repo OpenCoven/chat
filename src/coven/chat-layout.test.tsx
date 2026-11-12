@@ -1916,6 +1916,14 @@ describe('declared access and error copying', () => {
       );
       expect(said).not.toHaveTextContent('refresh');
       expect(access).not.toHaveTextContent('No project access is declared');
+      // Nor does the footnote send the reader to a refresh that can't help.
+      expect(access).toHaveTextContent(
+        "To edit grants, open the familiar's Projects tab in Coven Cave.",
+      );
+      expect(access).not.toHaveTextContent('then refresh project access here');
+      expect(access).toHaveTextContent(
+        'Familiar chats can change files and run commands beyond these projects without asking for permission.',
+      );
     } finally {
       Reflect.deleteProperty(navigator, 'platform');
     }
