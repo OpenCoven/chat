@@ -32,8 +32,10 @@ const LOCAL_PREFIXES = [
   'src-tauri/target',
 ];
 
-// Code spans that contain a slash but name something other than a repo path.
-const NON_PATH_PREFIXES = ['OpenCoven/'];
+// Code spans that contain a slash but name something other than a repo path:
+// GitHub repos, and branch prefixes no top-level directory uses. (`docs/` is
+// both a branch prefix and a directory, so docs branches stay out of backticks.)
+const NON_PATH_PREFIXES = ['OpenCoven/', 'feat/', 'fix/', 'chore/', 'ci/', 'refactor/', 'test/'];
 
 const PATH_EXTENSIONS = new Set([
   'css',

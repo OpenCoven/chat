@@ -70,6 +70,42 @@ $exeSha = (Get-FileHash -Algorithm SHA256 $exe).Hash.ToLowerInvariant()
 $signature = Get-AuthenticodeSignature $exe
 $webview = (Get-ItemProperty 'HKLM:\SOFTWARE\WOW6432Node\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}' -ErrorAction SilentlyContinue).pv
 
+# Row 578: the published v0.0.8 MSI, checked against v0.0.8's SHA256SUMS. The
+# row installs it over this build after the other rows, then this build over
+# it, and looks for what v0.0.8 saved in the web view's autofill.
+$upgrade = @()
+$upgradeFact = 'not run'
+# Releases before v0.1.2 don't clear it, so the row runs on candidates and on
+# v0.1.2 or later.
+try {
+  $clears = if ($env:CANDIDATE_INSTALLER) { $true } else { [version]($Release.TrimStart('v') -replace '[-+].*$', '') -ge [version]'0.1.2' }
+} catch { $clears = $true }
+if ($Installer -ne 'msi') {
+  $upgradeFact = 'not run: the upgrade row drives MSIs only'
+} elseif (-not $clears) {
+  $upgradeFact = "not run: $Release is older than v0.1.2, the first release that clears it"
+} else {
+  try {
+    $old = 'OpenCoven.Chat_0.0.8_x64_en-US.msi'
+    $oldWork = Join-Path $work 'v0.0.8'
+    New-Item -ItemType Directory -Force -Path $oldWork | Out-Null
+    $oldBase = 'https://github.com/OpenCoven/chat/releases/download/v0.0.8'
+    Invoke-WebRequest -UseBasicParsing -Uri "$oldBase/SHA256SUMS" -OutFile (Join-Path $oldWork 'SHA256SUMS')
+    Invoke-WebRequest -UseBasicParsing -Uri "$oldBase/$old" -OutFile (Join-Path $oldWork $old)
+    $oldExpected = (Get-Content (Join-Path $oldWork 'SHA256SUMS') | Where-Object { $_ -match "  $([regex]::Escape($old))$" }) -replace '\s.*$', ''
+    $oldSha = (Get-FileHash -Algorithm SHA256 (Join-Path $oldWork $old)).Hash.ToLowerInvariant()
+    Log "upgrade row: $old $oldSha, v0.0.8's SHA256SUMS lists $oldExpected"
+    if (-not $oldExpected -or $oldSha -ne $oldExpected) { throw "$old does not match v0.0.8's SHA256SUMS" }
+    $upgrade = @('--upgrade-from', (Join-Path $oldWork $old), '--upgrade-to', (Join-Path $work $asset))
+    $upgradeFact = "published msi v0.0.8 ($old $oldSha, matches its SHA256SUMS), then $sourceLabel over it"
+  } catch {
+    # Windows PowerShell passes a double quote inside a native argument badly.
+    $upgradeFact = "blocked: $($_.Exception.Message)" -replace '"', "'"
+    $upgrade = @('--upgrade-blocked', $upgradeFact)
+  }
+}
+Log "upgrade row: $upgradeFact"
+
 # NVDA, portable, writing what it speaks to a log at IO level.
 $nvdaVersion = '2025.3.2'
 $nvdaSetup = Join-Path $work "nvda_$nvdaVersion.exe"
@@ -104,6 +140,7 @@ $facts = [ordered]@{
   webview2 = $webview
   nvda = "$nvdaVersion portable, installer sha256 $nvdaSha (recorded, not pinned)"
   profile = 'fresh runner user; no prior ai.opencoven.chat data'
+  upgradeFrom = $upgradeFact
 }
 [System.IO.File]::WriteAllText((Join-Path $Out 'facts.json'), ($facts | ConvertTo-Json), $utf8)
 
@@ -115,5 +152,5 @@ Log "helper self-test: $($selfTest.Trim())"
 
 $label = "$((Get-CimInstance Win32_OperatingSystem).Caption), $sourceLabel"
 node (Join-Path $PSScriptRoot 'run.mjs') --app $exe --out $Out --lane $label --facts (Join-Path $Out 'facts.json') `
-  --nvda $nvda --japanese 00000411 --latin 00000409 --ime-on imeon --ime-off imeoff
+  --nvda $nvda --japanese 00000411 --latin 00000409 --ime-on imeon --ime-off imeoff @upgrade
 exit $LASTEXITCODE

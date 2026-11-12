@@ -1,8 +1,5 @@
 .chat-context {
-  grid-column: 1 / -1;
-  grid-row: 2;
   min-width: 0;
-  padding: 0 6px 4px;
   font-size: 12px;
 }
 .chat-context-trigger,
@@ -39,7 +36,8 @@
     background: transparent;
   }
 }
-/* Older desktop webviews retain the bounded inline picker. */
+/* Older desktop webviews retain the bounded inline picker. In the composer's
+   toolbar it takes a row of its own under the controls (chat-app.css). */
 .chat-context-panel:not([popover]) {
   position: static;
   width: auto;
@@ -109,6 +107,6 @@
 }
 .chat-context button:focus-visible,
 .chat-context-panel input:focus-visible {
-  outline: 2px solid currentColor;
-  outline-offset: 2px;
+  outline: var(--ring-width, 2px) solid var(--ring-focus, currentColor);
+  outline-offset: var(--ring-offset, 2px);
 }

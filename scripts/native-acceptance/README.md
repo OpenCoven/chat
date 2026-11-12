@@ -16,10 +16,10 @@ the ones published (this is also why the lane is not blocked by #532).
 runner, then run `run.mjs`. `.github/workflows/native-acceptance.yml` runs them.
 
 The model is a stand-in: `fixture.mjs` extends the packaged suite's
-deterministic endpoint with a slow streaming reply (row 7), an address with a
-sign-in name (#515), and the packaged suite's approval script, which asks the
-real engine to write a real file. Every word the app shows is synthetic. The
-asking rows also pair a stand-in phone (`phone.mjs`); see below.
+deterministic endpoint with a slow streaming reply (rows 7 and 543-1), an
+address with a sign-in name (#515), and the packaged suite's approval script,
+which asks the real engine to write a real file. Every word the app shows is
+synthetic. The asking rows also pair a stand-in phone (`phone.mjs`); see below.
 
 Results are **native OS-level automation** on CI runners. They are never
 hand-run results, and a row the lane could not stage is reported as blocked,
@@ -75,6 +75,15 @@ Current full-access candidates and releases use the full-access row. Select `ask
     iPhone stays a hand row on #573.
   - The engine signs in with an API key against the fixture, so none of these
     rows covers **Sign in with Claude**, and none uses a real model.
+- **Row 578 (Windows, MSI).** After every other row, `upgrade.mjs` installs the
+  published v0.0.8 MSI (checked against v0.0.8's `SHA256SUMS`) over the build
+  under test. In v0.0.8 it types a synthetic phrase into the composer during a
+  run, presses Stop run, selects the second familiar and quits. The phrase must
+  then be in `EBWebView\Default\Web Data`; if not, the row is blocked. It then
+  installs the build under test over v0.0.8, starts it, and quits. No `Web Data`
+  file may hold the phrase, the app must reopen on the second familiar (local
+  storage kept), and the transcript count must not change. It runs last because
+  v0.0.8 shows setup, with no text field, until Coven is installed.
 - v0.0.8 results and the issues they produced (#544, #545, #546, #547, #548) are
   recorded in `docs/verification/2026-10-18-rakazo-chat-ux.md`, section
   "Native OS-level automation on the published v0.0.8 installers".

@@ -43,53 +43,6 @@
   min-width: 0;
 }
 
-.coven-chat .coven-compact-composer {
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
-  align-items: end;
-  gap: 4px;
-  padding: 6px;
-  border-radius: 24px;
-}
-
-.coven-compact-composer .oc-composer-bar {
-  grid-column: 1;
-  grid-row: 1;
-  padding: 0;
-  min-height: 32px;
-  align-items: center;
-}
-
-.coven-compact-composer :is(.oc-composer-label, .oc-composer-spacer, .oc-composer-hint) {
-  display: none;
-}
-
-.coven-compact-composer .oc-composer-field {
-  grid-column: 2;
-  grid-row: 1;
-  min-width: 0;
-  padding: 6px 4px;
-  min-height: 32px;
-  line-height: 20px;
-}
-
-.coven-compact-composer .oc-composer-footer {
-  grid-column: 3;
-  grid-row: 1;
-  padding: 0;
-  min-height: 32px;
-  align-items: center;
-}
-
-.coven-compact-composer .oc-composer-attachments {
-  grid-column: 1 / -1;
-  padding: 6px;
-}
-
-.coven-compact-composer button[aria-label="Attach file"] {
-  border-radius: 50%;
-  background: var(--bg-elevated);
-}
 /* Cards wrap to two rows before scrolling; the padding leaves room for each
    card's remove control, which overhangs its corner. */
 .coven-chat .oc-composer-attachments {

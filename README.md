@@ -68,6 +68,7 @@ handle; drawers keep their own width.
 | **Cmd/Ctrl+K** | Go to the familiar search, opening the list if it's closed |
 | **Cmd/Ctrl+[** and **Cmd/Ctrl+]** | Step to the previous or next familiar, in the list's own order and filter |
 | **Cmd/Ctrl+F** | Open a find bar over the conversation that counts the messages and tool calls containing your text |
+| **Escape** | Stop the run in progress, as the composer's **esc · stop** control says |
 
 In the find bar, **Enter** and **Shift+Enter** step through the matches, scrolling each into view,
 and **Escape** closes it.
@@ -75,6 +76,13 @@ and **Escape** closes it.
 These shortcuts work while you're composing and leave your text unchanged. They stay quiet while a
 dialog or menu is open, and the rail buttons show shortcut hints. Modal dialogs and input-method
 composition don't trigger them.
+
+**Escape** stops a run from the composer, and from anywhere else in the window unless something
+else is using the key: an open dialog or menu, another text field such as the familiar search, or
+an open drawer, the find bar or a passage waiting to be quoted, which Escape closes first. Holding
+the key down doesn't carry on from one to the next. It stops only the run in the chat you're
+viewing: a run in another familiar's chat keeps going until you use its **Stop run** control. Your
+draft stays where it was, and focus comes back to the composer when the run has stopped.
 
 Typing a letter while nothing editable has focus starts a message: the keystroke moves to the
 composer and lands there, unless the composer can't send or a dialog or menu is open.
@@ -91,7 +99,9 @@ file access.
 **Settings › Access** lists that same declared access, write grants first, and says plainly that
 Chat neither enforces nor extends it. The **Access** row in the inspector's Overview opens it. When
 no access is declared, it says so. When Chat couldn't read the registry or grants, it says that
-instead, so an unreadable store never looks like an empty one.
+instead, so an unreadable store never looks like an empty one. Chat can't read them on Windows yet:
+there, Settings says so whenever Coven Cave has project metadata, and points to the familiar's
+**Projects** tab in Coven Cave.
 
 You can also type **`@name`** or **`#project`** directly in your message for inline suggestions.
 Use the arrow keys to choose and **Tab** to confirm, or **Escape** to dismiss. The optional
@@ -106,16 +116,26 @@ local metadata without needing Cave to run, and it doesn't import conversations 
 permissions. Without a configured registry and grants, Chat assumes no project access. Choose
 **Refresh Coven** after you change grants.
 
-The composer shows the reported chat project, or the familiar workspace when no chat project has
-been reported. This is observed context, not a workspace switch or a permission grant. On modern
-desktop webviews the reference picker opens above the app, so long paths don't push the composer
-out of view.
+The composer is one framed box: the message field, then a toolbar with attach (**+**, in Coven
+Code chats) and **Add context** on the left and **Send** on the right, then a details row. The details row shows what
+Chat knows about where the message goes: the familiar and its access (**Full access**), the
+harness the chat runs on, or that a new chat will start on, the model from
+**Settings › Model** (**Engine default** when none is set), and the reported chat project, or the
+familiar workspace when no chat project has been reported. This is observed context, not a
+workspace switch or a permission grant. The sliders button at the end of the row opens **Settings
+› Model**. In a narrow window the row wraps and the path is cut short; hover it for the whole path.
+On modern desktop webviews the reference picker opens above the app, so long paths don't push the
+composer out of view.
 
 ## While a run is going
 
-Run status and **Stop** stay beside the composer. Until reply text starts to stream, the end of the
-thread shows the familiar's avatar with what the run is doing right now: waiting for the familiar,
-running a named tool, or stopping. The status counts how long the run has been going. After thirty
+Run status and **Stop** stay beside the composer. While a run is going, **Send** becomes an **esc ·
+stop** control, and Escape stops the run (see **Keyboard shortcuts**). You can keep typing: Chat
+doesn't queue messages, so what you type stays in the composer, and you send it once the reply ends.
+A line above the composer says so while there's a draft, because the draft covers the placeholder.
+
+Until reply text starts to stream, the end of the thread shows the familiar's avatar with what the
+run is doing right now: waiting for the familiar, running a named tool, or stopping. The status counts how long the run has been going. After thirty
 seconds without a sign of life, the row says it's still waiting, or still running the tool.
 
 **Jump to latest** returns you to new output after you scroll back, and counts the messages that

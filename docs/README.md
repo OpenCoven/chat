@@ -42,6 +42,7 @@ These are true as of their date. Refresh anything they say before you act on it.
 
 | Folder | What it holds |
 | --- | --- |
+| [agents/](agents/working-here.md) | What agents working here need to know: GitHub habits, CI gaps, flaky rows, local test quirks |
 | [superpowers/](superpowers/README.md) | Old plans and specs, each with a status. Don't follow one as a work order unless it says current. |
 | [design-audits/](design-audits/) | Design reviews; #533 tracks the 2026-10-24 audit's findings |
 | [release-notes/](release-notes/) | One page per published release |

@@ -1,0 +1,54 @@
+import { join } from 'node:path';
+import { expect, test } from 'vitest';
+
+const path = '../scripts/native-acceptance/access-row.mjs';
+const { around, caveFiles, caveMetadata, idOf, namesIn, UNREADABLE_ON_WINDOWS } = await import(
+  path
+);
+
+test('the synthetic grants give one familiar every project, the first writable', () => {
+  const { projects, permissions } = caveMetadata('astra', '/work', 3);
+  expect(projects.version).toBe(1);
+  expect(projects.projects.map((project: { name: string }) => project.name)).toEqual([
+    'Access project 1',
+    'Access project 2',
+    'Access project 3',
+  ]);
+  expect(projects.projects[0].root).toBe(join('/work', 'project-1'));
+  expect(permissions.projectGrants).toEqual([
+    { familiarId: 'astra', projectId: 'native-access-1', access: 'write' },
+    { familiarId: 'astra', projectId: 'native-access-2', access: 'read' },
+    { familiarId: 'astra', projectId: 'native-access-3', access: 'read' },
+  ]);
+});
+
+test('the row writes only where Chat reads Cave metadata by default', () => {
+  expect(caveFiles({}, '/home/runner')).toMatchObject({
+    projects: join('/home/runner', '.coven', 'cave', 'projects.json'),
+    permissions: join('/home/runner', '.coven', 'cave', 'project-permissions.json'),
+  });
+  expect(caveFiles({ COVEN_CAVE_HOME: '/elsewhere' }, '/home/runner')).toEqual({
+    reason: 'COVEN_CAVE_HOME set on this runner',
+  });
+});
+
+test('a familiar is found by the name the window shows, not its id-like name', () => {
+  const listed = [{ id: 'astra-1', name: 'astra', display_name: 'Astra' }];
+  expect(idOf(listed, 'Astra')).toBe('astra-1');
+  expect(idOf(listed, 'astra')).toBeUndefined();
+});
+
+test('project names are read from all of the dialog text, once each', () => {
+  const text =
+    'Access project 2 Read only Copy Access project 2 path Access project 1 Read and write';
+  expect(namesIn(text)).toEqual(['Access project 1', 'Access project 2']);
+  expect(namesIn('No project access is declared for Astra')).toEqual([]);
+});
+
+test('the Windows wording is recorded with its surroundings', () => {
+  const text = `Access Astra ${UNREADABLE_ON_WINDOWS}, so Astra's declared access is unknown.`;
+  expect(around(text, UNREADABLE_ON_WINDOWS)).toContain("so Astra's declared access is unknown");
+  expect(around('No project access is declared for Astra', UNREADABLE_ON_WINDOWS)).toBe(
+    'No project access is declared for Astra',
+  );
+});

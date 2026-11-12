@@ -105,6 +105,8 @@ export function useQuoteSelection({
   const dismissRef = useRef<HTMLButtonElement>(null);
   const chat = JSON.stringify([familiarId, sessionId]);
   const shown = useLatest({ messages, familiarId, sessionId, chat, promptLimit });
+  const visible = state && state.chat === chat && !disabled ? state : null;
+  const showing = useLatest(Boolean(visible));
 
   // What last moved focus or the selection: a key press, or a pointer press
   // outside the action. Only the first may carry a passage past a link.
@@ -117,13 +119,17 @@ export function useQuoteSelection({
     const onKeyDown = (event: KeyboardEvent) => {
       lastInput.current = 'key';
       // The action takes its own Escape, and a dialog such as a link review
-      // closes on its own; in the conversation itself, Escape lets go.
+      // closes on its own; in the conversation itself, Escape lets go. Letting go
+      // of a waiting passage is all that key does: a run keeps going.
       if (
         event.key === 'Escape' &&
         !document.querySelector('dialog[open]') &&
         transcriptRef.current?.contains(document.activeElement)
-      )
+      ) {
+        const waiting = showing.current;
+        if (waiting) event.preventDefault();
         setState(null);
+      }
     };
     document.addEventListener('pointerdown', onPointerDown, true);
     document.addEventListener('keydown', onKeyDown, true);
@@ -131,7 +137,7 @@ export function useQuoteSelection({
       document.removeEventListener('pointerdown', onPointerDown, true);
       document.removeEventListener('keydown', onKeyDown, true);
     };
-  }, [transcriptRef]);
+  }, [transcriptRef, showing]);
 
   useEffect(() => {
     const onSelectionChange = () => {
@@ -217,8 +223,6 @@ export function useQuoteSelection({
   const onComposerKeyDown = useCallback((event: ReactKeyboardEvent<HTMLTextAreaElement>) => {
     if (enterHeld.current && event.key === 'Enter' && event.repeat) event.preventDefault();
   }, []);
-
-  const visible = state && state.chat === chat && !disabled ? state : null;
 
   function quote() {
     if (visible?.kind !== 'ready') return;
