@@ -90,15 +90,20 @@
   min-width: 0;
 }
 
-/* Keeps the look of the bare <code> it replaced: no muted step-paragraph color. */
+/* The paragraph lets a long command shrink beside Copy command. */
 .coven-onboarding-command .coven-onboarding-command-text {
   min-width: 0;
-  color: inherit;
 }
 
+/* The code is inline in its paragraph (#590), so a command that wraps, such as
+   a sign-in link, would draw its border in open pieces per line. Clone closes
+   each piece. Don't make it a block: that could give AT-SPI a separate, empty
+   paragraph again. */
 .coven-onboarding-command code {
   overflow-wrap: anywhere;
   user-select: all;
+  -webkit-box-decoration-break: clone;
+  box-decoration-break: clone;
 }
 
 .coven-onboarding-actions {
