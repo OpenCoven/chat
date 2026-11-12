@@ -601,7 +601,7 @@ describe('production Familiars layout', () => {
     expect(screen.queryByRole('button', { name: 'New chat' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Import from Cave' })).not.toBeInTheDocument();
     expect(openSettingsAt('Access')).toHaveTextContent(
-      "Every turn runs read-only unless you allow a familiar's request",
+      'Familiar chats run with full access as your user account.',
     );
   });
 
@@ -1808,7 +1808,9 @@ describe('declared access and error copying', () => {
     ]);
     expect(items[0]).toHaveTextContent('chatRead and write/work/chat');
     expect(items[1]).toHaveTextContent('apiRead only/work/api');
-    expect(access).toHaveTextContent("an allowed turn isn't limited to these projects");
+    expect(access).toHaveTextContent(
+      'Familiar chats can change files and run commands beyond these projects without asking for permission.',
+    );
   });
 
   it('tells "none declared" apart from "could not read"', () => {
@@ -3277,9 +3279,9 @@ describe('composer stop key, running copy and details row', () => {
   it('shows the real familiar, access, harness, model and workspace under the composer', () => {
     const { rerender } = render(<ChatLayout {...running({ busy: false })} />);
     let details = within(screen.getByRole('group', { name: 'Chat details' }));
-    expect(details.getByText('· Read only')).toBeInTheDocument();
+    expect(details.getByText('· Full access')).toBeInTheDocument();
     expect(screen.getByRole('group', { name: 'Chat details' })).toHaveTextContent(
-      'Astra · Read only',
+      'Astra · Full access',
     );
     // A new chat starts on the Settings harness, and no model means the engine's own.
     expect(details.getByText('Coven Code')).toBeInTheDocument();
@@ -3311,7 +3313,9 @@ describe('composer stop key, running copy and details row', () => {
     expect(details.getByText('Claude Code')).toBeInTheDocument();
     expect(details.getByText('openai/gpt-5.5')).toBeInTheDocument();
     expect(details.getByText('Chat project: /projects/x')).toBeInTheDocument();
-    expect(details.queryByText(/Create task|Full/)).not.toBeInTheDocument();
+    // Cave's task and access controls stay out; the access is stated, not chosen.
+    expect(details.queryByText(/Create task/)).not.toBeInTheDocument();
+    expect(details.queryByRole('button', { name: /Full/ })).not.toBeInTheDocument();
 
     fireEvent.click(details.getByRole('button', { name: 'Model settings' }));
     expect(
@@ -3423,25 +3427,20 @@ describe('composer stop key, running copy and details row', () => {
     expect(screen.queryByText(/You can send it when the reply ends/)).not.toBeInTheDocument();
   });
 
-  it('says when this familiar is on a turn with full permission', () => {
-    const { rerender } = render(<ChatLayout {...running({ runFullPermission: true })} />);
+  it('says every message runs with full access, during a run and between runs', () => {
+    // Chats run with full access (#576): the details row must not say read only.
+    const { rerender } = render(<ChatLayout {...running({ busy: false })} />);
     const details = within(screen.getByRole('group', { name: 'Chat details' }));
-    expect(details.getByText('· Full permission')).toHaveAttribute('data-access', 'full');
-    expect(details.queryByText(/Read only/)).not.toBeInTheDocument();
-    // Another familiar's allowed turn says nothing about this one.
-    rerender(<ChatLayout {...running({ runFullPermission: true, runFamiliarId: 'other' })} />);
-    expect(details.getByText('· Read only')).toBeInTheDocument();
-    // Nor does a flag left over once the turn has ended.
-    rerender(<ChatLayout {...running({ busy: false, runFullPermission: true })} />);
-    expect(details.getByText('· Read only')).toBeInTheDocument();
-  });
-
-  it('does not call every run read only now that a turn can be allowed', () => {
-    render(<ChatLayout {...running({ busy: false })} />);
-    const details = within(screen.getByRole('group', { name: 'Chat details' }));
-    const item = details.getByText('· Read only').closest('[title]');
-    expect(item?.getAttribute('title')).not.toMatch(/every run/i);
-    expect(item?.getAttribute('title')).toMatch(/ask you to allow one turn/);
+    const item = () => details.getByText('· Full access');
+    expect(item()).toHaveAttribute('data-access', 'full');
+    expect(item().closest('[title]')?.getAttribute('title')).toBe(
+      'Messages run with full access: Astra can change files and run commands under your user account without asking for permission.',
+    );
+    rerender(<ChatLayout {...running()} />);
+    expect(item()).toBeInTheDocument();
+    expect(screen.getByRole('group', { name: 'Chat details' })).not.toHaveTextContent(
+      /Read only|ask you to allow/,
+    );
   });
 
   it('reports no workspace, and names no familiar when none is selected', () => {
@@ -3526,6 +3525,8 @@ describe('a familiar asking for permission', () => {
     render(<ChatLayout {...asking({ onPermissionLog })} />);
     const access = openSettingsAt('Access');
     const log = await within(access).findByRole('list', { name: /Permission log/ });
+    // jsdom infers the role from the <ol>; WebKit, without markers, doesn't (#573).
+    expect(log).toHaveAttribute('role', 'list');
     const lines = within(log)
       .getAllByRole('listitem')
       .map((item) => item.textContent);

@@ -4,7 +4,15 @@
 // blocked, never as passed.
 
 import { spawnSync } from 'node:child_process';
+import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { isDeepStrictEqual } from 'node:util';
+import {
+  APPROVAL_NO_NOTE,
+  APPROVAL_UNASKED,
+  writeProofPrompt,
+} from '../packaged-acceptance/model-fixture.mjs';
 import { addressBars, browserProcesses, quitBrowsers } from './browser.mjs';
 import {
   center,
@@ -149,8 +157,8 @@ async function clickReviewedLink(app, name, row) {
 
 /** The lane's shared state: the app, the model log, the screen reader, the output folder. */
 export class Lane {
-  constructor({ app, native, requests, tokens, reader, shot, save, cli, frames }) {
-    Object.assign(this, { app, native, requests, tokens, reader, shot, save, cli, frames });
+  constructor({ app, native, requests, tokens, steps, reader, shot, save, cli, frames }) {
+    Object.assign(this, { app, native, requests, tokens, steps, reader, shot, save, cli, frames });
   }
 
   composer(familiar) {
@@ -309,7 +317,7 @@ export function shownText(node) {
   return '';
 }
 
-function textsIn(node) {
+export function textsIn(node) {
   return [...walk(node)].map(shownText).filter(Boolean);
 }
 
@@ -921,7 +929,7 @@ async function settingsGeneral(app) {
   await sleep(400);
 }
 
-async function closeSettings(app) {
+export async function closeSettings(app) {
   await app.click(await app.one('button', 'Close settings'));
   await app.gone('dialog', 'Settings', { timeout: 3_000 }).catch(async () => {
     await app.key('escape');
@@ -1877,4 +1885,45 @@ export async function stopKeyRow(lane, familiar) {
     row.expect('nothing sent after the stops', lane.requests(), settled);
     await lane.clearComposer(familiar);
   });
+}
+
+/** Check the file on disk and the native window after each of two ordinary sends. */
+export async function fullAccessRow(lane, familiar) {
+  const row = new Row('full-access', 'Familiar turns write outside the workspace without asking');
+  const { app } = lane;
+  await lane.attempt(row, async () => {
+    const folder = mkdtempSync(join(tmpdir(), 'chat-native-full-access-'));
+    try {
+      await showFamiliars(lane, row);
+      await app.click(await app.one('button', familiar));
+      await lane.clearComposer(familiar);
+      for (const [name, prompt, heading] of [
+        ['first.txt', 'Write the proof file.', APPROVAL_NO_NOTE],
+        ['second.txt', '[[request anyway]] Write another.', APPROVAL_UNASKED],
+      ]) {
+        const proof = join(folder, name);
+        await lane.send(familiar, writeProofPrompt(proof, prompt), 'heading', heading);
+        row.expect(`${name} was written`, existsSync(proof), true);
+        if (existsSync(proof))
+          row.expect(`${name} contents`, readFileSync(proof, 'utf8'), 'allowed turn\n');
+        row.expect(`${name} offered Allow once`, await app.count('button', 'Allow once'), 0);
+        row.expect(`${name} offered Decline`, await app.count('button', 'Decline'), 0);
+      }
+      const visibleText = textIn(await app.snapshot());
+      row.expect(
+        'legacy request block appeared as prose',
+        visibleText.includes('coven-permission-request'),
+        false,
+      );
+      row.expect(
+        'sidebar reported an approval request',
+        visibleText.includes('Asks permission'),
+        false,
+      );
+      lane.shot('full-access-without-approval');
+    } finally {
+      rmSync(folder, { recursive: true, force: true });
+    }
+  });
+  return row;
 }

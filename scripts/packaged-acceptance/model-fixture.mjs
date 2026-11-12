@@ -6,6 +6,7 @@
 
 import { appendFileSync } from 'node:fs';
 import { createServer } from 'node:http';
+import { isAbsolute } from 'node:path';
 
 export const ADDRESSES = {
   query: 'https://example.com/handoff-check?x=1',
@@ -56,6 +57,11 @@ export function replyFor(messages) {
 
 export const APPROVAL_SUMMARY = 'Write the proof file';
 export const APPROVAL_DONE = 'The proof file is written.';
+/** Lowercase hex keeps path bytes intact through WebKitWebDriver key input. */
+export function writeProofPrompt(path, request) {
+  return `[[write ${Buffer.from(path, 'utf8').toString('hex')}]] ${request}`;
+}
+
 /** The allowed turn's reply when the engine refused the write anyway. */
 export const APPROVAL_REFUSED = 'The engine refused the write:';
 /** A heading, so a row can wait for it: this turn's prompt carried no note from Chat. */
@@ -96,8 +102,14 @@ function lastPrompt(messages) {
  */
 export function approvalStep(messages) {
   const prompt = lastPrompt(messages);
-  const proof = [...prompt.matchAll(/\[\[ask (\S+)\]\]/g)].at(-1)?.[1];
-  if (!proof) return undefined;
+  // A path can hold spaces (macOS's Application Support), so it runs to the `]]`.
+  // `write` carries its path as lowercase hex (see `writeProofPrompt`).
+  const request = [...prompt.matchAll(/\[\[(ask|write) ([^\]]+?)\]\]/g)].at(-1);
+  if (!request) return undefined;
+  const [, operation, path] = request;
+  if (operation === 'write' && !/^(?:[0-9a-f]{2})+$/.test(path)) return undefined;
+  const proof = operation === 'write' ? Buffer.from(path, 'hex').toString('utf8') : path;
+  if (!isAbsolute(proof)) return undefined;
   const last = messages.at(-1)?.content;
   const result = Array.isArray(last)
     ? last.find((block) => block?.type === 'tool_result')
@@ -109,7 +121,7 @@ export function approvalStep(messages) {
   // Say what the engine said, so a refused write reads as one, not as success.
   if (allowed && result.is_error) return { text: `${APPROVAL_REFUSED} ${resultText(result)}` };
   if (allowed) return { text: APPROVAL_DONE };
-  // A familiar can write the block without being told how, so `askingOffRow`
+  // A familiar can write the block without being told how, so the default access row
   // sends one whatever Chat's note said.
   if (prompt.includes('[[request anyway]]')) {
     return { text: `## ${APPROVAL_UNASKED}\n\n${REQUEST_BLOCK}` };
@@ -121,7 +133,8 @@ export function approvalStep(messages) {
   };
 }
 
-function stream(res, model, { text, tool }) {
+/** Streams one step: a text reply, or one tool call the engine then runs. */
+export function streamStep(res, model, { text, tool }) {
   res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-cache' });
   const send = (event, data) => res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
   send('message_start', {
@@ -161,6 +174,48 @@ function stream(res, model, { text, tool }) {
   res.end();
 }
 
+export function sendModelStep(res, model, step, streaming) {
+  const { text } = step;
+  if (streaming) {
+    streamStep(res, model, step);
+  } else if (step.tool) {
+    res.writeHead(200, { 'content-type': 'application/json' });
+    res.end(
+      JSON.stringify({
+        id: 'msg_fixture',
+        type: 'message',
+        role: 'assistant',
+        model: model,
+        content: [
+          {
+            type: 'tool_use',
+            id: `toolu_fixture_${Date.now()}`,
+            name: step.tool.name,
+            input: step.tool.input,
+          },
+        ],
+        stop_reason: 'tool_use',
+        stop_sequence: null,
+        usage: { input_tokens: 1, output_tokens: 1 },
+      }),
+    );
+  } else {
+    res.writeHead(200, { 'content-type': 'application/json' });
+    res.end(
+      JSON.stringify({
+        id: 'msg_fixture',
+        type: 'message',
+        role: 'assistant',
+        model: model,
+        content: [{ type: 'text', text }],
+        stop_reason: 'end_turn',
+        stop_sequence: null,
+        usage: { input_tokens: 1, output_tokens: 1 },
+      }),
+    );
+  }
+}
+
 /** Starts the endpoint on 127.0.0.1 and resolves to { port, close }. */
 export function startModelFixture({ port = 0, log } = {}) {
   const server = createServer((req, res) => {
@@ -187,45 +242,7 @@ export function startModelFixture({ port = 0, log } = {}) {
       }
       if (req.method === 'POST' && path === '/v1/messages') {
         const step = approvalStep(parsed.messages) ?? { text: replyFor(parsed.messages) };
-        const { text } = step;
-        if (parsed.stream) {
-          stream(res, parsed.model, step);
-        } else if (step.tool) {
-          res.writeHead(200, { 'content-type': 'application/json' });
-          res.end(
-            JSON.stringify({
-              id: 'msg_fixture',
-              type: 'message',
-              role: 'assistant',
-              model: parsed.model,
-              content: [
-                {
-                  type: 'tool_use',
-                  id: `toolu_fixture_${Date.now()}`,
-                  name: step.tool.name,
-                  input: step.tool.input,
-                },
-              ],
-              stop_reason: 'tool_use',
-              stop_sequence: null,
-              usage: { input_tokens: 1, output_tokens: 1 },
-            }),
-          );
-        } else {
-          res.writeHead(200, { 'content-type': 'application/json' });
-          res.end(
-            JSON.stringify({
-              id: 'msg_fixture',
-              type: 'message',
-              role: 'assistant',
-              model: parsed.model,
-              content: [{ type: 'text', text }],
-              stop_reason: 'end_turn',
-              stop_sequence: null,
-              usage: { input_tokens: 1, output_tokens: 1 },
-            }),
-          );
-        }
+        sendModelStep(res, parsed.model, step, parsed.stream);
         return;
       }
       res.writeHead(404, { 'content-type': 'application/json' });
