@@ -32,6 +32,7 @@ import {
 } from './rows.mjs';
 import { screenReader } from './speech.mjs';
 import { storageRow } from './storage.mjs';
+import { unavailableRow } from './unavailable-row.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const repo = resolve(here, '..', '..');
@@ -302,6 +303,12 @@ try {
   await lane.front();
   await lane.reset();
   rows.push(await cancelledRunRow(lane, FIRST));
+  // Published releases before v0.1.2 don't have these changes.
+  if (!/^v0\.(?:0\.[0-9]+|1\.[01])(?:[-+]|$)/.test(facts.release ?? process.env.RELEASE ?? '')) {
+    await lane.front();
+    await lane.reset();
+    rows.push(await unavailableRow(lane, FIRST));
+  }
 
   // Asking for permission (#542, #573), last of the rows that send: its turns
   // write real files and leave requests in the thread. From v0.0.10 on, chats
