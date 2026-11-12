@@ -1861,6 +1861,32 @@ describe('declared access and error copying', () => {
     expect(access()).not.toHaveTextContent('No project access is declared');
   });
 
+  it("says on Windows that Chat can't read Cave's grants there yet, instead of offering a refresh", () => {
+    // A refresh can't help on Windows: Chat has no safe reader there (#587).
+    Object.defineProperty(navigator, 'platform', { configurable: true, get: () => 'Win32' });
+    try {
+      render(
+        <ChatLayout
+          {...layoutProps()}
+          connected
+          ready
+          familiars={[{ id: 'b', name: 'Bram', projectAccessUnavailable: true }]}
+          familiarId="b"
+        />,
+      );
+      openSettingsAt('Access');
+      const access = screen.getByRole('region', { name: 'Access' });
+      const said = within(access).getByText(/Coven Cave's project grants on Windows/);
+      expect(said).toHaveTextContent(
+        "Chat can't read Coven Cave's project grants on Windows yet, so Bram's declared access is unknown. See Bram's Projects tab in Coven Cave.",
+      );
+      expect(said).not.toHaveTextContent('refresh');
+      expect(access).not.toHaveTextContent('No project access is declared');
+    } finally {
+      Reflect.deleteProperty(navigator, 'platform');
+    }
+  });
+
   it('offers to copy an error notice', async () => {
     const writeText = vi.fn().mockResolvedValue(undefined);
     const original = Object.getOwnPropertyDescriptor(navigator, 'clipboard');
