@@ -13,6 +13,7 @@ import { homedir, release } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
+import { accessRow } from './access-row.mjs';
 import { ASKING_SOURCE, approvalRows, askingOffRow, askingRowsFor } from './approval.mjs';
 import { defaultBrowser, quitBrowsers } from './browser.mjs';
 import { App, Native, outline, PLATFORM, screenshot, sleep, until } from './driver.mjs';
@@ -313,6 +314,9 @@ try {
     await lane.front();
     await lane.reset();
     rows.push(await unavailableRow(lane, FIRST));
+    await lane.front();
+    await lane.reset();
+    rows.push(await accessRow(lane, FIRST));
   }
 
   // Asking for permission (#542, #573), last of the rows that send: its turns

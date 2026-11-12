@@ -164,6 +164,7 @@ export type ChatLayoutProps = Readonly<{
   onDeclineApproval?: (approval: CovenApproval) => void;
   /** Reads the permission log for Settings › Access. */
   onPermissionLog?: () => Promise<PermissionLogEntry[]>;
+  onRefreshProjectAccess?: () => Promise<void>;
   loading: boolean;
   cancelling: boolean;
   error: string;
@@ -2036,6 +2037,7 @@ export function ChatLayout(props: ChatLayoutProps) {
             connected={props.connected}
             onRefresh={props.onRefresh}
             refreshDisabled={Boolean(props.busy || props.loading || props.lifecycleBusy)}
+            onRefreshProjectAccess={props.onRefreshProjectAccess}
             companion={<CompanionPanel />}
             onPermissionLog={props.onPermissionLog}
             familiarName={(id) => props.familiars.find((item) => item.id === id)?.name ?? id}

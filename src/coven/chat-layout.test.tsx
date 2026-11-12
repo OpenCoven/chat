@@ -1830,6 +1830,10 @@ describe('declared access and error copying', () => {
     // The inspector sums it up and links to the full list in Settings.
     fireEvent.click(screen.getByRole('button', { name: /3 projects · 1 writable/ }));
     const access = screen.getByRole('region', { name: 'Access' });
+    expect(within(access).getByRole('region', { name: 'Project access list' })).toHaveAttribute(
+      'tabindex',
+      '0',
+    );
     const items = within(
       within(access).getByRole('list', { name: "Astra's declared project access" }),
     ).getAllByRole('listitem');
@@ -1843,6 +1847,23 @@ describe('declared access and error copying', () => {
     expect(access).toHaveTextContent(
       'Familiar chats can change files and run commands beyond these projects without asking for permission.',
     );
+  });
+
+  it('refreshes declared grants in Settings without refreshing the conversation', async () => {
+    const props = { ...layoutProps(), connected: true, familiarId: 'a' };
+    const refresh = vi.fn().mockResolvedValue(undefined);
+    render(
+      <ChatLayout
+        {...props}
+        familiars={[{ id: 'a', name: 'Astra' }]}
+        onRefreshProjectAccess={refresh}
+      />,
+    );
+    const access = openSettingsAt('Access');
+    fireEvent.click(within(access).getByRole('button', { name: 'Refresh project access' }));
+    await within(access).findByRole('button', { name: 'Refresh project access' });
+    expect(refresh).toHaveBeenCalledOnce();
+    expect(props.onRefresh).not.toHaveBeenCalled();
   });
 
   it('tells "none declared" apart from "could not read"', () => {
@@ -1895,6 +1916,14 @@ describe('declared access and error copying', () => {
       );
       expect(said).not.toHaveTextContent('refresh');
       expect(access).not.toHaveTextContent('No project access is declared');
+      // Nor does the footnote send the reader to a refresh that can't help.
+      expect(access).toHaveTextContent(
+        "To edit grants, open the familiar's Projects tab in Coven Cave.",
+      );
+      expect(access).not.toHaveTextContent('then refresh project access here');
+      expect(access).toHaveTextContent(
+        'Familiar chats can change files and run commands beyond these projects without asking for permission.',
+      );
     } finally {
       Reflect.deleteProperty(navigator, 'platform');
     }
