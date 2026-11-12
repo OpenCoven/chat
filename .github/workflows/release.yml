@@ -874,16 +874,21 @@ jobs:
           # connection mid-request three times on macos-15-intel on 2026-10-14
           # (#461): once here, twice in the smoke test, each after the ticket
           # had been issued and the image stapled. stapler exits 68 for that
-          # as well as for a missing ticket, so each call gets a few attempts
+          # as well as for a missing ticket, so each call gets several attempts
           # with a pause between. A real rejection fails all of them.
+          # In v0.0.9 the service stayed unreachable for longer than five tries
+          # 20s apart (#568), so the pause grows by 15s after each failure:
+          # 15s, 30s, ... 135s, which is 675s (over 11 minutes) across 10 tries.
           stapler_retry() {
-            local attempt
-            for attempt in 1 2 3 4 5; do
+            local attempt wait
+            for attempt in 1 2 3 4 5 6 7 8 9 10; do
               if xcrun stapler "$@"; then return 0; fi
-              echo "stapler $1 failed (attempt ${attempt} of 5); retrying in 20s..."
-              sleep 20
+              if [ "${attempt}" -eq 10 ]; then break; fi
+              wait=$((attempt * 15))
+              echo "stapler $1 failed (attempt ${attempt} of 10); retrying in ${wait}s..."
+              sleep "${wait}"
             done
-            echo "::error::stapler $* failed on every attempt."
+            echo "::error::stapler $* failed on all 10 attempts."
             return 1
           }
           # Same key file `Build installers` wrote; the next step removes it.
@@ -1025,16 +1030,21 @@ jobs:
           # connection mid-request three times on macos-15-intel on 2026-10-14
           # (#461): once here, twice in the smoke test, each after the ticket
           # had been issued and the image stapled. stapler exits 68 for that
-          # as well as for a missing ticket, so each call gets a few attempts
+          # as well as for a missing ticket, so each call gets several attempts
           # with a pause between. A real rejection fails all of them.
+          # In v0.0.9 the service stayed unreachable for longer than five tries
+          # 20s apart (#568), so the pause grows by 15s after each failure:
+          # 15s, 30s, ... 135s, which is 675s (over 11 minutes) across 10 tries.
           stapler_retry() {
-            local attempt
-            for attempt in 1 2 3 4 5; do
+            local attempt wait
+            for attempt in 1 2 3 4 5 6 7 8 9 10; do
               if xcrun stapler "$@"; then return 0; fi
-              echo "stapler $1 failed (attempt ${attempt} of 5); retrying in 20s..."
-              sleep 20
+              if [ "${attempt}" -eq 10 ]; then break; fi
+              wait=$((attempt * 15))
+              echo "stapler $1 failed (attempt ${attempt} of 10); retrying in ${wait}s..."
+              sleep "${wait}"
             done
-            echo "::error::stapler $* failed on every attempt."
+            echo "::error::stapler $* failed on all 10 attempts."
             return 1
           }
           cd "${STAGE_DIR}"
