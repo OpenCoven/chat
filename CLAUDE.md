@@ -100,6 +100,7 @@ sessions, or attachments must be verified in `app:dev`.
   branch surgery. Never work in the primary checkout, never touch another
   session's worktree, branch, PR or stash entry: `AGENTS.md` → **Working
   alongside other agents** has the full rules.
-- **Commits must be signed** (`git commit -S`); `main` rejects unsigned ones.
-  Setup is in `CONTRIBUTING.md` → **Commits must be signed**. Before pushing,
-  `git log -1 --show-signature` must report a good signature.
+- **Commits must be signed**; `main` rejects unsigned ones. Sign and check
+  them with the commands in `docs/agents/working-here.md` → **Commit
+  signing**: with an SSH key, a plain `git log --show-signature` prints "No
+  signature" even for a signed commit.

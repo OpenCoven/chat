@@ -17,11 +17,15 @@ when other sessions are busy. The REST endpoints keep working:
 gh api repos/OpenCoven/chat/issues -f title='...' -F body=@body.md
 gh api repos/OpenCoven/chat/pulls -f title='...' -f head=<branch> -f base=main -F body=@body.md
 gh api repos/OpenCoven/chat/issues/<n>/labels -f 'labels[]=ci:full'
+gh api -X DELETE repos/OpenCoven/chat/issues/<n>/labels/agent-ready
+gh api repos/OpenCoven/chat/issues/<n> --jq .body > body.md   # then edit the State block
+gh api -X PATCH repos/OpenCoven/chat/issues/<n> -F body=@body.md
 gh api repos/OpenCoven/chat/issues/<n>/comments -F body=@comment.md
 gh api -X PUT repos/OpenCoven/chat/pulls/<n>/merge -f sha=<expected head> -f merge_method=merge
 ```
 
-Marking a draft PR ready has no REST endpoint. Check
+Fetch the body right before you patch it, so you don't overwrite an edit made in between. Marking
+a draft PR ready has no REST endpoint. Check
 `gh api rate_limit --jq .resources.graphql.remaining` before `gh pr ready`.
 
 ### Every session is the same GitHub user
@@ -104,13 +108,22 @@ Compare against an unchanged worktree before chasing any of these as a regressio
 ## Commit signing
 
 `main` rejects unsigned commits. `CONTRIBUTING.md` has the general setup. With an SSH key and no
-`gpg` installed, sign per command without changing your config:
+`gpg` installed, sign per command without changing your config. Use the public key registered
+on the GitHub account as a signing key (`~/.ssh/id_ed25519.pub` on the machines in use today):
 
 ```bash
 git -c gpg.format=ssh -c user.signingkey="$HOME/.ssh/id_ed25519.pub" commit -S
 ```
 
-To check the signature locally, write `<your git email> <contents of the .pub file>` to a real
-file and pass `-c gpg.ssh.allowedSignersFile=<that file>` to `git log -1 --show-signature`. A
-`<(...)` process substitution is read only once and makes later checks fail. GitHub's
+To check it, keep an allowed signers file outside the repo (for example
+`~/.config/git/allowed_signers`) holding one line: your git email, a space, then the contents of
+the `.pub` file. Then:
+
+```bash
+git -c gpg.ssh.allowedSignersFile="$HOME/.config/git/allowed_signers" log -1 --show-signature
+```
+
+It must print `Good "git" signature`. Without the file, `git log --show-signature` and
+`git show --show-signature` print "No signature" even for a signed commit. Don't use a `<(...)`
+process substitution for the file: it is read only once, so later checks fail. GitHub's
 **Verified** badge is the final word.
