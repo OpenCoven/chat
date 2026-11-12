@@ -9,6 +9,20 @@ import {
 
 type Drag = Readonly<{ pointerId: number; startX: number; startWidth: number; width: number }>;
 
+const KEYS = 'Arrow keys resize it, Home and End reach the limits.';
+
+/**
+ * True where the screen reader speaks a focused separator's value text:
+ * VoiceOver on macOS and NVDA on Windows. Orca on Linux speaks only its role,
+ * name and description (#545), so there, and on any platform not named here,
+ * the description carries the width.
+ */
+function readerSpeaksSeparatorValue(): boolean {
+  const nav = typeof navigator === 'undefined' ? undefined : navigator;
+  // Only the platform string: a user agent can say "darwin", which holds "win".
+  return /^(Mac|Win)/.test(nav?.platform ?? '');
+}
+
 /**
  * The inspector's draggable left edge: a focusable separator that reports the
  * rail's current width. Dragging holds pointer capture, so the edge follows
@@ -34,6 +48,7 @@ export function InspectorResizer({
 }>) {
   const drag = useRef<Drag | null>(null);
   const describedBy = useId();
+  const speaksValue = readerSpeaksSeparatorValue();
   const widest = settleInspectorWidth(INSPECTOR_MAX_WIDTH, room);
 
   const finish = (event: PointerEvent<HTMLDivElement>) => {
@@ -76,7 +91,9 @@ export function InspectorResizer({
         // on a change speaks a percentage of the range; Settings shows pixels.
         aria-valuetext={`${width} pixels`}
         // Orca speaks a focused splitter's role and name, but neither its value
-        // nor its value text; it does speak a description, so the width is here too.
+        // nor its value text; it does speak a description, so on Linux the width
+        // is there too. VoiceOver and NVDA speak the value text and the
+        // description, so on macOS and Windows it is not: they say it once (#579).
         aria-describedby={describedBy}
         onKeyDown={onKeyDown}
         onPointerDown={(event) => {
@@ -113,7 +130,7 @@ export function InspectorResizer({
         }}
       />
       <span id={describedBy} hidden>
-        {width} pixels wide. Arrow keys resize it, Home and End reach the limits.
+        {speaksValue ? KEYS : `${width} pixels wide. ${KEYS}`}
       </span>
     </>
   );
