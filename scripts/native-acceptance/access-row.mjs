@@ -13,6 +13,9 @@ import { Row, showFamiliars } from './rows.mjs';
 export const ACCESS_PROJECTS = 8;
 const LIST_REGION = 'Project access list';
 const REFRESH = 'Refresh project access';
+/** What Settings says on Windows, where Chat can't read Cave's grants yet (#587, #601). */
+export const UNREADABLE_ON_WINDOWS = "Chat can't read Coven Cave's project grants on Windows yet";
+const declaresNone = (familiar) => `No project access is declared for ${familiar}`;
 
 /** Cave's project registry and grants for one familiar, in the shape Chat reads. */
 export function caveMetadata(familiarId, folder, count = ACCESS_PROJECTS) {
@@ -100,14 +103,25 @@ export function namesIn(text) {
  * names are read from all of the dialog's text rather than from list items.
  */
 async function projectNames(app) {
+  return namesIn(await settingsText(app));
+}
+
+/** All of the Settings dialog's text, as the platform's tree gives it. */
+async function settingsText(app) {
   const dialogs = await app.all('dialog', 'Settings');
-  if (!dialogs.length) return [];
-  const text = [...walk(dialogs[0])]
+  if (!dialogs.length) return '';
+  return [...walk(dialogs[0])]
     .map((node) =>
       [node.name, node.value, node.raw?.text].filter((part) => typeof part === 'string').join(' '),
     )
-    .join(' ');
-  return namesIn(text);
+    .join(' ')
+    .replace(/\s+/g, ' ');
+}
+
+/** The sentence around `phrase` in `text`, for the record. */
+export function around(text, phrase) {
+  const at = text.indexOf(phrase);
+  return at < 0 ? text.slice(0, 200) : text.slice(Math.max(0, at - 20), at + phrase.length + 120);
 }
 
 export async function accessRow(lane, familiar) {
@@ -116,13 +130,6 @@ export async function accessRow(lane, familiar) {
     'Settings › Access: Refresh project access, and a project list the keyboard reaches',
   );
   const { app } = lane;
-  if (PLATFORM === 'windows') {
-    row.block(
-      'Cave metadata',
-      "Chat doesn't read Cave's project metadata on Windows: open_metadata is Unix-only (#587)",
-    );
-    return row;
-  }
   const files = caveFiles();
   if (files.reason) {
     row.block('Cave metadata', files.reason);
@@ -146,6 +153,12 @@ export async function accessRow(lane, familiar) {
       await app.click(await app.one('button', familiar));
       await openSettingsAt(app, 'Access');
       row.expect('projects listed before any grant', await projectNames(app), []);
+      const before = await settingsText(app);
+      row.check(
+        'Settings says no access is declared before any grant',
+        before.includes(declaresNone(familiar)),
+        around(before, declaresNone(familiar)),
+      );
 
       folder = realpathSync(mkdtempSync(join(tmpdir(), 'chat-native-access-')));
       const metadata = caveMetadata(id, folder);
@@ -156,6 +169,50 @@ export async function accessRow(lane, familiar) {
 
       // The grants changed while Settings was open; only the button rereads them.
       await app.click(await app.one('button', REFRESH, { within: ['dialog', 'Settings'] }));
+      if (PLATFORM === 'windows') {
+        // Chat can't read Cave's grants on Windows yet, and says so (#587).
+        const said = await until(
+          "Settings to say Chat can't read the grants on Windows",
+          async () => {
+            const text = await settingsText(app);
+            return text.includes(UNREADABLE_ON_WINDOWS) ? text : null;
+          },
+          30_000,
+          500,
+        ).catch(async () => settingsText(app));
+        row.check(
+          "Settings says Chat can't read Coven Cave's grants on Windows",
+          said.includes(UNREADABLE_ON_WINDOWS),
+          around(said, UNREADABLE_ON_WINDOWS),
+        );
+        row.check(
+          'Settings no longer says none is declared',
+          !said.includes(declaresNone(familiar)),
+          around(said, 'declared'),
+        );
+        row.expect('projects listed after Refresh project access', await projectNames(app), []);
+        row.expect('Settings stayed open on Access', await app.count('dialog', 'Settings'), 1);
+        lane.shot('access-refreshed');
+        rmSync(files.projects);
+        rmSync(files.permissions);
+        await app.click(await app.one('button', REFRESH, { within: ['dialog', 'Settings'] }));
+        const after = await until(
+          'Settings to say none is declared once the grants are gone',
+          async () => {
+            const text = await settingsText(app);
+            return text.includes(declaresNone(familiar)) ? text : null;
+          },
+          30_000,
+          500,
+        ).catch(async () => settingsText(app));
+        row.check(
+          'Settings says no access is declared after the grants were removed',
+          after.includes(declaresNone(familiar)),
+          around(after, declaresNone(familiar)),
+        );
+        await closeSettings(app);
+        return;
+      }
       const shown = await until(
         `${ACCESS_PROJECTS} granted projects in Settings`,
         async () => {

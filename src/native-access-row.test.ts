@@ -2,7 +2,9 @@ import { join } from 'node:path';
 import { expect, test } from 'vitest';
 
 const path = '../scripts/native-acceptance/access-row.mjs';
-const { caveFiles, caveMetadata, idOf, namesIn } = await import(path);
+const { around, caveFiles, caveMetadata, idOf, namesIn, UNREADABLE_ON_WINDOWS } = await import(
+  path
+);
 
 test('the synthetic grants give one familiar every project, the first writable', () => {
   const { projects, permissions } = caveMetadata('astra', '/work', 3);
@@ -41,4 +43,12 @@ test('project names are read from all of the dialog text, once each', () => {
     'Access project 2 Read only Copy Access project 2 path Access project 1 Read and write';
   expect(namesIn(text)).toEqual(['Access project 1', 'Access project 2']);
   expect(namesIn('No project access is declared for Astra')).toEqual([]);
+});
+
+test('the Windows wording is recorded with its surroundings', () => {
+  const text = `Access Astra ${UNREADABLE_ON_WINDOWS}, so Astra's declared access is unknown.`;
+  expect(around(text, UNREADABLE_ON_WINDOWS)).toContain("so Astra's declared access is unknown");
+  expect(around('No project access is declared for Astra', UNREADABLE_ON_WINDOWS)).toBe(
+    'No project access is declared for Astra',
+  );
 });
