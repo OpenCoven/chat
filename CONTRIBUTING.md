@@ -112,10 +112,13 @@ New behavior needs a test. Bug fixes need a regression test that fails before th
 Documentation-only changes don't need the broad code, test, and build suite. Run
 `git diff --check`, keep prose wrapped at 100 columns, and verify new or changed links. The current
 Biome configuration doesn't process these governance documents, so don't report `pnpm lint` as
-validation for them.
+validation for them. If you changed `AGENTS.md`, `CLAUDE.md`, the orientation skill, or anything
+the docs index lists, also run the agent-doc path check, which fails on any path or link that no
+longer resolves (the unit suite runs it in CI too).
 
 ```bash
 git diff --check
+node scripts/agent-doc-paths.mjs
 ```
 
 ## Code style
