@@ -75,6 +75,50 @@ sessions from destroying each other's work:
    worktree) so a context reset, or the session that picks up after you, doesn't have to
    re-derive it.
 
+### Claim an issue before you start it
+
+GitHub shows every session as the same user, so claims are comments on the issue:
+
+1. **Check first.** Read the issue's latest comments and open PRs. If there is a claim with no
+   matching release comment, and the claimed branch or PR has moved in the last 3 days, pick
+   other work or ask the claimant (a peer session, or Val).
+2. **Claim.** Post one comment, on a single line:
+
+   ```text
+   **Claimed** by <session name> (<Claude Code | Codex | Copilot>) on <YYYY-MM-DD>. Worktree `.worktrees/<issue>-<slug>`, branch `<type>/<issue>-<slug>`. Plan: <one sentence>.
+   ```
+
+   The session name is whatever identifies you to peers: a Claude Code session name as
+   `ListAgents` shows it, or a Codex task id.
+3. **Release.** When you finish, or stop without finishing, post a **Released** comment saying
+   what landed (PR links) and what's left. Don't make the next agent wait on a silent claim.
+4. **Stale claims.** A claim with no release comment and no branch, PR or comment activity for 3
+   days is stale. Say so in a comment before taking the work over.
+
+Work that has no issue gets one first, so there is somewhere to claim it.
+
+### Name worktrees after their issue
+
+Use `.worktrees/<issue>-<slug>` for the worktree and `<type>/<issue>-<slug>` for the branch, for
+example `.worktrees/590-setup-command-text` on `fix/590-setup-command-text`. Anyone can then
+match a worktree to its issue and claim.
+
+### Find stale worktrees, and remove only your own
+
+`node scripts/agent-worktrees.mjs` lists every worktree with its branch, PR state, uncommitted and
+unpushed changes, lock, running processes and idle time. It removes nothing. Its verdicts:
+
+| Verdict | Meaning |
+| --- | --- |
+| `removable` | Work landed (merged, or PR closed), clean, nothing unpushed, unlocked, no process inside, idle 3+ days |
+| `check` | Landed, but recently active or named in `docs/project-coordination.md`. Ask before touching it |
+| `keep` | Uncommitted or unpushed work, locked, in use, or not landed |
+| `prunable` | The directory is gone. `git worktree prune` tidies the record |
+
+Remove a worktree yourself (`git worktree remove <path>`) only if you created it and it is
+`removable`. For anyone else's, even a `removable` one, post the report and let its owner or Val
+decide.
+
 ## Canonical UI file map
 
 Start here instead of grepping blind. `CLAUDE.md` has the directory-level map.

@@ -30,6 +30,7 @@ describe('agent doc paths', () => {
       '../coven-code',
       '--stream-json-input',
       'OpenCoven/coven-code',
+      'fix/590-setup-command-text',
       'https://github.com/OpenCoven/chat',
       'claurst-*',
       '.artifacts/ledger.md',
