@@ -1413,6 +1413,11 @@ test('keeps reading position, workspace and run controls clear on large and smal
   await expect(page.locator('.coven-chat')).toHaveAttribute('data-tier', 'compact');
   await expect(page.locator('.coven-chat')).toHaveAttribute('data-sidebar', 'closed');
   await expect(page.locator('.coven-chat')).toHaveAttribute('data-inspector', 'closed');
+  // Linux WebKit focuses buttons on press; exercise that behavior on macOS too.
+  // Focusing must not reflow a stale composer row and move the button before release.
+  await page.getByRole('button', { name: 'Add context', exact: true }).evaluate((trigger) => {
+    trigger.addEventListener('pointerdown', () => trigger.focus());
+  });
   await page.getByRole('button', { name: 'Add context', exact: true }).click();
   await expect(page.getByRole('combobox')).toBeInViewport();
   await expect(page.getByRole('button', { name: 'Close context picker' })).toBeInViewport();
