@@ -73,11 +73,15 @@ commits before merging.
 Confirm your signing configuration before your first commit:
 
 ```bash
-git config --get user.signingkey   # must identify your signing key
+git config --get user.signingkey   # your signing key, or pass -c user.signingkey=... per command
 git config --get gpg.format        # blank means the OpenPGP default
 git commit -S -m "feat: short imperative summary"
 git show --show-signature --no-patch HEAD
 ```
+
+With SSH signing (`gpg.format` set to `ssh`), the last command also needs
+`gpg.ssh.allowedSignersFile` to point at a file listing your email and public key, or it prints
+"No signature" for a signed commit. GitHub's **Verified** badge is the final word.
 
 Prefer a `type: summary` first line in the imperative mood, kept under 72
 characters, with detail in the body.
