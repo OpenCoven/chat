@@ -14,9 +14,10 @@ a turn fans out a long chain of tool calls (many `grep`/`Read` calls in a row).
 The bundled `coven-code` engine **cold-starts each message**. It never saves print-mode
 turns, so `coven run coven-code --continue <id>` starts with no context. To make up for
 that, Chat itself **replays the most recent turns, truncated**, from its own saved
-transcript. The replay carries message text only (no tool calls or tool output), newest
-turns first, capped at 24 KiB per turn and 4 KiB per message. There is no threaded
-session with a rolling summary.
+transcript. The replay carries message text only (no tool calls or tool output). It keeps
+the newest turns that fit: each message is cut at 4 KiB and the whole replay at 24 KiB,
+and older turns are dropped with a notice. There is no threaded session with a rolling
+summary.
 
 The replay code is in this repo: `REPLAY_HARNESSES`, `REPLAY_LIMIT`, and
 `REPLAY_MESSAGE_LIMIT` in `src-tauri/src/coven_runtime.rs` (the comment above them

@@ -1,7 +1,7 @@
 import { describe, expect, test, vi } from 'vitest';
 
 const modulePath = '../scripts/native-acceptance/rows.mjs';
-const { Lane } = await import(modulePath);
+const { Lane, revealLatest } = await import(modulePath);
 
 describe('native link completion boundary', () => {
   test('ordinary send waits after the reply is visible before returning a clickable link', async () => {
@@ -114,4 +114,34 @@ test('the model completion gate holds a streamed link until the lane releases it
     await reader?.cancel();
     await fixture.close();
   }
+});
+
+describe('row 567 brings the held reply into view', () => {
+  const note = () => {
+    const notes: [string, unknown][] = [];
+    return { notes, row: { note: (label: string, value: unknown) => notes.push([label, value]) } };
+  };
+
+  test('presses Jump to latest when the reply arrived below the visible area', async () => {
+    let shown = true;
+    const jump = { role: 'button', name: 'Jump to latest 1 new message' };
+    const app = {
+      all: vi.fn(async () => (shown ? [jump] : [])),
+      click: vi.fn(async () => {
+        shown = false;
+      }),
+    };
+    const { notes, row } = note();
+    await revealLatest(app, row);
+    expect(app.click).toHaveBeenCalledWith(jump);
+    expect(notes).toEqual([['Jump to latest before the click', 'shown; pressed it']]);
+  });
+
+  test('leaves the transcript alone when the reply is already in view', async () => {
+    const app = { all: vi.fn(async () => [{ role: 'button', name: 'Stop run' }]), click: vi.fn() };
+    const { notes, row } = note();
+    await revealLatest(app, row);
+    expect(app.click).not.toHaveBeenCalled();
+    expect(notes).toEqual([['Jump to latest before the click', 'not shown']]);
+  });
 });

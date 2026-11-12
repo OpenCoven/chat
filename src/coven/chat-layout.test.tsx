@@ -2902,6 +2902,46 @@ describe('inspector resizing', () => {
     expect(handle()).toHaveAttribute('aria-valuenow', '360');
   });
 
+  it('gives the width once, in the value text or the description the reader speaks (#579)', () => {
+    // On v0.0.9 VoiceOver read "vertical splitter 360 pixels Resize inspector
+    // 360 pixels wide…": it speaks the value text and the description. NVDA
+    // does too. Orca speaks the name and the description only (#545).
+    const keys = 'Arrow keys resize it, Home and End reach the limits.';
+    const lanes = [
+      { platform: 'MacIntel', reader: 'VoiceOver', speaksValue: true },
+      { platform: 'Win32', reader: 'NVDA', speaksValue: true },
+      { platform: 'Linux x86_64', reader: 'Orca', speaksValue: false },
+    ];
+    for (const { platform, reader, speaksValue } of lanes) {
+      Object.defineProperty(navigator, 'platform', { configurable: true, get: () => platform });
+      try {
+        const { unmount } = render(<ChatLayout {...layoutProps()} ready />);
+        const separator = handle();
+        const heard = () => {
+          const id = separator.getAttribute('aria-describedby') ?? '';
+          const description = document.getElementById(id)?.textContent ?? '';
+          const value = speaksValue ? (separator.getAttribute('aria-valuetext') ?? '') : '';
+          return `${value} Resize inspector ${description}`;
+        };
+        for (const width of [360, 376]) {
+          if (width === 376) fireEvent.keyDown(separator, { key: 'ArrowLeft' });
+          expect({
+            reader,
+            times: heard().match(new RegExp(`\\b${width}\\b`, 'g'))?.length,
+          }).toEqual({ reader, times: 1 });
+          expect(separator).toHaveAttribute('aria-valuetext', `${width} pixels`);
+          expect(separator).toHaveAccessibleDescription(
+            speaksValue ? keys : `${width} pixels wide. ${keys}`,
+          );
+        }
+        unmount();
+      } finally {
+        Reflect.deleteProperty(navigator, 'platform');
+        localStorage.clear();
+      }
+    }
+  });
+
   it('offers no separator in the medium and compact drawers', () => {
     for (const width of [900, 390]) {
       const restore = mockViewport(width);
