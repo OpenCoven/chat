@@ -14,13 +14,13 @@ import {
 
 const ready = (tag: string, previous: string | null) =>
   [
-    `# OpenCoven Chat ${tag}`,
+    `# Coven Chat ${tag}`,
     '',
     'What changes for you.',
     '',
     '## Before you install',
     '',
-    `Check \`OpenCoven.Chat_${tag.slice(1)}_aarch64.dmg\` against \`SHA256SUMS\`.`,
+    `Check \`Coven.Chat_${tag.slice(1)}_aarch64.dmg\` against \`SHA256SUMS\`.`,
     ...(previous ? ['', changelogLine(previous, tag)] : []),
     '',
   ].join('\n');
@@ -39,6 +39,19 @@ function repo(files: Record<string, string>) {
 }
 
 describe('release notes', () => {
+  test('keeps historical product titles valid after the desktop rename', () => {
+    const historical = ready('v0.1.1', null)
+      .replaceAll('Coven Chat', 'OpenCoven Chat')
+      .replaceAll('Coven.Chat_', 'OpenCoven.Chat_');
+    expect(checkNotes('v0.1.1', historical, { previous: null, index: '](v0.1.1.md)' })).toEqual([]);
+  });
+
+  test('checks installer versions under the new desktop product name', () => {
+    const wrongVersion = ready('v0.1.2', null).replace('Coven.Chat_0.1.2_', 'Coven.Chat_0.1.1_');
+    expect(checkNotes('v0.1.2', wrongVersion, { previous: null, index: '](v0.1.2.md)' })).toContain(
+      'an installer filename names version 0.1.1; this release is 0.1.2',
+    );
+  });
   test('every published release has ready notes and an index row', () => {
     // A failure names the file and what to change. The template is in
     // docs/release-notes/README.md.
@@ -92,7 +105,7 @@ describe('release notes', () => {
     });
     expect(problems).toEqual([
       `add a row for v0.1.2 to ${INDEX}`,
-      'start the file with the line "# OpenCoven Chat v0.1.2"',
+      'start the file with the line "# Coven Chat v0.1.2"',
       'add a "## Before you install" section (see the template in the index)',
       'say how to check a download against SHA256SUMS',
       'an installer filename names version 0.1.1; this release is 0.1.2',
