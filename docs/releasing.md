@@ -259,6 +259,13 @@ accepted, so nobody was blocked. `Notarize and staple the disk images` now
 submits each `.dmg` with the same credentials, staples the ticket and checks
 it, and the artifact check refuses an image without one.
 
+Apple's ticket service sometimes drops the connection after notarization has
+succeeded, and `stapler` reports that the same way as a missing ticket (#461).
+Both steps therefore try each `stapler` call up to 10 times, waiting 15s more
+after each failure (675s in all), and fail only after the last try. A drop in
+v0.0.9 outlasted the old 110s window (#568). A step that pauses for several
+minutes there is waiting on Apple, not stuck.
+
 > **Note:** when you rehearse before the certificates exist, a green result
 > says nothing about whether signing works. Each platform whose secrets are
 > absent builds unsigned (no notarization, no Authenticode), and those paths
