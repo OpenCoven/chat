@@ -19,6 +19,7 @@ import { defaultBrowser, quitBrowsers } from './browser.mjs';
 import { App, Native, outline, PLATFORM, screenshot, sleep, until } from './driver.mjs';
 import { engineHomeRow } from './engine-home-row.mjs';
 import { startModelFixture } from './fixture.mjs';
+import { modelRow } from './model-row.mjs';
 import {
   cancelledRunRow,
   fullAccessRow,
@@ -317,6 +318,9 @@ try {
     await lane.front();
     await lane.reset();
     rows.push(await accessRow(lane, FIRST));
+    await lane.front();
+    await lane.reset();
+    rows.push(await modelRow(lane, FIRST, models));
   }
 
   // Asking for permission (#542, #573), last of the rows that send: its turns

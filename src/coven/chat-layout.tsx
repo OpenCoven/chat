@@ -2020,6 +2020,7 @@ export function ChatLayout(props: ChatLayoutProps) {
             }}
             preferences={preferences}
             onPreferences={setPreferences}
+            chatHarness={chatHarness}
             archivedFilter={props.archivedFilter}
             onArchivedFilter={props.onArchivedFilter}
             archivedFilterDisabled={props.lifecycleBusy}

@@ -3149,8 +3149,8 @@ describe('model settings', () => {
       'aria-pressed',
       'true',
     );
-    fireEvent.change(within(model).getByRole('textbox', { name: 'Model' }), {
-      target: { value: ' anthropic/claude-sonnet-5-5 ' },
+    fireEvent.change(within(model).getByRole('combobox', { name: 'Model' }), {
+      target: { value: 'claude-sonnet-5-5' },
     });
     fireEvent.click(within(model).getByRole('checkbox', { name: 'Think longer' }));
     const speed = within(model).getByRole('group', { name: 'Speed' });
@@ -3159,7 +3159,7 @@ describe('model settings', () => {
     expect(model).toHaveTextContent('Messages sent from your iPhone use the engine');
     expect(stored()).toMatchObject({
       harness: 'claude',
-      model: 'anthropic/claude-sonnet-5-5',
+      model: 'claude-sonnet-5-5',
       think: true,
       speed: 'thorough',
     });
@@ -3167,16 +3167,35 @@ describe('model settings', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Send' }));
     expect(props.onSend).toHaveBeenCalledExactlyOnceWith({
       harness: 'claude',
-      model: 'anthropic/claude-sonnet-5-5',
+      model: 'claude-sonnet-5-5',
       think: true,
       speed: 'thorough',
     });
   });
 
+  it("offers Coven Code's presets as IDs the engine sends to each provider as they are", () => {
+    render(<ChatLayout {...layoutProps()} ready />);
+    const model = openSettingsAt('Model');
+    const picker = within(model).getByRole('combobox', { name: 'Model' });
+    // The engine strips a provider prefix only for non-Anthropic providers;
+    // an "anthropic/" ID would reach Anthropic's API as written (#584).
+    expect(within(picker).getByRole('option', { name: 'Claude Sonnet 5.5' })).toHaveValue(
+      'claude-sonnet-5-5',
+    );
+    expect(within(picker).getByRole('option', { name: 'Claude Opus 5.5' })).toHaveValue(
+      'claude-opus-5-5',
+    );
+    expect(within(picker).getByRole('option', { name: 'GPT-5.5' })).toHaveValue('openai/gpt-5.5');
+    fireEvent.change(picker, { target: { value: 'claude-sonnet-5-5' } });
+    expect(stored()).toMatchObject({ harness: 'coven-code', model: 'claude-sonnet-5-5' });
+  });
+
   it('says plainly when a model id could not be sent, until it is corrected or cleared', () => {
     render(<ChatLayout {...layoutProps()} ready />);
     const model = openSettingsAt('Model');
-    const field = within(model).getByRole('textbox', { name: 'Model' });
+    const picker = within(model).getByRole('combobox', { name: 'Model' });
+    fireEvent.change(picker, { target: { value: ':custom' } });
+    const field = within(model).getByRole('textbox', { name: 'Custom model ID' });
     fireEvent.change(field, { target: { value: '--model=x' } });
     expect(field).toHaveAttribute('aria-invalid', 'true');
     expect(field).toHaveAccessibleDescription(
@@ -3185,6 +3204,10 @@ describe('model settings', () => {
     fireEvent.change(field, { target: { value: '' } });
     expect(field).not.toHaveAttribute('aria-invalid');
     expect(model).toHaveTextContent("use the engine's default");
+    fireEvent.change(field, { target: { value: ' other/custom-model ' } });
+    expect(stored()).toMatchObject({ model: 'other/custom-model' });
+    fireEvent.change(picker, { target: { value: '' } });
+    expect(stored()).toMatchObject({ model: '' });
   });
 
   it('shows what a chat runs on, which opens Settings, and the model its latest run reported', () => {
