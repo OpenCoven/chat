@@ -1,23 +1,44 @@
 // The packaged suite's deterministic model stand-in, plus two replies the
 // native lane needs: one that streams slowly enough to cancel a real run while
 // it is still going (#504 row 7), and one carrying an address with a user name,
-// which the review must refuse to open (#515). Every word is synthetic.
+// which the review must refuse to open (#515). It also serves the packaged
+// suite's approval script (`approvalStep`), which asks the real engine to write a
+// real file, so the engine and not this fixture decides what each turn may do.
+// Every word is synthetic.
 
 import { appendFileSync } from 'node:fs';
 import { createServer } from 'node:http';
 import {
   ADDRESSES,
+  APPROVAL_DONE,
+  APPROVAL_NO_NOTE,
+  APPROVAL_REFUSED,
+  APPROVAL_SUMMARY,
+  APPROVAL_UNASKED,
+  approvalStep,
   replyFor as packagedReply,
+  sendModelStep,
   TABLE,
 } from '../packaged-acceptance/model-fixture.mjs';
 
-export { ADDRESSES, TABLE };
+export {
+  ADDRESSES,
+  APPROVAL_DONE,
+  APPROVAL_NO_NOTE,
+  APPROVAL_REFUSED,
+  APPROVAL_SUMMARY,
+  APPROVAL_UNASKED,
+  TABLE,
+};
 export const USERINFO = 'https://name@example.com/';
+/** The heading of an ordinary reply to a message sent while a request waits (#573). */
+export const MOVED_ON = 'Moving on';
 export const SLOW_LINES = 120;
 
 const EXTRA = {
   reviewrace: `A held reply.\n\n[Completion boundary](${ADDRESSES.query})`,
   userinfo: `One more address.\n\n- [Named login](${USERINFO})`,
+  moveon: `## ${MOVED_ON}\n\nNothing to write.`,
 };
 
 function lastText(messages) {
@@ -33,11 +54,21 @@ function lastText(messages) {
   return '';
 }
 
-/** The newest token decides, as in the packaged fixture. */
-function tokenOf(messages) {
-  return [
-    ...lastText(messages).matchAll(/\[\[(links|table|other|slow|userinfo|reviewrace)\]\]/g),
-  ].at(-1)?.[1];
+/**
+ * The newest token decides, as in the packaged fixture. Chat replays a chat's
+ * recent turns ahead of each message (`build_replay`), so an older turn's token
+ * can sit behind this message's own. `askAt` is where the newest `[[ask …]]`
+ * or `[[write …]]`
+ * starts: an allowed turn's own words carry no token, so the request it answers
+ * reaches the fixture only through the replay.
+ */
+export function newestToken(messages) {
+  const text = lastText(messages);
+  const native = [
+    ...text.matchAll(/\[\[(links|table|other|slow|userinfo|reviewrace|moveon)\]\]/g),
+  ].at(-1);
+  const askAt = Math.max(text.lastIndexOf('[[ask '), text.lastIndexOf('[[write '));
+  return { token: native?.[1], at: native?.index ?? -1, askAt };
 }
 
 function events(res, model) {
@@ -97,11 +128,18 @@ export function startModelFixture({ log } = {}) {
         parsed = {};
       }
       const path = (req.url ?? '').split('?')[0];
-      const token = tokenOf(parsed.messages);
+      const isMessage = req.method === 'POST' && path === '/v1/messages';
+      const newest = newestToken(parsed.messages);
+      const askWins = !newest.token || newest.askAt > newest.at;
+      const step = isMessage && askWins ? approvalStep(parsed.messages) : undefined;
+      const token = step ? 'ask' : newest.token;
       if (log) {
+        // `step` says what an approval turn was served: `write` is a real Write
+        // call for the engine to run or refuse, `text` the turn's closing reply.
+        const served = step ? { step: step.tool ? 'write' : 'text' } : {};
         appendFileSync(
           log,
-          `${JSON.stringify({ at: Date.now(), method: req.method, path, token: token ?? null })}\n`,
+          `${JSON.stringify({ at: Date.now(), method: req.method, path, token: token ?? null, ...served })}\n`,
         );
       }
       if (req.method === 'POST' && path === '/v1/messages/count_tokens') {
@@ -117,6 +155,10 @@ export function startModelFixture({ log } = {}) {
             error: { type: 'not_found_error', message: 'Not served.' },
           }),
         );
+        return;
+      }
+      if (step) {
+        sendModelStep(res, parsed.model, step, parsed.stream);
         return;
       }
       const text = EXTRA[token] ?? packagedReply(parsed.messages);
