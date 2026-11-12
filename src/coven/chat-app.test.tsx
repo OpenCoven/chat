@@ -1309,4 +1309,159 @@ describe('answering a familiar that asks for permission', () => {
     );
     expect(api.allow).not.toHaveBeenCalled();
   });
+
+  // Only the poll's interval is faked: Testing Library waits on real timeouts.
+  function polling() {
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
+  }
+  async function poll() {
+    await act(async () => {
+      vi.advanceTimersByTime(5_000);
+    });
+  }
+
+  it('reads the chat again when the phone answers a request this chat shows', async () => {
+    polling();
+    try {
+      const api = asking();
+      await ready(api);
+      await screen.findByRole('button', { name: 'Decline Create probe.txt' });
+      draft('typing here');
+      const reads = vi.mocked(api.readSession).mock.calls.length;
+      const reading = deferred<Awaited<ReturnType<typeof api.readSession>>>();
+      vi.mocked(api.readSession).mockReturnValueOnce(reading.promise);
+      // Declined on the phone: the host closed it and wrote its line into the chat.
+      vi.mocked(api.pendingApprovals).mockResolvedValue([]);
+      await poll();
+      await waitFor(() =>
+        expect(vi.mocked(api.readSession).mock.calls.length).toBeGreaterThan(reads),
+      );
+      // The read leaves the person typing here alone.
+      expect(screen.getByRole('textbox')).toBeEnabled();
+      expect(screen.getByRole('textbox')).toHaveValue('typing here');
+      const sessionId = vi.mocked(api.readSession).mock.calls.at(-1)?.[0] ?? '';
+      await act(async () => {
+        reading.resolve(
+          await (vi.mocked(api.readSession).getMockImplementation()?.(sessionId) as ReturnType<
+            typeof api.readSession
+          >),
+        );
+      });
+      expect(screen.getByRole('textbox')).toHaveValue('typing here');
+      await waitFor(() =>
+        expect(
+          screen.queryByRole('button', { name: 'Decline Create probe.txt' }),
+        ).not.toBeInTheDocument(),
+      );
+      await waitFor(() =>
+        expect(vi.mocked(api.readSession).mock.calls.length).toBeGreaterThan(reads),
+      );
+      expect(api.decline).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("doesn't read this chat again for another familiar's request", async () => {
+    polling();
+    try {
+      const api = runtime();
+      vi.mocked(api.pendingApprovals).mockResolvedValue([{ ...approval, familiarId: 'other' }]);
+      await ready(api);
+      await waitFor(() => expect(api.pendingApprovals).toHaveBeenCalled());
+      await act(async () => {
+        await Promise.resolve();
+      });
+      const reads = vi.mocked(api.readSession).mock.calls.length;
+      vi.mocked(api.pendingApprovals).mockResolvedValue([]);
+      const asked = vi.mocked(api.pendingApprovals).mock.calls.length;
+      await poll();
+      await waitFor(() =>
+        expect(vi.mocked(api.pendingApprovals).mock.calls.length).toBeGreaterThan(asked),
+      );
+      await act(async () => {
+        await Promise.resolve();
+      });
+      expect(vi.mocked(api.readSession).mock.calls.length).toBe(reads);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  // A read locks the composer, so one right after a run would take the field's focus.
+  it("doesn't read the chat again when this window's message closes the request", async () => {
+    const api = asking();
+    const running = deferred<{ runId: string; events: never[] }>();
+    vi.mocked(api.send).mockReturnValue(running.promise);
+    await ready(api);
+    await screen.findByRole('button', { name: 'Decline Create probe.txt' });
+    draft('never mind');
+    click('Send');
+    await waitFor(() => expect(screen.getByTestId('run-familiar')).toHaveTextContent('f'));
+    // The read the run's start set off may still list it; the host closes it as the message starts.
+    await act(async () => {
+      await Promise.resolve();
+    });
+    vi.mocked(api.pendingApprovals).mockResolvedValue([]);
+    const reads = vi.mocked(api.readSession).mock.calls.length;
+    await act(async () => {
+      running.resolve({ runId: 'run', events: [] });
+      await running.promise;
+    });
+    await waitFor(() => expect(screen.getByTestId('run-familiar')).toHaveTextContent('idle'));
+    await waitFor(() =>
+      expect(
+        screen.queryByRole('button', { name: 'Decline Create probe.txt' }),
+      ).not.toBeInTheDocument(),
+    );
+    await act(async () => {
+      await new Promise((done) => setTimeout(done, 50));
+    });
+    expect(vi.mocked(api.readSession).mock.calls.length).toBe(reads);
+  });
+
+  it('reads the chat after a phone Decline of a request a refused message left open', async () => {
+    polling();
+    try {
+      const api = asking();
+      vi.mocked(api.send).mockRejectedValue(new Error('Coven is not running.'));
+      await ready(api);
+      await screen.findByRole('button', { name: 'Decline Create probe.txt' });
+      draft('never mind');
+      click('Send');
+      await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent('not running'));
+      await waitFor(() => expect(screen.getByTestId('run-familiar')).toHaveTextContent('idle'));
+      await act(async () => {
+        await new Promise((done) => setTimeout(done, 20));
+      });
+      const reads = vi.mocked(api.readSession).mock.calls.length;
+      vi.mocked(api.pendingApprovals).mockResolvedValue([]);
+      await poll();
+      await waitFor(() =>
+        expect(vi.mocked(api.readSession).mock.calls.length).toBeGreaterThan(reads),
+      );
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('reads the chat once after declining here', async () => {
+    const api = asking();
+    await ready(api);
+    const decline = await screen.findByRole('button', { name: 'Decline Create probe.txt' });
+    vi.mocked(api.pendingApprovals).mockResolvedValue([]);
+    const reads = vi.mocked(api.readSession).mock.calls.length;
+    const asked = vi.mocked(api.pendingApprovals).mock.calls.length;
+    fireEvent.click(decline);
+    await waitFor(() =>
+      expect(vi.mocked(api.pendingApprovals).mock.calls.length).toBeGreaterThan(asked),
+    );
+    await waitFor(() =>
+      expect(vi.mocked(api.readSession).mock.calls.length).toBeGreaterThan(reads),
+    );
+    await act(async () => {
+      await new Promise((done) => setTimeout(done, 50));
+    });
+    expect(vi.mocked(api.readSession).mock.calls.length).toBe(reads + 1);
+  });
 });

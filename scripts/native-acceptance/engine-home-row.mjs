@@ -34,7 +34,7 @@ export function requestedSince(models, before) {
 }
 
 export async function engineHomeRow(lane, familiar, models) {
-  const row = new Row('v010-engine-home', "Coven Code run from Chat reads Coven's managed home");
+  const row = new Row('v012-engine-home', "Coven Code run from Chat reads Coven's managed home");
   const homes = engineHomes();
   if (homes.reason) {
     row.block('engine home', homes.reason);
