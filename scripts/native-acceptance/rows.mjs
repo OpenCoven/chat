@@ -465,6 +465,24 @@ async function readMenu(lane, row, label, pressed) {
   return items;
 }
 
+/**
+ * Brings the newest reply into view as a person would. The transcript follows
+ * new messages only while it is near its end, and earlier rows return focus
+ * to links higher up, so a held reply can arrive below the visible area. A
+ * click at an off-screen link's position lands elsewhere: candidate runs
+ * 43006448055 and 43009039930 failed 567 on Linux that way, with Jump to
+ * latest on screen.
+ */
+export async function revealLatest(app, row) {
+  const jump = (await app.all('button')).find((node) => /^Jump to latest/.test(node.name));
+  row.note('Jump to latest before the click', jump ? 'shown; pressed it' : 'not shown');
+  if (!jump) return;
+  await app.click(jump);
+  await until('the transcript to reach the newest reply', async () =>
+    (await app.all('button')).every((node) => !/^Jump to latest/.test(node.name)),
+  );
+}
+
 async function linkNamed(app, name) {
   return await until(`link "${name}"`, async () => (await app.all('link', name)).at(-1), 15_000);
 }
@@ -563,6 +581,7 @@ export async function linkCompletionRow(lane, familiar, finishReview) {
         { complete: false },
       );
       row.expect('run still active before the review', await app.count('button', 'Stop run'), 1);
+      await revealLatest(app, row);
       await trace.sample('stream-held-before-click');
       await app.click(await linkNamed(app, 'Completion boundary'));
       await until('the held-stream review to appear', () =>
