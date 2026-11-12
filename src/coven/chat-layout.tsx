@@ -1905,7 +1905,7 @@ export function ChatLayout(props: ChatLayoutProps) {
                         )}
                       </div>
                       <div className="fr-row">
-                        <span className="fr-row-label">Access</span>
+                        <span className="fr-row-label">Declared access</span>
                         <button
                           type="button"
                           className="coven-access-summary"

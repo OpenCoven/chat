@@ -126,7 +126,7 @@ export function around(text, phrase) {
 
 export async function accessRow(lane, familiar) {
   const row = new Row(
-    'v010-access',
+    'v012-access',
     'Settings › Access: Refresh project access, and a project list the keyboard reaches',
   );
   const { app } = lane;
