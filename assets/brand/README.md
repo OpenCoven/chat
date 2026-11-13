@@ -3,6 +3,8 @@
 The Coven Chat mark is the OpenCoven crown inside an outlined speech bubble,
 white on ink black (`#050409`).
 
+The desktop rounded icon uses a 32-unit bubble outline for a quieter silhouette at small sizes. The crown path is unchanged, and the opaque mobile master retains its original 37.5-unit outline.
+
 | File | What it is | Used for |
 | --- | --- | --- |
 | `chat-app-icon.svg` | Opaque square, full-bleed ink black | iOS App Store icon, `public/apple-touch-icon.png` |

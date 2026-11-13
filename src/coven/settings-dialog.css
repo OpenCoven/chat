@@ -11,22 +11,9 @@
   padding: 0;
   border: 1px solid var(--border-strong);
   border-radius: 20px;
-  background:
-    radial-gradient(
-      120% 70% at 0% 0%,
-      color-mix(in oklch, var(--accent-presence) 9%, transparent),
-      transparent 60%
-    ),
-    radial-gradient(
-      90% 60% at 100% 100%,
-      color-mix(in oklch, var(--accent-violet, var(--accent-presence)) 6%, transparent),
-      transparent 70%
-    ), var(--bg-panel);
+  background: var(--bg-panel);
   color: var(--text-primary);
-  box-shadow:
-    0 40px 120px rgba(0, 0, 0, 0.6),
-    0 0 0 1px rgba(255, 255, 255, 0.04) inset,
-    0 1px 0 rgba(255, 255, 255, 0.06) inset;
+  box-shadow: 0 24px 72px rgba(0, 0, 0, 0.28);
   overflow: hidden;
 }
 
@@ -118,14 +105,8 @@
 }
 
 .coven-settings-nav-item[aria-current="page"] {
-  background:
-    linear-gradient(
-      90deg,
-      color-mix(in oklch, var(--accent-presence) 14%, transparent),
-      transparent 80%
-    ), var(--bg-elevated);
+  background: var(--bg-hover);
   color: var(--text-primary);
-  box-shadow: 0 0 0 1px var(--border-hairline) inset;
 }
 
 .coven-settings-nav-item[aria-current="page"]::before {
@@ -137,7 +118,7 @@
   width: 2px;
   border-radius: 2px;
   background: var(--accent-presence);
-  box-shadow: 0 0 10px var(--accent-presence);
+  box-shadow: none;
 }
 
 .coven-settings-nav-item:focus-visible {
@@ -235,11 +216,9 @@
 
 .coven-settings-card {
   border: 1px solid var(--border-hairline);
-  border-radius: 14px;
-  background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.03), transparent 50%),
-    color-mix(in srgb, var(--bg-elevated) 55%, transparent);
-  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.03) inset;
+  border-radius: 12px;
+  background: var(--bg-raised);
+  overflow: hidden;
 }
 
 .coven-settings-row {
@@ -318,7 +297,8 @@
   font-size: 13px;
 }
 
-.coven-model-select:focus-visible {
+.coven-model-select:focus-visible,
+.coven-access-scroll:focus-visible {
   outline: 2px solid var(--ring-focus);
   outline-offset: 2px;
 }
@@ -540,11 +520,6 @@
   border: 1px solid var(--border-hairline);
   border-radius: 14px;
   background: color-mix(in srgb, var(--bg-elevated) 45%, transparent);
-}
-
-.coven-access-scroll:focus-visible {
-  outline: 2px solid var(--ring-focus);
-  outline-offset: 2px;
 }
 
 .coven-access-list {

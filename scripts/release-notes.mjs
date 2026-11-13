@@ -28,7 +28,7 @@ export const HISTORICAL = Object.freeze(['v0.0.1-demo.1']);
 const TAG = /^v(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.-]+))?$/;
 // The template's own placeholders (vX.Y.Z, vA.B.C) count too.
 const PLACEHOLDER = /\b(TODO|TBD|FIXME)\b|X\.Y\.Z|A\.B\.C/;
-const INSTALLER_VERSION = /OpenCoven\.Chat_([0-9][^_\s`]*)_/g;
+const INSTALLER_VERSION = /(?:OpenCoven\.Chat|Coven\.Chat)_([0-9][^_\s`]*)_/g;
 
 /** Orders tags by version; a prerelease sorts before its release. */
 export function compareTags(a, b) {
@@ -84,8 +84,8 @@ export function checkNotes(tag, raw, { previous, index }) {
   if (!indexed) problems.push(`add a row for ${tag} to ${INDEX}`);
   if (HISTORICAL.includes(tag)) return problems;
 
-  const title = `# OpenCoven Chat ${tag}`;
-  if (markdown.split('\n', 1)[0] !== title) {
+  const title = `# Coven Chat ${tag}`;
+  if (![title, `# OpenCoven Chat ${tag}`].includes(markdown.split('\n', 1)[0])) {
     problems.push(`start the file with the line "${title}"`);
   }
   if (!/^## Before you install$/m.test(markdown)) {

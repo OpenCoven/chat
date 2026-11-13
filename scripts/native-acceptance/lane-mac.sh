@@ -25,9 +25,9 @@ if [ -n "${CANDIDATE_INSTALLER:-}" ]; then
   source_label="candidate ${arch} DMG built from ${commit}, not a published release"
 else
   version="${release#v}"
-  asset="OpenCoven.Chat_${version}_${arch}.dmg"
   base="https://github.com/OpenCoven/chat/releases/download/${release}"
   curl --proto '=https' --tlsv1.2 --fail --location --retry 3 -o "$work/SHA256SUMS" "$base/SHA256SUMS" || exit 1
+  asset="$(node "$here/../release-installer.mjs" "$work/SHA256SUMS" "$version" "${arch}.dmg")" || exit 1
   curl --proto '=https' --tlsv1.2 --fail --location --retry 3 -o "$work/$asset" "$base/$asset" || exit 1
   checksum="$(cd "$work" && grep -F "  ${asset}" SHA256SUMS | shasum -a 256 -c - 2>&1)"
   log "checksum: $checksum"
@@ -39,9 +39,11 @@ sha="$(shasum -a 256 "$work/$asset" | cut -d' ' -f1)"
 
 log "prior app data: $(ls -d "$HOME/Library/Application Support/ai.opencoven.chat" "$HOME/Library/WebKit/ai.opencoven.chat" 2>&1 | tr '\n' ' ')"
 mount="$(hdiutil attach -nobrowse -readonly "$work/$asset" | awk -F'\t' '/\/Volumes\//{print $NF}' | tail -1)"
-ditto "$mount/OpenCoven Chat.app" "/Applications/OpenCoven Chat.app"
+product="Coven Chat"
+if [ ! -d "$mount/$product.app" ]; then product="OpenCoven Chat"; fi
+app="/Applications/$product.app"
+ditto "$mount/$product.app" "$app" || exit 1
 hdiutil detach "$mount" -quiet
-app="/Applications/OpenCoven Chat.app"
 sign="$(codesign -dvvv "$app" 2>&1)"
 cdhash="$(printf '%s\n' "$sign" | sed -n 's/^CDHash=//p')"
 identifier="$(printf '%s\n' "$sign" | sed -n 's/^Identifier=//p')"

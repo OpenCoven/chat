@@ -29,6 +29,22 @@ function mutated(change: (input: Input) => void): Input {
 }
 
 describe('verify-package', () => {
+  it.each(['msi', 'nsis', 'deb'])(
+    'rejects a rename that loses the legacy %s install identity',
+    (kind) => {
+      const input = actual();
+      const bundle = input.conf.bundle;
+      if (kind === 'msi') {
+        bundle.windows = { ...bundle.windows, wix: {} };
+      } else if (kind === 'nsis') {
+        bundle.windows = { ...bundle.windows, nsis: {} };
+      } else {
+        bundle.linux.deb = { depends: [] };
+      }
+      expect(verifyPackage(input).failures.join('\n')).toMatch(/legacy.*install identity/i);
+    },
+  );
+
   it('passes the package as declared', () => {
     expect(verifyPackage(actual()).failures).toEqual([]);
   });

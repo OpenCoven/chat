@@ -117,8 +117,7 @@ export interface CovenRuntime {
   changeChatLifecycle(id: string, lifecycle: ChatLifecycle): Promise<void>;
 }
 
-const UNAVAILABLE =
-  'Local Coven requires the desktop app. Install Coven CLI and open OpenCoven Chat.';
+const UNAVAILABLE = 'Local Coven requires the desktop app. Install Coven CLI and open Coven Chat.';
 function record(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }

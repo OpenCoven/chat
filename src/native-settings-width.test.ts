@@ -151,7 +151,7 @@ test.each([true, false])(
     const shots: string[] = [];
     const keys: string[] = [];
     const settingsFocus = { role: 'button', name: 'Model' };
-    let focus = { role: 'window', name: 'Astra — OpenCoven Chat' };
+    let focus = { role: 'window', name: 'Astra — Coven Chat' };
     let reviewingSettings = false;
     const app = {
       one: async () => fixture.root,
