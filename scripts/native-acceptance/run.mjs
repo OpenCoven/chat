@@ -170,8 +170,8 @@ rows.push(setup);
 let child;
 let reader;
 
-function spawnApp(logName) {
-  const started = spawn(options.app, [], {
+function spawnApp(logName, app = options.app) {
+  const started = spawn(app, [], {
     env,
     detached: PLATFORM !== 'windows',
     stdio: ['ignore', 'pipe', 'pipe'],
@@ -387,8 +387,9 @@ try {
     blocked.block('staging', options['upgrade-blocked']);
     rows.push(blocked);
   } else if (PLATFORM === 'windows' && options['upgrade-from'] && options['upgrade-to']) {
-    const launch = async (logName) => {
-      const started = spawnApp(logName);
+    // Row 578 starts v0.0.8 from its own folder, which differs once the product name changed.
+    const launch = async (logName, app = options.app) => {
+      const started = spawnApp(logName, app);
       const shown = await attach(started, screen);
       await shown.activate();
       await shown.setFrame(FRAMES.wide).catch(() => undefined);
