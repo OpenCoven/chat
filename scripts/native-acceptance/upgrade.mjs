@@ -125,27 +125,32 @@ export async function autofillUpgradeRow({
   shot,
   out,
   familiars: [first, second],
+  resolveInstalledExe = () => exe,
+  installMsi = msiexec,
+  waitForWebViewGone = webViewGone,
+  getProductVersion = productVersion,
 }) {
   const row = new Row('578', 'Autofill an earlier version saved is cleared on upgrade');
   let running = null;
   try {
     row.note('installers', { from: from.label, to: to.label });
-    row.note('web view processes gone before v0.0.8', await webViewGone());
+    row.note('web view processes gone before v0.0.8', await waitForWebViewGone());
 
     // Staging: v0.0.8 over the build under test. If the installer refuses the
     // downgrade, the build under test is removed first; Chat's data stays.
-    let code = msiexec(['/i', from.path], join(out, 'msiexec-v0.0.8.log'));
+    let code = installMsi(['/i', from.path], join(out, 'msiexec-v0.0.8.log'));
     if (!INSTALLED.has(code)) {
       row.note('v0.0.8 over the build under test', `msiexec ${code}; removing it first`);
-      msiexec(['/x', to.path], join(out, 'msiexec-remove.log'));
-      code = msiexec(['/i', from.path], join(out, 'msiexec-v0.0.8.log'));
+      installMsi(['/x', to.path], join(out, 'msiexec-remove.log'));
+      code = installMsi(['/i', from.path], join(out, 'msiexec-v0.0.8.log'));
     }
     row.check('v0.0.8 installed', INSTALLED.has(code), `msiexec ${code}`);
-    const oldVersion = productVersion(exe);
-    row.note('installed app', { version: oldVersion, sha256: sha256(exe) });
+    const oldExe = resolveInstalledExe();
+    const oldVersion = getProductVersion(oldExe);
+    row.note('installed app', { version: oldVersion, sha256: sha256(oldExe) });
     row.check('v0.0.8 is the installed app', oldVersion.startsWith('0.0.8'), oldVersion);
 
-    running = await launch('app-v0.0.8.log');
+    running = await launch('app-v0.0.8.log', oldExe);
     const lane = new Lane({ app: running.app, native, shot, requests: () => 0, tokens: () => 0 });
     const screen = await firstScreen(lane.app);
     row.note('v0.0.8 first screen', screen);
@@ -203,11 +208,12 @@ export async function autofillUpgradeRow({
     row.note('transcripts before the upgrade', kept);
 
     // The upgrade: the build under test installed over v0.0.8, then started.
-    code = msiexec(['/i', to.path], join(out, 'msiexec-upgrade.log'));
+    code = installMsi(['/i', to.path], join(out, 'msiexec-upgrade.log'));
     row.check('the build under test installed over v0.0.8', INSTALLED.has(code), `msiexec ${code}`);
-    row.expect('the build under test is the installed app again', sha256(exe), installedSha);
-    row.note('installed app', { version: productVersion(exe) });
-    running = await launch('app-upgraded.log');
+    const upgradedExe = resolveInstalledExe();
+    row.expect('the build under test is the installed app again', sha256(upgradedExe), installedSha);
+    row.note('installed app', { version: getProductVersion(upgradedExe) });
+    running = await launch('app-upgraded.log', upgradedExe);
     lane.app = running.app;
     const reopened = await firstScreen(lane.app);
     row.expect(

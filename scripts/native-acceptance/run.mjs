@@ -170,8 +170,8 @@ rows.push(setup);
 let child;
 let reader;
 
-function spawnApp(logName) {
-  const started = spawn(options.app, [], {
+function spawnApp(logName, app = options.app) {
+  const started = spawn(app, [], {
     env,
     detached: PLATFORM !== 'windows',
     stdio: ['ignore', 'pipe', 'pipe'],
@@ -387,8 +387,8 @@ try {
     blocked.block('staging', options['upgrade-blocked']);
     rows.push(blocked);
   } else if (PLATFORM === 'windows' && options['upgrade-from'] && options['upgrade-to']) {
-    const launch = async (logName) => {
-      const started = spawnApp(logName);
+    const launch = async (logName, app = options.app) => {
+      const started = spawnApp(logName, app);
       const shown = await attach(started, screen);
       await shown.activate();
       await shown.setFrame(FRAMES.wide).catch(() => undefined);
@@ -400,6 +400,19 @@ try {
         from: { path: options['upgrade-from'], label: 'published msi v0.0.8' },
         to: { path: options['upgrade-to'], label: options.lane },
         exe: options.app,
+        resolveInstalledExe: () =>
+          execFileSync(
+            'powershell.exe',
+            [
+              '-NoProfile',
+              '-NonInteractive',
+              '-ExecutionPolicy',
+              'Bypass',
+              '-File',
+              join(here, 'windows', 'find-installed-exe.ps1'),
+            ],
+            { encoding: 'utf8' },
+          ).trim(),
         installedSha: facts.installedExeSha256,
         launch,
         quit: (shown, started) => quit(shown, started, () => shown.activate()),

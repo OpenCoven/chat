@@ -56,15 +56,7 @@ if ($Installer -eq 'msi') {
   $p = Start-Process (Join-Path $work $asset) -ArgumentList '/S' -Wait -PassThru
 }
 Log "installer exit: $($p.ExitCode)"
-$exe = @(
-  "$env:LOCALAPPDATA\Programs\Coven Chat\opencoven-chat.exe",
-  "$env:LOCALAPPDATA\Coven Chat\opencoven-chat.exe",
-  "$env:ProgramFiles\Coven Chat\opencoven-chat.exe",
-  "$env:LOCALAPPDATA\Programs\OpenCoven Chat\opencoven-chat.exe",
-  "$env:LOCALAPPDATA\OpenCoven Chat\opencoven-chat.exe",
-  "$env:ProgramFiles\OpenCoven Chat\opencoven-chat.exe"
-) | Where-Object { Test-Path $_ } | Select-Object -First 1
-if (-not $exe) { $exe = (Get-ChildItem -Path $env:LOCALAPPDATA, $env:ProgramFiles -Filter opencoven-chat.exe -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1).FullName }
+$exe = & (Join-Path $PSScriptRoot 'windows\find-installed-exe.ps1')
 Log "installed: $exe"
 $exeSha = (Get-FileHash -Algorithm SHA256 $exe).Hash.ToLowerInvariant()
 $signature = Get-AuthenticodeSignature $exe
