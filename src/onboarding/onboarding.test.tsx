@@ -87,6 +87,39 @@ describe('first-run setup', () => {
     expect(screen.queryByRole('button', { name: 'Continue to Chat' })).not.toBeInTheDocument();
   });
 
+  it('puts each setup command in its own paragraph so Linux screen readers get its text (#590)', async () => {
+    await renderWith(
+      setupReturning(
+        report({
+          coven: { ok: false },
+          engine: { ok: false },
+          signIn: {
+            ok: false,
+            engine: 'missing',
+            claude: 'missing',
+            chatgpt: 'missing',
+            claudeInstaller: CURL,
+          },
+          familiar: { ok: false, count: 0 },
+        }),
+      ),
+    );
+    // WebKitGTK gave AT-SPI an inline element laid out as a flex item without
+    // its text, so on Linux the command read as an empty section next to Copy
+    // command. A paragraph holding only the command keeps its text.
+    for (const [title, command] of [
+      ['Coven', 'npm install -g @opencoven/cli'],
+      ['Model sign-in', CURL],
+    ] as const) {
+      const paragraph = within(step(title)).getByText(command).closest('p');
+      expect(paragraph, title).not.toBeNull();
+      expect(paragraph?.textContent).toBe(command);
+      expect(paragraph?.parentElement?.querySelector('button')).toHaveAccessibleName(
+        'Copy command',
+      );
+    }
+  });
+
   it('names the engine command once Coven is installed', async () => {
     await renderWith(setupReturning(report({ engine: { ok: false } })));
     expect(within(step('Coven')).getByText('Installed: coven 0.4.9.')).toBeInTheDocument();

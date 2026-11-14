@@ -71,6 +71,7 @@ gh api -X POST repos/OpenCoven/chat/actions/runs/<run-id>/rerun-failed-jobs
 | --- | --- | --- |
 | Native acceptance row 515 (Open hands the address to the browser) | Firefox shows no window for a plain `http://` address; or, on Windows, the next link's review never opens within 10 s | About 1 in 13 runs, Linux and Windows, 2026-11-10 to 11-11 |
 | Native acceptance row 567 (link review while streaming) | "Timed out waiting for the held-stream review to appear" | Linux, 2026-11-10 to 11-11. #588 fixes the lane's cause (it pressed a link below the visible area) |
+| Native Windows storage audit row 504-8 | `ENOENT` statting a disappearing `Preferences<UUID>.tmp` file after quitting; the collector stops before privacy assertions | Published v0.1.2, run [43564207450](https://github.com/OpenCoven/chat/actions/runs/43564207450), attempt 1. A Windows-only retry observed all 19 rows. The first failure is retained; [#625](https://github.com/OpenCoven/chat/issues/625) tracks a stable snapshot without weakening checks. |
 | iPhone companion UI test `testPairSendStreamStopAndForget` | Fails at varying steps, including on PRs that don't touch the companion | 5 of about 20 runs, 2026-11-10 to 11-12; tallied on #414 |
 | `Unix producer supervisor (darwin-arm64)` | "producer and broker UIDs were not distinct", then passes on rerun | Once, 2026-11-09. Probably a timing race, not equal UIDs |
 | Packaged acceptance AppImage jobs | Ubuntu package mirror unreachable from the runner | 2026-11-11 to 11-12; infrastructure, not the PR. #603 adds a mirror fallback |
