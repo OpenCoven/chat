@@ -65,7 +65,7 @@ The base was current main `af52a3fc6c60ad2d4858398133eaf64f6fd35105`. Work is is
 
 ## Receipts and limits
 
-Durable local receipts are in `.worktrees/548-linux-settings-verification/.artifacts/548/`: the requirement checkpoint, release metadata, original Linux artifacts for all failed runs, the first Windows artifact, full first-failure job logs, local red/green and full-suite logs, hosted Web logs, signature verification records, `752b48c-raw-speech-reanalysis.json`, and the final downloaded Linux artifact with its SHA-256 index and `final-native-audit.json`.
+Durable local receipts are in `$HOME/Documents/OpenCovenEvidence/chat/retired/548-linux-settings-verification-365b09ac20eb-d11666ee050e/restored/.artifacts/548/`: the requirement checkpoint, release metadata, original Linux artifacts for all failed runs, the first Windows artifact, full first-failure job logs, local red/green and full-suite logs, hosted Web logs, signature verification records, `752b48c-raw-speech-reanalysis.json`, and the final downloaded Linux artifact with its SHA-256 index and `final-native-audit.json`.
 
 The final Linux artifact retains `settings-tree-{400,360,600}.json`, `settings-inspector-{400,360,600}.json`, `settings-orca-{400,360,600}.json`, screenshots `09-settings-width-400.png`, `10-settings-width-360.png` and `11-settings-width-600.png`, and original Orca session logs 3, 4 and 5. Environment, facts and result files retain the installer, isolated-profile and version evidence. The full final Linux job log is retained alongside the artifact.
 
