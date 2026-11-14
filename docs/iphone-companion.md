@@ -13,7 +13,7 @@ The iPhone companion, **Coven Chat** on your home screen (source in `apps/ios/Ch
    **Enter pairing link**, paste it and choose **Connect**. A link opened from
    elsewhere fills the field but still waits for **Connect**.
 
-A link grants access to Chat conversations and full-access familiar runs on the Mac. It contains an HTTPS address, a random bearer token and the SHA-256 fingerprint of the Mac's certificate. Before sending credentials, the phone checks that the Mac presents that exact certificate. Bonjour (local network discovery) supplies addresses to try. Credentials stay in the phone's Keychain on that device alone and never sync to your other devices. Conversation data and drafts stay in memory on the phone. Chat continues to save history on the Mac.
+A link grants access to Chat conversations and full-access familiar runs on the Mac. It contains an HTTPS address, a random bearer token and the SHA-256 fingerprint of the Mac's certificate. Before sending credentials, the phone checks that the Mac presents that exact certificate. Bonjour (local network discovery) supplies addresses to try. Credentials stay in the phone's Keychain on that device alone and never sync to your other devices. Native drafts and recent history use protected phone storage as described below. Chat continues to save authoritative history on the Mac.
 
 **Turn off** closes the listener and its connections without revoking pairing.
 Turn it on again to let saved phones back in. **Forget paired phones** rotates
@@ -65,10 +65,21 @@ limited number of them. When that limit is reached, it refuses new sends from
 the phone rather than dropping old receipts, because dropping one could let a
 message run twice.
 
+## Phone storage and recovery
+
+The source implementation saves drafts for their exact familiar and conversation, plus recent history for up to seven days within a 20 MiB total storage budget. Files use complete iOS Data Protection and are excluded from backups. Cached history opens while the Mac is unreachable, with a saved-time label; sending waits for a fresh authenticated read. Older cached history is evicted before drafts or unresolved send identities. If safe storage is unavailable or full, the app keeps the visible draft and refuses dispatch until recovery can be recorded.
+
+If the conversation's destination changes, **Review Recovered Drafts** lets you inspect and edit the earlier draft before adding it to the current draft. Edits in the recovered editor are saved for the original conversation even if the sheet closes or the app relaunches before placement. If the destination changes while the editor is open, review the new destination before adding the draft. Placement preserves text already being composed and never sends automatically. Drafts and the minimal navigation metadata needed to reopen them remain until sent, cleared or removed by forgetting the Mac, even after recent history expires. Cached history cannot learn about a deletion or revocation while offline; deletion is reconciled on a successful refresh, and confirmed revocation clears that peer's phone data.
+
+Open **⋯ › Phone Privacy** to choose **Keep conversation text only while open**. This immediately removes persisted draft and transcript bodies; the current process can still hold its text in memory. Pairing credentials and minimal unresolved-operation metadata remain on the device, including the original request ID, destination, payload digest and submission state. That metadata lets a relaunched app check the original send without reconstructing or resubmitting it. Unsent text cannot be recovered after process termination in this mode.
+
+**Clear Downloaded History** removes cached transcript content while preserving drafts, unresolved operations and the familiar/destination metadata needed to reopen drafts. **Forget Mac** removes the pairing and that peer's cached content and recovery data. Cleanup failures remain visible and retryable. A reinstalled app cannot load another installation's cache.
+
+This is the native persistence milestone under [#612](https://github.com/OpenCoven/chat/issues/612), not evidence of a newly available TestFlight build or completion of remote access, phone attachments or push notifications. Those capabilities still require their own integration and release acceptance. Simulator file-protection attribute support is limited; physical lock/unlock protection remains a device acceptance gate.
+
 ## Build and verify
 
-Requires Xcode with an iOS 18+ simulator, XcodeGen and the repository's Rust
-1.95.0 toolchain. Generate the Xcode project with:
+Requires Xcode with an iOS 18+ simulator, XcodeGen, the repository's Node toolchain and Rust 1.95.0. Generate the Xcode project with:
 
 ```sh
 xcodegen generate --spec apps/ios/ChatCompanion/project.yml
@@ -81,7 +92,7 @@ device build together:
 apps/ios/ChatCompanion/Scripts/test-e2e.sh
 ```
 
-The script creates and removes its own simulator and temporary pairing state.
+The script creates and removes its own simulator and temporary pairing state. Its test-only HTTPS proxy pins the real fixture upstream and uses a separate certificate for the phone, so Bonjour cannot bypass injected faults. The relaunch flow drops a response after host admission, checks the original receipt after relaunch and verifies one send dispatch. This fixture is not packaged with the app.
 These variables change what it does:
 
 - `CHAT_IOS_DESTINATION` selects an existing simulator, which the script keeps.
