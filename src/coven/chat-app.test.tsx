@@ -1198,7 +1198,8 @@ describe('run options from Settings', () => {
     click('Send');
     await waitFor(() => expect(api.send).toHaveBeenCalledTimes(1));
     const toCovenCode = vi.mocked(api.send).mock.calls[0]?.[0];
-    expect(toCovenCode).toMatchObject({ sessionId: 'one', model: 'openai/gpt-5.5', think: true });
+    expect(toCovenCode).toMatchObject({ sessionId: 'one', think: true });
+    expect(toCovenCode).not.toHaveProperty('model');
     expect(toCovenCode).not.toHaveProperty('harness');
     await waitFor(() => expect(screen.getByTestId('run-familiar')).toHaveTextContent('idle'));
 
@@ -1217,8 +1218,9 @@ describe('run options from Settings', () => {
     click('Send');
     await waitFor(() => expect(api.send).toHaveBeenCalledTimes(2));
     const toCodex = vi.mocked(api.send).mock.calls[1]?.[0];
-    expect(toCodex).toMatchObject({ sessionId: 'two', model: 'openai/gpt-5.5' });
-    for (const key of ['harness', 'think', 'speed']) expect(toCodex).not.toHaveProperty(key);
+    expect(toCodex).toMatchObject({ sessionId: 'two' });
+    for (const key of ['harness', 'model', 'think', 'speed'])
+      expect(toCodex).not.toHaveProperty(key);
   });
 
   it('refuses a model id that is not one before anything is sent, and keeps the draft', async () => {
@@ -1262,6 +1264,21 @@ describe('answering a familiar that asks for permission', () => {
     vi.mocked(api.pendingApprovals).mockResolvedValue([approval]);
     return api;
   }
+
+  it('keeps another engine’s model out of an approved Codex turn', async () => {
+    const api = asking();
+    const codex = { ...first, harness: 'codex' };
+    vi.mocked(api.listSessions).mockResolvedValue([codex]);
+    vi.mocked(api.readSession).mockResolvedValue({ session: codex, events: [] });
+    await ready(api);
+    choice.value = { harness: 'coven-code', model: 'claude-opus-5-5', think: true, speed: 'fast' };
+    fireEvent.click(await screen.findByRole('button', { name: 'Allow Create probe.txt' }));
+    await waitFor(() => expect(api.allow).toHaveBeenCalledOnce());
+    expect(vi.mocked(api.allow).mock.calls[0]?.[0]).toEqual({
+      approvalId: 'request-1',
+      runId: expect.any(String),
+    });
+  });
 
   it('offers what the host says is open, and shows nothing it does not', async () => {
     const view = await ready(runtime());

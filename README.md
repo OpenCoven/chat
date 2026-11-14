@@ -253,14 +253,13 @@ Settings content scrolls inside its panel. Tab past **Close settings** to focus 
 - **Runs on** (Coven Code, Codex or Claude Code) applies when a familiar's chat starts. A chat
   keeps what it started on, and the inspector's **Runs on** row shows it. Only Coven Code takes
   attached files, so the composer doesn't offer attaching in a Codex or Claude Code chat.
-- **Model** passes the chosen ID to the Coven CLI as `--model`. Choose **Engine default** to leave selection to the engine, or **Custom model** to enter an ID. Chat accepts an ID of up to 200 characters that starts with a letter or digit and uses only letters, digits and `_ . / : + -`, and won't send while the field holds anything else.
+- **Model** saves a separate choice for each engine and passes the current chat's choice to the Coven CLI as `--model`. Switching engines or opening a chat on another engine restores that engine's choice, or **Engine default** when none is saved. Choose **Custom model** to enter an ID for that engine. Chat accepts an ID of up to 200 characters that starts with a letter or digit and uses only letters, digits and `_ . / : + -`, and won't send while the field holds anything else.
 - **Think longer** and **Speed** are passed as `--think` and `--speed`. Coven Code and Claude Code
   use them. Codex ignores them, so Chat doesn't send them to a Codex chat.
-- They apply to every message sent from this window, in new and existing chats. Messages sent
-  from the iPhone companion use the engine's defaults.
+- Model choices apply to messages sent from this window on the same engine, in new and existing chats. Thinking and speed remain window preferences. Messages sent from the iPhone companion use the engine's defaults.
 - When a run reports its model, the inspector's **Activity** tab shows it under **Model**.
 
-The presets include GPT-6 Astra, GPT-6.1 Sol, GPT-6.1 Terra and GPT-6 Luna, plus Claude Fable 5.2 and Opus, Sonnet and Haiku 5.5. Coven Code's GPT choices use Codex sign-in; standalone Codex receives bare model IDs. Older saved IDs remain editable under **Custom model** and are sent unchanged.
+The presets include GPT-6 Astra, GPT-6.1 Sol, GPT-6.1 Terra and GPT-6 Luna, plus Claude Fable 5.2 and Opus, Sonnet and Haiku 5.5. Coven Code's GPT choices use Codex sign-in; standalone Codex receives bare model IDs. Older saved IDs remain editable under **Custom model** for their engine and are sent unchanged. A legacy Claude choice paired with Codex is retained for Coven Code, leaving Codex on its own default. A legacy bare GPT or OpenAI reasoning-model choice paired with Claude Code is retained for Codex. Legacy provider-qualified OpenAI/Codex IDs remain with Coven Code; other legacy custom IDs stay with the previously selected engine. Custom IDs are not checked against a preset allowlist, so their availability still depends on that engine and your provider account.
 
 ### Updates
 

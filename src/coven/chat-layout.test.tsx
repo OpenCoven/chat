@@ -3156,6 +3156,73 @@ describe('model settings', () => {
     return screen.getByRole('button', { name: /^(Coven Code|Codex|Claude Code)/ });
   }
 
+  it('remembers separate model choices when changing engines and reopening Settings', () => {
+    const props = {
+      ...layoutProps(),
+      familiars: astra,
+      familiarId: 'f',
+      ready: true,
+      connected: true,
+      draft: 'hello',
+    };
+    const first = render(<ChatLayout {...props} />);
+    let model = openSettingsAt('Model');
+    fireEvent.change(within(model).getByRole('combobox', { name: 'Model' }), {
+      target: { value: 'claude-opus-5-5' },
+    });
+    fireEvent.click(within(model).getByRole('button', { name: 'Codex' }));
+    expect(within(model).getByRole('combobox', { name: 'Model' })).toHaveValue('');
+    fireEvent.change(within(model).getByRole('combobox', { name: 'Model' }), {
+      target: { value: 'gpt-6.1-sol' },
+    });
+    first.unmount();
+    render(<ChatLayout {...props} />);
+    model = openSettingsAt('Model');
+    expect(within(model).getByRole('combobox', { name: 'Model' })).toHaveValue('gpt-6.1-sol');
+    fireEvent.click(within(model).getByRole('button', { name: 'Coven Code' }));
+    expect(within(model).getByRole('combobox', { name: 'Model' })).toHaveValue('claude-opus-5-5');
+    fireEvent.click(screen.getByRole('button', { name: 'Close settings' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+    expect(props.onSend).toHaveBeenCalledExactlyOnceWith({
+      harness: 'coven-code',
+      model: 'claude-opus-5-5',
+      think: false,
+      speed: 'default',
+    });
+  });
+
+  it('shows and sends the model belonging to an existing Codex chat', () => {
+    localStorage.setItem(
+      KEY,
+      JSON.stringify({
+        harness: 'coven-code',
+        model: 'claude-opus-5-5',
+        models: { 'coven-code': 'claude-opus-5-5', codex: 'gpt-6.1-sol' },
+      }),
+    );
+    const props = {
+      ...layoutProps(),
+      familiars: astra,
+      familiarId: 'f',
+      sessionId: 'existing',
+      sessions: [{ id: 'existing', title: 'Astra', harness: 'codex', familiarId: 'f' }],
+      ready: true,
+      connected: true,
+      draft: 'hello',
+    };
+    render(<ChatLayout {...props} />);
+    const model = openSettingsAt('Model');
+    expect(within(model).getByRole('combobox', { name: 'Model' })).toHaveValue('gpt-6.1-sol');
+    fireEvent.click(screen.getByRole('button', { name: 'Close settings' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+    expect(props.onSend).toHaveBeenCalledExactlyOnceWith({
+      harness: 'codex',
+      model: 'gpt-6.1-sol',
+      think: false,
+      speed: 'default',
+    });
+  });
+
   it('keeps the harness, model, reasoning and speed chosen in Settings and sends with them', () => {
     const props = {
       ...layoutProps(),
@@ -3598,7 +3665,7 @@ describe('composer stop key, running copy and details row', () => {
     details = within(screen.getByRole('group', { name: 'Chat details' }));
     // An existing chat keeps the harness it started on.
     expect(details.getByText('Claude Code')).toBeInTheDocument();
-    expect(details.getByText('openai/gpt-5.5')).toBeInTheDocument();
+    expect(details.getByText('Engine default')).toBeInTheDocument();
     expect(details.getByText('Chat project: /projects/x')).toBeInTheDocument();
     // Cave's task and access controls stay out; the access is stated, not chosen.
     expect(details.queryByText(/Create task/)).not.toBeInTheDocument();

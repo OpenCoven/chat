@@ -13,7 +13,9 @@ import {
   HARNESSES,
   isValidModel,
   MODEL_MAX,
+  modelsByHarness,
   type Preferences,
+  runOptions,
   SPEED_LABEL,
   SPEEDS,
   TEXT_SCALE,
@@ -438,10 +440,14 @@ function ModelSection({ preferences, onPreferences, chatHarness }: SettingsDialo
   const modelErrorId = useId();
   const thinkId = useId();
   const [editingCustom, setEditingCustom] = useState(false);
-  const validModel = isValidModel(preferences.model);
-  const groups = ENGINE_MODEL_GROUPS[chatHarness ?? preferences.harness] ?? [];
-  const preset = groups.some(({ models }) => models.some(([id]) => id === preferences.model));
-  const custom = editingCustom || (preferences.model !== '' && !preset);
+  const { harness, model } = runOptions(preferences, chatHarness);
+  const validModel = isValidModel(model);
+  const groups = ENGINE_MODEL_GROUPS[harness] ?? [];
+  const preset = groups.some(({ models }) => models.some(([id]) => id === model));
+  const custom = editingCustom || (model !== '' && !preset);
+  function chooseModel(model: string) {
+    onPreferences({ model, models: { ...modelsByHarness(preferences), [harness]: model } });
+  }
   return (
     <>
       <Group title="New chats">
@@ -455,7 +461,10 @@ function ModelSection({ preferences, onPreferences, chatHarness }: SettingsDialo
               options={HARNESSES}
               labels={HARNESS_LABEL}
               value={preferences.harness}
-              onChange={(harness) => onPreferences({ harness })}
+              onChange={(harness) => {
+                setEditingCustom(false);
+                onPreferences({ harness, models: modelsByHarness(preferences) });
+              }}
             />
           }
         />
@@ -467,7 +476,7 @@ function ModelSection({ preferences, onPreferences, chatHarness }: SettingsDialo
           htmlFor={modelId}
           hint={
             validModel ? (
-              "Choose Engine default to use the engine's default model, or enter a provider ID under Custom model."
+              `Models are saved separately for each engine. This chat uses ${HARNESS_LABEL[harness]}. Choose Engine default or enter an ID for this engine under Custom model.`
             ) : (
               <span id={modelErrorId} className="coven-settings-row-error">
                 A model id starts with a letter or digit and uses only letters, digits and _ . / : +
@@ -480,11 +489,11 @@ function ModelSection({ preferences, onPreferences, chatHarness }: SettingsDialo
               <select
                 id={modelId}
                 className="coven-model-select"
-                value={custom ? CUSTOM_MODEL : preferences.model}
+                value={custom ? CUSTOM_MODEL : model}
                 onChange={(event) => {
                   const model = event.target.value;
                   setEditingCustom(model === CUSTOM_MODEL);
-                  if (model !== CUSTOM_MODEL) onPreferences({ model });
+                  if (model !== CUSTOM_MODEL) chooseModel(model);
                 }}
               >
                 <option value="">Engine default</option>
@@ -513,10 +522,10 @@ function ModelSection({ preferences, onPreferences, chatHarness }: SettingsDialo
                       autoComplete="off"
                       autoCapitalize="off"
                       maxLength={MODEL_MAX}
-                      value={preferences.model}
+                      value={model}
                       aria-invalid={validModel ? undefined : true}
                       aria-describedby={validModel ? undefined : modelErrorId}
-                      onChange={(event) => onPreferences({ model: event.target.value.trim() })}
+                      onChange={(event) => chooseModel(event.target.value.trim())}
                     />
                   </span>
                 </>
