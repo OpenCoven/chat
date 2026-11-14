@@ -43,7 +43,7 @@ Start from this template. The check enforces the title, the **Before you install
 changelog line at the end. The rest is judgment.
 
 ```markdown
-# OpenCoven Chat vX.Y.Z
+# Coven Chat vX.Y.Z
 
 One or two sentences on what changes for someone who installs this. For a patch, name the
 release it follows and say whether updating is optional.
@@ -62,7 +62,7 @@ small fixes under "Also fixed".
 - Works with: the Coven and engine versions it was tested with, and the iPhone companion
   builds that work with it.
 - Checking a download against `SHA256SUMS`, with an example filename for this version, such as
-  `OpenCoven.Chat_X.Y.Z_aarch64.dmg`.
+  `Coven.Chat_X.Y.Z_aarch64.dmg`.
 
 **Full changelog:** [vA.B.C...vX.Y.Z](https://github.com/OpenCoven/chat/compare/vA.B.C...vX.Y.Z)
 ```

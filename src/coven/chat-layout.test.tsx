@@ -1270,6 +1270,32 @@ describe('inspector detail rows', () => {
 });
 
 describe('sidebar search', () => {
+  it('clears a populated search, announces its results, and returns focus without changing chats', () => {
+    const props = layoutProps();
+    render(
+      <ChatLayout
+        {...props}
+        connected
+        familiarId="a"
+        familiars={[
+          { id: 'a', name: 'Alder' },
+          { id: 'b', name: 'Birch' },
+        ]}
+      />,
+    );
+    const search = screen.getByRole('searchbox', { name: 'Search familiars' });
+    fireEvent.change(search, { target: { value: 'Bir' } });
+    expect(screen.getByRole('status', { name: 'Familiar search results' })).toHaveTextContent(
+      '1 familiar',
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Clear familiar search' }));
+    expect(search).toHaveValue('');
+    expect(search).toHaveFocus();
+    expect(screen.getByRole('button', { name: 'Alder' })).toBeVisible();
+    expect(screen.getByRole('button', { name: 'Birch' })).toBeVisible();
+    expect(props.onFamiliar).not.toHaveBeenCalled();
+  });
+
   it('offers to clear a search that matches nothing', () => {
     render(<ChatLayout {...layoutProps()} connected familiars={[{ id: 'a', name: 'Astra' }]} />);
     expect(screen.queryByRole('button', { name: 'Clear search' })).not.toBeInTheDocument();
@@ -2362,11 +2388,11 @@ describe('window title', () => {
       onWindowTitle,
     };
     const { rerender } = render(<ChatLayout {...base} />);
-    expect(onWindowTitle).toHaveBeenLastCalledWith('OpenCoven Chat');
+    expect(onWindowTitle).toHaveBeenLastCalledWith('Coven Chat');
     rerender(<ChatLayout {...base} familiarId="a" />);
-    expect(onWindowTitle).toHaveBeenLastCalledWith('Astra — OpenCoven Chat');
+    expect(onWindowTitle).toHaveBeenLastCalledWith('Astra — Coven Chat');
     rerender(<ChatLayout {...base} familiarId="a" finished={{ b: 'reply' }} />);
-    expect(onWindowTitle).toHaveBeenLastCalledWith('(1) Astra — OpenCoven Chat');
+    expect(onWindowTitle).toHaveBeenLastCalledWith('(1) Astra — Coven Chat');
     const calls = onWindowTitle.mock.calls.length;
     rerender(<ChatLayout {...base} familiarId="a" finished={{ b: 'reply' }} draft="typing" />);
     expect(onWindowTitle).toHaveBeenCalledTimes(calls);

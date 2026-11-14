@@ -2,6 +2,7 @@ import { execFileSync } from 'node:child_process';
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { runInNewContext } from 'node:vm';
+import playwrightConfig from '../playwright.config';
 
 type CapabilityFile = {
   $schema?: string;
@@ -926,12 +927,18 @@ describe('Phase 1 specification guards', () => {
   });
 
   it('pins Playwright to a dedicated fresh preview server', () => {
-    const playwrightConfig = readText('playwright.config.ts');
     const packageManifest = readJson<PackageManifest>('package.json');
-
-    expect(playwrightConfig).toContain("const previewUrl = 'http://127.0.0.1:4174';");
-    expect(playwrightConfig).toMatch(/reuseExistingServer:\s*false/);
-    expect(playwrightConfig).toMatch(/command:\s*'corepack pnpm build && corepack pnpm preview'/);
+    expect(playwrightConfig.use?.baseURL).toBe('http://127.0.0.1:4174');
+    expect(playwrightConfig.webServer).toMatchObject({
+      url: 'http://127.0.0.1:4174',
+      reuseExistingServer: false,
+      command:
+        'corepack pnpm build && corepack pnpm exec vite preview --host 127.0.0.1 --port 4174 --strictPort',
+    });
+    expect(playwrightConfig.projects?.map((project) => project.name)).toEqual([
+      'chromium',
+      'webkit',
+    ]);
     expect(packageManifest.scripts?.['install:clean']).toBe(
       'corepack pnpm install --frozen-lockfile',
     );

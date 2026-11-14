@@ -6,12 +6,41 @@ import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
+import * as releaseTools from '../scripts/release-smoke.mjs';
 import {
   expectedInstallers,
   expectedUpdaterArtifacts,
   smokeTestRelease,
 } from '../scripts/release-smoke.mjs';
 import { buildUpdaterManifest } from '../scripts/updater-manifest.mjs';
+
+describe('published installer names across the desktop rename', () => {
+  it.each(['Coven.Chat', 'OpenCoven.Chat'])(
+    'resolves the published %s asset from checksums',
+    (product) => {
+      const asset = `${product}_0.1.1_aarch64.dmg`;
+      expect(
+        releaseTools.resolvePublishedInstaller(
+          `${'a'.repeat(64)}  ${asset}\n`,
+          '0.1.1',
+          'aarch64.dmg',
+        ),
+      ).toBe(asset);
+    },
+  );
+
+  it('refuses missing or ambiguous installer identities', () => {
+    expect(() => releaseTools.resolvePublishedInstaller('', '0.1.1', 'aarch64.dmg')).toThrow(
+      /exactly one/i,
+    );
+    const sums = ['Coven.Chat', 'OpenCoven.Chat']
+      .map((name) => `${'a'.repeat(64)}  ${name}_0.1.1_aarch64.dmg`)
+      .join('\n');
+    expect(() => releaseTools.resolvePublishedInstaller(sums, '0.1.1', 'aarch64.dmg')).toThrow(
+      /exactly one/i,
+    );
+  });
+});
 
 const projectRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const VERSION = JSON.parse(readFileSync(join(projectRoot, 'src-tauri/tauri.conf.json'), 'utf8'))
@@ -138,12 +167,12 @@ describe('release smoke test', () => {
     // downloads show. The Windows names are Tauri's: `_x64_en-US.msi` from
     // WiX and `_x64-setup.exe` from NSIS.
     expect(expectedInstallers('0.0.5')).toEqual([
-      'OpenCoven.Chat_0.0.5_aarch64.dmg',
-      'OpenCoven.Chat_0.0.5_x64.dmg',
-      'OpenCoven.Chat_0.0.5_x64_en-US.msi',
-      'OpenCoven.Chat_0.0.5_x64-setup.exe',
-      'OpenCoven.Chat_0.0.5_amd64.AppImage',
-      'OpenCoven.Chat_0.0.5_amd64.deb',
+      'Coven.Chat_0.0.5_aarch64.dmg',
+      'Coven.Chat_0.0.5_x64.dmg',
+      'Coven.Chat_0.0.5_x64_en-US.msi',
+      'Coven.Chat_0.0.5_x64-setup.exe',
+      'Coven.Chat_0.0.5_amd64.AppImage',
+      'Coven.Chat_0.0.5_amd64.deb',
     ]);
   });
 
@@ -152,18 +181,18 @@ describe('release smoke test', () => {
     // archives only the macOS app; tauri-plugin-updater 2.12 looks up
     // `{os}-{arch}-{installer}` before `{os}-{arch}`.
     expect(Object.fromEntries(expectedUpdaterArtifacts('0.0.6'))).toEqual({
-      'aarch64-apple-darwin-OpenCoven.Chat.app.tar.gz': ['darwin-aarch64-app', 'darwin-aarch64'],
-      'x86_64-apple-darwin-OpenCoven.Chat.app.tar.gz': ['darwin-x86_64-app', 'darwin-x86_64'],
-      'OpenCoven.Chat_0.0.6_x64_en-US.msi': ['windows-x86_64-msi'],
-      'OpenCoven.Chat_0.0.6_x64-setup.exe': ['windows-x86_64-nsis', 'windows-x86_64'],
-      'OpenCoven.Chat_0.0.6_amd64.AppImage': ['linux-x86_64-appimage', 'linux-x86_64'],
-      'OpenCoven.Chat_0.0.6_amd64.deb': ['linux-x86_64-deb'],
+      'aarch64-apple-darwin-Coven.Chat.app.tar.gz': ['darwin-aarch64-app', 'darwin-aarch64'],
+      'x86_64-apple-darwin-Coven.Chat.app.tar.gz': ['darwin-x86_64-app', 'darwin-x86_64'],
+      'Coven.Chat_0.0.6_x64_en-US.msi': ['windows-x86_64-msi'],
+      'Coven.Chat_0.0.6_x64-setup.exe': ['windows-x86_64-nsis', 'windows-x86_64'],
+      'Coven.Chat_0.0.6_amd64.AppImage': ['linux-x86_64-appimage', 'linux-x86_64'],
+      'Coven.Chat_0.0.6_amd64.deb': ['linux-x86_64-deb'],
     });
   });
 
   it('refuses an installer that kept the space in its name', () => {
     // SHA256SUMS would then list a name nobody can download.
-    const name = `OpenCoven Chat_${VERSION}_x64.dmg`;
+    const name = `Coven Chat_${VERSION}_x64.dmg`;
     expect(smoke(release({ [name]: 'installer' })).failures).toContain(
       `Unexpected release asset: ${name}.`,
     );
@@ -173,7 +202,7 @@ describe('release smoke test', () => {
     // The names come from Tauri's bundler; a change there would otherwise
     // publish an installer SHA256SUMS and the notes do not name.
     for (const suffix of ['x64_de-DE.msi', 'arm64-setup.exe']) {
-      const name = `OpenCoven.Chat_${VERSION}_${suffix}`;
+      const name = `Coven.Chat_${VERSION}_${suffix}`;
       expect(smoke(release({ [name]: 'installer' })).failures).toContain(
         `Unexpected release asset: ${name}.`,
       );
@@ -203,7 +232,7 @@ describe('release smoke test', () => {
   });
 
   it('fails an asset from another version or product', () => {
-    const stray = `OpenCoven.Chat_9.9.9_x64.dmg`;
+    const stray = `Coven.Chat_9.9.9_x64.dmg`;
     expect(smoke(release({ [stray]: 'old' })).failures).toContain(
       `Unexpected release asset: ${stray}.`,
     );
@@ -340,18 +369,18 @@ describe('release smoke test', () => {
         manifest.platforms['windows-x86_64-nsis'],
       );
       expect(manifest.platforms['linux-x86_64-deb']?.url).toBe(
-        `https://github.com/OpenCoven/chat/releases/download/${TAG}/OpenCoven.Chat_${VERSION}_amd64.deb`,
+        `https://github.com/OpenCoven/chat/releases/download/${TAG}/Coven.Chat_${VERSION}_amd64.deb`,
       );
       // The feed carries the signature's contents, not a path to it.
       expect(manifest.platforms['darwin-aarch64']?.signature).toBe(
-        `signature of aarch64-apple-darwin-OpenCoven.Chat.app.tar.gz`,
+        `signature of aarch64-apple-darwin-Coven.Chat.app.tar.gz`,
       );
     });
 
     it('fails an artifact without its signature, and a signature with no artifact', () => {
       const { dir, names } = updaterRelease();
-      const deb = `OpenCoven.Chat_${VERSION}_amd64.deb`;
-      const dmg = `OpenCoven.Chat_${VERSION}_aarch64.dmg`;
+      const deb = `Coven.Chat_${VERSION}_amd64.deb`;
+      const dmg = `Coven.Chat_${VERSION}_aarch64.dmg`;
       rmSync(join(dir, `${deb}.sig`));
       writeFileSync(join(dir, `${dmg}.sig`), 'stray');
       writeChecksums(dir, [...names.filter((name) => name !== `${deb}.sig`), `${dmg}.sig`]);
@@ -362,7 +391,7 @@ describe('release smoke test', () => {
 
     it('fails a feed that omits a platform, points elsewhere or carries another signature', () => {
       const { dir, names, manifest } = updaterRelease();
-      const exe = `OpenCoven.Chat_${VERSION}_x64-setup.exe`;
+      const exe = `Coven.Chat_${VERSION}_x64-setup.exe`;
       const platforms = { ...manifest.platforms } as Record<
         string,
         { signature: string; url: string }
@@ -387,7 +416,7 @@ describe('release smoke test', () => {
         `latest.json windows-x86_64-nsis does not point at ${exe} in this release.`,
       );
       expect(failures).toContain(
-        'latest.json darwin-x86_64 signature differs from x86_64-apple-darwin-OpenCoven.Chat.app.tar.gz.sig.',
+        'latest.json darwin-x86_64 signature differs from x86_64-apple-darwin-Coven.Chat.app.tar.gz.sig.',
       );
       expect(failures).toContain('latest.json names unexpected platform windows-aarch64.');
     });
@@ -410,7 +439,7 @@ describe('release smoke test', () => {
 
     it('refuses to write a feed with a missing or empty signature', () => {
       const { dir } = updaterRelease();
-      const appImage = `OpenCoven.Chat_${VERSION}_amd64.AppImage`;
+      const appImage = `Coven.Chat_${VERSION}_amd64.AppImage`;
       writeFileSync(join(dir, `${appImage}.sig`), '  \n');
       const build = () =>
         buildUpdaterManifest({

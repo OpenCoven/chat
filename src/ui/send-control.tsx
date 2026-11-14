@@ -125,7 +125,7 @@ export function SendControl({
         {...(iconOnly ? { 'aria-label': 'Send' } : {})}
       >
         {iconOnly ? null : 'Send'}
-        <Icon name="arrow-up-bold" size={iconOnly ? 15 : 13} />
+        <Icon name="arrow-up" size={iconOnly ? 15 : 13} />
       </Button>
       {hasPalette && options && onSelectOption ? (
         <CompletionPalette trigger={caret} commands={options} onSelect={onSelectOption} />
