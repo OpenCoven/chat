@@ -22,33 +22,18 @@ import { execFileSync, spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { basename, join, win32 } from 'node:path';
+import { basename, join } from 'node:path';
 import { sleep, until } from './driver.mjs';
 import { Lane, Row, showFamiliars } from './rows.mjs';
 import { browserFiles, containing, sqlitePlaces } from './storage.mjs';
+import { installedAt, installPaths } from './windows/installed-exe.mjs';
+
+export { EARLIER_NAMES, installedAt, installPaths } from './windows/installed-exe.mjs';
 
 /** Synthetic, and typed by no other row. */
 export const UPGRADE_PHRASE = 'Autofill left by v0.0.8';
 /** msiexec's success codes: done, and done but a restart is wanted. */
 const INSTALLED = new Set([0, 3010]);
-/** Product names earlier releases installed under. v0.0.8 is OpenCoven Chat. */
-export const EARLIER_NAMES = ['OpenCoven Chat'];
-
-/**
- * Where an MSI may have put the app: the build under test's own path, then the
- * same binary under each earlier product name's folder in Program Files.
- */
-export function installPaths(exe, names = EARLIER_NAMES) {
-  const programFiles = win32.dirname(win32.dirname(exe));
-  const binary = win32.basename(exe);
-  return [...new Set([exe, ...names.map((name) => win32.join(programFiles, name, binary))])];
-}
-
-/** The first of `paths` that exists, or null. */
-export function installedAt(paths, exists = existsSync) {
-  return paths.find((path) => exists(path)) ?? null;
-}
-
 const home = homedir();
 const shown = (path) => path.replace(home, '~');
 const sha256 = (path) => createHash('sha256').update(readFileSync(path)).digest('hex');
@@ -147,26 +132,29 @@ export async function autofillUpgradeRow({
   shot,
   out,
   familiars: [first, second],
+  installMsi = msiexec,
+  waitForWebViewGone = webViewGone,
+  getProductVersion = productVersion,
 }) {
   const row = new Row('578', 'Autofill an earlier version saved is cleared on upgrade');
   let running = null;
   try {
     row.note('installers', { from: from.label, to: to.label });
-    row.note('web view processes gone before v0.0.8', await webViewGone());
+    row.note('web view processes gone before v0.0.8', await waitForWebViewGone());
 
     // Staging: v0.0.8 over the build under test. If the installer refuses the
     // downgrade, the build under test is removed first; Chat's data stays.
-    let code = msiexec(['/i', from.path], join(out, 'msiexec-v0.0.8.log'));
+    let code = installMsi(['/i', from.path], join(out, 'msiexec-v0.0.8.log'));
     if (!INSTALLED.has(code)) {
       row.note('v0.0.8 over the build under test', `msiexec ${code}; removing it first`);
-      msiexec(['/x', to.path], join(out, 'msiexec-remove.log'));
-      code = msiexec(['/i', from.path], join(out, 'msiexec-v0.0.8.log'));
+      installMsi(['/x', to.path], join(out, 'msiexec-remove.log'));
+      code = installMsi(['/i', from.path], join(out, 'msiexec-v0.0.8.log'));
     }
     row.check('v0.0.8 installed', INSTALLED.has(code), `msiexec ${code}`);
     const paths = installPaths(exe);
     const oldExe = installedAt(paths.slice().reverse());
     if (!oldExe) throw new Error(`v0.0.8's app is in none of ${paths.join(', ')}`);
-    const oldVersion = productVersion(oldExe);
+    const oldVersion = getProductVersion(oldExe);
     row.note('installed app', { path: oldExe, version: oldVersion, sha256: sha256(oldExe) });
     row.check('v0.0.8 is the installed app', oldVersion.startsWith('0.0.8'), oldVersion);
 
@@ -219,7 +207,7 @@ export async function autofillUpgradeRow({
     shot('578-v0.0.8');
     row.note('v0.0.8 quit by its own shortcut', await quit(lane.app, running.child));
     running = null;
-    row.note('web view processes gone after v0.0.8', await webViewGone());
+    row.note('web view processes gone after v0.0.8', await waitForWebViewGone());
 
     const saved = webDataHits(row, 'after v0.0.8');
     if (saved.length) row.note('precondition: v0.0.8 saved the phrase in Web Data', saved);
@@ -228,11 +216,11 @@ export async function autofillUpgradeRow({
     row.note('transcripts before the upgrade', kept);
 
     // The upgrade: the build under test installed over v0.0.8, then started.
-    code = msiexec(['/i', to.path], join(out, 'msiexec-upgrade.log'));
+    code = installMsi(['/i', to.path], join(out, 'msiexec-upgrade.log'));
     row.check('the build under test installed over v0.0.8', INSTALLED.has(code), `msiexec ${code}`);
     const upgradedExe = installedAt(paths);
     if (!upgradedExe) throw new Error(`the upgraded app is in none of ${paths.join(', ')}`);
-    row.note('installed app', { path: upgradedExe, version: productVersion(upgradedExe) });
+    row.note('installed app', { path: upgradedExe, version: getProductVersion(upgradedExe) });
     row.expect(
       'the build under test is the installed app again',
       sha256(upgradedExe),
@@ -258,7 +246,7 @@ export async function autofillUpgradeRow({
     shot('578-upgraded');
     row.note('upgraded app quit by its own shortcut', await quit(lane.app, running.child));
     running = null;
-    row.note('web view processes gone after the upgrade', await webViewGone());
+    row.note('web view processes gone after the upgrade', await waitForWebViewGone());
 
     const after = webDataHits(row, 'after the upgrade');
     if (saved.length) row.expect(`Web Data files containing "${UPGRADE_PHRASE}"`, after, []);

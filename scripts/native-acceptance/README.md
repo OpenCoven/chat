@@ -88,6 +88,9 @@ Current full-access candidates and releases use the full-access row. Select `ask
   test is Coven Chat, in `Program Files\Coven Chat`. The row starts each version
   from where its installer put it, and after the upgrade no copy of v0.0.8 may
   be left under either name.
+
+Windows executable discovery shares `windows/installed-exe.mjs` between the PowerShell lane entry point and row 578. It checks only known installation folders, never recursively scans caches, and requires a file. The upgrade row prefers the earlier product folder during staging and the current folder after upgrade, then checks versions, hashes and leftover old binaries. Its discovery and transition regressions run in the normal unit suite.
+
 - v0.0.8 results and the issues they produced (#544, #545, #546, #547, #548) are
   recorded in `docs/verification/2026-10-18-rakazo-chat-ux.md`, section
   "Native OS-level automation on the published v0.0.8 installers".
