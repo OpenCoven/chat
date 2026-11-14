@@ -31,7 +31,7 @@
   },
   "plugins": {
     "updater": {
-      "pubkey": "PENDING-VAL-UPDATER-PUBLIC-KEY",
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDFCNTIwOTA5MzlBRURFRTQKUldUazNxNDVDUWxTR3dnZktFQktQL05iV0t6VUNSdXdrZ25zaHVuaVpjamhvUmF6ekozWjBLU08K",
       "endpoints": ["https://github.com/OpenCoven/chat/releases/download/updater/latest.json"],
       "windows": { "installMode": "passive" }
     }
