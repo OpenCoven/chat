@@ -13,7 +13,7 @@ The iPhone companion, **Coven Chat** on your home screen (source in `apps/ios/Ch
    **Enter pairing link**, paste it and choose **Connect**. A link opened from
    elsewhere fills the field but still waits for **Connect**.
 
-A link grants access to Chat conversations and full-access familiar runs on the Mac. It contains an HTTPS address, a random bearer token and the SHA-256 fingerprint of the Mac's certificate. Before sending credentials, the phone checks that the Mac presents that exact certificate. Bonjour (local network discovery) supplies addresses to try. Credentials stay in the phone's Keychain on that device alone and never sync to your other devices. Conversation data and drafts stay in memory on the phone. Chat continues to save history on the Mac.
+A link grants access to Chat conversations and full-access familiar runs on the Mac. It contains an HTTPS address, a random bearer token and the SHA-256 fingerprint of the Mac's certificate. Before sending credentials, the phone checks that the Mac presents that exact certificate. Bonjour (local network discovery) supplies addresses to try. Credentials stay in the phone's Keychain on that device alone and never sync to your other devices. Native drafts and recent history use protected phone storage as described below. Chat continues to save authoritative history on the Mac.
 
 **Turn off** closes the listener and its connections without revoking pairing.
 Turn it on again to let saved phones back in. **Forget paired phones** rotates
@@ -65,10 +65,21 @@ limited number of them. When that limit is reached, it refuses new sends from
 the phone rather than dropping old receipts, because dropping one could let a
 message run twice.
 
+## Phone storage and recovery
+
+The source implementation saves drafts for their exact familiar and conversation, plus recent history for up to seven days within a 20 MiB total storage budget. Files use complete iOS Data Protection and are excluded from backups. Cached history opens while the Mac is unreachable, with a saved-time label; sending waits for a fresh authenticated read. Older cached history is evicted before drafts or unresolved send identities. If safe storage is unavailable or full, the app keeps the visible draft and refuses dispatch until recovery can be recorded.
+
+If the conversation's destination changes, **Review Recovered Drafts** lets you inspect and edit the earlier draft before adding it to the current draft. Edits in the recovered editor are saved for the original conversation even if the sheet closes or the app relaunches before placement. If the destination changes while the editor is open, review the new destination before adding the draft. Placement preserves text already being composed and never sends automatically. Drafts and the minimal navigation metadata needed to reopen them remain until sent, cleared or removed by forgetting the Mac, even after recent history expires. Cached history cannot learn about a deletion or revocation while offline; deletion is reconciled on a successful refresh, and confirmed revocation clears that peer's phone data.
+
+Open **⋯ › Phone Privacy** to choose **Keep conversation text only while open**. This immediately removes persisted draft and transcript bodies; the current process can still hold its text in memory. Pairing credentials and minimal unresolved-operation metadata remain on the device, including the original request ID, destination, payload digest and submission state. That metadata lets a relaunched app check the original send without reconstructing or resubmitting it. Unsent text cannot be recovered after process termination in this mode.
+
+**Clear Downloaded History** removes cached transcript content while preserving drafts, unresolved operations and the familiar/destination metadata needed to reopen drafts. **Forget Mac** removes the pairing and that peer's cached content and recovery data. Cleanup failures remain visible and retryable. A reinstalled app cannot load another installation's cache.
+
+This is the native persistence milestone under [#612](https://github.com/OpenCoven/chat/issues/612), not evidence of a newly available TestFlight build or completion of remote access, phone attachments or push notifications. Those capabilities still require their own integration and release acceptance. Simulator file-protection attribute support is limited; physical lock/unlock protection remains a device acceptance gate.
+
 ## Build and verify
 
-Requires Xcode with an iOS 18+ simulator, XcodeGen and the repository's Rust
-1.95.0 toolchain. Generate the Xcode project with:
+Requires Xcode with an iOS 18+ simulator, XcodeGen, the repository's Node toolchain and Rust 1.95.0. Generate the Xcode project with:
 
 ```sh
 xcodegen generate --spec apps/ios/ChatCompanion/project.yml
@@ -81,7 +92,7 @@ device build together:
 apps/ios/ChatCompanion/Scripts/test-e2e.sh
 ```
 
-The script creates and removes its own simulator and temporary pairing state.
+The script creates and removes its own simulator and temporary pairing state. Its test-only HTTPS proxy pins the real fixture upstream and uses a separate certificate for the phone, so Bonjour cannot bypass injected faults. The relaunch flow drops a response after host admission, checks the original receipt after relaunch and verifies one send dispatch. This fixture is not packaged with the app.
 These variables change what it does:
 
 - `CHAT_IOS_DESTINATION` selects an existing simulator, which the script keeps.
@@ -138,6 +149,16 @@ The upload needs an App Store Connect app record for the bundle ID. The App
 Store Connect API can't create one, so create it once on the website under
 **Apps → New App**. A build appears in TestFlight after Apple finishes
 processing it. External testers need Beta App Review first.
+
+### Verify processing and testing availability
+
+An accepted upload is not evidence that Apple finished processing it. Run the **TestFlight status** workflow from `main` with the exact build number printed in the upload log and its marketing version. For the native persistence upload in run [43573491965](https://github.com/OpenCoven/chat/actions/runs/43573491965), those values are `1910` and `0.3.0`; that run ties the upload to source `181ff52523b6d3aed8c51d5c16b5c92f9ba247c5`. The status query does not establish source provenance on its own.
+
+The workflow uses the existing `release-signing` environment and makes only GET requests to App Store Connect. Its short-lived JWT is scoped to each exact request; it cannot upload builds, assign testers or send notifications. The helper checks the returned app bundle, build number, marketing version, iOS platform, expiry and related beta detail instead of trusting server filters alone. It polls a missing or processing build, or rate limits, for up to 15 minutes. Invalid or unknown metadata, HTTP failures and timeouts fail the workflow; the nonsecret `testflight-status` artifact records the result. No API response bodies, tester details, keys or tokens are retained.
+
+`testing_available` means Apple reports `IN_BETA_TESTING` for at least one audience; `internalTesting` and `externalTesting` distinguish those audiences. `READY_FOR_BETA_TESTING` alone is reported as `action_required`. This is Apple metadata, not proof that a named tester received an invitation, installed the candidate or completed device acceptance. Other results require inspecting the recorded state in App Store Connect; the verifier never changes distribution settings. See Apple's [build API](https://developer.apple.com/documentation/appstoreconnectapi/get-v1-builds), [internal beta states](https://developer.apple.com/documentation/appstoreconnectapi/internalbetastate), [external beta states](https://developer.apple.com/documentation/appstoreconnectapi/externalbetastate) and [scoped tokens](https://developer.apple.com/documentation/appstoreconnectapi/generating-tokens-for-api-requests).
+
+Run the helper's credential-free regressions with `node --test scripts/testflight-status.test.mjs`. For an actual local read, supply `APPLE_API_KEY`, `APPLE_API_ISSUER` and `APPLE_API_KEY_PATH`, then run `node scripts/testflight-status.mjs 1910 0.3.0 /path/to/status.json`. A local fixture pass is not a live Apple status result.
 
 ### Upload from your Mac
 

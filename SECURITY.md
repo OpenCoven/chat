@@ -24,15 +24,7 @@ first-run setup installs it from `OpenCoven/coven`.
 
 In either repository, use its private vulnerability reporting rather than a public issue.
 
-OpenCoven Chat does not persist authenticated conversation bodies in IndexedDB, `localStorage`,
-or `sessionStorage`. The window keeps only your selected familiar and your Settings choices in
-`localStorage`: display preferences, and the harness, model, reasoning and speed your messages ask
-for. Unsent drafts stay in memory. On Windows the window turns WebView2's general autofill off,
-and every text field is marked `autocomplete="off"`, so what you type is not kept in the web view's
-own autofill data either. Versions before v0.0.9 left that autofill on, so each time Chat starts on
-Windows it clears the web view's saved autofill data. It clears nothing else: your selected familiar
-and Settings stay. The desktop host keeps the following in Chat's
-local app data folder (on macOS, `~/Library/Application Support/ai.opencoven.chat`):
+OpenCoven Chat does not persist authenticated conversation bodies in IndexedDB, `localStorage`, or `sessionStorage`. The window keeps only your selected familiar and your Settings choices in `localStorage`: display preferences, and the harness, model, reasoning and speed your messages ask for. Desktop window drafts stay in memory; native iPhone storage is described below. On Windows the window turns WebView2's general autofill off, and every text field is marked `autocomplete="off"`, so what you type is not kept in the web view's own autofill data either. Versions before v0.0.9 left that autofill on, so each time Chat starts on Windows it clears the web view's saved autofill data. It clears nothing else: your selected familiar and Settings stay. The desktop host keeps the following in Chat's local app data folder (on macOS, `~/Library/Application Support/ai.opencoven.chat`):
 
 - **Transcripts.** Chat saves one transcript per message you send, as
   `coven-transcripts/<session-id>.jsonl`, so your history survives restarts.
@@ -132,8 +124,9 @@ explicitly enable it on the desktop. It exposes a narrow, authenticated HTTPS AP
 interface.
 
 - The listener refuses browser Origin requests and redirects.
-- The phone pins the paired certificate before it sends its random bearer, keeps the pairing in the
-  device-only Keychain, and stores no transcript or draft on disk.
+- The phone pins the paired certificate before it sends its random bearer and keeps the pairing in device-only Keychain storage. Native drafts and recent history use complete iOS Data Protection and backup exclusion; recent history expires after seven days and is evicted to stay within a 20 MiB total store budget. The browser storage prohibition above is unchanged.
+- Phone cache partitions bind the installation, trusted host, authorization identity, familiar and exact conversation. Discovery never supplies trust. Forget/reinstall/confirmed revocation purge the appropriate phone data; offline caches cannot learn about host deletion or revocation until reconnection.
+- Phone Privacy can remove persisted conversation/draft bodies while retaining device credentials and minimal unresolved-operation metadata. Before dispatch, the phone saves the original request ID, destination and payload digest. Relaunch reconciles that identity without automatically resending. Corrupt, full or unavailable recovery storage blocks dispatch instead of forgetting an uncertain request. Clearing downloaded history preserves drafts and recovery metadata; cleanup failures stay visible.
 - Desktop credentials and durable idempotency receipts use private app storage.
 - Revoking phones rotates the bearer and closes existing connections.
 - Discovery records contain only a candidate endpoint and a public fingerprint, never a token.

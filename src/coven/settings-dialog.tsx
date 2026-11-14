@@ -404,11 +404,13 @@ function Choices<T extends string>({
 }
 
 const CODEX_MODELS = [
-  ['gpt-5.5', 'GPT-5.5'],
-  ['gpt-5.4', 'GPT-5.4'],
-  ['gpt-5.4-mini', 'GPT-5.4 Mini'],
+  ['gpt-6-astra', 'GPT-6 Astra'],
+  ['gpt-6.1-sol', 'GPT-6.1 Sol'],
+  ['gpt-6.1-terra', 'GPT-6.1 Terra'],
+  ['gpt-6-luna', 'GPT-6 Luna'],
 ] as const;
 const CLAUDE_MODELS = [
+  ['claude-fable-5-2', 'Claude Fable 5.2'],
   ['claude-opus-5-5', 'Claude Opus 5.5'],
   ['claude-sonnet-5-5', 'Claude Sonnet 5.5'],
   ['claude-haiku-5-5', 'Claude Haiku 5.5'],
@@ -416,11 +418,13 @@ const CLAUDE_MODELS = [
 const ENGINE_MODEL_GROUPS: Readonly<
   Record<string, readonly { label: string; models: readonly (readonly [string, string])[] }[]>
 > = {
-  // Coven Code takes "openai/…" to choose OpenAI and strips the prefix before
-  // sending, but sends an "anthropic/…" ID to Anthropic as written, so its
-  // Claude presets are the IDs Anthropic's API knows.
+  // Coven Code 0.9 routes GPT models through its Codex sign-in provider and
+  // strips that prefix before sending. Its direct Anthropic path needs bare IDs.
   'coven-code': [
-    { label: 'OpenAI', models: CODEX_MODELS.map(([id, label]) => [`openai/${id}`, label]) },
+    {
+      label: 'OpenAI (Codex sign-in)',
+      models: CODEX_MODELS.map(([id, label]) => [`codex/${id}`, label]),
+    },
     { label: 'Anthropic', models: CLAUDE_MODELS },
   ],
   codex: [{ label: 'OpenAI', models: CODEX_MODELS }],

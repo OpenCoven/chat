@@ -61,7 +61,7 @@ final class PinnedAPI: NSObject, CompanionClient, URLSessionDelegate, URLSession
     try await request("history", query: [URLQueryItem(name: "familiarId", value: familiarId)])
   }
   func send(_ value: SendRequest) async throws -> Run {
-    try await request("send", body: JSONEncoder().encode(value))
+    try await request("send", body: CompanionRequestEncoding.encode(value))
   }
   func run(id: String) async throws -> Run {
     try await request("run", query: [URLQueryItem(name: "id", value: id)])
@@ -73,7 +73,7 @@ final class PinnedAPI: NSObject, CompanionClient, URLSessionDelegate, URLSession
     guard result.ok else { throw CompanionError.message("The Mac could not stop this run.") }
   }
   func answer(_ value: ApprovalAnswer) async throws -> ApprovalResult {
-    try await request("approval", body: JSONEncoder().encode(value))
+    try await request("approval", body: CompanionRequestEncoding.encode(value))
   }
   func permissionLog() async throws -> PermissionLog {
     try await request("permission-log")

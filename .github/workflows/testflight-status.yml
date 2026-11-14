@@ -1,0 +1,68 @@
+name: TestFlight status
+on:
+  pull_request:
+    paths:
+      - 'scripts/testflight-status*'
+      - '.github/workflows/testflight-status.yml'
+  workflow_dispatch:
+    inputs:
+      build:
+        description: Exact uploaded CFBundleVersion (commit count from upload log)
+        type: string
+        required: true
+      version:
+        description: Exact uploaded marketing version
+        type: string
+        default: '0.3.0'
+        required: true
+permissions:
+  contents: read
+jobs:
+  tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version-file: '.node-version'
+      - run: node --test scripts/testflight-status.test.mjs
+  status:
+    needs: tests
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: release-signing
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version-file: '.node-version'
+      - name: Read exact build status from Apple
+        env:
+          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+          APPLE_API_KEY_BASE64: ${{ secrets.APPLE_API_KEY_BASE64 }}
+          BUILD: ${{ inputs.build }}
+          VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          umask 077
+          key_dir=$(mktemp -d "$RUNNER_TEMP/asc-status.XXXXXX")
+          trap 'rm -rf "$key_dir"' EXIT
+          export APPLE_API_KEY_PATH="$key_dir/key.p8"
+          printf '%s' "$APPLE_API_KEY_BASE64" | base64 --decode > "$APPLE_API_KEY_PATH"
+          unset APPLE_API_KEY_BASE64
+          node scripts/testflight-status.mjs "$BUILD" "$VERSION" "$RUNNER_TEMP/testflight-status.json"
+      - name: Retain nonsecret Apple metadata receipt
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: testflight-status
+          path: ${{ runner.temp }}/testflight-status.json
+          if-no-files-found: error
+          retention-days: 30

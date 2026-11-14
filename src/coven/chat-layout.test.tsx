@@ -3213,9 +3213,118 @@ describe('model settings', () => {
     expect(within(picker).getByRole('option', { name: 'Claude Opus 5.5' })).toHaveValue(
       'claude-opus-5-5',
     );
-    expect(within(picker).getByRole('option', { name: 'GPT-5.5' })).toHaveValue('openai/gpt-5.5');
+    expect(within(picker).getByRole('option', { name: 'GPT-6.1 Sol' })).toHaveValue(
+      'codex/gpt-6.1-sol',
+    );
+    expect(within(picker).getByRole('option', { name: 'Claude Fable 5.2' })).toHaveValue(
+      'claude-fable-5-2',
+    );
     fireEvent.change(picker, { target: { value: 'claude-sonnet-5-5' } });
     expect(stored()).toMatchObject({ harness: 'coven-code', model: 'claude-sonnet-5-5' });
+  });
+
+  const currentModels = [
+    ['coven-code', 'GPT-6 Astra', 'codex/gpt-6-astra'],
+    ['coven-code', 'GPT-6.1 Sol', 'codex/gpt-6.1-sol'],
+    ['coven-code', 'GPT-6.1 Terra', 'codex/gpt-6.1-terra'],
+    ['coven-code', 'GPT-6 Luna', 'codex/gpt-6-luna'],
+    ['coven-code', 'Claude Fable 5.2', 'claude-fable-5-2'],
+    ['coven-code', 'Claude Opus 5.5', 'claude-opus-5-5'],
+    ['coven-code', 'Claude Sonnet 5.5', 'claude-sonnet-5-5'],
+    ['coven-code', 'Claude Haiku 5.5', 'claude-haiku-5-5'],
+    ['codex', 'GPT-6 Astra', 'gpt-6-astra'],
+    ['codex', 'GPT-6.1 Sol', 'gpt-6.1-sol'],
+    ['codex', 'GPT-6.1 Terra', 'gpt-6.1-terra'],
+    ['codex', 'GPT-6 Luna', 'gpt-6-luna'],
+    ['claude', 'Claude Fable 5.2', 'claude-fable-5-2'],
+    ['claude', 'Claude Opus 5.5', 'claude-opus-5-5'],
+    ['claude', 'Claude Sonnet 5.5', 'claude-sonnet-5-5'],
+    ['claude', 'Claude Haiku 5.5', 'claude-haiku-5-5'],
+  ] as const;
+
+  it.each(currentModels)('selects and dispatches %s preset %s as %s', (harness, label, id) => {
+    localStorage.setItem(KEY, JSON.stringify({ harness }));
+    const props = {
+      ...layoutProps(),
+      familiars: astra,
+      familiarId: 'f',
+      ready: true,
+      connected: true,
+      draft: 'hello',
+    };
+    render(<ChatLayout {...props} />);
+    const model = openSettingsAt('Model');
+    const picker = within(model).getByRole('combobox', { name: 'Model' });
+    const option = within(picker).getByRole('option', { name: label }) as HTMLOptionElement;
+    fireEvent.change(picker, { target: { value: option.value } });
+    expect(stored()).toMatchObject({ harness, model: id });
+    fireEvent.click(screen.getByRole('button', { name: 'Close settings' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+    expect(props.onSend).toHaveBeenCalledExactlyOnceWith({
+      harness,
+      model: id,
+      think: false,
+      speed: 'default',
+    });
+  });
+
+  it.each(['openai/gpt-5.5', 'gpt-5.4', 'provider/my-custom-model'])(
+    'keeps saved model %s as editable Custom and dispatches it unchanged after reopening',
+    (id) => {
+      localStorage.setItem(KEY, JSON.stringify({ model: id }));
+      const props = {
+        ...layoutProps(),
+        familiars: astra,
+        familiarId: 'f',
+        ready: true,
+        connected: true,
+        draft: 'hello',
+      };
+      const first = render(<ChatLayout {...props} />);
+      const model = openSettingsAt('Model');
+      expect(within(model).getByRole('combobox', { name: 'Model' })).toHaveValue(':custom');
+      expect(within(model).getByRole('textbox', { name: 'Custom model ID' })).toHaveValue(id);
+      first.unmount();
+      render(<ChatLayout {...props} />);
+      openSettingsAt('Model');
+      expect(screen.getByRole('textbox', { name: 'Custom model ID' })).toHaveValue(id);
+      fireEvent.click(screen.getByRole('button', { name: 'Close settings' }));
+      fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+      expect(props.onSend).toHaveBeenCalledExactlyOnceWith({
+        harness: 'coven-code',
+        model: id,
+        think: false,
+        speed: 'default',
+      });
+      expect(stored()?.model).toBe(id);
+    },
+  );
+
+  it('returns to Engine default without dispatching the formerly selected model', () => {
+    localStorage.setItem(KEY, JSON.stringify({ model: 'codex/gpt-6.1-sol' }));
+    const props = {
+      ...layoutProps(),
+      familiars: astra,
+      familiarId: 'f',
+      ready: true,
+      connected: true,
+      draft: 'hello',
+    };
+    render(<ChatLayout {...props} />);
+    const model = openSettingsAt('Model');
+    fireEvent.change(within(model).getByRole('combobox', { name: 'Model' }), {
+      target: { value: '' },
+    });
+    expect(stored()?.model).toBe('');
+    expect(within(model).queryByRole('textbox', { name: 'Custom model ID' })).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Close settings' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+    expect(props.onSend).toHaveBeenCalledExactlyOnceWith({
+      harness: 'coven-code',
+      model: '',
+      think: false,
+      speed: 'default',
+    });
   });
 
   it('says plainly when a model id could not be sent, until it is corrected or cleared', () => {
