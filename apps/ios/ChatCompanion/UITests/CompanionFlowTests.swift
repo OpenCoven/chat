@@ -71,8 +71,7 @@ final class CompanionFlowTests: XCTestCase {
       app.staticTexts.containing(NSPredicate(format: "label CONTAINS %@", "Created fixture.txt."))
         .firstMatch.waitForExistence(timeout: 20), app.debugDescription)
     XCTAssertFalse(app.buttons["approval-allow"].exists)
-    app.buttons["Connection options"].tap()
-    app.buttons["Permission Log"].tap()
+    chooseConnectionAction(app.buttons["Permission Log"], in: app)
     XCTAssertTrue(
       app.staticTexts.containing(NSPredicate(format: "label CONTAINS %@", "Allowed on iPhone"))
         .firstMatch.waitForExistence(timeout: 15), app.debugDescription)
@@ -112,9 +111,7 @@ final class CompanionFlowTests: XCTestCase {
     let composer = app.textFields["composer"].exists ? app.textFields["composer"] : app.textViews["composer"]
     focus(composer, in: app)
     composer.typeText("Draft survives relaunch")
-    app.buttons["Connection options"].tap()
-    XCTAssertTrue(app.buttons["mobile-privacy"].waitForExistence(timeout: 5))
-    app.buttons["mobile-privacy"].tap()
+    chooseConnectionAction(app.buttons["mobile-privacy"], in: app)
     XCTAssertTrue(app.switches["cache-conversation-text"].waitForExistence(timeout: 5))
     XCTAssertTrue(app.buttons["clear-downloaded-history"].exists)
     app.buttons["Done"].tap()
@@ -175,8 +172,7 @@ final class CompanionFlowTests: XCTestCase {
     XCTAssertEqual(afterRecovery.sendCount, 1)
     focus(composer, in: app)
     composer.typeText("Text only while open")
-    app.buttons["Connection options"].tap()
-    app.buttons["mobile-privacy"].tap()
+    chooseConnectionAction(app.buttons["mobile-privacy"], in: app)
     let privacyToggle = app.switches["cache-conversation-text"]
     XCTAssertTrue(privacyToggle.waitForExistence(timeout: 10), app.debugDescription)
     let privacyImage = XCTAttachment(screenshot: app.screenshot())
@@ -203,14 +199,25 @@ final class CompanionFlowTests: XCTestCase {
   }
 
   private func forgetMac(in app: XCUIApplication) {
-    app.buttons["Connection options"].tap()
-    let menuAction = app.buttons["Forget Mac"]
-    XCTAssertTrue(menuAction.waitForExistence(timeout: 5))
-    menuAction.tap()
+    chooseConnectionAction(app.buttons["Forget Mac"], in: app)
     let confirmation = app.sheets.buttons["Forget Mac"].firstMatch
     XCTAssertTrue(confirmation.waitForExistence(timeout: 10), app.debugDescription)
     confirmation.tap()
     XCTAssertTrue(app.buttons["Pair with your Mac"].waitForExistence(timeout: 10))
+  }
+
+  /// iOS 26.5 can expose a visible SwiftUI menu row with an invalid AX tap point
+  /// (-1, -1). Use its observed on-screen centre; the following assertions must
+  /// still prove that the actual privacy sheet, log or confirmation opened.
+  private func chooseConnectionAction(_ action: XCUIElement, in app: XCUIApplication) {
+    app.buttons["Connection options"].tap()
+    let visible = XCTNSPredicateExpectation(predicate: NSPredicate { element, _ in
+      guard let row = element as? XCUIElement, row.exists, row.isEnabled else { return false }
+      let frame = row.frame
+      return !frame.isEmpty && app.frame.contains(frame)
+    }, object: action)
+    XCTAssertEqual(XCTWaiter.wait(for: [visible], timeout: 10), .completed, app.debugDescription)
+    action.coordinate(withNormalizedOffset: .init(dx: 0.5, dy: 0.5)).tap()
   }
 
   /// Taps `field` until it holds keyboard focus, so `typeText` has somewhere to
