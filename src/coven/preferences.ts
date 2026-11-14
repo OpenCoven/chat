@@ -22,8 +22,9 @@ export type Preferences = Readonly<{
   inspectorWidth: number;
   /** The harness a familiar's chat starts on. An existing chat keeps its own. */
   harness: Harness;
-  /** Passed as `coven run --model`; empty leaves the harness on its own default. */
+  /** Last chosen ID, retained for settings saved before per-engine choices. */
   model: string;
+  models?: Readonly<Partial<Record<Harness, string>>>;
   /** Ask for deeper reasoning (`coven run --think`). */
   think: boolean;
   /** Latency and reasoning hint (`coven run --speed`). */
@@ -116,6 +117,16 @@ export function readPreferences(): Preferences {
         typeof record.model === 'string' && isValidModel(record.model)
           ? record.model
           : DEFAULT_PREFERENCES.model,
+      ...(record.models && typeof record.models === 'object' && !Array.isArray(record.models)
+        ? {
+            models: Object.fromEntries(
+              HARNESSES.flatMap((harness) => {
+                const model = (record.models as Record<string, unknown>)[harness];
+                return typeof model === 'string' && isValidModel(model) ? [[harness, model]] : [];
+              }),
+            ),
+          }
+        : {}),
       think: typeof record.think === 'boolean' ? record.think : DEFAULT_PREFERENCES.think,
       speed: SPEEDS.includes(record.speed as Speed)
         ? (record.speed as Speed)
@@ -159,8 +170,29 @@ export function usePreferences(): Preferences {
 /** What the reader asked messages to run with. */
 export type RunOptions = Readonly<Pick<Preferences, 'harness' | 'model' | 'think' | 'speed'>>;
 
-export function runOptions(preferences: Preferences): RunOptions {
-  const { harness, model, think, speed } = preferences;
+export function modelsByHarness(
+  preferences: Preferences,
+): Readonly<Partial<Record<Harness, string>>> {
+  if (preferences.models) return preferences.models;
+  const { harness, model } = preferences;
+  if (!model) return {};
+  let legacyHarness = harness;
+  if (/^(?:anthropic\/|claude-)/i.test(model)) {
+    legacyHarness = harness === 'claude' ? 'claude' : 'coven-code';
+  } else if (/^(?:codex|openai)\//i.test(model)) {
+    legacyHarness = 'coven-code';
+  } else if (harness === 'claude' && /^(?:gpt-|o\d(?:-|$))/i.test(model)) {
+    legacyHarness = 'codex';
+  }
+  return { [legacyHarness]: model };
+}
+
+export function runOptions(preferences: Preferences, chatHarness?: string): RunOptions {
+  const harness = HARNESSES.includes(chatHarness as Harness)
+    ? (chatHarness as Harness)
+    : preferences.harness;
+  const { think, speed } = preferences;
+  const model = modelsByHarness(preferences)[harness] ?? '';
   return { harness, model, think, speed };
 }
 
@@ -191,7 +223,7 @@ export function sendOptions(
     ...(chatHarness === undefined && options.harness !== 'coven-code'
       ? { harness: options.harness }
       : {}),
-    ...(options.model ? { model: options.model } : {}),
+    ...(harness === options.harness && options.model ? { model: options.model } : {}),
     ...(reasoning && options.think ? { think: true } : {}),
     ...(reasoning && options.speed !== 'default' ? { speed: options.speed } : {}),
   };

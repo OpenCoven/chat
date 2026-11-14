@@ -775,10 +775,10 @@ export function ChatLayout(props: ChatLayoutProps) {
   }
   const familiar = props.familiars.find((item) => item.id === props.familiarId);
   const session = props.sessions.find((item) => item.id === props.sessionId);
-  const run = runOptions(preferences);
   // An existing chat keeps the harness it started on. Before the harness could
   // be chosen, Chat started every chat on Coven Code.
   const chatHarness = session ? (session.harness ?? 'coven-code') : undefined;
+  const run = runOptions(preferences, chatHarness);
   // Only Coven Code takes attached files; the host refuses them for the others.
   const onAttach = canAttach(run, chatHarness) ? props.onAttach : undefined;
   const name = familiar?.name ?? 'Coven';
