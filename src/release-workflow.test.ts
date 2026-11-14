@@ -116,6 +116,11 @@ describe('release workflow specification', () => {
     }
     expect(verify).toContain('0.*|*-*) prerelease=true');
     expect(build).toContain('runner: macos-15-intel');
+    // GitHub removed the macos-14 Arm64 image (actions/runner-images#15227):
+    // a job asking for it is refused before its first step, so a tag could not
+    // build the Apple Silicon app. The image is pinned by name, like the rest.
+    expect(build).toMatch(/platform: macos-aarch64\n\s+runner: macos-15\n/);
+    expect(build).not.toContain('macos-14');
     expect(build).toContain('lipo -archs');
     expect(build).toContain(`dpkg-deb --field "\${deb}" Version`);
     expect(build).toContain('dpkg-deb --contents');
@@ -516,6 +521,61 @@ describe('release workflow specification', () => {
     expect(smoke).toContain(
       `spctl --assess --type open --context context:primary-signature --verbose=2 "\${dmg}"`,
     );
+  });
+
+  test('keeps retrying stapler for at least ten minutes before failing', () => {
+    const build = job('build', 'publish');
+    const step = (name: string) => build.indexOf(`- name: ${name}`);
+    const retryFunction = (text: string) => {
+      const start = text.indexOf('stapler_retry() {');
+      return text.slice(start, text.indexOf('\n          }\n', start) + 12);
+    };
+    const notarize = retryFunction(
+      build.slice(step('Notarize and staple the disk images'), step('Remove the notarization key')),
+    );
+    const smoke = retryFunction(build.slice(step('Smoke-test artifacts')));
+    expect(notarize).toContain('xcrun stapler "$@"');
+    expect(smoke).toBe(notarize);
+
+    // xcrun and sleep are stand-ins: xcrun fails until call `succeedOn`, and
+    // sleep records how long the loop would have waited.
+    const run = (succeedOn: number) => {
+      const script = [
+        'set -euo pipefail',
+        'calls=0',
+        `xcrun() { calls=$((calls + 1)); [ "\${calls}" -ge ${succeedOn} ]; }`,
+        'sleep() { echo "slept $1"; }',
+        notarize,
+        'if stapler_retry validate image.dmg; then echo "status 0"; else echo "status 1"; fi',
+        'echo "calls $calls"',
+      ].join('\n');
+      const result = spawnSync('bash', ['-c', script], { encoding: 'utf8' });
+      const log = `${result.stdout}${result.stderr}`;
+      const slept = [...log.matchAll(/^slept (\d+)$/gm)].map((match) => Number(match[1]));
+      return { log, slept, total: slept.reduce((sum, seconds) => sum + seconds, 0) };
+    };
+
+    // In v0.0.9 Apple's ticket service stayed unreachable for longer than the
+    // old five tries 20s apart, about 110s, and the release failed after
+    // notarization had succeeded (#568). The loop now waits at least ten
+    // minutes in all, the pause grows between tries, and every failed try is
+    // reported before the step gives up.
+    const never = run(Number.MAX_SAFE_INTEGER);
+    expect(never.log).toContain('status 1');
+    expect(never.log).toContain('calls 10');
+    expect(never.slept).toHaveLength(9);
+    expect(never.total).toBeGreaterThanOrEqual(600);
+    expect(never.slept).toEqual([...never.slept].sort((a, b) => a - b));
+    expect(never.log).toContain('stapler validate failed (attempt 1 of 10); retrying in 15s...');
+    expect(never.log).toContain('stapler validate failed (attempt 9 of 10); retrying in 135s...');
+    expect(never.log).toContain('::error::stapler validate image.dmg failed on all 10 attempts.');
+
+    // A drop that clears stops the loop at once.
+    const third = run(3);
+    expect(third.log).toContain('status 0');
+    expect(third.log).toContain('calls 3');
+    expect(third.slept).toEqual([15, 30]);
+    expect(third.log).not.toContain('::error::');
   });
 
   test('refuses to build or stage an unsigned artifact on the production path', () => {

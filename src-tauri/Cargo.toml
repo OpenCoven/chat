@@ -1,6 +1,6 @@
 [package]
 name = "opencoven-chat"
-version = "0.0.6"
+version = "0.1.2"
 description = "OpenCoven Chat desktop scaffold"
 edition = "2021"
 rust-version = "1.95.0"
@@ -39,7 +39,7 @@ fs2 = "=0.4.3"
 getrandom = "=0.4.3"
 httparse = "=1.10.1"
 rcgen = { version = "=0.14.10", default-features = false, features = ["crypto", "aws_lc_rs"] }
-rustls = "=0.23.45"
+rustls = "=0.23.46"
 subtle = "=2.6.1"
 tokio-rustls = "=0.26.5"
 hmac = "=0.12.1"
@@ -69,6 +69,9 @@ apple-native-keyring-store = { version = "=1.0.2", features = ["keychain"] }
 security-framework = "=3.7.0"
 
 [target.'cfg(target_os = "windows")'.dependencies]
+# The versions wry 0.55 already uses, to filter WebView2's right-click menu (#547).
+webview2-com = "=0.38.2"
+windows-core = "=0.61.2"
 windows-native-keyring-store = "=1.1.0"
 windows-sys = { version = "=0.61.2", features = [
   "Win32_Foundation",
@@ -82,6 +85,10 @@ windows-sys = { version = "=0.61.2", features = [
   "Win32_System_Threading",
   "Win32_UI_Shell",
 ] }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+# The version wry 0.55 already uses, to filter WebKitGTK's right-click menu (#547).
+webkit2gtk = "=2.0.2"
 
 [target.'cfg(all(unix, not(target_os = "macos")))'.dependencies]
 zbus-secret-service-keyring-store = { version = "=1.0.1", features = ["crypto-rust"] }

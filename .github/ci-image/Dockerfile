@@ -34,11 +34,16 @@ ENV DEBIAN_FRONTEND=noninteractive
 # Deliberately no --no-install-recommends: this list is a transcription of what
 # the workflow installed before, and dropping recommended packages would be a
 # behavioural change smuggled in under a reliability fix.
+#
+# The packaged acceptance job drives the installed app through tauri-driver:
+# webkit2gtk-driver supplies WebKitWebDriver, xvfb and xauth give the window a
+# display, dbus-x11 a session bus, and xclip reads the system clipboard.
 RUN apt-get update \
   && apt-get install -y \
     build-essential \
     ca-certificates \
     curl \
+    dbus-x11 \
     file \
     git \
     libayatana-appindicator3-dev \
@@ -50,8 +55,12 @@ RUN apt-get update \
     patchelf \
     pkg-config \
     unzip \
+    webkit2gtk-driver \
     wget \
+    xauth \
+    xclip \
     xdg-utils \
+    xvfb \
     zstd \
   && rm -rf /var/lib/apt/lists/*
 
@@ -59,4 +68,7 @@ RUN apt-get update \
 # and would surface as a confusing linker error inside a CI job instead.
 RUN pkg-config --exists webkit2gtk-4.1 \
   && pkg-config --exists gtk+-3.0 \
+  && command -v WebKitWebDriver \
+  && command -v xvfb-run \
+  && command -v xclip \
   && test -d /ms-playwright

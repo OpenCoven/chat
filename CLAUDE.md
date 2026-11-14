@@ -3,7 +3,9 @@
 Tauri desktop app (React 19 + Vite frontend, Rust backend) that talks to the
 user's locally installed **Coven CLI**. `README.md` is the product-behavior
 contract; read it before changing user-visible behavior. This file is the map.
-`AGENTS.md` covers the chat transport's failure mode and the write-root check.
+Start at `AGENTS.md`: it is the entry point for every agent, says where current
+work lives, sets the rules for working next to other sessions, and covers the
+chat transport's failure mode and the write-root check.
 
 ## You are probably in the right repo: verify before wandering
 
@@ -93,7 +95,12 @@ sessions, or attachments must be verified in `app:dev`.
 - **Conversation content never touches browser storage** (see `SECURITY.md`).
   Drafts are per-familiar and in-memory only.
 - **Worktrees:** `git fetch origin`, then
-  `git worktree add -b <type>/<name> .worktrees/<short-name> origin/main`.
+  `git worktree add -b <type>/<issue>-<slug> .worktrees/<issue>-<slug> origin/main`.
   Several are live and some are `locked`. Run `git worktree list` before any
-  branch surgery, and see the global concurrent-sessions rule.
-- **Commits must be signed** (`git commit -S`). See `~/.claude/CLAUDE.md`.
+  branch surgery. Never work in the primary checkout, never touch another
+  session's worktree, branch, PR or stash entry: `AGENTS.md` → **Working
+  alongside other agents** has the full rules.
+- **Commits must be signed**; `main` rejects unsigned ones. Sign and check
+  them with the commands in `docs/agents/working-here.md` → **Commit
+  signing**: with an SSH key, a plain `git log --show-signature` prints "No
+  signature" even for a signed commit.

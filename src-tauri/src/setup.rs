@@ -5,7 +5,7 @@
 
 use std::{
     path::{Path, PathBuf},
-    process::{Command, Stdio},
+    process::Stdio,
     sync::{
         atomic::{AtomicBool, Ordering},
         Arc, Mutex,
@@ -17,8 +17,8 @@ use serde_json::{json, Value};
 use tauri::ipc::Channel;
 
 use crate::coven_runtime::{
-    blocking, cli_json, execute_command_lines, home, resolve_cli, run_process, tool_search_path,
-    READ_TIMEOUT,
+    blocking, child_env, cli_json, execute_command_lines, home, resolve_cli, run_process,
+    tool_search_path, READ_TIMEOUT,
 };
 
 /// Sign-in probes start other programs (`claude`, the engine). A probe that
@@ -67,7 +67,7 @@ fn supported_platform() -> bool {
 /// standard output. Standard error is ignored: status commands report there
 /// in prose that the window does not show.
 fn probe(program: &Path, args: &[&str]) -> Result<(i32, String), String> {
-    let mut command = Command::new(program);
+    let mut command = child_env::command(program);
     command
         .args(args)
         .stdin(Stdio::null())
@@ -343,7 +343,7 @@ fn stream_tool(
     cancel: &AtomicBool,
     on_event: &mut dyn FnMut(Value) -> Result<(), String>,
 ) -> Result<(i32, String), String> {
-    let mut command = Command::new(program);
+    let mut command = child_env::command(program);
     command
         .args(args)
         .stdin(Stdio::null())

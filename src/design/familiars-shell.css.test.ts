@@ -48,6 +48,32 @@ function hex(name: string, scheme: Scheme = 'dark'): HexColor {
   return value as HexColor;
 }
 
+/** An `oklch(L C h)` token as sRGB hex, so it can be held to the same contrast checks. */
+function oklchHex(name: string, scheme: Scheme = 'dark'): HexColor {
+  const value = tokens(scheme).get(name) ?? '';
+  const parts = value.match(/^oklch\(([\d.]+) ([\d.]+) ([\d.]+)\)$/);
+  if (!parts) throw new Error(`${name} is not a ${scheme} oklch token: ${value || 'missing'}`);
+  const [lightness, chroma, hue] = parts.slice(1).map(Number) as [number, number, number];
+  const a = chroma * Math.cos((hue * Math.PI) / 180);
+  const b = chroma * Math.sin((hue * Math.PI) / 180);
+  const l = (lightness + 0.3963377774 * a + 0.2158037573 * b) ** 3;
+  const m = (lightness - 0.1055613458 * a - 0.0638541728 * b) ** 3;
+  const s = (lightness - 0.0894841775 * a - 1.291485548 * b) ** 3;
+  const linear = [
+    4.0767416621 * l - 3.3077115913 * m + 0.2309699292 * s,
+    -1.2684380046 * l + 2.6097574011 * m - 0.3413193965 * s,
+    -0.0041960863 * l - 0.7034186147 * m + 1.707614701 * s,
+  ];
+  const channel = (x: number) => {
+    const clamped = Math.min(1, Math.max(0, x));
+    const encoded = clamped <= 0.0031308 ? 12.92 * clamped : 1.055 * clamped ** (1 / 2.4) - 0.055;
+    return Math.round(encoded * 255)
+      .toString(16)
+      .padStart(2, '0');
+  };
+  return `#${linear.map(channel).join('')}` as HexColor;
+}
+
 // Every surface text sits on, including hover (highlighted rows and menu
 // items) and sunken (code chips, the search field).
 const SURFACES = [
@@ -111,6 +137,13 @@ describe('familiars-shell.css', () => {
           hex('--accent-presence-foreground', scheme),
           hex('--accent-presence', scheme),
         ),
+      ).toBeGreaterThanOrEqual(AA_NORMAL_TEXT);
+    });
+
+    it('keeps a label readable on a solid danger fill', () => {
+      // The composer's running Stop is a solid danger pill with this label.
+      expect(
+        contrastRatio(hex('--color-danger-foreground', scheme), oklchHex('--color-danger', scheme)),
       ).toBeGreaterThanOrEqual(AA_NORMAL_TEXT);
     });
   });

@@ -1,5 +1,12 @@
 import { expect, type Page, test } from '@playwright/test';
 import { contrastFailures } from './contrast';
+import { installRuntimeFixture } from './fixtures/runtime';
+
+// Safari's default Tab model skips buttons; Option+Tab reaches all controls.
+async function tabThroughControls(page: Page) {
+  const webkit = page.context().browser()?.browserType().name() === 'webkit';
+  await page.keyboard.press(webkit ? 'Alt+Tab' : 'Tab');
+}
 
 const observationCommands = [
   'plugin:window|set_title',
@@ -7,300 +14,6 @@ const observationCommands = [
   'plugin:event|unlisten',
   'companion_active_run',
 ];
-
-declare global {
-  interface Window {
-    __covenFixture: { calls: string[]; inputs?: unknown[]; finish?: () => void };
-    /** Overrides the first familiar's name, for layout tests with long names. */
-    __fixtureFamiliarName?: string;
-    /** Addresses the window asked the host to open, in order. */
-    __openedLinks?: unknown[];
-  }
-}
-
-async function installRuntimeFixture(
-  page: Page,
-  available = true,
-  reply = 'Streamed through the Coven boundary.',
-  population = 1,
-  // When set, these frames replace the single assistant reply so a test can
-  // stream the structured tool shapes the runtime documents.
-  stream?: Record<string, unknown>[],
-  observerFailure = false,
-  // First-run setup's own answer. It normally follows `available`; a test of
-  // the chat's disconnected state sets it so Coven goes missing after setup.
-  setupComplete = available,
-) {
-  await page.addInitScript(
-    ({ ready, reply, population, stream, observerFailure, setupComplete }) => {
-      const portrait = document.createElement('canvas');
-      portrait.width = 2;
-      portrait.height = 2;
-      const paint = portrait.getContext('2d');
-      if (!paint) throw new Error('Cannot create the PNG avatar fixture.');
-      paint.fillStyle = '#9386d0';
-      paint.fillRect(0, 0, 2, 2);
-      const avatarUrl = portrait.toDataURL('image/png');
-      const callbacks = new Map<number, (data: unknown) => void>();
-      let callbackId = 0;
-      // What first-run setup has installed during this page's life.
-      const installed = { coven: false, engine: false };
-      let rejectRun: ((error: Error) => void) | undefined;
-      type FixtureHead = {
-        session: {
-          id: string;
-          title: string;
-          harness: string;
-          status: string;
-          familiarId: string;
-          updatedAt: string;
-          projectRoot: string;
-        };
-        events: Record<string, unknown>[];
-      };
-      const saved = localStorage.getItem('coven-browser-fixture');
-      const state: {
-        heads: Record<string, FixtureHead>;
-        calls: string[];
-        inputs: unknown[];
-      } = saved ? JSON.parse(saved) : { heads: {}, calls: [], inputs: [] };
-      const persist = () => localStorage.setItem('coven-browser-fixture', JSON.stringify(state));
-      window.__covenFixture = { calls: state.calls, inputs: state.inputs };
-      Object.defineProperty(window, '__TAURI_EVENT_PLUGIN_INTERNALS__', {
-        value: { unregisterListener() {} },
-      });
-      Object.defineProperty(window, '__TAURI_INTERNALS__', {
-        value: {
-          // What the host describes about the window; setTitle needs its label.
-          metadata: { currentWindow: { label: 'main' } },
-          transformCallback(callback: (data: unknown) => void) {
-            callbacks.set(++callbackId, callback);
-            return callbackId;
-          },
-          unregisterCallback(id: number) {
-            callbacks.delete(id);
-          },
-          async invoke(command: string, args: Record<string, unknown> = {}) {
-            window.__covenFixture.calls.push(command);
-            persist();
-            switch (command) {
-              case 'plugin:event|listen':
-                if (observerFailure) throw new Error('Fixture observer unavailable');
-                return 1;
-              case 'plugin:event|unlisten':
-              case 'companion_active_run':
-                return null;
-              case 'setup_check':
-                return {
-                  platform: { ok: true, os: 'macos' },
-                  coven:
-                    setupComplete || installed.coven
-                      ? { ok: true, version: 'fixture' }
-                      : { ok: false },
-                  engine: { ok: setupComplete || installed.engine },
-                  signIn: {
-                    ok: setupComplete,
-                    engine: setupComplete ? 'signed-in' : 'missing',
-                    claude: 'missing',
-                    chatgpt: 'missing',
-                    claudeInstaller: 'curl -fsSL https://claude.ai/install.sh | bash',
-                  },
-                  familiar: { ok: setupComplete, count: setupComplete ? 1 : 0 },
-                };
-              case 'coven_runtime_status':
-                return ready
-                  ? {
-                      available: true,
-                      version: 'fixture',
-                      transport: 'cli',
-                      sdkHealth: 'unavailable',
-                    }
-                  : {
-                      available: false,
-                      error: 'Coven CLI is not installed. Install Coven CLI, then retry.',
-                      setup: 'install-cli',
-                    };
-              case 'coven_runtime_familiars':
-                return Array.from({ length: population }, (_, index) => ({
-                  id: index ? `fixture-familiar-${index}` : 'fixture-familiar',
-                  name: index
-                    ? `Familiar ${index}`
-                    : (window.__fixtureFamiliarName ?? 'Local familiar'),
-                  displayName: index
-                    ? `Familiar ${index}`
-                    : (window.__fixtureFamiliarName ?? 'Local familiar'),
-                  workspace: `/fixture/familiars/${index}/workspace`,
-                  projectAccess: index
-                    ? [{ name: 'private', path: `/fixture/private/${index}`, access: 'read' }]
-                    : [
-                        {
-                          name: 'workspace',
-                          path: '/fixture/familiars/0/workspace',
-                          access: 'write',
-                        },
-                        {
-                          name: 'workspace',
-                          path: '/fixture/projects/library/workspace',
-                          access: 'read',
-                        },
-                        { name: 'workspace', path: '/fixture/workspace', access: 'write' },
-                      ],
-                  description:
-                    population > 1
-                      ? 'A detailed familiar purpose. '.repeat(100)
-                      : 'Native-boundary browser fixture',
-                  avatarUrl,
-                }));
-              case 'coven_runtime_sessions':
-                return Object.values(state.heads).map((head) => head.session);
-              case 'coven_runtime_read': {
-                const selected = Object.values(state.heads).find(
-                  (head) => head.session.id === args.id,
-                );
-                if (!selected) throw new Error('Unexpected session read.');
-                return selected;
-              }
-              case 'setup_run': {
-                const channel = args.onEvent;
-                const step = args.step;
-                if (
-                  typeof args.runId !== 'string' ||
-                  (step !== 'install_coven' && step !== 'install_engine') ||
-                  typeof channel !== 'object' ||
-                  !channel ||
-                  !('id' in channel) ||
-                  typeof channel.id !== 'number'
-                )
-                  throw new Error('Invalid setup boundary.');
-                const callback = callbacks.get(channel.id);
-                if (!callback) throw new Error('Setup callback not registered.');
-                const events =
-                  step === 'install_coven'
-                    ? [
-                        { type: 'progress', stage: 'download', received: 0, total: 100 },
-                        { type: 'progress', stage: 'download', received: 50, total: 100 },
-                        { type: 'progress', stage: 'download', received: 100, total: 100 },
-                        { type: 'progress', stage: 'install' },
-                      ]
-                    : [
-                        { type: 'line', text: 'Downloading coven-code 0.8.0' },
-                        { type: 'line', text: 'Engine ready' },
-                      ];
-                events.forEach((message, index) => {
-                  callback({ index, message });
-                });
-                callback({ index: events.length, end: true });
-                if (step === 'install_coven') installed.coven = true;
-                else installed.engine = true;
-                return step === 'install_coven' ? { version: 'fixture' } : { installed: true };
-              }
-              case 'coven_runtime_send': {
-                const input = args.input;
-                window.__covenFixture.inputs?.push(input);
-                const channel = args.onEvent;
-                if (
-                  typeof input !== 'object' ||
-                  !input ||
-                  !('prompt' in input) ||
-                  !('runId' in input) ||
-                  !('familiarId' in input) ||
-                  typeof input.familiarId !== 'string' ||
-                  typeof input.prompt !== 'string' ||
-                  typeof channel !== 'object' ||
-                  !channel ||
-                  !('id' in channel) ||
-                  typeof channel.id !== 'number'
-                )
-                  throw new Error('Invalid send boundary.');
-                const callback = callbacks.get(channel.id);
-                if (!callback) throw new Error('Stream callback not registered.');
-                const familiarId = input.familiarId;
-                const current = state.heads[familiarId];
-                if (
-                  (current &&
-                    (!('sessionId' in input) || input.sessionId !== current.session.id)) ||
-                  (!current && 'sessionId' in input && input.sessionId)
-                )
-                  throw new Error('Send must resume this familiar canonical head.');
-                const session = current?.session ?? {
-                  id: `head-${input.familiarId}`,
-                  title: 'A real runtime boundary fixture',
-                  harness: 'coven-code',
-                  status: 'completed',
-                  familiarId: input.familiarId,
-                  updatedAt: '2026-09-15T00:00:00Z',
-                  projectRoot: '/fixture/workspace',
-                };
-                const events: Record<string, unknown>[] = [
-                  { type: 'system', subtype: 'init', session_id: session.id },
-                  {
-                    type: 'user',
-                    session_id: session.id,
-                    attachments:
-                      'attachments' in input && Array.isArray(input.attachments)
-                        ? input.attachments.map((file: { name: string; bytes: number[] }) => ({
-                            name: file.name,
-                            size: file.bytes.length,
-                          }))
-                        : [],
-                    message: { content: [{ type: 'text', text: input.prompt }] },
-                  },
-                  ...(stream
-                    ? stream.map((frame) => ({ ...frame, session_id: session.id }))
-                    : [
-                        {
-                          type: 'assistant',
-                          session_id: session.id,
-                          message: {
-                            content: [{ type: 'text', text: reply }],
-                          },
-                        },
-                      ]),
-                ];
-                state.heads[familiarId] = {
-                  session,
-                  events: [...(current?.events ?? []), ...events],
-                };
-                persist();
-                events.forEach((message, index) => {
-                  callback({ index, message });
-                });
-                return new Promise((resolve, reject) => {
-                  rejectRun = reject;
-                  window.__covenFixture.finish = () => {
-                    events.push({ type: 'result', session_id: session.id, is_error: false });
-                    state.heads[familiarId] = {
-                      session,
-                      events: [...(current?.events ?? []), ...events],
-                    };
-                    persist();
-                    callback({ index: events.length - 1, message: events[events.length - 1] });
-                    callback({ index: events.length, end: true });
-                    resolve({ runId: input.runId, events });
-                  };
-                });
-              }
-              case 'coven_runtime_cancel':
-                rejectRun?.(new Error('Coven run was cancelled.'));
-                return null;
-              // The host would hand the address to the system; the fixture records it.
-              case 'open_reviewed_link':
-                window.__openedLinks = [...(window.__openedLinks ?? []), args.address];
-                return null;
-              // The one Tauri core permission the window holds: its own title.
-              case 'plugin:window|set_title':
-                document.documentElement.dataset.nativeTitle = String(args.value);
-                return null;
-              default:
-                throw new Error(`Unexpected native command: ${command}`);
-            }
-          },
-        },
-      });
-    },
-    { ready: available, reply, population, stream, observerFailure, setupComplete },
-  );
-}
 
 test('keeps the familiar list and inspector scrollable inside a short window', async ({ page }) => {
   await page.setViewportSize({ width: 820, height: 390 });
@@ -333,14 +46,50 @@ test('keeps the familiar list and inspector scrollable inside a short window', a
   expect(await page.evaluate(() => [window.scrollX, window.scrollY])).toEqual([0, 0]);
 });
 
+test('keeps the end of a long workspace path visible in the inspector', async ({
+  page,
+  browserName,
+}) => {
+  test.skip(
+    browserName === 'webkit',
+    'WebKit Range geometry ignores RTL overflow offsets; the Chromium measurement remains enforced.',
+  );
+  await page.setViewportSize({ width: 1200, height: 800 });
+  await installRuntimeFixture(page);
+  await page.goto('/');
+  await expect(page.getByRole('textbox', { name: 'Message Local familiar' })).toBeEnabled();
+  await page.getByRole('button', { name: "Open Local familiar's familiar card" }).click();
+  const value = page.locator('.fr-inspector').getByTitle('/fixture/familiars/0/workspace').first();
+  await expect(value).toBeVisible();
+  const ends = await value.evaluate((element) => {
+    const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT);
+    let text: Text | undefined;
+    while (walker.nextNode()) text = walker.currentNode as Text;
+    if (!text) throw new Error('The path row has no text.');
+    const box = element.getBoundingClientRect();
+    const range = document.createRange();
+    range.setStart(text, text.length - 1);
+    range.setEnd(text, text.length);
+    const last = range.getBoundingClientRect();
+    return {
+      truncated: element.scrollWidth > element.clientWidth,
+      endVisible: last.left >= box.left - 0.5 && last.right <= box.right + 0.5,
+    };
+  });
+  // The folder name at the end is what tells paths apart; the start gives way.
+  // Measured in Chromium, the suite's engine: WebKit's range geometry ignores
+  // the right-to-left overflow shift, so a WebKit run of this check misreads.
+  expect(ends).toEqual({ truncated: true, endVisible: true });
+});
+
 test('names the native window after the familiar being shown', async ({ page }) => {
   await installRuntimeFixture(page);
   await page.goto('/');
   await expect(page.getByRole('textbox', { name: 'Message Local familiar' })).toBeEnabled();
-  await expect(page).toHaveTitle('Local familiar — OpenCoven Chat');
+  await expect(page).toHaveTitle('Local familiar — Coven Chat');
   await expect(page.locator('html')).toHaveAttribute(
     'data-native-title',
-    'Local familiar — OpenCoven Chat',
+    'Local familiar — Coven Chat',
   );
 });
 
@@ -445,6 +194,59 @@ for (const colorScheme of ['dark', 'light'] as const) {
     expect(found).toEqual([]);
   });
 }
+
+test('puts a permission request first in a narrow window, and typing finds the field', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 480, height: 520 });
+  await installRuntimeFixture(page, true, undefined, 1, undefined, false, true, [
+    {
+      id: 'request-narrow',
+      familiarId: 'fixture-familiar',
+      summary: 'Create notes.md in the project folder and add the agenda from this chat.',
+      reason: 'The read-only turn could not write the file, and the agenda needs saving now.',
+      requestedAt: Date.now(),
+      expiresAt: Date.now() + 3_600_000,
+    },
+  ]);
+  await page.goto('/');
+  // The card and the composer don't both fit here, so the answer comes first.
+  for (const name of ['Allow once', 'Decline']) {
+    await expect(page.getByRole('button', { name, exact: true })).toBeInViewport({ ratio: 1 });
+  }
+  const composer = page.getByRole('textbox', { name: 'Message Local familiar' });
+  await page.keyboard.type('x');
+  await expect(composer).toHaveValue('x');
+  await expect(composer).toBeFocused();
+  await expect(composer).toBeInViewport({ ratio: 1 });
+  const send = page.getByRole('button', { name: 'Send', exact: true });
+  await send.scrollIntoViewIfNeeded();
+  await expect(send).toBeInViewport({ ratio: 1 });
+});
+
+test('keeps the access word whole beside a long familiar name in a narrow window', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 480, height: 520 });
+  const name = 'Astra the Remarkably Long Named Familiar of the Northern Reach';
+  await page.addInitScript((familiar) => {
+    window.__fixtureFamiliarName = familiar;
+  }, name);
+  await installRuntimeFixture(page);
+  await page.goto('/');
+  await expect(page.getByRole('textbox', { name: `Message ${name}` })).toBeEnabled();
+  const access = page.locator('[data-access="full"]');
+  await expect(access).toContainText('Full access');
+  const fit = await access.evaluate((element) => {
+    const box = element.getBoundingClientRect();
+    const row = element.parentElement?.getBoundingClientRect();
+    return {
+      clipped: element.scrollWidth > element.clientWidth + 1,
+      insideRow: Boolean(row && box.left >= row.left - 1 && box.right <= row.right + 1),
+    };
+  });
+  expect(fit).toEqual({ clipped: false, insideRow: true });
+});
 
 test('keeps a long composer placeholder on one line in a narrow window', async ({ page }) => {
   await page.setViewportSize({ width: 480, height: 520 });
@@ -577,7 +379,7 @@ test('quotes a selected passage into the draft from the pointer or the keyboard,
   await expect(quote).toBeVisible();
   // The action follows the conversation in the tab order.
   await page.getByRole('button', { name: 'Copy reply' }).focus();
-  await page.keyboard.press('Tab');
+  await tabThroughControls(page);
   await expect(quote).toBeFocused();
   // Enter quotes; holding it repeats into the composer, which must not send.
   await page.keyboard.down('Enter');
@@ -598,7 +400,7 @@ test('quotes a selected passage into the draft from the pointer or the keyboard,
   });
   await expect(page.getByText('from your message')).toBeVisible();
   await page.getByRole('button', { name: 'Copy reply' }).focus();
-  await page.keyboard.press('Tab');
+  await tabThroughControls(page);
   await page.keyboard.press('Escape');
   await expect(quote).toHaveCount(0);
   await expect(page.getByRole('log', { name: 'Messages' })).toBeFocused();
@@ -812,6 +614,205 @@ test('cancellation retains the submitted draft instead of pretending success', a
   await expect(composer).toHaveValue('Keep this draft after cancellation');
   expect(await page.evaluate(() => window.__covenFixture.calls)).toContain('coven_runtime_cancel');
 });
+
+test('keeps focus in the composer through the read that follows a run', async ({ page }) => {
+  await page.addInitScript(() => {
+    window.__fixtureReadDelayMs = 700;
+  });
+  await installRuntimeFixture(page);
+  await page.goto('/');
+  const composer = page.getByRole('textbox', { name: 'Message Local familiar' });
+  await expect(composer).toBeEnabled();
+  const stop = page.getByRole('button', { name: 'Stop run', exact: true });
+
+  // Stopped with Escape from the field, in a chat with no reply yet.
+  await composer.fill('Stop me');
+  await page.getByRole('button', { name: 'Send', exact: true }).click();
+  await expect(stop).toBeVisible();
+  await composer.focus();
+  await page.keyboard.press('Escape');
+  await expect(stop).toHaveCount(0);
+  await expect(composer).toBeEnabled();
+  await expect(composer).toBeFocused();
+
+  // A run that ends by itself, with someone typing in the field as it does.
+  await page.getByRole('button', { name: 'Send', exact: true }).click();
+  await expect(stop).toBeVisible();
+  await composer.focus();
+  await page.keyboard.type('next');
+  await page.evaluate(() => window.__covenFixture.finish?.());
+  await expect(stop).toHaveCount(0);
+  await expect(composer).toBeEnabled();
+  await expect(composer).toBeFocused();
+  await page.keyboard.type(' question');
+  await expect(composer).toHaveValue(/next question$/);
+});
+
+test('Escape stops a run from the page and the composer, but not from a dialog', async ({
+  page,
+}) => {
+  await installRuntimeFixture(page);
+  await page.goto('/');
+  const composer = page.getByRole('textbox', { name: 'Message Local familiar' });
+  const stop = page.getByRole('button', { name: 'Stop run', exact: true });
+  const cancels = async () =>
+    (await page.evaluate(() => window.__covenFixture.calls)).filter(
+      (call) => call === 'coven_runtime_cancel',
+    ).length;
+  await expect(composer).toBeEnabled();
+  await composer.fill('Stop me from the page');
+  await page.getByRole('button', { name: 'Send', exact: true }).click();
+  await expect(stop).toHaveText('esc · stop');
+  await expect(stop).toHaveAttribute('aria-keyshortcuts', 'Escape');
+  await expect(composer).toHaveAttribute('placeholder', /send when the reply ends · esc to stop/);
+
+  // A dialog takes Escape for itself; the run goes on.
+  await page.getByRole('button', { name: 'Open settings' }).click();
+  await expect(page.getByRole('dialog', { name: 'Settings' })).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(page.getByRole('dialog', { name: 'Settings' })).toHaveCount(0);
+  await expect(stop).toBeVisible();
+  expect(await cancels()).toBe(0);
+
+  // Nothing editable has focus: Escape stops the run.
+  await page.getByRole('log', { name: 'Messages' }).focus();
+  await page.keyboard.press('Escape');
+  await expect(stop).toHaveCount(0);
+  expect(await cancels()).toBe(1);
+  await expect(composer).toHaveValue('Stop me from the page');
+
+  // In the composer, Escape stops the run too.
+  await composer.fill('Stop me from the composer');
+  await page.getByRole('button', { name: 'Send', exact: true }).click();
+  await expect(stop).toBeVisible();
+  await composer.focus();
+  await page.keyboard.press('Escape');
+  await expect(stop).toHaveCount(0);
+  expect(await cancels()).toBe(2);
+  await expect(composer).toHaveValue('Stop me from the composer');
+  // The field was turned off while the run stopped; focus comes back to it.
+  await expect(composer).toBeFocused();
+
+  // The same goes for the Stop control itself, reached from the keyboard.
+  await page.getByRole('button', { name: 'Send', exact: true }).click();
+  await expect(stop).toBeVisible();
+  await stop.focus();
+  await page.keyboard.press('Enter');
+  await expect(stop).toHaveCount(0);
+  expect(await cancels()).toBe(3);
+  await expect(composer).toBeFocused();
+});
+
+for (const colorScheme of ['dark', 'light'] as const) {
+  test(`says Full access during a run and between runs (${colorScheme})`, async ({ page }) => {
+    // Chats run with full access (#576). The turn stays open on its thinking dots, which
+    // would never let the contrast read settle, so motion is off.
+    await page.emulateMedia({ colorScheme, reducedMotion: 'reduce' });
+    await page.setViewportSize({ width: 1600, height: 900 });
+    await installRuntimeFixture(page);
+    await page.goto('/');
+    const composer = page.getByRole('textbox', { name: 'Message Local familiar' });
+    const details = page
+      .getByRole('region', { name: 'Message composer' })
+      .getByRole('group', { name: 'Chat details' });
+    await expect(composer).toBeEnabled();
+    await expect(details).toContainText('Local familiar · Full access');
+    await composer.fill('Keep this turn open');
+    await page.getByRole('button', { name: 'Send', exact: true }).click();
+    const stop = page.getByRole('button', { name: 'Stop run', exact: true });
+    await expect(stop).toBeVisible();
+    await expect(details).toContainText('Local familiar · Full access');
+    await page.mouse.move(2, 2);
+    // Retried: with motion off nothing tells the helper the first paint has settled, and a
+    // backdrop caught mid-repaint reads every text at about 1:1. A real failure still fails.
+    await expect.poll(() => contrastFailures(page), { timeout: 15_000 }).toEqual([]);
+    await page.getByRole('log', { name: 'Messages' }).focus();
+    await page.keyboard.press('Escape');
+    await expect(stop).toHaveCount(0);
+    await expect(details).toContainText('Local familiar · Full access');
+    await expect(details).not.toContainText(/Read only|Full permission/);
+  });
+
+  test(`lays the composer out as field, toolbar and details (${colorScheme})`, async ({
+    page,
+  }, testInfo) => {
+    await page.emulateMedia({ colorScheme });
+    await page.setViewportSize({ width: 1600, height: 900 });
+    await installRuntimeFixture(page);
+    await page.goto('/');
+    const composer = page.getByRole('textbox', { name: 'Message Local familiar' });
+    await expect(composer).toBeEnabled();
+    const frame = page.getByRole('region', { name: 'Message composer' });
+    const details = frame.getByRole('group', { name: 'Chat details' });
+    await expect(details).toContainText('Local familiar · Full access');
+    await expect(details).toContainText('Coven Code');
+    await expect(details).toContainText('Engine default');
+    await expect(details).toContainText('Familiar workspace: /fixture/familiars/0/workspace');
+    const field = await composer.boundingBox();
+    const send = await page.getByRole('button', { name: 'Send', exact: true }).boundingBox();
+    const context = await page
+      .getByRole('button', { name: 'Add context', exact: true })
+      .boundingBox();
+    const row = await details.boundingBox();
+    // The field first, the toolbar under it, then the details row.
+    expect((send?.y ?? 0) + 1).toBeGreaterThan((field?.y ?? 0) + (field?.height ?? 0));
+    expect(
+      Math.abs(
+        (send?.y ?? 0) + (send?.height ?? 0) / 2 - ((context?.y ?? 0) + (context?.height ?? 0) / 2),
+      ),
+    ).toBeLessThan(2);
+    expect((row?.y ?? 0) + 1).toBeGreaterThan((send?.y ?? 0) + (send?.height ?? 0));
+    await page.mouse.move(2, 2);
+    await page.locator('.fr-composer-inner').screenshot({
+      path: testInfo.outputPath(`composer-idle-${colorScheme}.png`),
+      animations: 'disabled',
+    });
+
+    await composer.fill('Show me the running composer');
+    await page.getByRole('button', { name: 'Send', exact: true }).click();
+    await expect(page.getByRole('button', { name: 'Stop run', exact: true })).toBeVisible();
+    await page.mouse.move(2, 2);
+    expect(await contrastFailures(page)).toEqual([]);
+    await page.locator('.fr-composer-inner').screenshot({
+      path: testInfo.outputPath(`composer-running-${colorScheme}.png`),
+      animations: 'disabled',
+    });
+
+    // At the narrowest window the row wraps or cuts; the page never scrolls sideways.
+    await page.setViewportSize({ width: 480, height: 520 });
+    await expect(page.getByRole('button', { name: 'Stop run', exact: true })).toBeInViewport();
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(
+      true,
+    );
+    expect(await frame.evaluate((node) => node.scrollWidth <= node.clientWidth)).toBe(true);
+    await page.locator('.fr-composer-inner').screenshot({
+      path: testInfo.outputPath(`composer-running-narrow-${colorScheme}.png`),
+      animations: 'disabled',
+    });
+    await page.evaluate(() => window.__covenFixture.finish?.());
+    await expect(page.getByRole('button', { name: 'Stop run', exact: true })).toHaveCount(0);
+
+    // A file card and the byte-limit warning fit the narrow box too.
+    const transfer = await page.evaluateHandle(() => {
+      const data = new DataTransfer();
+      data.items.add(new File(['notes'], 'notes.md', { type: 'text/markdown' }));
+      return data;
+    });
+    await page.locator('main.fr-thread').dispatchEvent('drop', { dataTransfer: transfer });
+    await expect(frame.getByText('notes.md')).toBeVisible();
+    await composer.fill('x'.repeat(32_769));
+    await expect(frame.getByText(/Message is 32,769 bytes/)).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Send', exact: true })).toBeInViewport();
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(
+      true,
+    );
+    expect(await frame.evaluate((node) => node.scrollWidth <= node.clientWidth)).toBe(true);
+    await page.locator('.fr-composer-inner').screenshot({
+      path: testInfo.outputPath(`composer-draft-narrow-${colorScheme}.png`),
+      animations: 'disabled',
+    });
+  });
+}
 
 test('keeps cancellation available after switching to another familiar', async ({ page }) => {
   await page.setViewportSize({ width: 820, height: 390 });
@@ -1204,6 +1205,9 @@ test('reserves full-height clickable rail tabs and widens the shared chat column
     await page.getByRole('button', { name: 'Close inspector', exact: true }).click();
   }
   await page.setViewportSize({ width: 360, height: 520 });
+  await expect(page.locator('.coven-chat')).toHaveAttribute('data-tier', 'compact');
+  await expect(page.locator('.coven-chat')).toHaveAttribute('data-sidebar', 'closed');
+  await expect(page.locator('.coven-chat')).toHaveAttribute('data-inspector', 'closed');
   await expect(left).toBeVisible();
   await expect(right).toBeVisible();
   await left.focus();
@@ -1404,6 +1408,16 @@ test('keeps reading position, workspace and run controls clear on large and smal
   await expect(field).toHaveValue('');
   await expect(page.getByText('Chat project: /fixture/workspace')).toBeVisible();
   await page.setViewportSize({ width: 480, height: 520 });
+  // WebKit can return from resizing before matchMedia updates the React shell.
+  // Wait for the drawers to fold before choosing a pointer target in the composer.
+  await expect(page.locator('.coven-chat')).toHaveAttribute('data-tier', 'compact');
+  await expect(page.locator('.coven-chat')).toHaveAttribute('data-sidebar', 'closed');
+  await expect(page.locator('.coven-chat')).toHaveAttribute('data-inspector', 'closed');
+  // Linux WebKit focuses buttons on press; exercise that behavior on macOS too.
+  // Focusing must not reflow a stale composer row and move the button before release.
+  await page.getByRole('button', { name: 'Add context', exact: true }).evaluate((trigger) => {
+    trigger.addEventListener('pointerdown', () => trigger.focus());
+  });
   await page.getByRole('button', { name: 'Add context', exact: true }).click();
   await expect(page.getByRole('combobox')).toBeInViewport();
   await expect(page.getByRole('button', { name: 'Close context picker' })).toBeInViewport();
@@ -1477,8 +1491,13 @@ test('formats streamed replies and keeps wide code and tables inside the transcr
 // Chromium only: this proves the review flow in a browser, not what a desktop webview does with Open.
 test('copies the reviewed address honestly when the async clipboard refuses', async ({
   page,
+  browserName,
   context,
 }) => {
+  test.skip(
+    browserName === 'webkit',
+    'Playwright WebKit does not expose clipboard-read/write permissions; the real clipboard check runs in Chromium.',
+  );
   await context.grantPermissions(['clipboard-read', 'clipboard-write']);
   const address = 'https://docs.example.test/guide?step=2#install';
   await installRuntimeFixture(page, true, `See [the guide](${address}).`);
@@ -1574,7 +1593,7 @@ test('reviews an external link before anything opens, then opens only that addre
   await expect(review.locator('.coven-link-review-address')).toHaveText(address);
   // The modal keeps focus: Tab cycles its three controls and never reaches the composer.
   for (const name of ['Copy address', 'Open', 'Cancel']) {
-    await page.keyboard.press('Tab');
+    await tabThroughControls(page);
     await expect(review.getByRole('button', { name })).toBeFocused();
   }
   const fits = await review.evaluate((node) => {
@@ -1611,8 +1630,13 @@ test('reviews an external link before anything opens, then opens only that addre
 // Chromium only: this proves the table controls in a browser, not what a desktop webview does.
 test('expands a table into a snapshot sheet and copies its exact source', async ({
   page,
+  browserName,
   context,
 }) => {
+  test.skip(
+    browserName === 'webkit',
+    'Playwright WebKit does not expose clipboard-read/write permissions; the real clipboard check runs in Chromium.',
+  );
   await page.setViewportSize({ width: 480, height: 640 });
   await context.grantPermissions(['clipboard-read', 'clipboard-write']);
   const table = [
@@ -1907,7 +1931,7 @@ for (const colorScheme of ['dark', 'light'] as const) {
     const failures: string[] = [];
     const seen = new Set<string>();
     for (let stop = 0; stop < 80; stop++) {
-      await page.keyboard.press('Tab');
+      await tabThroughControls(page);
       const target = await page.evaluate(() => {
         const element = document.activeElement as HTMLElement | null;
         if (!element || element === document.body) return null;
@@ -2086,5 +2110,51 @@ for (const colorScheme of ['light', 'dark'] as const) {
     await page.goto('/');
     await expect(page.getByRole('alert')).toContainText('Could not observe iPhone activity');
     expect(await contrastFailures(page)).toEqual([]);
+  });
+}
+
+for (const openedBeforeCompletion of [false, true]) {
+  test(`link completion boundary: ${openedBeforeCompletion ? 'observed review is dismissed' : 'located live target is replaced'}`, async ({
+    page,
+  }) => {
+    await installRuntimeFixture(
+      page,
+      true,
+      'See [Completion boundary](https://example.com/handoff-check?x=1).',
+    );
+    await page.goto('/');
+    const composer = page.getByRole('textbox', { name: 'Message Local familiar' });
+    await composer.fill('Show the link.');
+    await page.getByRole('button', { name: 'Send', exact: true }).click();
+    await expect(page.getByRole('button', { name: 'Stop run', exact: true })).toBeVisible();
+    const link = page.getByRole('link', { name: 'Completion boundary', exact: true });
+    const liveTarget = await link.elementHandle();
+    expect(liveTarget).not.toBeNull();
+    const review = page.getByRole('dialog', { name: 'Open this link?' });
+    if (openedBeforeCompletion) {
+      await link.click();
+      await expect(review).toBeVisible();
+      await expect(review.locator('.coven-link-review-address')).toHaveText(
+        'https://example.com/handoff-check?x=1',
+      );
+    }
+    await page.evaluate(() => window.__covenFixture.finish?.('completion-new-head'));
+    await expect(page.getByRole('button', { name: 'Stop run', exact: true })).toHaveCount(0);
+    await expect(composer).toBeEnabled();
+    await expect.poll(() => liveTarget?.evaluate((element) => element.isConnected)).toBe(false);
+    await expect(review).toHaveCount(0);
+    expect(await page.evaluate(() => window.__openedLinks ?? [])).toEqual([]);
+    if (openedBeforeCompletion)
+      await expect(page.getByRole('log', { name: 'Messages' })).toBeFocused();
+    // Reacquire after completion instead of acting on the removed target.
+    await link.click();
+    await expect(review).toBeVisible();
+    await expect(review.locator('.coven-link-review-address')).toHaveText(
+      'https://example.com/handoff-check?x=1',
+    );
+    await page.keyboard.press('Escape');
+    await expect(review).toHaveCount(0);
+    await expect(link).toBeFocused();
+    expect(await page.evaluate(() => window.__openedLinks ?? [])).toEqual([]);
   });
 }

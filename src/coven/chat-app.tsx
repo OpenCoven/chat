@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   type CompanionRunEvent,
   type ObserveCompanionRuns,
@@ -6,10 +6,12 @@ import {
 } from '../lib/companion-runs';
 import {
   type ChatLifecycle,
+  type CovenApproval,
   type CovenFamiliar,
   type CovenRunEvent,
+  type CovenRunResult,
   type CovenRuntime,
-  type CovenSession,
+  type CovenSessionHead,
   type CovenSetupStep,
   createCovenRuntime,
 } from '../lib/coven-runtime';
@@ -26,6 +28,8 @@ const STORAGE_KEY = 'opencoven.chat.navigation.v1';
 const STREAM_FLUSH_MS = 16;
 /** The host's cap on how far back one chat can be read (see `MAX_HISTORY_DEPTH`). */
 const MAX_HISTORY_DEPTH = 4;
+/** An open request can be answered on the phone, or expire, while this window watches. */
+const APPROVAL_POLL_MS = 5000;
 type Navigation = { familiarId: string; sessionId: string; drafts: Record<string, string> };
 type LastRun = { ms: number; outcome: 'reply' | 'error' | 'stopped' };
 function errorText(error: unknown) {
@@ -79,7 +83,7 @@ function draftKey(navigation: Navigation) {
 function selectCanonical(
   previous: Navigation,
   familiars: readonly CovenFamiliar[],
-  sessions: readonly CovenSession[],
+  sessions: readonly CovenSessionHead[],
   archived: boolean,
 ): Navigation {
   const eligible = familiars.filter(
@@ -120,7 +124,9 @@ export function ChatApp({
   const [navigation, setNavigation] = useState(saved.navigation);
   const navigationRef = useRef(navigation);
   const [familiars, setFamiliars] = useState<CovenFamiliar[]>([]);
-  const [sessions, setSessions] = useState<CovenSession[]>([]);
+  const [sessions, setSessions] = useState<CovenSessionHead[]>([]);
+  const selectedSession = sessions.find((session) => session.id === navigation.sessionId);
+  const chatUnavailable = selectedSession?.unavailable === true;
   const [events, setEvents] = useState<CovenRunEvent[]>([]);
   // The host holds only the newest part of this chat's history; nothing failed.
   const [partial, setPartial] = useState(false);
@@ -150,6 +156,15 @@ export function ChatApp({
   // The familiar the active run addresses. Selection may move while a run is
   // live, and the layout must not credit the run to whichever familiar is shown.
   const [runFamiliarId, setRunFamiliarId] = useState('');
+  const [approvals, setApprovals] = useState<CovenApproval[]>([]);
+  const [answeringApproval, setAnsweringApproval] = useState(false);
+  const approvalReads = useRef(0);
+  /** Requests being allowed: the host may not have recorded the answer yet. */
+  const allowing = useRef(new Set<string>());
+  /** The requests the last read returned, and those this window declined. */
+  const shownApprovals = useRef<CovenApproval[]>([]);
+  const answeredHere = useRef(new Set<string>());
+  const quietRead = useRef(false);
   const [runStartedAt, setRunStartedAt] = useState(0);
   // How each familiar's most recent run in this window ended, and how long it took.
   const [lastRuns, setLastRuns] = useState<Record<string, LastRun>>({});
@@ -294,6 +309,7 @@ export function ChatApp({
           navigate({ ...current, sessionId: head.id });
           return;
         }
+        if (head.unavailable) return;
         request = ++readId.current;
         const result = await runtime.readSession(head.id, depthRef.current);
         if (
@@ -385,19 +401,23 @@ export function ChatApp({
   // biome-ignore lint/correctness/useExhaustiveDependencies: `reads` explicitly asks for the history again.
   useEffect(() => {
     const request = ++readId.current;
+    // A read for the phone's sake keeps the screen and the composer as they are,
+    // as one during a phone run does: the person may be typing here.
+    const quiet = Boolean(phoneRunRef.current) || quietRead.current;
+    quietRead.current = false;
     // Reading further back keeps what is on screen until the longer history
     // arrives; a different chat starts empty.
-    if (depth === 1 && (!phoneRunRef.current || readingSession.current !== navigation.sessionId)) {
+    if (depth === 1 && (!quiet || readingSession.current !== navigation.sessionId)) {
       setEvents([]);
       setPartial(false);
     }
     readingSession.current = navigation.sessionId;
     setReadError('');
-    if (!available || !navigation.sessionId) {
+    if (!available || !navigation.sessionId || chatUnavailable) {
       if (available) setLoading(false);
       return;
     }
-    if (!phoneRunRef.current) setLoading(true);
+    if (!quiet) setLoading(true);
     const reading =
       depth > 1
         ? runtime.readSession(navigation.sessionId, depth)
@@ -428,12 +448,71 @@ export function ChatApp({
     return () => {
       ++readId.current;
     };
-  }, [runtime, available, navigation.sessionId, reads, depth]);
+  }, [runtime, available, navigation.sessionId, chatUnavailable, reads, depth]);
+
+  /**
+   * Reads the open requests. A request this chat showed that closes without this
+   * window answering it was declined on the phone, replaced by a phone message,
+   * or expired. Only a Decline writes a line into the chat, and an open chat
+   * shows that line once it reads again, so `reread` reads it then. A read
+   * locks the composer, so the reads a run sets off pass `reread: false`: a
+   * request that closes around a run was replaced by that run's own message,
+   * which writes nothing.
+   */
+  const refreshApprovals = useCallback(
+    async ({ reread = true } = {}) => {
+      const request = ++approvalReads.current;
+      try {
+        const next = await runtime.pendingApprovals();
+        if (approvalReads.current === request) {
+          const open = next.filter((item) => !allowing.current.has(item.id));
+          const isOpen = (id: string) => open.some((still) => still.id === id);
+          const familiar = navigationRef.current.familiarId;
+          const closedElsewhere = shownApprovals.current.some(
+            (item) =>
+              item.familiarId === familiar &&
+              !answeredHere.current.has(item.id) &&
+              !isOpen(item.id),
+          );
+          const runOver = !activeRun.current && !phoneRunRef.current;
+          // Still open once a run is over: the host refused the message that
+          // would have closed it, so it is the phone's to answer again.
+          for (const id of answeredHere.current)
+            if (!isOpen(id) || (!reread && runOver)) answeredHere.current.delete(id);
+          shownApprovals.current = open;
+          setApprovals(open);
+          if (reread && closedElsewhere && runOver) {
+            quietRead.current = true;
+            setReads((value) => value + 1);
+          }
+        }
+      } catch {
+        // The last known list stays. Answering re-checks on the host regardless.
+      }
+    },
+    [runtime],
+  );
+  // biome-ignore lint/correctness/useExhaustiveDependencies: a request can only appear when a run ends, here or on the phone.
+  useEffect(() => {
+    if (available) void refreshApprovals({ reread: false });
+    else {
+      shownApprovals.current = [];
+      setApprovals([]);
+    }
+  }, [available, busy, phoneRun, refreshApprovals]);
+  const watchingApprovals = available && approvals.length > 0;
+  useEffect(() => {
+    if (!watchingApprovals) return;
+    const timer = setInterval(() => void refreshApprovals(), APPROVAL_POLL_MS);
+    return () => clearInterval(timer);
+  }, [watchingApprovals, refreshApprovals]);
 
   async function send(options: RunOptions) {
     const current = navigationRef.current;
+    const session = sessions.find((item) => item.id === current.sessionId);
     if (lifecyclePending.current) return;
-    if (sessions.some((session) => session.id === current.sessionId && session.archived)) {
+    if (session?.unavailable) return;
+    if (session?.archived) {
       setError('Restore this archived chat before sending a message.');
       return;
     }
@@ -447,9 +526,6 @@ export function ChatApp({
       );
       return;
     }
-    const chatHarness = current.sessionId
-      ? sessions.find((session) => session.id === current.sessionId)?.harness
-      : undefined;
     const key = draftKey(current);
     const prompt = current.drafts[key] ?? '';
     const selectedFiles = attachmentRef.current[key] ?? [];
@@ -463,13 +539,128 @@ export function ChatApp({
     ) {
       return;
     }
+    // This message closes the familiar's open requests as it starts, and writes
+    // nothing about them into the chat, so their closing needs no read.
+    for (const item of shownApprovals.current)
+      if (item.familiarId === current.familiarId) answeredHere.current.add(item.id);
+    await runTurn({
+      prompt,
+      selectedFiles,
+      start: (runId, onEvent) =>
+        runtime.send(
+          {
+            runId,
+            prompt,
+            ...(selectedFiles.length
+              ? { attachments: selectedFiles.map(({ name, bytes }) => ({ name, bytes })) }
+              : {}),
+            ...(current.sessionId ? { sessionId: current.sessionId } : {}),
+            ...(current.familiarId ? { familiarId: current.familiarId } : {}),
+            ...sendOptions(options, session?.harness),
+          },
+          onEvent,
+        ),
+    });
+  }
+
+  /**
+   * The person's click on Allow once. The host holds the request, so all that
+   * crosses from here is which one and the options a message would carry.
+   */
+  async function allowApproval(approval: CovenApproval, options: RunOptions) {
+    const current = navigationRef.current;
+    const session = sessions.find((item) => item.id === current.sessionId);
+    if (
+      lifecyclePending.current ||
+      activeRun.current ||
+      phoneRunRef.current ||
+      selecting.current ||
+      !available ||
+      loading ||
+      session?.unavailable ||
+      approval.familiarId !== current.familiarId
+    ) {
+      return;
+    }
+    if (!isValidModel(options.model)) {
+      setError(
+        "The model in Settings › Model isn't a model id. Correct it, or clear it to use the engine's default.",
+      );
+      return;
+    }
+    const { harness: _chatKeepsItsHarness, ...runOptions } = sendOptions(options, session?.harness);
+    allowing.current.add(approval.id);
+    answeredHere.current.add(approval.id);
+    setApprovals((previous) => previous.filter((item) => item.id !== approval.id));
+    try {
+      await runTurn({
+        keepsDraft: true,
+        prompt: '',
+        selectedFiles: [],
+        start: (runId, onEvent) =>
+          runtime.allow({ approvalId: approval.id, runId, ...runOptions }, onEvent),
+      });
+    } finally {
+      // A request the host refused to spend comes back here.
+      allowing.current.delete(approval.id);
+      void refreshApprovals({ reread: false });
+    }
+  }
+
+  async function declineApproval(approval: CovenApproval) {
+    setAnsweringApproval(true);
+    answeredHere.current.add(approval.id);
+    try {
+      await runtime.decline(approval.id);
+      // The chat now carries a line saying so.
+      setReads((value) => value + 1);
+    } catch (failure) {
+      setError(errorText(failure));
+    } finally {
+      setAnsweringApproval(false);
+      void refreshApprovals();
+    }
+  }
+
+  async function refreshProjectAccess() {
+    const life = lifetime.current;
+    const familiarId = navigationRef.current.familiarId;
+    const refreshed = await runtime.listFamiliars();
+    if (lifetime.current !== life) return;
+    const next = refreshed.find((item) => item.id === familiarId);
+    if (!next) throw new Error('Coven could not find this familiar.');
+    setFamiliars((current) =>
+      current.map((familiar) => {
+        if (familiar.id !== familiarId) return familiar;
+        const { projectAccessUnavailable: _unavailable, ...rest } = familiar;
+        return {
+          ...rest,
+          projectAccess: next.projectAccess ?? [],
+          ...(next.projectAccessUnavailable ? { projectAccessUnavailable: true } : {}),
+        };
+      }),
+    );
+  }
+
+  async function runTurn(turn: {
+    /** The turn isn't the composer's: its draft stays, and a failure offers no resend. */
+    keepsDraft?: boolean;
+    prompt: string;
+    selectedFiles: ChatAttachment[];
+    start: (runId: string, onEvent: (event: CovenRunEvent) => void) => Promise<CovenRunResult>;
+  }) {
+    const current = navigationRef.current;
+    const key = draftKey(current);
+    const { prompt, selectedFiles } = turn;
     const run = { id: crypto.randomUUID(), cancelRequested: false };
     activeRun.current = run;
     setRetryKey('');
     const draftVersion = draftVersions.current[key] ?? 0;
-    navigate({ ...current, drafts: { ...current.drafts, [key]: '' } });
-    attachmentRef.current = { ...attachmentRef.current, [key]: [] };
-    setAttachments(attachmentRef.current);
+    if (!turn.keepsDraft) {
+      navigate({ ...current, drafts: { ...current.drafts, [key]: '' } });
+      attachmentRef.current = { ...attachmentRef.current, [key]: [] };
+      setAttachments(attachmentRef.current);
+    }
     const life = lifetime.current;
     setBusy(true);
     setRunFamiliarId(current.familiarId);
@@ -499,33 +690,21 @@ export function ChatApp({
     }
     publish([]);
     try {
-      const result = await runtime.send(
-        {
-          runId: run.id,
-          prompt,
-          ...(selectedFiles.length
-            ? { attachments: selectedFiles.map(({ name, bytes }) => ({ name, bytes })) }
-            : {}),
-          ...(current.sessionId ? { sessionId: current.sessionId } : {}),
-          ...(current.familiarId ? { familiarId: current.familiarId } : {}),
-          ...sendOptions(options, chatHarness),
-        },
-        (event) => {
-          if (lifetime.current !== life || activeRun.current !== run) return;
-          // Append in place and publish a snapshot at most once per frame, so
-          // a long stream costs O(n) copying per frame rather than per event.
-          streamed.push(event);
-          if (
-            ((event.type === 'system' && event.subtype === 'init') || event.type === 'result') &&
-            typeof event.session_id === 'string'
-          )
-            streamedSession = event.session_id;
-          flush ??= setTimeout(() => {
-            flush = null;
-            publish(streamed.slice());
-          }, STREAM_FLUSH_MS);
-        },
-      );
+      const result = await turn.start(run.id, (event) => {
+        if (lifetime.current !== life || activeRun.current !== run) return;
+        // Append in place and publish a snapshot at most once per frame, so
+        // a long stream costs O(n) copying per frame rather than per event.
+        streamed.push(event);
+        if (
+          ((event.type === 'system' && event.subtype === 'init') || event.type === 'result') &&
+          typeof event.session_id === 'string'
+        )
+          streamedSession = event.session_id;
+        flush ??= setTimeout(() => {
+          flush = null;
+          publish(streamed.slice());
+        }, STREAM_FLUSH_MS);
+      });
       if (lifetime.current !== life) return;
       const projected = projectEvents(result.events);
       if (result.events.length) {
@@ -543,7 +722,7 @@ export function ChatApp({
       // The run is over here; the session reload below is not part of it.
       const finishedAt = Date.now();
       if (lifetime.current === life) {
-        if (!completed) {
+        if (!completed && !turn.keepsDraft) {
           const latest = navigationRef.current;
           const untouched = (draftVersions.current[key] ?? 0) === draftVersion;
           if (untouched && latest.drafts[key] === '')
@@ -565,7 +744,7 @@ export function ChatApp({
         } catch (failure) {
           if (lifetime.current === life) {
             setError(
-              `Could not reload this familiar's chat: ${errorText(failure)}. Reopen the familiar before sending again.`,
+              `Could not reload chats. Refresh Coven before sending again. ${errorText(failure)}`,
             );
             setAvailable(false);
           }
@@ -649,6 +828,7 @@ export function ChatApp({
     const current = navigationRef.current;
     if (
       !available ||
+      chatUnavailable ||
       !current.sessionId ||
       lifecyclePending.current ||
       activeRun.current ||
@@ -726,9 +906,18 @@ export function ChatApp({
     [events, liveEvents],
   );
   const messages = projection.messages;
+  const unavailableError =
+    available && chatUnavailable
+      ? "Coven couldn't load this chat. Refresh Coven to try again."
+      : '';
 
   return (
     <ChatLayout
+      onRefreshProjectAccess={refreshProjectAccess}
+      approvals={approvals}
+      answeringApproval={answeringApproval}
+      onAllowApproval={(approval, options) => void allowApproval(approval, options)}
+      onDeclineApproval={(approval) => void declineApproval(approval)}
       archivedFilter={archived}
       onArchivedFilter={(value) => {
         if (lifecyclePending.current) return;
@@ -736,12 +925,10 @@ export function ChatApp({
         setArchived(value);
         navigate(selectCanonical(navigationRef.current, familiars, sessions, value));
       }}
-      selectedArchived={sessions.some((item) => item.id === navigation.sessionId && item.archived)}
-      readOnly={sessions.some((item) => item.id === navigation.sessionId && item.archived)}
+      selectedArchived={Boolean(selectedSession?.archived)}
+      readOnly={Boolean(selectedSession?.archived)}
       lifecycleBusy={changingLifecycle}
-      // A failed refresh leaves the last known lists visible for context but
-      // never mutable: lifecycle stays locked until the runtime is available.
-      lifecycleLocked={!available}
+      lifecycleLocked={!available || chatUnavailable}
       onLifecycle={(next) => void changeLifecycle(next)}
       attachments={attachments[draftKey(navigation)] ?? []}
       attaching={attaching}
@@ -785,7 +972,8 @@ export function ChatApp({
         available &&
         Boolean(navigation.familiarId) &&
         !changingLifecycle &&
-        !sessions.some((item) => item.id === navigation.sessionId && item.archived)
+        !chatUnavailable &&
+        !selectedSession?.archived
       }
       busy={busy}
       runFamiliarId={phoneRun?.familiarId ?? runFamiliarId}
@@ -809,19 +997,26 @@ export function ChatApp({
       finished={finished}
       loading={loading}
       cancelling={cancelling}
-      error={error || runOutputs[draftKey(navigation)]?.error || ''}
+      error={error || unavailableError || runOutputs[draftKey(navigation)]?.error || ''}
       // A failed run restores what it was sent; the notice can send it again.
-      {...(runOutputs[draftKey(navigation)]?.error && !busy && retryKey === draftKey(navigation)
+      {...(runOutputs[draftKey(navigation)]?.error &&
+      !busy &&
+      !chatUnavailable &&
+      retryKey === draftKey(navigation)
         ? { onRetry: (options: RunOptions) => void send(options) }
         : {})}
-      onDismissError={() => {
-        setError('');
-        const key = draftKey(navigationRef.current);
-        setRunOutputs((previous) => {
-          const output = previous[key];
-          return output?.error ? { ...previous, [key]: { ...output, error: '' } } : previous;
-        });
-      }}
+      {...(error || !unavailableError
+        ? {
+            onDismissError: () => {
+              setError('');
+              const key = draftKey(navigationRef.current);
+              setRunOutputs((previous) => {
+                const output = previous[key];
+                return output?.error ? { ...previous, [key]: { ...output, error: '' } } : previous;
+              });
+            },
+          }
+        : {})}
       onFamiliar={(id) => {
         if (lifecyclePending.current) return;
         setError('');

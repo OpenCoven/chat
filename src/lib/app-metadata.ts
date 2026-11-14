@@ -1,5 +1,5 @@
 export const APP_CONNECTION_STATE = 'Standalone';
-export const APP_DISPLAY_NAME = 'OpenCoven Chat';
+export const APP_DISPLAY_NAME = 'Coven Chat';
 export const APP_IDENTIFIER = 'ai.opencoven.chat';
 /**
  * Mirrors `APP_PHASE` in `src-tauri/src/metadata.rs`, which the conformance lock

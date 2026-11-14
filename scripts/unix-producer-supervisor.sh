@@ -560,8 +560,18 @@ trusted_root=${0%/*}
 exec "$trusted_root/node" "$trusted_root/pnpm-runtime/bin/pnpm.cjs" "$@"
 EOF
 cp "$rustup_executable" "$trusted_rustup"
-cp "$rustup_executable" "$trusted_cargo"
-cp "$rustup_executable" "$trusted_rustc"
+# A Homebrew env launcher invokes rustup regardless of its copied filename.
+# Dispatch the pinned tools explicitly while retaining private toolchain homes.
+cat >"$trusted_cargo" <<'EOF'
+#!/bin/sh
+trusted_root=${0%/*}
+exec "$trusted_root/rustup" run 1.95.0 cargo "$@"
+EOF
+cat >"$trusted_rustc" <<'EOF'
+#!/bin/sh
+trusted_root=${0%/*}
+exec "$trusted_root/rustup" run 1.95.0 rustc "$@"
+EOF
 if [[ "$host_os" == Darwin ]]; then
   /bin/chmod -RN "$producer_root" "$workspace" "$trusted_root"
 fi

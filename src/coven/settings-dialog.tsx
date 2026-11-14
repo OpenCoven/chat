@@ -3,7 +3,7 @@ import chatIconUrl from '../../assets/brand/chat-app-icon-rounded.svg';
 import packageJson from '../../package.json';
 import { cx } from '../design/familiars-ui';
 import { Icon, type IconName } from '../design/minimal-icons';
-import type { CovenProjectAccess } from '../lib/coven-runtime';
+import type { CovenProjectAccess, PermissionLogEntry } from '../lib/coven-runtime';
 import { CopyButton } from './copy-button';
 import { FamiliarAvatar } from './familiar-avatar';
 import { INSPECTOR_DEFAULT_WIDTH } from './inspector-width';
@@ -54,7 +54,7 @@ const SECTIONS: readonly Readonly<{
     id: 'access',
     label: 'Access',
     icon: 'folder-open',
-    blurb: 'Projects Coven declares for the selected familiar.',
+    blurb: 'Familiar chats run with full access as your user account.',
   },
   { id: 'devices', label: 'Devices', icon: 'monitor', blurb: 'Your iPhone and remote screens.' },
   {
@@ -65,6 +65,12 @@ const SECTIONS: readonly Readonly<{
   },
   { id: 'about', label: 'About', icon: 'info', blurb: 'This app and the Coven CLI it talks to.' },
 ];
+
+/** True on Windows, where Chat can't read Coven Cave's project metadata yet (#587). */
+export function isWindowsPlatform(): boolean {
+  const nav = typeof navigator === 'undefined' ? undefined : navigator;
+  return /^Win/.test(nav?.platform ?? '');
+}
 
 /** True on Apple platforms, where shortcuts read ⌘ and ⇧ rather than Ctrl and Shift. */
 export function isApplePlatform(): boolean {
@@ -111,6 +117,7 @@ export type SettingsDialogProps = Readonly<{
   onClose: () => void;
   preferences: Preferences;
   onPreferences: (patch: Partial<Preferences>) => void;
+  chatHarness?: string | undefined;
   archivedFilter?: boolean | undefined;
   onArchivedFilter?: ((archived: boolean) => void) | undefined;
   archivedFilterDisabled?: boolean | undefined;
@@ -120,10 +127,15 @@ export type SettingsDialogProps = Readonly<{
   connected: boolean;
   onRefresh: () => void;
   refreshDisabled: boolean;
+  onRefreshProjectAccess?: (() => Promise<void>) | undefined;
   /** The iPhone companion's opener, which owns its own dialog. */
   companion?: ReactNode;
   /** About › Updates, which owns its own state (#356). */
   updates?: ReactNode;
+  /** Reads the permission log, newest first. */
+  onPermissionLog?: (() => Promise<PermissionLogEntry[]>) | undefined;
+  /** The name a familiar goes by, for the log's lines. */
+  familiarName?: ((id: string) => string) | undefined;
 }>;
 
 /**
@@ -194,7 +206,13 @@ export function SettingsDialog(props: SettingsDialogProps) {
               <Icon name="x" size={15} />
             </button>
           </header>
-          <div className="coven-settings-scroll">
+          <section
+            key={active?.id}
+            className="coven-settings-scroll"
+            aria-label="Settings content"
+            // biome-ignore lint/a11y/noNoninteractiveTabindex: keyboard users need to scroll sections that have no controls, such as Shortcuts.
+            tabIndex={0}
+          >
             {active?.id === 'general' ? <GeneralSection {...props} /> : null}
             {active?.id === 'model' ? <ModelSection {...props} /> : null}
             {active?.id === 'chats' ? <ChatsSection {...props} /> : null}
@@ -202,7 +220,7 @@ export function SettingsDialog(props: SettingsDialogProps) {
             {active?.id === 'devices' ? <DevicesSection {...props} /> : null}
             {active?.id === 'shortcuts' ? <ShortcutsSection /> : null}
             {active?.id === 'about' ? <AboutSection {...props} /> : null}
-          </div>
+          </section>
         </section>
       </div>
     </dialog>
@@ -233,18 +251,20 @@ function Row({
   stacked?: boolean;
 }>) {
   return (
+    // The copy is paragraphs, not spans: WebKitGTK hands AT-SPI no text for a
+    // row drawn only in spans, so Orca had nothing to read here (#548).
     <div className={cx('coven-settings-row', stacked && 'coven-settings-row--stacked')}>
-      <span className="coven-settings-row-copy">
+      <div className="coven-settings-row-copy">
         {htmlFor ? (
           <label className="coven-settings-row-label" htmlFor={htmlFor}>
             {label}
           </label>
         ) : (
-          <span className="coven-settings-row-label">{label}</span>
+          <p className="coven-settings-row-label">{label}</p>
         )}
-        {hint ? <span className="coven-settings-row-hint">{hint}</span> : null}
-      </span>
-      <span className="coven-settings-row-control">{control}</span>
+        {hint ? <p className="coven-settings-row-hint">{hint}</p> : null}
+      </div>
+      <div className="coven-settings-row-control">{control}</div>
     </div>
   );
 }
@@ -275,6 +295,7 @@ function Switch({
 
 function GeneralSection({ preferences, onPreferences }: SettingsDialogProps) {
   const groupId = useId();
+  const widthId = useId();
   return (
     <>
       <Group title="Text size">
@@ -315,18 +336,21 @@ function GeneralSection({ preferences, onPreferences }: SettingsDialogProps) {
           label="Inspector width"
           hint="Drag the inspector's left edge, or focus its Resize inspector handle and use the arrow keys, Home and End. The conversation keeps at least 440px."
           control={
-            <span className="coven-inspector-width">
-              <span className="coven-inspector-width-value">{preferences.inspectorWidth}px</span>
+            <div className="coven-inspector-width">
+              <p id={widthId} className="coven-inspector-width-value">
+                {preferences.inspectorWidth}px
+              </p>
               <button
                 type="button"
                 className="fr-btn fr-btn--secondary fr-btn--sm"
                 aria-label="Reset inspector width"
+                aria-describedby={widthId}
                 disabled={preferences.inspectorWidth === INSPECTOR_DEFAULT_WIDTH}
                 onClick={() => onPreferences({ inspectorWidth: INSPECTOR_DEFAULT_WIDTH })}
               >
                 Reset
               </button>
-            </span>
+            </div>
           }
         />
       </Group>
@@ -379,11 +403,41 @@ function Choices<T extends string>({
   );
 }
 
-function ModelSection({ preferences, onPreferences }: SettingsDialogProps) {
+const CODEX_MODELS = [
+  ['gpt-5.5', 'GPT-5.5'],
+  ['gpt-5.4', 'GPT-5.4'],
+  ['gpt-5.4-mini', 'GPT-5.4 Mini'],
+] as const;
+const CLAUDE_MODELS = [
+  ['claude-opus-5-5', 'Claude Opus 5.5'],
+  ['claude-sonnet-5-5', 'Claude Sonnet 5.5'],
+  ['claude-haiku-5-5', 'Claude Haiku 5.5'],
+] as const;
+const ENGINE_MODEL_GROUPS: Readonly<
+  Record<string, readonly { label: string; models: readonly (readonly [string, string])[] }[]>
+> = {
+  // Coven Code takes "openai/…" to choose OpenAI and strips the prefix before
+  // sending, but sends an "anthropic/…" ID to Anthropic as written, so its
+  // Claude presets are the IDs Anthropic's API knows.
+  'coven-code': [
+    { label: 'OpenAI', models: CODEX_MODELS.map(([id, label]) => [`openai/${id}`, label]) },
+    { label: 'Anthropic', models: CLAUDE_MODELS },
+  ],
+  codex: [{ label: 'OpenAI', models: CODEX_MODELS }],
+  claude: [{ label: 'Anthropic', models: CLAUDE_MODELS }],
+};
+const CUSTOM_MODEL = ':custom';
+
+function ModelSection({ preferences, onPreferences, chatHarness }: SettingsDialogProps) {
   const modelId = useId();
+  const customId = useId();
   const modelErrorId = useId();
   const thinkId = useId();
+  const [editingCustom, setEditingCustom] = useState(false);
   const validModel = isValidModel(preferences.model);
+  const groups = ENGINE_MODEL_GROUPS[chatHarness ?? preferences.harness] ?? [];
+  const preset = groups.some(({ models }) => models.some(([id]) => id === preferences.model));
+  const custom = editingCustom || (preferences.model !== '' && !preset);
   return (
     <>
       <Group title="New chats">
@@ -409,7 +463,7 @@ function ModelSection({ preferences, onPreferences }: SettingsDialogProps) {
           htmlFor={modelId}
           hint={
             validModel ? (
-              "Leave it empty to use the engine's default, or enter the id your provider gives, such as openai/gpt-5.5."
+              "Choose Engine default to use the engine's default model, or enter a provider ID under Custom model."
             ) : (
               <span id={modelErrorId} className="coven-settings-row-error">
                 A model id starts with a letter or digit and uses only letters, digits and _ . / : +
@@ -418,21 +472,52 @@ function ModelSection({ preferences, onPreferences }: SettingsDialogProps) {
             )
           }
           control={
-            <span className="coven-access-filter coven-model-field">
-              <input
+            <div className="coven-model-controls">
+              <select
                 id={modelId}
-                type="text"
-                placeholder="Engine default"
-                spellCheck={false}
-                autoComplete="off"
-                autoCapitalize="off"
-                maxLength={MODEL_MAX}
-                value={preferences.model}
-                aria-invalid={validModel ? undefined : true}
-                aria-describedby={validModel ? undefined : modelErrorId}
-                onChange={(event) => onPreferences({ model: event.target.value.trim() })}
-              />
-            </span>
+                className="coven-model-select"
+                value={custom ? CUSTOM_MODEL : preferences.model}
+                onChange={(event) => {
+                  const model = event.target.value;
+                  setEditingCustom(model === CUSTOM_MODEL);
+                  if (model !== CUSTOM_MODEL) onPreferences({ model });
+                }}
+              >
+                <option value="">Engine default</option>
+                {groups.map(({ label, models }) => (
+                  <optgroup key={label} label={label}>
+                    {models.map(([id, name]) => (
+                      <option key={id} value={id}>
+                        {name}
+                      </option>
+                    ))}
+                  </optgroup>
+                ))}
+                <option value={CUSTOM_MODEL}>Custom model</option>
+              </select>
+              {custom ? (
+                <>
+                  <label className="coven-settings-row-label" htmlFor={customId}>
+                    Custom model ID
+                  </label>
+                  <span className="coven-access-filter coven-model-field">
+                    <input
+                      id={customId}
+                      type="text"
+                      placeholder="provider/model"
+                      spellCheck={false}
+                      autoComplete="off"
+                      autoCapitalize="off"
+                      maxLength={MODEL_MAX}
+                      value={preferences.model}
+                      aria-invalid={validModel ? undefined : true}
+                      aria-describedby={validModel ? undefined : modelErrorId}
+                      onChange={(event) => onPreferences({ model: event.target.value.trim() })}
+                    />
+                  </span>
+                </>
+              ) : null}
+            </div>
           }
         />
         <Row
@@ -503,8 +588,117 @@ function ChatsSection({
   );
 }
 
-function AccessSection({ familiar, onRefresh, refreshDisabled }: SettingsDialogProps) {
+function logLine(entry: PermissionLogEntry, name: string): string {
+  const device = entry.device === 'iphone' ? 'iPhone' : 'this computer';
+  const summary = entry.summary ?? '';
+  switch (entry.event) {
+    case 'requested':
+      return `${name} asked: ${summary}`;
+    case 'allowed':
+      return `Allowed on ${device} for ${name}: ${summary}`;
+    case 'declined':
+      return `Declined on ${device} for ${name}: ${summary}`;
+    case 'superseded':
+      return `A new message replaced ${name}'s request: ${summary}`;
+    case 'action':
+      return `${name} used ${entry.tool ?? 'a tool'}${entry.detail ? `: ${entry.detail}` : ''}`;
+    case 'finished':
+      return `${name}'s allowed turn ${entry.outcome === 'completed' ? 'finished' : (entry.outcome ?? 'ended')}.`;
+  }
+}
+
+function PermissionLog({ onPermissionLog, familiarName }: SettingsDialogProps) {
+  const [log, setLog] = useState<{ entries: PermissionLogEntry[]; error: string } | null>(null);
+  useEffect(() => {
+    if (!onPermissionLog) return;
+    let alive = true;
+    onPermissionLog()
+      .then((entries) => {
+        if (alive) setLog({ entries, error: '' });
+      })
+      .catch((failure: unknown) => {
+        if (alive)
+          setLog({
+            entries: [],
+            error: failure instanceof Error ? failure.message : String(failure),
+          });
+      });
+    return () => {
+      alive = false;
+    };
+  }, [onPermissionLog]);
+  return (
+    <Group title="Permission log">
+      {log === null ? (
+        <p className="coven-settings-footnote">Reading the log…</p>
+      ) : log.error ? (
+        <p className="coven-settings-footnote">{log.error}</p>
+      ) : log.entries.length === 0 ? (
+        <p className="coven-settings-footnote">
+          Nothing yet. When a familiar asks for permission, the request, your answer and each tool
+          call Coven reports from the allowed turn appear here.
+        </p>
+      ) : (
+        // WebKit, the window on macOS and Linux, drops the list role from a list
+        // drawn without markers unless the role is stated, so VoiceOver and Orca
+        // would read the log as loose lines.
+        // biome-ignore lint/a11y/useSemanticElements: it is an ol; WebKit needs the role stated too.
+        <ol
+          className="coven-permission-log"
+          // biome-ignore lint/a11y/noRedundantRoles: redundant everywhere but WebKit; see above.
+          role="list"
+          aria-label="Permission log, newest first"
+        >
+          {log.entries.map((entry, index) => (
+            <li
+              key={`${entry.approvalId}-${entry.at}-${index}`}
+              className={`coven-permission-log-entry coven-permission-log-entry--${entry.event}`}
+            >
+              <time dateTime={new Date(entry.at).toISOString()}>
+                {new Date(entry.at).toLocaleString()}
+              </time>
+              <span>{logLine(entry, familiarName?.(entry.familiarId) ?? entry.familiarId)}</span>
+            </li>
+          ))}
+        </ol>
+      )}
+    </Group>
+  );
+}
+
+function AccessSection(props: SettingsDialogProps) {
+  return (
+    <>
+      <FamiliarAccess {...props} />
+      {props.onPermissionLog ? <PermissionLog {...props} /> : null}
+    </>
+  );
+}
+
+function FamiliarAccess({
+  familiar,
+  onRefresh,
+  onRefreshProjectAccess,
+  refreshDisabled,
+}: SettingsDialogProps) {
   const [query, setQuery] = useState('');
+  const [refreshing, setRefreshing] = useState(false);
+  const [refreshError, setRefreshError] = useState('');
+  async function refreshAccess() {
+    if (!onRefreshProjectAccess) {
+      onRefresh();
+      return;
+    }
+    setRefreshing(true);
+    setRefreshError('');
+    try {
+      await onRefreshProjectAccess();
+    } catch {
+      setRefreshError('Could not refresh project access. Try again.');
+    } finally {
+      setRefreshing(false);
+    }
+  }
   if (!familiar) {
     return (
       <div className="coven-settings-empty">
@@ -546,76 +740,90 @@ function AccessSection({ familiar, onRefresh, refreshDisabled }: SettingsDialogP
             ) : null}
           </div>
         ) : null}
+        <button
+          type="button"
+          className="fr-btn fr-btn--secondary fr-btn--sm"
+          disabled={refreshDisabled || refreshing}
+          onClick={() => void refreshAccess()}
+        >
+          {refreshing ? 'Refreshing project access…' : 'Refresh project access'}
+        </button>
       </div>
+      {refreshError ? (
+        <p className="coven-settings-row-error" role="alert">
+          {refreshError}
+        </p>
+      ) : null}
       {all.length ? (
         <>
-          {all.length > 6 ? (
+          {all.length > 6 || query ? (
             <label className="coven-access-filter">
               <Icon name="magnifying-glass" size={13} />
               <input
                 type="search"
                 aria-label="Filter projects"
+                autoComplete="off"
                 placeholder="Filter projects"
                 value={query}
                 onChange={(event) => setQuery(event.target.value)}
               />
             </label>
           ) : null}
-          <ul
-            className="coven-access-list"
-            aria-label={`${familiar.name}'s declared project access`}
-          >
-            {shown.map((project) => (
-              <li key={`${project.path}:${project.access}`} className="coven-access-item">
-                <span className="coven-access-icon" aria-hidden="true">
-                  <Icon name="folder-open" size={14} />
-                </span>
-                <span className="coven-access-name">{project.name}</span>
-                <span
-                  className={cx(
-                    'coven-access-pill',
-                    project.access === 'write' && 'coven-access-pill--write',
-                  )}
-                >
-                  {project.access === 'write' ? 'Read and write' : 'Read only'}
-                </span>
-                <span className="coven-access-path" title={project.path}>
-                  {homeRelative(project.path)}
-                </span>
-                <CopyButton
-                  className="coven-access-copy"
-                  text={project.path}
-                  label={`Copy ${project.name} path`}
-                />
-              </li>
-            ))}
-            {shown.length === 0 ? (
-              <li className="coven-access-none">No projects match “{query.trim()}”.</li>
-            ) : null}
-          </ul>
+          {/* biome-ignore lint/a11y/noNoninteractiveTabindex: keyboard users must be able to focus and scroll the project list. */}
+          <section className="coven-access-scroll" aria-label="Project access list" tabIndex={0}>
+            <ul
+              className="coven-access-list"
+              aria-label={`${familiar.name}'s declared project access`}
+            >
+              {shown.map((project) => (
+                <li key={`${project.path}:${project.access}`} className="coven-access-item">
+                  <span className="coven-access-icon" aria-hidden="true">
+                    <Icon name="folder-open" size={14} />
+                  </span>
+                  <span className="coven-access-name">{project.name}</span>
+                  <span
+                    className={cx(
+                      'coven-access-pill',
+                      project.access === 'write' && 'coven-access-pill--write',
+                    )}
+                  >
+                    {project.access === 'write' ? 'Read and write' : 'Read only'}
+                  </span>
+                  <span className="coven-access-path" title={project.path}>
+                    {homeRelative(project.path)}
+                  </span>
+                  <CopyButton
+                    className="coven-access-copy"
+                    text={project.path}
+                    label={`Copy ${project.name} path`}
+                  />
+                </li>
+              ))}
+              {shown.length === 0 ? (
+                <li className="coven-access-none">No projects match “{query.trim()}”.</li>
+              ) : null}
+            </ul>
+          </section>
         </>
       ) : (
         <div className="coven-settings-empty">
           <Icon name="folder-open" size={22} />
           <p>
             {familiar.projectAccessUnavailable
-              ? `Chat could not read Coven's project registry or grants, so ${familiar.name}'s declared access is unknown. Check them in Coven, then refresh.`
+              ? isWindowsPlatform()
+                ? `Chat can't read Coven Cave's project grants on Windows yet, so ${familiar.name}'s declared access is unknown. See ${familiar.name}'s Projects tab in Coven Cave.`
+                : `Chat could not read Coven's project registry or grants, so ${familiar.name}'s declared access is unknown. Check them in Coven, then refresh.`
               : `No project access is declared for ${familiar.name} in Coven's project registry or grants.`}
           </p>
         </div>
       )}
       <p className="coven-settings-footnote">
-        Chat shows access as Coven declares it and neither enforces nor extends it. Change it in
-        Coven, then{' '}
-        <button
-          type="button"
-          className="coven-settings-link"
-          disabled={refreshDisabled}
-          onClick={onRefresh}
-        >
-          refresh
-        </button>
-        . Tool approval controls are not available in this app.
+        {/* On Windows a refresh can't show Cave's grants yet (#587). */}
+        {isWindowsPlatform()
+          ? "To edit grants, open the familiar's Projects tab in Coven Cave."
+          : "To edit grants, open the familiar's Projects tab in Coven Cave, then refresh project access here."}{' '}
+        Familiar chats can change files and run commands beyond these projects without asking for
+        permission.
       </p>
     </>
   );

@@ -18,11 +18,11 @@
   },
   "harness": {
     "repository": "OpenCoven/chat",
-    "revision": "6820a96d030b387093c37b324a42a44e949df84b"
+    "revision": "0ba58aa94e73182701255dc44c0d34d550cf017f"
   },
   "harnessAuthority": {
-    "revision": "6820a96d030b387093c37b324a42a44e949df84b",
-    "tree": "05e3d1daf62f9cf12ed2358c03f39b5da521beff",
+    "revision": "0ba58aa94e73182701255dc44c0d34d550cf017f",
+    "tree": "ed90a36bea99f420f6033e353c0fe79e54fb3ac5",
     "files": [
       {
         "path": "scripts/phase1-conformance.mjs",
@@ -111,8 +111,8 @@
       },
       {
         "path": "scripts/unix-producer-supervisor.sh",
-        "blob": "0a27a5be4d2eb4981d35d7e3c178424c851697c5",
-        "sha256": "b73036415744c80ed27d5667f255ceea149096ca517b47c93a154299802206ff"
+        "blob": "5a8371ffd847cd0f48c9fab8db10571e76b59a44",
+        "sha256": "a78b9b6b809fd8a094db2c41603fbfb594ab4598e7752f32290d71fa2c8c35b6"
       },
       {
         "path": "scripts/windows-job-supervisor.cs",
@@ -141,25 +141,25 @@
       },
       {
         "path": ".github/workflows/ci.yml",
-        "blob": "abf3081586771e90da254f79b25af1bbae33ba42",
-        "sha256": "7e16d9965414b2f471152427f1c4c647a18de692b68682f9a237628de0a75f0c"
+        "blob": "2c93ac983bee981817210ab121d0fb6f6bc87f8f",
+        "sha256": "7dd31169a34a2b7040bdb958ef1c7c326feebb94fea46e56c99016c124e80eef"
       },
       {
         "path": ".github/workflows/client-v1-conformance.yml",
-        "blob": "15bb9d4927d56133a43ee9c34832c56a7635aff9",
-        "sha256": "d71071d3a3d99472021e6b90e2299cc1b87b720a65356086ff205874e202b7fa"
+        "blob": "86dae1feb8f98904f3a7767a19c661dcf45e341c",
+        "sha256": "65bfabe1685aa6f6efb9aa7d33e244735fc6230308ac62bc22e7b6f101d0afd4"
       }
     ],
     "productionDeltas": [
       {
         "path": "src-tauri/Cargo.toml",
-        "blob": "efcc77a7d2cdd7fbd6f313fbbce618c6857aba64",
-        "sha256": "9fe724d5c1f668aaf2b4792f4859d49ebee402ac51c8b6762a642dd3102ed5ce"
+        "blob": "409376e4a911861bab0873f8f96ed990c2579b75",
+        "sha256": "b15afcfff692895a75075cd47ccb5d632889477662e0d3ce07aa9fc920eff042"
       },
       {
         "path": "src-tauri/Cargo.lock",
-        "blob": "3642cf0dad3c7f523b52bcc63bcac8657655a972",
-        "sha256": "38779abfd05da6be4823976f19488a451a362e4506db5bc9912b6beda314901a"
+        "blob": "166d6e46ee0075ac88c1f75f4430ae2e6a1dfe27",
+        "sha256": "d0ff2746026a20cbaa8300678bc27baa70aa28876529b66360066db33dfd2a37"
       },
       {
         "path": "src-tauri/src/bin/phase1-native-rpc.rs",
@@ -198,8 +198,8 @@
       },
       {
         "path": "src-tauri/src/lib.rs",
-        "blob": "6522d83756d640bd3d76530c8eb0c23b8c2bfbee",
-        "sha256": "d04e6f0b1d6965f5ef88fbcd89b49a785d6a23d787bcaf176f0e1703b6ca6cbe"
+        "blob": "893ea2c3ad8a5d2bc21d7d5d0aa58d844e3b7550",
+        "sha256": "a726e92294812f88d1928a181ec8c2c69630680fc8065be2643d162263254adb"
       }
     ]
   },

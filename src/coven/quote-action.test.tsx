@@ -374,6 +374,79 @@ describe('quoting a selected passage', () => {
     expect(props.onSend).toHaveBeenCalledTimes(1);
   });
 
+  // WebKit clears the selection when Tab moves focus to a link inside it, and
+  // the action used to go with it, one press from the passage (#544).
+  const linked: ChatMessage = {
+    id: '2',
+    role: 'assistant',
+    text: 'The plan has three steps.\n\n- [Handoff check](https://example.com/handoff-check?x=1)\n\nDone.',
+  };
+  /** Tab as WebKit does it: focus moves to `to`, and the selection is cleared. */
+  function tabTo(to: HTMLElement) {
+    fireEvent.keyDown(document.activeElement ?? document.body, { key: 'Tab' });
+    act(() => to.focus());
+    clearSelection();
+  }
+
+  it('keeps the passage while Tab crosses the links in it to reach the action', () => {
+    const props = quoteProps();
+    render(<Harness {...props} messages={[question, linked]} />);
+    act(() => screen.getByRole('log').focus());
+    selectText('The plan has', 'Handoff check');
+    tabTo(screen.getByRole('link', { name: 'Handoff check' }));
+    const quote = screen.getByRole('button', { name: 'Quote selection' });
+    tabTo(quote);
+    fireEvent.keyDown(quote, { key: 'Enter' });
+    expect(field()).toHaveValue('> The plan has three steps.\n>\n> Handoff check\n\n');
+    expect(props.onSend).not.toHaveBeenCalled();
+  });
+
+  it('still drops the passage after Tab on a pointer press, Escape, focus leaving, or a new selection', () => {
+    render(<Harness {...quoteProps()} messages={[question, linked]} />);
+    const log = screen.getByRole('log');
+    const link = () => screen.getByRole('link', { name: 'Handoff check' });
+    const keep = () => {
+      act(() => log.focus());
+      selectText('The plan has', 'Handoff check');
+      tabTo(link());
+      expect(quoteButton()).toBeInTheDocument();
+    };
+
+    keep();
+    fireEvent.pointerDown(log);
+    clearSelection();
+    expect(quoteButton()).not.toBeInTheDocument();
+
+    keep();
+    fireEvent.keyDown(link(), { key: 'Escape' });
+    expect(quoteButton()).not.toBeInTheDocument();
+
+    keep();
+    // On past the composer, to the familiars list.
+    const nova = screen.getAllByRole('button', { name: /Nova/ })[0];
+    if (!nova) throw new Error('No Nova');
+    tabTo(nova);
+    expect(quoteButton()).not.toBeInTheDocument();
+
+    keep();
+    selectText('What is the plan', 'three steps');
+    expect(quoteButton()).not.toBeInTheDocument();
+  });
+
+  it('lets Escape go of the passage first, and only the next press stops a run', () => {
+    const props: ChatLayoutProps = { ...quoteProps(), busy: true };
+    render(<Harness {...props} />);
+    const log = screen.getByRole('log');
+    act(() => log.focus());
+    selectText('three steps');
+    expect(quoteButton()).toBeInTheDocument();
+    fireEvent.keyDown(log, { key: 'Escape' });
+    expect(quoteButton()).not.toBeInTheDocument();
+    expect(props.onCancel).not.toHaveBeenCalled();
+    fireEvent.keyDown(log, { key: 'Escape' });
+    expect(props.onCancel).toHaveBeenCalledOnce();
+  });
+
   it('closes on Escape or Dismiss and returns focus to the conversation', () => {
     const props = quoteProps();
     render(<Harness {...props} />);

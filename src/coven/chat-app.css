@@ -63,14 +63,8 @@
   overflow: hidden;
   border: 0;
   border-radius: 0;
-  background:
-    linear-gradient(90deg, rgba(255, 255, 255, 0.045), transparent 55%),
-    linear-gradient(180deg, rgba(255, 255, 255, 0.035), transparent 45%), var(--coven-rail-tab-bg);
-  box-shadow:
-    inset 1px 0 rgba(255, 255, 255, 0.07),
-    inset -1px 0 rgba(0, 0, 0, 0.5);
-  backdrop-filter: blur(8px);
-  -webkit-backdrop-filter: blur(8px);
+  background: var(--coven-rail-tab-bg);
+  box-shadow: none;
   color: var(--text-secondary);
   cursor: pointer;
   transition:
@@ -191,12 +185,10 @@
 }
 
 .coven-composer-context {
-  margin: 0 8px 6px;
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 11px;
-  color: var(--text-secondary);
 }
 
 .coven-run-status {
@@ -204,6 +196,17 @@
   margin: 4px 8px 8px;
   color: var(--accent-presence);
   font-size: 12px;
+}
+
+.coven-run-note {
+  margin: -4px 8px 8px;
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+/* Empty, it stays on the page for screen readers and takes no room. */
+.coven-run-note:empty {
+  margin: 0;
 }
 
 .coven-run-elapsed {
@@ -363,7 +366,7 @@
   overscroll-behavior: contain;
 }
 
-.coven-composer-fieldset {
+.coven-composer-wrap {
   margin: 0;
   padding: 0;
   border: 0;
@@ -474,6 +477,7 @@
 .coven-error-text {
   flex: 1 1 auto;
   min-width: 0;
+  margin: 0;
 }
 
 .coven-chat .coven-error-copy {
@@ -631,6 +635,10 @@
   font-weight: 500;
 }
 
+.coven-agent-asks {
+  color: var(--color-warning);
+}
+
 .coven-agent-done--error {
   color: var(--color-danger);
 }
@@ -652,7 +660,14 @@
 
 /* The familiar's purpose under the empty thread's heading. */
 .coven-thread-empty-purpose {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  max-width: 48ch;
+  overflow: hidden;
+  overflow-wrap: anywhere;
   font-size: 13px;
+  line-height: 1.5;
   color: var(--text-primary);
   text-wrap: balance;
 }
@@ -832,6 +847,14 @@
   text-align: right;
 }
 
+/*
+ * A long path keeps its end, the part that names the folder: the box runs
+ * right to left, so it overflows and ellipsizes at the start. The value sits
+ * in a <bdi> that is isolated left to right, so its own characters keep their
+ * order (a leading `/` stays first). Setting `unicode-bidi: plaintext` on the
+ * box instead hid both ends in WebKit (an ellipsis at the start and the end
+ * clipped) and kept the start in Chromium.
+ */
 .coven-row-value--path {
   display: block;
   overflow: hidden;
@@ -840,7 +863,11 @@
   direction: rtl;
   text-overflow: ellipsis;
   white-space: nowrap;
-  unicode-bidi: plaintext;
+}
+
+.coven-row-value--path > bdi {
+  direction: ltr;
+  unicode-bidi: isolate;
 }
 
 /* A path row keeps its copy control beside the truncated value. */
@@ -1088,6 +1115,303 @@
 
 /* ------------------------------------------------------------- composer */
 
+/*
+ * The composer follows Cave's: one framed box holding the field, a toolbar
+ * (attach and Add context as outlined small-caps pills on the left; Send, or
+ * the "esc · stop" pill during a run, on the right), and, past a hairline, a
+ * row of what Chat knows about where the message goes. The vendored rules in
+ * ui.css sit at :where() weight, so these win without fighting them; the
+ * focus and warning states they would otherwise hide are restated here.
+ */
+.coven-chat .coven-compact-composer {
+  /* WebKit can retain stale intrinsic grid-row heights after a resize until
+     focus forces layout, moving a pressed toolbar button before release. */
+  display: flex;
+  flex-direction: column;
+  border-color: var(--border-strong);
+  border-radius: 16px;
+  background: color-mix(in oklch, var(--bg-raised) 88%, var(--bg-base));
+  box-shadow:
+    0 12px 32px color-mix(in oklch, var(--bg-panel) 52%, transparent),
+    inset 0 1px 0 rgba(255, 255, 255, 0.05);
+}
+
+/* A full-strength 2px ring (border plus 1px spread), as ui.css draws it. */
+.coven-chat .coven-compact-composer:focus-within {
+  border-color: var(--ring-focus);
+  box-shadow:
+    0 0 0 1px var(--ring-focus),
+    0 0 0 4px color-mix(in srgb, var(--ring-focus) 12%, transparent),
+    0 16px 40px -16px rgba(0, 0, 0, 0.6);
+}
+
+.coven-chat .coven-compact-composer[data-tone="warning"] {
+  border-color: color-mix(in oklch, var(--color-warning) 50%, transparent);
+}
+
+.coven-chat
+  .coven-compact-composer
+  :is(.oc-composer-label, .oc-composer-spacer, .oc-composer-hint) {
+  display: none;
+}
+
+.coven-chat .coven-compact-composer .oc-composer-field {
+  min-width: 0;
+  max-height: calc(24px * 8 + 20px);
+  padding: 12px 16px 8px;
+  font-size: 14px;
+  line-height: 24px;
+}
+
+.coven-chat .coven-compact-composer .oc-composer-toolbar {
+  min-height: 32px;
+  padding: 0 8px 6px;
+}
+
+/* The left cluster lays its controls straight into the toolbar row, so an
+   inline picker (older webviews) can take a full row under the controls. */
+.coven-chat .coven-compact-composer :is(.oc-composer-bar, .chat-context) {
+  display: contents;
+}
+
+.coven-chat .coven-compact-composer .chat-context-panel:not([popover]) {
+  flex: 1 0 100%;
+  order: 1;
+}
+
+/* Cave's Tools pill: outlined, small caps, the technical face. */
+.coven-chat .coven-compact-composer
+  :is(.oc-composer-bar > [data-slot="button"], .chat-context-trigger) {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  height: 28px;
+  padding: 0 8px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-control);
+  background: color-mix(in oklch, var(--bg-panel) 94%, var(--bg-base));
+  box-shadow: inset 0 1px 0 color-mix(in oklch, var(--text-primary) 8%, transparent);
+  color: var(--text-secondary);
+  font-family: var(--font-jetbrains-mono);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  line-height: 1;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+
+.coven-chat .coven-compact-composer .oc-composer-bar > [data-slot="button"][data-size="icon"] {
+  width: 28px;
+  padding: 0;
+}
+
+.coven-chat
+  .coven-compact-composer
+  :is(.oc-composer-bar > [data-slot="button"], .chat-context-trigger):hover:not(:disabled) {
+  border-color: color-mix(in oklch, var(--accent-presence) 48%, var(--border-strong));
+  background: color-mix(in oklch, var(--bg-panel) 94%, var(--bg-base));
+  color: var(--text-primary);
+}
+
+.coven-chat .coven-compact-composer .chat-context-trigger[aria-expanded="true"] {
+  border-color: var(--accent-presence);
+  background: color-mix(in oklch, var(--accent-presence) 14%, transparent);
+  color: var(--accent-presence);
+}
+
+/* The byte-limit warning sits after the pills and wraps rather than pushing Send out. */
+.coven-chat .coven-compact-composer .oc-composer-warning {
+  flex: 1 1 12rem;
+  min-width: 0;
+  padding: 4px;
+  text-align: start;
+}
+
+.coven-chat .coven-compact-composer [data-slot="send-control"] {
+  overflow: visible;
+}
+
+/*
+ * Send at rest, from Cave's composer: a 32px square in the emphasized role,
+ * a lavender outline over an 18% lavender tint, never a solid fill
+ * (docs/design-authority.md). It is disabled until there is something to send.
+ */
+.coven-chat .coven-compact-composer .oc-send-main[data-size="icon"] {
+  width: 32px;
+  height: 32px;
+  border-color: var(--accent-presence);
+  border-radius: var(--radius-control);
+  background: color-mix(in oklch, var(--accent-presence) 18%, transparent);
+  box-shadow: none;
+  color: var(--accent-presence);
+}
+
+.coven-chat .coven-compact-composer .oc-send-main[data-size="icon"]:hover {
+  background: color-mix(in oklch, var(--accent-presence) 26%, transparent);
+}
+
+.coven-chat .coven-compact-composer .oc-send-main[data-size="icon"]:disabled {
+  background: transparent;
+  opacity: 0.4;
+}
+
+/*
+ * Stop during a run, from Cave's composer: a solid salmon "esc · stop" pill.
+ * Its label takes the shell's on-danger foreground, at 4.5:1 or better in
+ * both schemes (familiars-shell.css.test.ts).
+ */
+.coven-chat .coven-compact-composer .oc-send-stop[data-shortcut] {
+  min-width: 0;
+  height: 32px;
+  padding-inline: 10px;
+  border-color: transparent;
+  border-radius: var(--radius-control);
+  background: var(--color-danger);
+  color: var(--color-danger-foreground);
+  font-family: var(--font-jetbrains-mono);
+  font-size: 11px;
+  font-weight: 650;
+  white-space: nowrap;
+}
+
+.coven-chat .coven-compact-composer .oc-send-stop[data-shortcut]:hover {
+  background: color-mix(in oklch, var(--color-danger) 88%, var(--text-primary));
+}
+
+/* Under the drop overlay the pill falls back to the destructive tint, so its
+   label reads against the overlay that covers it, not a fill the overlay hides. */
+.coven-chat .fr-thread[data-dragging] .coven-compact-composer .oc-send-stop[data-shortcut] {
+  border-color: color-mix(in oklch, var(--color-danger) 35%, transparent);
+  background: transparent;
+  color: color-mix(in oklch, var(--color-danger) 70%, var(--text-primary));
+}
+
+/* The details row: Cave's footer band, one tone deeper than the box. */
+.coven-chat .coven-compact-composer .oc-composer-meta {
+  gap: 4px 14px;
+  min-height: 32px;
+  padding: 4px 8px 4px 12px;
+  border-radius: 0 0 15px 15px;
+  background: color-mix(in oklch, var(--bg-base) 62%, transparent);
+  font-size: 12px;
+}
+
+.coven-composer-meta-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  max-width: 100%;
+  white-space: nowrap;
+}
+
+.coven-composer-meta-item > svg {
+  flex-shrink: 0;
+}
+
+.coven-composer-meta-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.coven-composer-meta-familiar {
+  color: var(--text-secondary);
+}
+
+.coven-composer-meta-avatar {
+  display: inline-flex;
+}
+
+/* The name gives way before the access word, which always shows in full. */
+.coven-composer-meta-access {
+  flex: none;
+}
+
+/* Every run has full access (#576), so the words stay put. Weight sets them apart; the row's
+   own text colour keeps them at AA contrast, which the warning colour missed in light mode. */
+.coven-composer-meta-access[data-access="full"] {
+  font-weight: 600;
+}
+
+/* The path gives way first: it shrinks to an ellipsis, then wraps to its own line. */
+.coven-composer-meta-workspace {
+  flex: 1 1 0;
+  min-width: min(8rem, 100%);
+}
+
+.coven-composer-meta-settings {
+  display: inline-grid;
+  place-items: center;
+  flex-shrink: 0;
+  width: 24px;
+  height: 24px;
+  margin-inline-start: auto;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-control);
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+
+.coven-composer-meta-settings:hover:not(:disabled) {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.coven-composer-meta-settings:focus-visible {
+  outline: var(--ring-width) solid var(--ring-focus);
+  outline-offset: var(--ring-offset);
+}
+
+.coven-composer-meta-settings:disabled {
+  cursor: default;
+  opacity: 0.5;
+}
+
+.coven-approval {
+  display: grid;
+  gap: 6px;
+  margin: 0 0 10px;
+  padding: 12px 14px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-control);
+  background: var(--bg-raised);
+}
+
+.coven-approval-heading {
+  margin: 0;
+  color: var(--text-primary);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.coven-approval-summary {
+  margin: 0;
+  color: var(--text-primary);
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+
+.coven-approval-reason,
+.coven-approval-scope,
+.coven-approval-hint {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.coven-approval-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 4px;
+}
+
 .coven-composer-note {
   margin: 0 4px 8px;
   color: var(--text-secondary);
@@ -1165,5 +1489,48 @@
 @media (prefers-reduced-motion: reduce) {
   .coven-inspector-resizer::after {
     transition: none;
+  }
+}
+
+/* Calm surfaces and consistent controls across the desktop shell. */
+.coven-chat .fr-grain {
+  display: none;
+}
+
+.coven-chat .coven-agent-search {
+  gap: 8px;
+  min-height: 36px;
+  padding: 4px 4px 4px 10px;
+  border-radius: 10px;
+  background: var(--bg-sunken);
+}
+
+.coven-agent-search input::-webkit-search-cancel-button {
+  -webkit-appearance: none;
+}
+
+.coven-search-results {
+  display: block;
+  padding: 0 16px 8px;
+  color: var(--text-muted);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+.coven-chat .oc-send-main:not([data-size="icon"]) {
+  min-width: 76px;
+  border-radius: 8px;
+}
+
+.coven-chat .coven-rail-tab-cue {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+@media (pointer: coarse) {
+  .coven-chat :is(.fr-btn, .fr-icon-btn, .oc-button, .coven-settings-close) {
+    min-width: 44px;
+    min-height: 44px;
   }
 }

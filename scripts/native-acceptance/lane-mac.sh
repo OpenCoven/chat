@@ -1,0 +1,124 @@
+#!/usr/bin/env bash
+# The macOS native lane: verify and install the published DMG on a fresh runner,
+# record what the runner is, then drive the app with run.mjs.
+# Usage: lane-mac.sh <release tag> <out dir> <arch: aarch64|x64>
+set -uo pipefail
+release="$1"
+out="$2"
+arch="${3:-aarch64}"
+mkdir -p "$out"
+here="$(cd "$(dirname "$0")" && pwd)"
+log() { printf '%s\n' "$*" | tee -a "$out/environment.txt"; }
+
+work="$(mktemp -d)"
+if [ -n "${CANDIDATE_INSTALLER:-}" ]; then
+  # A candidate: this commit, built on this runner. Not a published release, so
+  # there is no SHA256SUMS to check, and the results say so.
+  commit="$(git -C "$here/../.." rev-parse --short HEAD)"
+  release="candidate ${commit}"
+  # Tauri names the bundle with a space; release assets carry a dot instead.
+  asset="$(basename "$CANDIDATE_INSTALLER" | tr ' ' .)"
+  cp "$CANDIDATE_INSTALLER" "$work/$asset"
+  checksum="candidate build of ${commit}; not a published release, so no SHA256SUMS"
+  log "checksum: $checksum"
+  sums="none (candidate)"
+  source_label="candidate ${arch} DMG built from ${commit}, not a published release"
+else
+  version="${release#v}"
+  base="https://github.com/OpenCoven/chat/releases/download/${release}"
+  curl --proto '=https' --tlsv1.2 --fail --location --retry 3 -o "$work/SHA256SUMS" "$base/SHA256SUMS" || exit 1
+  asset="$(node "$here/../release-installer.mjs" "$work/SHA256SUMS" "$version" "${arch}.dmg")" || exit 1
+  curl --proto '=https' --tlsv1.2 --fail --location --retry 3 -o "$work/$asset" "$base/$asset" || exit 1
+  checksum="$(cd "$work" && grep -F "  ${asset}" SHA256SUMS | shasum -a 256 -c - 2>&1)"
+  log "checksum: $checksum"
+  case "$checksum" in *": OK") ;; *) echo "::error::$asset does not match SHA256SUMS"; exit 1 ;; esac
+  sums="$(shasum -a 256 "$work/SHA256SUMS" | cut -d' ' -f1)"
+  source_label="published ${arch} DMG ${release}"
+fi
+sha="$(shasum -a 256 "$work/$asset" | cut -d' ' -f1)"
+
+log "prior app data: $(ls -d "$HOME/Library/Application Support/ai.opencoven.chat" "$HOME/Library/WebKit/ai.opencoven.chat" 2>&1 | tr '\n' ' ')"
+mount="$(hdiutil attach -nobrowse -readonly "$work/$asset" | awk -F'\t' '/\/Volumes\//{print $NF}' | tail -1)"
+product="Coven Chat"
+if [ ! -d "$mount/$product.app" ]; then product="OpenCoven Chat"; fi
+app="/Applications/$product.app"
+ditto "$mount/$product.app" "$app" || exit 1
+hdiutil detach "$mount" -quiet
+sign="$(codesign -dvvv "$app" 2>&1)"
+cdhash="$(printf '%s\n' "$sign" | sed -n 's/^CDHash=//p')"
+identifier="$(printf '%s\n' "$sign" | sed -n 's/^Identifier=//p')"
+team="$(printf '%s\n' "$sign" | sed -n 's/^TeamIdentifier=//p')"
+log "codesign: CDHash=$cdhash Identifier=$identifier Team=$team"
+log "gatekeeper: $(spctl -a -vv "$app" 2>&1 | tr '\n' ' ')"
+log "stapled: $(xcrun stapler validate "$app" 2>&1 | tail -1)"
+log "quarantine: $(xattr -p com.apple.quarantine "$app" 2>&1)"
+
+# The Dock covers the bottom of a small screen; hide it, and ask for a larger
+# display mode where the runner's virtual display offers one.
+defaults write com.apple.dock autohide -bool true
+defaults write com.apple.dock autohide-delay -float 1000
+killall Dock 2>/dev/null
+if brew install displayplacer > "$out/displayplacer.txt" 2>&1; then
+  displayplacer list >> "$out/displayplacer.txt" 2>&1
+  id="$(displayplacer list 2>/dev/null | sed -n 's/^Persistent screen id: //p' | head -1)"
+  mode="$(displayplacer list 2>/dev/null | grep -E 'res:(1920x1080|1680x1050|1600x900|1440x900)' | grep -v scaling:on | head -1)"
+  res="$(printf '%s' "$mode" | sed -n 's/.*res:\([0-9]*x[0-9]*\).*/\1/p')"
+  hz="$(printf '%s' "$mode" | sed -n 's/.*hz:\([0-9]*\).*/\1/p')"
+  depth="$(printf '%s' "$mode" | sed -n 's/.*color_depth:\([0-9]*\).*/\1/p')"
+  if [ -n "$id" ] && [ -n "$res" ]; then
+    displayplacer "id:$id res:$res hz:${hz:-60} color_depth:${depth:-8} scaling:off origin:(0,0) degree:0" >> "$out/displayplacer.txt" 2>&1
+  fi
+fi
+log "display: $(system_profiler SPDisplaysDataType 2>/dev/null | grep -E 'Resolution' | head -1 | sed 's/^ *//')"
+
+# Tab reaches every control only with keyboard navigation on (System Settings >
+# Keyboard > Keyboard navigation); recorded with the results.
+defaults write -g AppleKeyboardUIMode -int 2
+# VoiceOver answers AppleScript only when these are set.
+sudo mkdir -p /private/var/db/Accessibility
+sudo bash -c 'printf a > /private/var/db/Accessibility/.VoiceOverAppleScriptEnabled'
+# Reading VoiceOver's last phrase is an Apple Event to VoiceOver; without a
+# grant, macOS asks "hosted-compute-agent wants access to control VoiceOver"
+# on screen and every read waits. The runner's SIP is off, so the grant is
+# written the way the runner image writes its own.
+for db in "$HOME/Library/Application Support/com.apple.TCC/TCC.db" "/Library/Application Support/com.apple.TCC/TCC.db"; do
+  for client in /opt/hca/hosted-compute-agent /usr/bin/osascript /bin/bash /usr/local/opt/runner/provisioner/provisioner; do
+    sudo sqlite3 "$db" "INSERT OR REPLACE INTO access (service, client, client_type, auth_value, auth_reason, auth_version, indirect_object_identifier_type, indirect_object_identifier, flags, last_modified) VALUES ('kTCCServiceAppleEvents', '$client', 1, 2, 3, 1, 0, 'com.apple.VoiceOver', 0, CAST(strftime('%s','now') AS INTEGER));" 2>> "$out/tcc.txt"
+  done
+done
+log "Apple Events to VoiceOver granted: $(sudo sqlite3 "$HOME/Library/Application Support/com.apple.TCC/TCC.db" "select client from access where service='kTCCServiceAppleEvents' and indirect_object_identifier='com.apple.VoiceOver'" 2>&1 | tr '\n' ' ')"
+
+swiftc -O -o "$out/native-mac" "$here/mac/NativeDriver.swift" || exit 1
+log "helper trust: $(echo '{"cmd":"trust"}' | "$out/native-mac")"
+
+cat > "$out/facts.json" <<EOF
+{
+  "release": "$release",
+  "installer": "$asset",
+  "installerSha256": "$sha",
+  "sha256sumsSha256": "$sums",
+  "checksum": "$checksum",
+  "cdhash": "$cdhash",
+  "identifier": "$identifier",
+  "team": "$team",
+  "macOS": "$(sw_vers -productVersion) ($(sw_vers -buildVersion)) $(uname -m)",
+  "webkit": "$(defaults read /System/Library/Frameworks/WebKit.framework/Resources/Info.plist CFBundleVersion 2>/dev/null)",
+  "sip": "$(csrutil status 2>&1 | tr -d '"')",
+  "keyboardNavigation": "AppleKeyboardUIMode $(defaults read -g AppleKeyboardUIMode 2>&1)",
+  "profile": "fresh runner user; no prior ai.opencoven.chat data"
+}
+EOF
+
+# Kotoeri runs as its own app, which the system starts when it is selected;
+# starting it by hand left the keys Latin, so it is only recorded here.
+log "Japanese input method processes before the run: $(pgrep -fl JapaneseIM 2>&1 | tr '\n' ';')"
+
+node "$here/run.mjs" --app "$app/Contents/MacOS/opencoven-chat" --out "$out" \
+  --lane "macOS $(sw_vers -productVersion) $(uname -m), ${source_label}" \
+  --helper "$out/native-mac" --facts "$out/facts.json" \
+  --japanese com.apple.inputmethod.Kotoeri.RomajiTyping.Japanese --latin com.apple.keylayout.ABC \
+  --ime-on kana --ime-off eisu
+status=$?
+log "Japanese input method processes after the run: $(pgrep -fl JapaneseIM 2>&1 | tr '\n' ';')"
+log "TCC rows: $(sudo sqlite3 '/Library/Application Support/com.apple.TCC/TCC.db' "select service, client, indirect_object_identifier from access where service in ('kTCCServiceAccessibility','kTCCServiceScreenCapture','kTCCServiceAppleEvents','kTCCServicePostEvent')" 2>&1 | tr '\n' ';' | cut -c1-2000)"
+exit $status

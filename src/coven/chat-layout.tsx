@@ -7,6 +7,7 @@ import {
   type RefObject,
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -21,12 +22,19 @@ import {
   titleCase,
 } from '../design/familiars-ui';
 import { Icon } from '../design/minimal-icons';
-import type { ChatLifecycle, CovenProjectAccess, CovenSetupStep } from '../lib/coven-runtime';
+import type {
+  ChatLifecycle,
+  CovenApproval,
+  CovenProjectAccess,
+  CovenSetupStep,
+  PermissionLogEntry,
+} from '../lib/coven-runtime';
 import type { ScreenRelay } from '../lib/screen-relay';
 import { defaultUpdateStore } from '../lib/updater';
 import { type SetWindowTitle, windowTitle } from '../lib/window-title';
 import { Composer } from '../ui/composer';
 import { MenuPortalContainer } from '../ui/dropdown-menu';
+import { ApprovalCard } from './approval-card';
 import { AttachmentCard } from './attachment-card';
 import { ATTACHMENT_ACCEPT, type ChatAttachment, formatAttachmentSize } from './attachments';
 import { ChatLifecycleControls } from './chat-lifecycle';
@@ -67,6 +75,7 @@ import {
   useSettingsShortcut,
   useStepShortcut,
   useTypeToCompose,
+  useWindowEscape,
 } from './rail-shortcuts';
 import {
   activityTime,
@@ -105,6 +114,8 @@ export type ChatLayoutProps = Readonly<{
     projectRoot?: string;
     /** The harness the chat runs on, which it keeps for good. */
     harness?: string;
+    /** Coven couldn't load this recorded chat; the error says so. */
+    unavailable?: boolean;
   }[];
   messages: readonly ChatMessage[];
   attachments?: readonly ChatAttachment[];
@@ -149,6 +160,15 @@ export type ChatLayoutProps = Readonly<{
    * are opened again. Their rows say so.
    */
   finished?: Readonly<Record<string, 'reply' | 'error'>>;
+  /** Requests familiars are waiting on an answer for, across every chat. */
+  approvals?: readonly CovenApproval[];
+  /** A Decline is on its way to the host. */
+  answeringApproval?: boolean;
+  onAllowApproval?: (approval: CovenApproval, options: RunOptions) => void;
+  onDeclineApproval?: (approval: CovenApproval) => void;
+  /** Reads the permission log for Settings › Access. */
+  onPermissionLog?: () => Promise<PermissionLogEntry[]>;
+  onRefreshProjectAccess?: () => Promise<void>;
   loading: boolean;
   cancelling: boolean;
   error: string;
@@ -247,6 +267,16 @@ export function composerCopy(connected: boolean, familiarName?: string, anyFamil
     placeholder: `Message ${familiarName} · @ familiar · # project`,
   };
 }
+
+/**
+ * The composer's placeholder while a run is active and the field is free. Chat
+ * does not queue a message: Stop takes Send's place and Enter does nothing
+ * until the run ends, so what is typed waits in the field to be sent then.
+ * Escape stops the run, in the field or anywhere a dialog, drawer or other
+ * field does not claim it (`useWindowEscape`).
+ */
+export const RUNNING_PLACEHOLDER = 'Replying… (send when the reply ends · esc to stop)';
+const DRAFT_WAITS_NOTE = 'Your message stays here. You can send it when the reply ends.';
 
 /**
  * What the end of the transcript says while a run is active and no prose is
@@ -733,8 +763,8 @@ export function ChatLayout(props: ChatLayoutProps) {
     if (!sidebar) openSidebar();
     setSearchFocus((n) => n + 1);
   });
-  function openSettings(section: SettingsSection = 'general') {
-    settingsOpener.current = activeControl();
+  function openSettings(section: SettingsSection = 'general', opener = activeControl()) {
+    settingsOpener.current = opener;
     setSettings(section);
   }
   const onSettingsShortcut = useCallback(() => {
@@ -834,6 +864,15 @@ export function ChatLayout(props: ChatLayoutProps) {
   const workspaceLabel = session?.projectRoot ? 'Chat project' : 'Familiar workspace';
   const composerDisabled =
     !props.ready || props.loading || props.cancelling || props.attaching || props.readOnly;
+  const approval = props.approvals?.find((item) => item.familiarId === props.familiarId);
+  // Allow starts a run, so it waits for the same things a message would.
+  const allowUnavailable = props.readOnly
+    ? 'Restore this archived chat to allow this.'
+    : props.busy
+      ? 'Allow once is available when the current run ends.'
+      : !props.ready || props.loading
+        ? 'Allow once is available when this chat has loaded.'
+        : '';
   // The same gate as the header's refresh control.
   const refreshBlocked = Boolean(props.busy || props.loading || props.lifecycleBusy);
   const transcriptRef = useRef<HTMLDivElement>(null);
@@ -892,6 +931,25 @@ export function ChatLayout(props: ChatLayoutProps) {
     },
   };
   const composerRef = useRef<HTMLTextAreaElement>(null);
+  // The field turns off while a run stops and while the chat is read again after a
+  // run, and that drops focus. If the field had it, give it back when the field comes
+  // on again, unless focus has already gone somewhere else. Chromium takes focus off
+  // a field the moment it's disabled, so this reads focus before that commit.
+  const giveFocusBack = useRef(false);
+  const fieldHasFocus =
+    composerRef.current !== null && document.activeElement === composerRef.current;
+  // biome-ignore lint/correctness/useExhaustiveDependencies: only the field turning off or on counts, not focus moving while it's on.
+  useLayoutEffect(() => {
+    if (composerDisabled) {
+      if (fieldHasFocus) giveFocusBack.current = true;
+      return;
+    }
+    if (!giveFocusBack.current) return;
+    giveFocusBack.current = false;
+    if (!document.activeElement || document.activeElement === document.body) {
+      composerRef.current?.focus();
+    }
+  }, [composerDisabled]);
   // Start typing anywhere in the shell and the words go to the familiar. The
   // first letter is appended here rather than left to the browser, so it is
   // neither lost to a controlled field nor delivered twice.
@@ -900,13 +958,18 @@ export function ChatLayout(props: ChatLayoutProps) {
     if (composerDisabled || !field) return false;
     props.onDraft(props.draft + key);
     field.focus();
+    // WebKit doesn't bring a focused field into view on its own, and a permission
+    // card in a small window can have pushed this one out of sight.
+    field.scrollIntoView?.({ block: 'nearest' });
     const end = props.draft.length + key.length;
     field.setSelectionRange(end, end);
     return true;
   });
+  const composerAreaRef = useRef<HTMLDivElement>(null);
   const quote = useQuoteSelection({
     transcriptRef,
     composerRef,
+    composerAreaRef,
     messages: props.messages,
     familiarId: props.familiarId,
     sessionId: props.sessionId,
@@ -1019,6 +1082,11 @@ export function ChatLayout(props: ChatLayoutProps) {
     setFindOpen(false);
     transcriptRef.current?.focus();
   }
+  // Escape closes what's open before it touches the run: a drawer takes it first,
+  // then the find bar, wherever focus is. Only then does it stop a run, and only
+  // this chat's: a run in another chat stays with its own Stop control.
+  useWindowEscape(findOpen && !scrim, closeFind);
+  useWindowEscape(runHere && !props.cancelling && !scrim && !findOpen, props.onCancel);
   function stepFind(direction: 1 | -1) {
     if (!matches.length) return;
     setFindAt(
@@ -1154,7 +1222,7 @@ export function ChatLayout(props: ChatLayoutProps) {
           ) : null}
           <span className="coven-rail-tab-label">Familiars</span>
           <span className="coven-rail-tab-cue" aria-hidden="true">
-            ›
+            <Icon name="caret-right" size={14} />
           </span>
         </button>
         <button
@@ -1171,7 +1239,7 @@ export function ChatLayout(props: ChatLayoutProps) {
         >
           <span className="coven-rail-tab-label">{familiar?.name || 'Details'}</span>
           <span className="coven-rail-tab-cue" aria-hidden="true">
-            ‹
+            <Icon name="caret-left" size={14} />
           </span>
         </button>
         <aside
@@ -1207,15 +1275,21 @@ export function ChatLayout(props: ChatLayoutProps) {
                     ? 'coven-sidebar-settings coven-sidebar-settings--update'
                     : 'coven-sidebar-settings'
                 }
-                onClick={() => openSettings(update.kind === 'available' ? 'about' : 'general')}
+                onClick={(event) =>
+                  openSettings(
+                    update.kind === 'available' ? 'about' : 'general',
+                    event.currentTarget,
+                  )
+                }
               />
             </div>
-            <label className="coven-agent-search">
+            <div className="coven-agent-search">
               <Icon name="magnifying-glass" size={14} />
               <input
                 ref={searchRef}
                 type="search"
                 aria-label="Search familiars"
+                autoComplete="off"
                 aria-keyshortcuts={SEARCH_SHORTCUT}
                 title={SEARCH_HINT}
                 placeholder="Search"
@@ -1237,7 +1311,26 @@ export function ChatLayout(props: ChatLayoutProps) {
                   }
                 }}
               />
-            </label>
+              {query ? (
+                <FamIconButton
+                  icon="x"
+                  size="sm"
+                  label="Clear familiar search"
+                  onClick={() => {
+                    setQuery('');
+                    searchRef.current?.focus();
+                  }}
+                />
+              ) : null}
+            </div>
+            <output
+              className={query ? 'coven-search-results' : 'coven-sr-only'}
+              aria-label="Familiar search results"
+              aria-live="polite"
+              aria-atomic="true"
+            >
+              {query ? `${agents.length} ${agents.length === 1 ? 'familiar' : 'familiars'}` : ''}
+            </output>
             <div className="fr-conv-scroll">
               <div className="fr-conv-list" ref={listRef}>
                 {agents.map((item, index) => {
@@ -1247,12 +1340,19 @@ export function ChatLayout(props: ChatLayoutProps) {
                   const draft = props.drafts?.[item.id]?.trim() ?? '';
                   const done = live ? undefined : props.finished?.[item.id];
                   const doneLabel = done === 'error' ? 'Run failed' : 'New reply';
+                  const asks = !live && props.approvals?.some((a) => a.familiarId === item.id);
                   return (
                     <button
                       type="button"
                       key={item.id}
                       className="fr-conv coven-agent-row"
-                      aria-label={done ? `${item.name} (${doneLabel.toLowerCase()})` : item.name}
+                      aria-label={
+                        asks
+                          ? `${item.name} (asks for permission)`
+                          : done
+                            ? `${item.name} (${doneLabel.toLowerCase()})`
+                            : item.name
+                      }
                       title={item.description}
                       aria-current={item.id === props.familiarId || undefined}
                       disabled={props.lifecycleBusy}
@@ -1267,6 +1367,8 @@ export function ChatLayout(props: ChatLayoutProps) {
                             <span className="fr-conv-time coven-agent-live">
                               {props.cancelling ? 'Stopping…' : 'Responding…'}
                             </span>
+                          ) : asks ? (
+                            <span className="fr-conv-time coven-agent-asks">Asks permission</span>
                           ) : done ? (
                             <span
                               className={`fr-conv-time coven-agent-done${done === 'error' ? ' coven-agent-done--error' : ''}`}
@@ -1385,7 +1487,7 @@ export function ChatLayout(props: ChatLayoutProps) {
             )}
             <div className="fr-thread-header-actions">
               <FamIconButton
-                icon="squares-four"
+                icon="monitor"
                 label={screenOpen ? 'Hide screen' : 'Show screen'}
                 title={screenOpen ? 'Hide the remote screen' : 'View a remote screen over VNC'}
                 aria-pressed={screenOpen}
@@ -1400,7 +1502,7 @@ export function ChatLayout(props: ChatLayoutProps) {
                 title={SETTINGS_HINT}
                 aria-keyshortcuts={SETTINGS_SHORTCUT}
                 aria-haspopup="dialog"
-                onClick={() => openSettings()}
+                onClick={(event) => openSettings('general', event.currentTarget)}
               />
               <FamIconButton
                 icon="arrow-clockwise"
@@ -1433,6 +1535,7 @@ export function ChatLayout(props: ChatLayoutProps) {
                   ref={findRef}
                   type="search"
                   aria-label="Find in conversation"
+                  autoComplete="off"
                   placeholder="Find in conversation"
                   value={findQuery}
                   onChange={(event) => {
@@ -1528,7 +1631,10 @@ export function ChatLayout(props: ChatLayoutProps) {
               ) : null}
               {props.error ? (
                 <div className="coven-error" role="alert">
-                  <span className="coven-error-text">{props.error}</span>
+                  {/* A paragraph, not a span: WebKitGTK gave AT-SPI a span laid out
+                    as a flex item without its text, so on Linux the alert held
+                    only its Copy error button (native run 43006448055). */}
+                  <p className="coven-error-text">{props.error}</p>
                   {props.onReloadChat && !props.loading ? (
                     <FamButton size="sm" className="coven-error-retry" onClick={props.onReloadChat}>
                       Reload chat
@@ -1576,7 +1682,9 @@ export function ChatLayout(props: ChatLayoutProps) {
                   <ThinkingIndicator label={liveRow} />
                 </div>
               ) : null}
-              {!props.messages.length && !props.loading && !runHere ? (
+              {/* A chat Coven couldn't load isn't a new one: its error says what
+                happened, and "the start of your conversation" would contradict it. */}
+              {!props.messages.length && !props.loading && !runHere && !session?.unavailable ? (
                 <div className="fr-thread-empty">
                   {familiar ? (
                     <FamiliarAvatar name={name} avatarUrl={familiar.avatarUrl} size={36} ring />
@@ -1585,7 +1693,9 @@ export function ChatLayout(props: ChatLayoutProps) {
                     {familiar ? `Chat with ${name}` : 'No familiar selected'}
                   </span>
                   {familiar?.description ? (
-                    <span className="coven-thread-empty-purpose">{familiar.description}</span>
+                    <span className="coven-thread-empty-purpose" title={familiar.description}>
+                      {familiar.description}
+                    </span>
                   ) : null}
                   <span className="fr-empty-text">
                     {emptyThreadText(props.connected, familiar?.name, props.familiars.length > 0)}
@@ -1601,7 +1711,7 @@ export function ChatLayout(props: ChatLayoutProps) {
             </div>
           </div>
           <div className="fr-composer-wrap">
-            <div className="fr-composer-inner">
+            <div className="fr-composer-inner" ref={composerAreaRef}>
               {showLatest && (
                 <button
                   type="button"
@@ -1622,14 +1732,34 @@ export function ChatLayout(props: ChatLayoutProps) {
                 </button>
               )}
               {quote.action}
-              <div className="coven-composer-context" title={workspace}>
-                {workspace ? `${workspaceLabel}: ${workspace}` : 'No workspace reported'}
-              </div>
+              {approval ? (
+                <ApprovalCard
+                  approval={approval}
+                  name={name}
+                  answering={Boolean(props.answeringApproval)}
+                  allowDisabled={allowUnavailable !== ''}
+                  allowHint={allowUnavailable || undefined}
+                  onAllow={() => props.onAllowApproval?.(approval, run)}
+                  onDecline={() => props.onDeclineApproval?.(approval)}
+                />
+              ) : null}
               {props.busy && (
-                <output className="coven-run-status">
-                  {runStatusText(name, runName, runHere, props.cancelling, runningTool)}
+                <p className="coven-run-status">
+                  <output>
+                    {runStatusText(name, runName, runHere, props.cancelling, runningTool)}
+                  </output>
+                  {/* Beside the live region, not in it: it would be read out every second. */}
                   {elapsed ? <span className="coven-run-elapsed"> · {elapsed}</span> : null}
-                </output>
+                </p>
+              )}
+              {/* The placeholder says this until there's a draft to cover it. Always
+                  rendered during a run, so the words are announced when they appear. */}
+              {runHere && (
+                <p className="coven-run-note" aria-live="polite">
+                  {!props.cancelling && (props.draft.trim() || props.attachments?.length)
+                    ? DRAFT_WAITS_NOTE
+                    : null}
+                </p>
               )}
               {props.readOnly && (
                 <p className="coven-composer-note">
@@ -1643,21 +1773,37 @@ export function ChatLayout(props: ChatLayoutProps) {
                   </FamButton>
                 </div>
               )}
-              <fieldset className="coven-composer-fieldset" disabled={composerDisabled}>
+              {/* Not a disabled fieldset: that would also turn off the details row's
+                Settings › Model button, which stays usable while the message can't be
+                edited. */}
+              <div className="coven-composer-wrap">
                 <Composer
+                  disabled={composerDisabled}
                   textareaRef={composerRef}
                   textareaProps={mentionCompletion.textareaProps}
                   onKeyDown={(event) => {
                     quote.onComposerKeyDown(event);
                     if (!event.defaultPrevented) mentionCompletion.onKeyDown(event);
+                    if (event.key !== 'Escape' || event.defaultPrevented) return;
+                    // An open drawer takes Escape before the run does; the run keeps going.
+                    if (scrim) event.preventDefault();
+                    // So does the find bar, and focus stays in this field.
+                    else if (findOpen && !event.repeat && !event.nativeEvent.isComposing) {
+                      event.preventDefault();
+                      setFindOpen(false);
+                    }
                   }}
                   className="coven-compact-composer"
                   minRows={1}
                   attachmentIcon="plus"
+                  sendIcon
+                  stopOnEscape={runHere}
                   value={props.draft}
                   onValueChange={props.onDraft}
                   label={composer.label}
-                  placeholder={composer.placeholder}
+                  placeholder={
+                    runHere && !composerDisabled ? RUNNING_PLACEHOLDER : composer.placeholder
+                  }
                   onSend={() => props.onSend(run)}
                   {...(oversize
                     ? {
@@ -1668,7 +1814,16 @@ export function ChatLayout(props: ChatLayoutProps) {
                       }
                     : {})}
                   running={props.busy && !composerDisabled}
-                  onStop={props.onCancel}
+                  onStop={() => {
+                    // The Stop control goes away with the run, so its focus comes here too.
+                    if (
+                      composerRef.current
+                        ?.closest('[data-slot="composer"]')
+                        ?.contains(document.activeElement)
+                    )
+                      giveFocusBack.current = true;
+                    props.onCancel();
+                  }}
                   allowAttachmentOnly
                   attachments={(props.attachments ?? []).map((file) => ({
                     id: file.id,
@@ -1692,17 +1847,82 @@ export function ChatLayout(props: ChatLayoutProps) {
                   {...(!props.busy && props.onRemoveAttachment
                     ? { onRemoveAttachment: props.onRemoveAttachment }
                     : {})}
+                  tools={
+                    <ContextPicker
+                      key={`${props.familiarId}:${props.sessionId}`}
+                      familiars={props.familiars}
+                      familiarId={props.familiarId}
+                      value={props.draft}
+                      onValueChange={props.onDraft}
+                      textareaRef={composerRef}
+                      disabled={composerDisabled || props.busy}
+                    />
+                  }
+                  metaLabel="Chat details"
+                  meta={
+                    <>
+                      {familiar ? (
+                        <span
+                          className="coven-composer-meta-item coven-composer-meta-familiar"
+                          title={`Messages run with full access: ${name} can change files and run commands under your user account without asking for permission.`}
+                        >
+                          <span className="coven-composer-meta-avatar" aria-hidden="true">
+                            <FamiliarAvatar name={name} avatarUrl={familiar.avatarUrl} size={18} />
+                          </span>
+                          <span className="coven-composer-meta-text">{name}</span>
+                          <span className="coven-composer-meta-access" data-access="full">
+                            {' · Full access'}
+                          </span>
+                        </span>
+                      ) : null}
+                      <span
+                        className="coven-composer-meta-item"
+                        title={
+                          chatHarness
+                            ? `This chat runs on ${harnessLabel(chatHarness)}. A chat keeps what it started on.`
+                            : `A new chat starts on ${harnessLabel(run.harness)}.`
+                        }
+                      >
+                        <Icon name="terminal-window" size={13} />
+                        <span className="coven-sr-only">Runs on </span>
+                        <span className="coven-composer-meta-text">
+                          {harnessLabel(chatHarness ?? run.harness)}
+                        </span>
+                      </span>
+                      <span
+                        className="coven-composer-meta-item"
+                        title={
+                          run.model
+                            ? `Messages ask for ${run.model}.`
+                            : "Messages use the engine's default model."
+                        }
+                      >
+                        <Icon name="brain" size={13} />
+                        <span className="coven-sr-only">Model: </span>
+                        <span className="coven-composer-meta-text">
+                          {run.model || 'Engine default'}
+                        </span>
+                      </span>
+                      <span className="coven-composer-meta-item coven-composer-meta-workspace">
+                        <Icon name="folder-open" size={13} />
+                        <span className="coven-composer-context" title={workspace}>
+                          {workspace ? `${workspaceLabel}: ${workspace}` : 'No workspace reported'}
+                        </span>
+                      </span>
+                      <button
+                        type="button"
+                        className="coven-composer-meta-settings"
+                        aria-label="Model settings"
+                        aria-haspopup="dialog"
+                        title="Settings › Model"
+                        onClick={() => openSettings('model')}
+                      >
+                        <Icon name="sliders-horizontal" size={14} />
+                      </button>
+                    </>
+                  }
                 >
                   {mentionCompletion.suggestions}
-                  <ContextPicker
-                    key={`${props.familiarId}:${props.sessionId}`}
-                    familiars={props.familiars}
-                    familiarId={props.familiarId}
-                    value={props.draft}
-                    onValueChange={props.onDraft}
-                    textareaRef={composerRef}
-                    disabled={composerDisabled || props.busy}
-                  />
                 </Composer>
                 {onAttach ? (
                   <>
@@ -1713,7 +1933,7 @@ export function ChatLayout(props: ChatLayoutProps) {
                       hidden
                       aria-label="Select text attachments"
                       accept={ATTACHMENT_ACCEPT}
-                      disabled={props.busy || props.attaching}
+                      disabled={composerDisabled || props.busy}
                       onChange={(event) => {
                         onAttach?.(Array.from(event.target.files ?? []));
                         event.target.value = '';
@@ -1728,7 +1948,7 @@ export function ChatLayout(props: ChatLayoutProps) {
                     ) : null}
                   </>
                 ) : null}
-              </fieldset>
+              </div>
             </div>
           </div>
         </main>
@@ -1801,7 +2021,7 @@ export function ChatLayout(props: ChatLayoutProps) {
                         <span className="fr-row-label">Identity</span>
                         <span className="coven-row-path">
                           <code className="fr-row-value coven-row-value--path" title={familiar.id}>
-                            {familiar.id}
+                            <bdi>{familiar.id}</bdi>
                           </code>
                           <CopyButton
                             className="coven-row-copy"
@@ -1818,7 +2038,7 @@ export function ChatLayout(props: ChatLayoutProps) {
                               className="fr-row-value coven-row-value--path"
                               title={familiar.workspace}
                             >
-                              {familiar.workspace}
+                              <bdi>{familiar.workspace}</bdi>
                             </span>
                             <CopyButton
                               className="coven-row-copy"
@@ -1847,7 +2067,7 @@ export function ChatLayout(props: ChatLayoutProps) {
                               ? `This chat runs on ${harnessLabel(chatHarness)}. A chat keeps what it started on.`
                               : `${name}'s chat will start on ${harnessLabel(run.harness)}.`
                           }
-                          onClick={() => openSettings('model')}
+                          onClick={(event) => openSettings('model', event.currentTarget)}
                         >
                           {harnessLabel(chatHarness ?? run.harness)}
                           <span aria-hidden="true"> ›</span>
@@ -1868,12 +2088,12 @@ export function ChatLayout(props: ChatLayoutProps) {
                         )}
                       </div>
                       <div className="fr-row">
-                        <span className="fr-row-label">Access</span>
+                        <span className="fr-row-label">Declared access</span>
                         <button
                           type="button"
                           className="coven-access-summary"
                           aria-haspopup="dialog"
-                          onClick={() => openSettings('access')}
+                          onClick={(event) => openSettings('access', event.currentTarget)}
                         >
                           {accessSummary(projectAccess, familiar.projectAccessUnavailable)}
                           <span aria-hidden="true"> ›</span>
@@ -1920,7 +2140,7 @@ export function ChatLayout(props: ChatLayoutProps) {
                           className="fr-row-value coven-row-value--path"
                           title={`Reported by the latest run: ${props.model}`}
                         >
-                          {props.model}
+                          <bdi>{props.model}</bdi>
                         </code>
                       </div>
                     ) : null}
@@ -1976,6 +2196,7 @@ export function ChatLayout(props: ChatLayoutProps) {
             }}
             preferences={preferences}
             onPreferences={setPreferences}
+            chatHarness={chatHarness}
             archivedFilter={props.archivedFilter}
             onArchivedFilter={props.onArchivedFilter}
             archivedFilterDisabled={props.lifecycleBusy}
@@ -1993,8 +2214,11 @@ export function ChatLayout(props: ChatLayoutProps) {
             connected={props.connected}
             onRefresh={props.onRefresh}
             refreshDisabled={Boolean(props.busy || props.loading || props.lifecycleBusy)}
+            onRefreshProjectAccess={props.onRefreshProjectAccess}
             companion={<CompanionPanel />}
             updates={<UpdatesPanel runActive={Boolean(props.busy)} />}
+            onPermissionLog={props.onPermissionLog}
+            familiarName={(id) => props.familiars.find((item) => item.id === id)?.name ?? id}
           />
         ) : null}
       </div>

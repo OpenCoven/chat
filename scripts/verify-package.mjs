@@ -10,7 +10,7 @@ import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
-export const PRODUCT_NAME = 'OpenCoven Chat';
+export const PRODUCT_NAME = 'Coven Chat';
 export const IDENTIFIER = 'ai.opencoven.chat';
 export const DEFAULT_WINDOW = { width: 1180, height: 780 };
 // The implemented and documented minimum (README, responsive tiers). The
@@ -41,6 +41,10 @@ export const ALLOWED_PERMISSIONS = [
   'allow-coven-runtime-read',
   'allow-coven-runtime-send',
   'allow-coven-runtime-cancel',
+  'allow-coven-runtime-approvals',
+  'allow-coven-runtime-allow',
+  'allow-coven-runtime-decline',
+  'allow-coven-runtime-permission-log',
   'allow-mission-prepare',
   'allow-mission-list',
   'allow-mission-remove',
@@ -107,12 +111,32 @@ export function verifyPackage({ conf, capabilities, cargo, exists }) {
   if (conf.productName !== PRODUCT_NAME)
     fail(`productName is ${conf.productName}, not ${PRODUCT_NAME}.`);
   if (conf.identifier !== IDENTIFIER) fail(`identifier is ${conf.identifier}, not ${IDENTIFIER}.`);
+  if (
+    conf.bundle?.windows?.wix?.upgradeCode?.toLowerCase() !== 'a2a06b97-15fc-5a57-98c4-22c77ca45ea2'
+  )
+    fail('Keep the legacy MSI install identity: pin the OpenCoven Chat UpgradeCode.');
+  if (
+    conf.bundle?.windows?.nsis?.template !== 'installer/installer.nsi' ||
+    !exists('installer/installer.nsi')
+  )
+    fail('Keep the legacy NSIS install identity: use the versioned migration template.');
+  for (const field of ['provides', 'conflicts', 'replaces']) {
+    if (!conf.bundle?.linux?.deb?.[field]?.includes('opencoven-chat'))
+      fail(`Keep the legacy Debian install identity: ${field} must include opencoven-chat.`);
+  }
 
   const windows = conf.app?.windows ?? [];
   const main = windows.find((window) => window.label === 'main');
   if (windows.length !== 1 || !main)
     fail('The package must declare exactly one window, labelled main.');
   else {
+    // WebView2 keeps what is typed into a field in its profile's Web Data while
+    // its general autofill is on, which it is by default, and it may not honor a
+    // field's autocomplete="off" (#546). Conversation text never goes there.
+    if (main.generalAutofillEnabled !== false)
+      fail(
+        'generalAutofillEnabled must be false: WebView2 autofill would keep typed text on disk.',
+      );
     if (main.width !== DEFAULT_WINDOW.width || main.height !== DEFAULT_WINDOW.height)
       fail(
         `The default window is ${main.width}x${main.height}, not ${DEFAULT_WINDOW.width}x${DEFAULT_WINDOW.height}.`,

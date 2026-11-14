@@ -393,13 +393,13 @@ export function MissionPanel({ familiar, name, missions = defaultMissions }: Pro
             <div className="fr-row">
               <span className="fr-row-label">Revision</span>
               <code className="fr-row-value coven-row-value--path" title={preparation.rootId}>
-                {preparation.revisionId}
+                <bdi>{preparation.revisionId}</bdi>
               </code>
             </div>
             <div className="fr-row">
               <span className="fr-row-label">Project</span>
               <code className="fr-row-value coven-row-value--path" title={project.trim()}>
-                {project.trim()}
+                <bdi>{project.trim()}</bdi>
               </code>
             </div>
             <div className="fr-row">
@@ -439,6 +439,7 @@ export function MissionPanel({ familiar, name, missions = defaultMissions }: Pro
           <input
             id={`${id}-statement`}
             className="coven-missions-input"
+            autoComplete="off"
             value={statement}
             maxLength={STATEMENT_LIMIT * 2}
             placeholder="Why does the build fail?"
@@ -450,6 +451,7 @@ export function MissionPanel({ familiar, name, missions = defaultMissions }: Pro
           <textarea
             id={`${id}-prompt`}
             className="coven-missions-input coven-missions-prompt"
+            autoComplete="off"
             value={prompt}
             rows={4}
             placeholder="Read the last CI log and explain why the build fails."
@@ -590,7 +592,7 @@ function MissionCard({
         <div className="fr-row">
           <span className="fr-row-label">Project</span>
           <code className="fr-row-value coven-row-value--path" title={view.projectCwd}>
-            {view.projectCwd}
+            <bdi>{view.projectCwd}</bdi>
           </code>
         </div>
         <div className="fr-row">

@@ -21,13 +21,17 @@ pub(crate) async fn companion_snapshot(app: AppHandle) -> Result<Value, String> 
             validate_id(string(f,"id")?)?;
             Ok(json!({"id":string(f,"id")?,"name":string(f,"name")?,"displayName":string(f,"display_name")?,"description":f.get("description"),"emoji":f.get("emoji")}))
         }).collect::<Result<Vec<Value>,String>>()?;
-        let _storage = crate::chat_lifecycle::STORAGE_LOCK.lock().map_err(|_| "Chat unavailable.")?;
-        let sessions = visible_sessions(&data, &cli_json(&["sessions", "--all", "--json"])?)?;
+        let sessions = {
+            let _storage = crate::chat_lifecycle::STORAGE_LOCK.lock().map_err(|_| "Chat unavailable.")?;
+            visible_sessions(&data, &cli_json(&["sessions", "--all", "--json"])?)?
+        };
         let sessions = sessions.as_array().ok_or("Invalid sessions.")?.iter().map(|s| json!({
             "id":crate::companion::backend::session_alias(s["id"].as_str().unwrap_or("")),
             "familiarId":s["familiarId"],"title":s["title"],"archived":s["archived"]
         })).collect::<Vec<_>>();
-        Ok(json!({"version":1,"familiars":familiars,"sessions":sessions,"activeRun":null}))
+        // Takes the storage lock itself, so it runs after that hold has ended.
+        let approvals = crate::chat_approvals::open_requests(&data, crate::chat_approvals::now_ms())?;
+        Ok(json!({"version":1,"familiars":familiars,"sessions":sessions,"activeRun":null,"pendingApprovals":approvals}))
     }).await
 }
 
@@ -72,7 +76,6 @@ pub(crate) fn companion_start(
     app: AppHandle,
     request: crate::companion::backend::SendRequest,
 ) -> Result<Arc<crate::companion::backend::RunRecord>, String> {
-    use tauri::Emitter;
     if !cfg!(unix) {
         return Err("Companion execution requires macOS or Linux.".into());
     }
@@ -83,6 +86,90 @@ pub(crate) fn companion_start(
         .app_local_data_dir()
         .map_err(|_| "Cannot locate chat storage.")?;
     let (cancel, registration) = state.register_run(&request.request_id)?;
+    companion_run(app.clone(), data, request, cancel, registration, None)
+}
+
+/// The phone's Allow. It runs like a message from the phone, in the Mac's
+/// process, so the window follows it and either device can stop it.
+pub(crate) fn companion_allow(
+    app: AppHandle,
+    request_id: String,
+    approval_id: String,
+) -> Result<Arc<crate::companion::backend::RunRecord>, String> {
+    if !cfg!(unix) {
+        return Err("Companion execution requires macOS or Linux.".into());
+    }
+    validate_id(&request_id)?;
+    validate_id(&approval_id)?;
+    let state = app.state::<CovenRuntimeState>();
+    let data = app
+        .path()
+        .app_local_data_dir()
+        .map_err(|_| "Cannot locate chat storage.")?;
+    // Allow spends the request, so the run slot comes first: a busy runtime
+    // leaves the request open for the person to try again.
+    let (cancel, registration) = state.register_run(&request_id)?;
+    let grant = crate::chat_approvals::allow_request(
+        &data,
+        &approval_id,
+        crate::chat_approvals::Device::Iphone,
+        &request_id,
+        crate::chat_approvals::now_ms(),
+    )?;
+    let request = crate::companion::backend::SendRequest {
+        request_id,
+        familiar_id: grant.familiar_id.clone(),
+        session_id: Some(crate::companion::backend::session_alias(&grant.session_id)),
+        prompt: crate::chat_approvals::allowed_prompt(&grant.summary),
+    };
+    companion_run(
+        app.clone(),
+        data,
+        request,
+        cancel,
+        registration,
+        Some(grant),
+    )
+}
+
+pub(crate) fn companion_open_approval(
+    app: &AppHandle,
+    approval_id: &str,
+) -> Result<Option<String>, String> {
+    let data = app
+        .path()
+        .app_local_data_dir()
+        .map_err(|_| "Cannot locate chat storage.")?;
+    crate::chat_approvals::open_familiar(&data, approval_id, crate::chat_approvals::now_ms())
+}
+
+pub(crate) fn companion_decline(app: &AppHandle, approval_id: &str) -> Result<(), String> {
+    let data = app
+        .path()
+        .app_local_data_dir()
+        .map_err(|_| "Cannot locate chat storage.")?;
+    decline_request(&data, approval_id, crate::chat_approvals::Device::Iphone)
+}
+
+pub(crate) fn companion_permission_log(app: &AppHandle) -> Result<Value, String> {
+    let data = app
+        .path()
+        .app_local_data_dir()
+        .map_err(|_| "Cannot locate chat storage.")?;
+    let entries = crate::chat_approvals::recent(&data, PERMISSION_LOG_LIMIT)?;
+    Ok(json!({"entries": entries}))
+}
+
+fn companion_run(
+    app: AppHandle,
+    data: PathBuf,
+    request: crate::companion::backend::SendRequest,
+    cancel: Arc<AtomicBool>,
+    registration: RunRegistration,
+    grant: Option<crate::chat_approvals::Grant>,
+) -> Result<Arc<crate::companion::backend::RunRecord>, String> {
+    use tauri::Emitter;
+    let state = app.state::<CovenRuntimeState>();
     let record = crate::companion::backend::RunRecord::new(
         request.request_id.clone(),
         request.familiar_id.clone(),
@@ -129,6 +216,7 @@ pub(crate) fn companion_start(
                 think: false,
                 speed: None,
                 attachments: Vec::new(),
+                grant,
             };
             send_local(&data, input, &cancel, &mut |event| {
                 worker_record.observe(event.clone())?;

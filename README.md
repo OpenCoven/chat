@@ -1,8 +1,8 @@
-<p align="center"><img src="assets/brand/chat-app-icon-rounded.svg" width="96" height="96" alt="OpenCoven Chat logo: the OpenCoven crown inside a speech bubble"></p>
+<p align="center"><img src="assets/brand/chat-app-icon-rounded.svg" width="96" height="96" alt="Coven Chat logo: the OpenCoven crown inside a speech bubble"></p>
 
-# OpenCoven Chat
+# Coven Chat
 
-OpenCoven Chat is a desktop app for chatting with your familiars through the Coven CLI installed
+Coven Chat is a desktop app for chatting with your familiars through the Coven CLI installed
 on your computer. Each familiar has one ongoing chat, and the window shows real runs as they
 happen. You don't need Cave, a Cave pairing, or a separate demo build.
 
@@ -33,7 +33,7 @@ it with the arrow and page keys without focusing a control inside it.
 The interface follows your system's light or dark appearance. Both palettes hold all visible text
 to WCAG AA contrast, checked on the rendered app in each scheme.
 
-The window title names the familiar you're viewing, such as `Astra — OpenCoven Chat`. When runs
+The window title names the familiar you're viewing, such as `Astra — Coven Chat`. When runs
 have ended in other chats you haven't opened yet, the title leads with a count, so a window in the
 background shows that a reply is waiting.
 
@@ -51,7 +51,8 @@ previous 880px limit), while the app frame stays still. The window can shrink to
 
 While both rails are in the grid, the inspector can be resized. Drag its left edge, or Tab to the
 **Resize inspector** handle on that edge and press **Left** or **Right** (16px a step; the keys
-mirror in a right-to-left layout), or **Home** and **End** for the ends. It ranges from 280px to
+mirror in a right-to-left layout), or **Home** and **End** for the ends. The handle gives screen readers
+its width in pixels. It ranges from 280px to
 600px, and the conversation column always keeps at least 440px, so a narrower window or an open
 familiars list can hold the inspector under your choice for a while; the width you chose comes back
 when there is room. The default is 360px, and Settings → General shows the current width with a
@@ -67,6 +68,7 @@ handle; drawers keep their own width.
 | **Cmd/Ctrl+K** | Go to the familiar search, opening the list if it's closed |
 | **Cmd/Ctrl+[** and **Cmd/Ctrl+]** | Step to the previous or next familiar, in the list's own order and filter |
 | **Cmd/Ctrl+F** | Open a find bar over the conversation that counts the messages and tool calls containing your text |
+| **Escape** | Stop the run in progress, as the composer's **esc · stop** control says |
 
 In the find bar, **Enter** and **Shift+Enter** step through the matches, scrolling each into view,
 and **Escape** closes it.
@@ -74,6 +76,13 @@ and **Escape** closes it.
 These shortcuts work while you're composing and leave your text unchanged. They stay quiet while a
 dialog or menu is open, and the rail buttons show shortcut hints. Modal dialogs and input-method
 composition don't trigger them.
+
+**Escape** stops a run from the composer, and from anywhere else in the window unless something
+else is using the key: an open dialog or menu, another text field such as the familiar search, or
+an open drawer, the find bar or a passage waiting to be quoted, which Escape closes first. Holding
+the key down doesn't carry on from one to the next. It stops only the run in the chat you're
+viewing: a run in another familiar's chat keeps going until you use its **Stop run** control. Your
+draft stays where it was, and focus comes back to the composer when the run has stopped.
 
 Typing a letter while nothing editable has focus starts a message: the keystroke moves to the
 composer and lands there, unless the composer can't send or a dialog or menu is open.
@@ -90,7 +99,9 @@ file access.
 **Settings › Access** lists that same declared access, write grants first, and says plainly that
 Chat neither enforces nor extends it. The **Access** row in the inspector's Overview opens it. When
 no access is declared, it says so. When Chat couldn't read the registry or grants, it says that
-instead, so an unreadable store never looks like an empty one.
+instead, so an unreadable store never looks like an empty one. Chat can't read them on Windows yet:
+there, Settings says so whenever Coven Cave has project metadata, and points to the familiar's
+**Projects** tab in Coven Cave.
 
 You can also type **`@name`** or **`#project`** directly in your message for inline suggestions.
 Use the arrow keys to choose and **Tab** to confirm, or **Escape** to dismiss. The optional
@@ -105,16 +116,26 @@ local metadata without needing Cave to run, and it doesn't import conversations 
 permissions. Without a configured registry and grants, Chat assumes no project access. Choose
 **Refresh Coven** after you change grants.
 
-The composer shows the reported chat project, or the familiar workspace when no chat project has
-been reported. This is observed context, not a workspace switch or a permission grant. On modern
-desktop webviews the reference picker opens above the app, so long paths don't push the composer
-out of view.
+The composer is one framed box: the message field, then a toolbar with attach (**+**, in Coven
+Code chats) and **Add context** on the left and **Send** on the right, then a details row. The details row shows what
+Chat knows about where the message goes: the familiar and its access (**Full access**), the
+harness the chat runs on, or that a new chat will start on, the model from
+**Settings › Model** (**Engine default** when none is set), and the reported chat project, or the
+familiar workspace when no chat project has been reported. This is observed context, not a
+workspace switch or a permission grant. The sliders button at the end of the row opens **Settings
+› Model**. In a narrow window the row wraps and the path is cut short; hover it for the whole path.
+On modern desktop webviews the reference picker opens above the app, so long paths don't push the
+composer out of view.
 
 ## While a run is going
 
-Run status and **Stop** stay beside the composer. Until reply text starts to stream, the end of the
-thread shows the familiar's avatar with what the run is doing right now: waiting for the familiar,
-running a named tool, or stopping. The status counts how long the run has been going. After thirty
+Run status and **Stop** stay beside the composer. While a run is going, **Send** becomes an **esc ·
+stop** control, and Escape stops the run (see **Keyboard shortcuts**). You can keep typing: Chat
+doesn't queue messages, so what you type stays in the composer, and you send it once the reply ends.
+A line above the composer says so while there's a draft, because the draft covers the placeholder.
+
+Until reply text starts to stream, the end of the thread shows the familiar's avatar with what the
+run is doing right now: waiting for the familiar, running a named tool, or stopping. The status counts how long the run has been going. After thirty
 seconds without a sign of life, the row says it's still waiting, or still running the tool.
 
 **Jump to latest** returns you to new output after you scroll back, and counts the messages that
@@ -164,6 +185,9 @@ sent. A quote is ordinary draft text: edit or delete it before sending like anyt
   action, nothing is added and the action asks you to select the passage again.
 - **Dismiss quote** or Escape closes the action. While a passage waits to be quoted, the
   conversation holds its place instead of following a streaming reply.
+- Tab reaches the action from the passage, past any links in or after it, even where moving focus
+  clears the selection, as it does on macOS and Linux. Clicking elsewhere, Escape in the
+  conversation, a new selection, or Tab out of the conversation and composer lets the passage go.
 - The selection is held in memory only while the action is open, and is never stored.
 
 ## When the list is empty
@@ -190,6 +214,8 @@ or press **Cmd/Ctrl+,**. It has seven sections:
 - **Devices:** the **iPhone companion**.
 - **Shortcuts:** every keyboard shortcut.
 - **About:** the app version, **Updates**, whether Chat reached the Coven CLI, and what the window stores.
+
+Settings content scrolls inside its panel. Tab past **Close settings** to focus the content, then use the arrow or page keys to scroll; on macOS, use Option+Tab if Tab skips controls. Opening another section starts at its top.
 
 **Settings › Model** chooses what runs your messages:
 
@@ -278,11 +304,7 @@ assistant replies. When a capability is unavailable, Chat says so instead of sim
 Installing Coven doesn't configure a model provider, so complete any provider setup your CLI needs
 before you start a run.
 
-New chats run on Coven's bundled `coven-code` engine unless **Settings › Model** says Codex or
-Claude Code. Every run has explicit read-only permissions. Chat doesn't grant write access or
-simulate approval controls. The native runtime supports macOS, Linux, and
-Windows. Every run's process tree is contained (as a process group on macOS and Linux, and as a
-kill-on-close job on Windows), so **Stop** ends the Coven CLI together with everything it started.
+New chats run on Coven's bundled `coven-code` engine unless **Settings › Model** says Codex or Claude Code. Familiar chats run with full access under the desktop user's account, including sends from a paired iPhone. Familiars can change files and run commands without per-turn approval. The native runtime supports macOS, Linux, and Windows. Every run's process tree is contained (as a process group on macOS and Linux, and as a kill-on-close job on Windows), so **Stop** ends the Coven CLI together with everything it started.
 
 The frozen SDK artifacts stay pinned. Chat doesn't expand their existing health and conformance
 contracts into undocumented chat methods, and the standalone runtime doesn't fall back to Cave.
@@ -414,7 +436,10 @@ Switching familiar or chat closes an open review, and so does its message going 
 returns to the conversation. Chat won't open or copy an address over 8,192 bytes once encoded, or
 one that isn't a complete web address, and never shortens one to fit; the reply's **Copy** still
 copies it as written. Because links in a reply carry no address of their own, the right-click menu
-offers only text actions. Chat keeps no address after the review closes.
+offers only text actions. On Windows and Linux, Chat takes the web view's page actions (Back,
+Reload, Save as, Print and the like) out of that menu, since they would reload or navigate Chat's
+own window, so a right-click with no text to act on, such as on a link with nothing selected, opens
+no menu there. Chat keeps no address after the review closes.
 
 Each table in a reply has two controls above it. **Copy table Markdown** copies that table's
 source exactly as the reply wrote it, escapes, alignment markers, links and inline code included,
@@ -571,7 +596,7 @@ filesystem, or HTTP command to the webview, and grants no Tauri shell, filesyste
 network plugin permission. The main window's capability, `src-tauri/capabilities/default.json`,
 lets it invoke only:
 
-- the seven `coven_runtime_*` commands the chat interface uses,
+- the eleven `coven_runtime_*` commands the chat interface uses,
 - the eight `mission_*` commands that send one read-only familiar mission, follow it,
   cancel it and remove it (#155), which keep each mission's keys on the native side,
 - the four `setup_*` commands of first-run setup,

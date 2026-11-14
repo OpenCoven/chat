@@ -233,11 +233,7 @@ assignment, RPC decoder and primary/secondary exception pipeline. This fixture
 correction does not establish the protected installation failure's cause or
 relax the round-trip assertions.
 
-The lock now selects reviewed source `6820a96d030b387093c37b324a42a44e949df84b`,
-tree `05e3d1daf62f9cf12ed2358c03f39b5da521beff`, including all 25 governed files
-and ten production deltas. The checkout regression exercises all five labels
-from that immutable revision. SDK rebinding, both scope rotations and fresh
-protected validation remain required; this binding alone is not acceptance.
+The lock now selects reviewed source `3aa2ed6a4fcdee9db4470c4466ed8ead910273d1`, tree `4f8135af87a8b6f723ddbc40007130e7dc19f935`, including all 25 governed files and ten production deltas. The checkout regression exercises all five labels from that immutable revision. SDK rebinding, both scope rotations and fresh protected validation remain required; this binding alone is not acceptance.
 
 ## Cave rc.7 adoption (landed)
 
@@ -1199,16 +1195,12 @@ explicitly skip, and must not claim, the privileged UID/cgroup runtime results.
 
 ### Windows pre-bootstrap trust boundary
 
-The `win32-x64` matrix expansion does not begin with checkout or a setup
-action. Its first step is inline `pwsh` reviewed as part of the workflow
-itself. Before network access or repository mutation, that step requires the
-GitHub `windows-2025-vs2026` x64 image with one of two reviewed image
-profiles:
+The `win32-x64` matrix expansion begins with inline `pwsh` reviewed as part of the workflow itself. Before network access or repository mutation, that step requires the GitHub `windows-2025-vs2026` x64 image with one of two reviewed image profiles:
 
 | Image version | Visual Studio | Windows build | PowerShell | .NET runtime |
 | --- | --- | --- | --- | --- |
-| `20260907.229.1` | `18.9.12120.119` | `26100.33296` | `7.6.5` | `10.0.11` |
 | `20260922.246.2` | `18.10.12210.168` | `26100.33438` | `7.6.6` | `10.0.12` |
+| `20261103.298.1` | `18.11.12328.437` | `26100.33674` | `7.6.9` | `10.0.14` |
 
 The image selects its whole profile. Unknown images and any crossed value are
 rejected. GitHub deploys a new image gradually, so for a while runners serve
@@ -2099,7 +2091,7 @@ revision authorities can therefore have different workflow hashes:
 
 | File | Bytes | SHA-256 |
 | --- | ---: | --- |
-| `.github/workflows/client-v1-conformance.yml` | 183,220 | `d71071d3a3d99472021e6b90e2299cc1b87b720a65356086ff205874e202b7fa` |
+| `.github/workflows/client-v1-conformance.yml` | 183,221 | `65bfabe1685aa6f6efb9aa7d33e244735fc6230308ac62bc22e7b6f101d0afd4` |
 | `scripts/contract-canary.mjs` | 40,618 | `a4c2fe0a5eb6a5ff4653de5374c34c0fb46907c6806a5d23b86d8b37206ef958` |
 | `scripts/executable-resolution.mjs` | 9,154 | `31e3c412ff8c835f14522f36a59e91f4a4ba82913210ae8e3b4455217503f430` |
 | `scripts/owned-temp-directory.mjs` | 9,205 | `1ba30d2d5f0312143e2837956899a4f3f116f3619937d5d9756ff197ecb2a325` |
@@ -2119,9 +2111,9 @@ revision authorities can therefore have different workflow hashes:
 | `scripts/phase1-linux-secret-service.sh` | 5,650 | `83ce19c0dd6da5002f6853fa37addb4fc2d39f3d17beee1b1c39e1fce232b476` |
 | `scripts/unix-artifact-handoff.c` | 18,704 | `2a003f9aa1d1886b9a593371a73cb65fe3a4a8b703f1c59fec8a27694367b7fc` |
 | `scripts/unix-producer-command.sh` | 3,223 | `ce9ec2ff00947f3ec0db53f144c99d34bc27de6085062d00dccff7c934c2e3c8` |
-| `scripts/unix-producer-supervisor.sh` | 29,424 | `b73036415744c80ed27d5667f255ceea149096ca517b47c93a154299802206ff` |
+| `scripts/unix-producer-supervisor.sh` | 29,728 | `a78b9b6b809fd8a094db2c41603fbfb594ab4598e7752f32290d71fa2c8c35b6` |
 | `scripts/unix-producer-supervisor-attack.c` | 6,211 | `e485ebebb6570b06f179c03a3849224d59d96400b7cadd5547067cce35239642` |
-| `scripts/unix-producer-supervisor.test.sh` | 13,348 | `a8c6f48915b0c86a704a7ddc28eaa7f808ae0a3ddfcdb38c0c23ac0d83738f6d` |
+| `scripts/unix-producer-supervisor.test.sh` | 13,429 | `31f5023d4f54ca8ec867404e600996bb7da655c2d8903ff08c4f688ff4fc93bb` |
 | `scripts/phase1-windows-supervisor-build.sh` | 4,646 | `713a9e0282887ade3e243b5ba175794d74cdb02c28c38dcd41491c9505812770` |
 | `scripts/phase1-windows-supervisor-install.ps1` | 1,743 | `2baab275f0bb6789884cded5f6185d00bfa5348b9e7c3ad1e5575353639101d5` |
 | `scripts/windows-job-supervisor.cs` | 402,329 | `1f6a6d210b3551688dcb530bc4513f9f18578b35e681720139afec26b372c823` |
@@ -3086,3 +3078,25 @@ hosted supersession/replacement validation; it closed on 2026-09-16. The motivat
 `35117564510` was cancelled while its Windows job continued to completion; the
 replacement run `35118809575` subsequently passed all eleven jobs. That history
 does not validate the new cancellation guard.
+
+
+The #558 protected run 42550212128 stopped on the unreviewed Windows image 20261103.298.1 and a Homebrew Rust launcher dispatch mismatch on macOS. Read-only profile run 42552224366 observed Windows build 26100.33674, PowerShell 7.6.9, .NET 10.0.14 and Visual Studio 18.11.12328.437 on that image; kernel32 10.0.26100.33296, MSVC 14.44.35207 and Windows SDK 10.0.26100.0 remain available. The current exact profile is updated to that observed combination, retaining the previously reviewed 20260922.246.2 combination as the second allowed profile. Unknown images and mixed profile versions still fail closed. The trusted Unix cargo and rustc launchers explicitly dispatch through rustup run 1.95.0, preserving the private toolchain homes, root ownership, read-only staging and producer containment. These fixes require a new reviewed authority and SDK binding before another protected execution; this source change is not a successful conformance receipt.
+
+
+The #558 native runner compatibility authority is f8d4dd4263c28fa5943426f53ee72910ec0caeae, tree 92a2e2fc9170ac6cc2b629da727e6ba4c7d17571. The separate repin reviews all 25 governed files and ten production deltas; only the protected workflow and trusted Unix supervisor differ from authority 3aa2ed6a4fcdee9db4470c4466ed8ead910273d1. The explicit pinned Rust dispatch and observed complete Windows image profile require a matching delivered SDK validator and fresh protected execution before acceptance.
+
+## v0.1.0 package-version authority
+
+The v0.1.0 release bump landed in merge commit `ef4d020710eb62f3f13ca88cf60dafd7f32082f4`, tree `248a691a9a80374ca421aaa479feb8c0905764d4`. The follow-up repin binds all 25 governed files and ten production deltas to that existing merge on main. Only `src-tauri/Cargo.toml` and `src-tauri/Cargo.lock` differ from the preceding authority, and their changes are the application package version from 0.0.9 to 0.1.0. The Chat, SDK, Cave, Coven, and evidence pins remain unchanged; this source-authority refresh does not claim a new protected SDK validation run.
+
+## v0.1.1 package-version authority
+
+The v0.1.1 version content landed in merge commit `07d63f8d09ef8bbb7d70b128280687ccd081e834`, tree `63dd4a513e4ba0cbe0f6795f2666bd0064beab7c`. This follow-up repins all 25 governed files and ten production deltas to that existing main merge. Only the two Cargo application-version hashes change from the previous authority. The release tag must be created after this repin lands and must pass the trusted freshness guard before being pushed. Other repository and evidence pins remain unchanged, and no new protected SDK validation is claimed.
+
+## November 2026 dependency security authority
+
+The dependency security patch in PR #599 landed in merge commit `40ac93ccc604b1933cb8dc26c7cf06a05e5bb442`, tree `58fdbeea4698b141819406a33aa0b5feea88aeed`. This follow-up binds all 25 governed files and ten production deltas to that existing main merge. Only the Cargo manifest and lockfile identities change from the preceding authority, reflecting rustls 0.23.46. All other repository, tool and evidence pins remain unchanged. This source-authority refresh does not claim a new protected SDK validation run.
+
+## v0.1.2 package-version authority
+
+The v0.1.2 release content and Settings repairs in PR #613 landed in merge commit `0ba58aa94e73182701255dc44c0d34d550cf017f`, tree `ed90a36bea99f420f6033e353c0fe79e54fb3ac5`. This separate repin binds all 25 governed files and 10 production deltas to that existing first-parent merge on main. Three production identities change from the previous authority: the application version in `src-tauri/Cargo.toml` and `src-tauri/Cargo.lock`, and the Coven Chat product name in the startup error in `src-tauri/src/lib.rs` from #614. All remaining repository, tool and evidence pins stay unchanged. This records the source authority for the release; it does not claim a new protected SDK validation run.

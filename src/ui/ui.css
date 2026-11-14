@@ -73,24 +73,14 @@
 }
 
 :where([data-slot="button"][data-variant="presence"]) {
-  background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.1), rgba(255, 255, 255, 0.03)),
-    color-mix(in oklch, var(--oc-presence) 26%, var(--bg-elevated, #232327));
-  border-color: color-mix(in oklch, var(--oc-presence) 45%, rgba(255, 255, 255, 0.12));
-  color: var(--text-primary, #f0eff4);
-  box-shadow:
-    0 1px 2px rgba(0, 0, 0, 0.5),
-    inset 0 1px 0 rgba(255, 255, 255, 0.16);
+  background: var(--oc-presence);
+  border-color: transparent;
+  color: var(--accent-presence-foreground, #0c0c0e);
+  box-shadow: none;
 }
 
 :where([data-slot="button"][data-variant="presence"]):hover {
-  background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.14), rgba(255, 255, 255, 0.04)),
-    color-mix(in oklch, var(--oc-presence) 34%, var(--bg-elevated, #232327));
-}
-
-:where([data-slot="button"][data-variant="presence"]):active {
-  transform: translateY(1px);
+  background: color-mix(in srgb, var(--oc-presence) 88%, var(--text-primary, #f0eff4));
 }
 
 :where([data-slot="button"][data-variant="outline"]) {
@@ -369,7 +359,7 @@
   overflow: hidden;
 }
 
-:where([data-slot="send-control"]) .oc-send-main {
+:where([data-slot="send-control"][data-options]) .oc-send-main {
   border-start-end-radius: 0;
   border-end-end-radius: 0;
 }
@@ -391,43 +381,45 @@
   display: grid;
   gap: 0;
   border: 1px solid var(--border-strong, rgba(255, 255, 255, 0.16));
-  border-radius: 10px;
-  background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.03), transparent 40%), var(--bg-raised, #1c1c1f);
-  box-shadow:
-    0 12px 32px -18px rgba(0, 0, 0, 0.9),
-    0 1px 2px rgba(0, 0, 0, 0.5),
-    inset 0 1px 0 rgba(255, 255, 255, 0.05);
+  border-radius: 14px;
+  background: var(--bg-raised, #1c1c1f);
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.08);
   transition:
     border-color 160ms,
-    box-shadow 240ms;
+    box-shadow 160ms;
 }
 
-/* A full-strength 2px ring (border plus 1px spread) keeps focus visible at 3:1. */
 :where([data-slot="composer"]):focus-within {
   border-color: var(--ring-focus, #a79bf5);
-  box-shadow:
-    0 0 0 1px var(--ring-focus, #a79bf5),
-    0 0 0 4px color-mix(in srgb, var(--ring-focus, #a79bf5) 12%, transparent),
-    0 16px 40px -16px rgba(0, 0, 0, 0.9),
-    inset 0 1px 0 rgba(255, 255, 255, 0.05);
+  box-shadow: 0 0 0 1px var(--ring-focus, #a79bf5);
 }
 
 :where([data-slot="composer"][data-tone="warning"]) {
   border-color: color-mix(in oklch, var(--color-warning, oklch(0.76 0.08 78)) 50%, transparent);
 }
 
+/* The field first, then one toolbar row, then the host's details row. */
+.oc-composer-label {
+  display: block;
+  padding: 8px 12px 0;
+  font-size: 12px;
+  color: var(--text-secondary, #a2a1ab);
+}
+
+.oc-composer-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 8px;
+  min-width: 0;
+  padding: 0 8px 8px;
+}
+
 .oc-composer-bar {
   display: flex;
   align-items: center;
-  gap: 2px;
-  padding: 4px 6px 0 6px;
-}
-
-.oc-composer-label {
-  margin-left: 6px;
-  font-size: 12px;
-  color: var(--text-secondary, #a2a1ab);
+  gap: 4px;
+  min-width: 0;
 }
 
 .oc-composer-spacer {
@@ -500,9 +492,20 @@ textarea[data-slot="textarea"]:focus-visible {
 .oc-composer-footer {
   display: flex;
   align-items: center;
-  justify-content: space-between;
   gap: 8px;
-  padding: 4px 8px 8px 12px;
+  margin-inline-start: auto;
+}
+
+.oc-composer-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 12px;
+  min-width: 0;
+  padding: 6px 12px;
+  border-top: 1px solid var(--border-hairline, rgba(255, 255, 255, 0.08));
+  font-size: 11px;
+  color: var(--text-muted, #8e8d97);
 }
 
 .oc-composer-hint {

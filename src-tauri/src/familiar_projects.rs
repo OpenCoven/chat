@@ -398,19 +398,23 @@ fn read_store<T: DeserializeOwned>(
     path: &Path,
     legacy: Option<&Path>,
 ) -> Result<Option<T>, String> {
-    let file = match open_metadata(path) {
+    read_store_with(path, legacy, open_metadata)
+}
+
+fn read_store_with<T: DeserializeOwned>(
+    path: &Path,
+    legacy: Option<&Path>,
+    open: fn(&Path) -> io::Result<File>,
+) -> Result<Option<T>, String> {
+    let file = match open(path) {
         Ok(file) => file,
-        // `Unsupported` is the no-follow reader declining to read at all on
-        // this platform. That is an absent store, not a broken one; failing
-        // here would take every familiar down with it.
-        Err(error)
-            if matches!(
-                error.kind(),
-                io::ErrorKind::NotFound | io::ErrorKind::Unsupported
-            ) =>
-        {
+        // Only a store that isn't there is absent. One this build can't read
+        // safely (`Unsupported`: Windows, #587) is unreadable, so Settings says
+        // Chat couldn't read it rather than that nothing is declared. The
+        // caller marks every familiar's access unknown and keeps the list.
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {
             return match legacy {
-                Some(legacy) => read_store(legacy, None),
+                Some(legacy) => read_store_with(legacy, None, open),
                 None => Ok(None),
             };
         }
@@ -485,11 +489,15 @@ fn open_metadata(path: &Path) -> io::Result<File> {
     Ok(directory)
 }
 
+/// Windows has no reader that refuses links yet (#587). A store that isn't
+/// there is still absent, so "no access is declared" stays true for someone
+/// without Coven Cave; one that is there is reported as unreadable.
 #[cfg(not(unix))]
-fn open_metadata(_path: &Path) -> io::Result<File> {
+fn open_metadata(path: &Path) -> io::Result<File> {
+    std::fs::symlink_metadata(path)?;
     Err(io::Error::new(
         io::ErrorKind::Unsupported,
-        "Safe Cave metadata loading is unavailable on this platform.",
+        "Chat can't read Coven Cave's project metadata on this platform yet.",
     ))
 }
 
@@ -540,6 +548,40 @@ mod tests {
             fs::set_permissions(&self.0, fs::Permissions::from_mode(0o700)).unwrap();
             fs::remove_dir_all(&self.0).unwrap();
         }
+    }
+
+    fn unsupported(_: &Path) -> io::Result<File> {
+        Err(io::Error::new(io::ErrorKind::Unsupported, "no safe reader"))
+    }
+
+    fn missing(_: &Path) -> io::Result<File> {
+        Err(io::Error::new(io::ErrorKind::NotFound, "absent"))
+    }
+
+    #[test]
+    fn a_store_this_platform_cannot_read_is_unreadable_not_empty() {
+        // Windows reported "no project access is declared" for familiars that
+        // Coven Cave gave projects, because Unsupported read as absent (#587).
+        let error = read_store_with::<Value>(Path::new("/cave/projects.json"), None, unsupported)
+            .unwrap_err();
+        assert!(error.starts_with("Cannot open Cave metadata"), "{error}");
+        let legacy = Path::new("/legacy/projects.json");
+        assert!(read_store_with::<Value>(
+            Path::new("/cave/projects.json"),
+            Some(legacy),
+            unsupported
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn a_missing_store_is_absent_and_falls_back_to_the_legacy_path() {
+        let legacy = Path::new("/legacy/projects.json");
+        assert_eq!(
+            read_store_with::<Value>(Path::new("/cave/projects.json"), Some(legacy), missing)
+                .unwrap(),
+            None
+        );
     }
 
     #[test]

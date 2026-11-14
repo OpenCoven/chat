@@ -12,37 +12,73 @@ use std::{
 pub(super) struct FixtureBackend {
     pub starts: AtomicUsize,
     pub active: Mutex<Option<Arc<RunRecord>>>,
+    /// Open after a message that says it needs permission, until it's answered.
+    pub approval_open: AtomicBool,
+    pub answers: Mutex<Vec<&'static str>>,
+}
+/// The one request the fixture can raise.
+pub(super) const FIXTURE_APPROVAL: &str = "fixture-approval";
+impl FixtureBackend {
+    fn begin(
+        &self,
+        request_id: String,
+        familiar_id: String,
+        prompt: &str,
+    ) -> Result<Arc<RunRecord>, String> {
+        let mut active = self.active.lock().unwrap();
+        if active.as_ref().is_some_and(|r| r.running()) {
+            return Err("Busy".into());
+        }
+        self.starts.fetch_add(1, Ordering::SeqCst);
+        let run = RunRecord::new(request_id, familiar_id, Arc::new(AtomicBool::new(false)));
+        run.observe(json!({"type":"user","message":{"content":[{"type":"text","text":prompt}]}}))?;
+        *active = Some(run.clone());
+        Ok(run)
+    }
+    fn answer(&self, id: &str, answer: &'static str) -> Result<(), String> {
+        if id != FIXTURE_APPROVAL || !self.approval_open.swap(false, Ordering::SeqCst) {
+            return Err("This request was already answered.".into());
+        }
+        self.answers.lock().unwrap().push(answer);
+        Ok(())
+    }
 }
 #[async_trait::async_trait]
 impl Backend for FixtureBackend {
     async fn snapshot(&self) -> Result<Value, String> {
+        let approvals = if self.approval_open.load(Ordering::SeqCst) {
+            json!([{"id":FIXTURE_APPROVAL,"familiarId":"fixture","summary":"Create fixture.txt","reason":"The fixture needs a new file","requestedAt":1,"expiresAt":4_102_444_800_000u64}])
+        } else {
+            json!([])
+        };
         Ok(
-            json!({"version":1,"familiars":[{"id":"fixture","name":"fixture","displayName":"Fixture Familiar","description":"Native transport acceptance fixture","emoji":"🧪"}],"sessions":[],"activeRun":null}),
+            json!({"version":1,"familiars":[{"id":"fixture","name":"fixture","displayName":"Fixture Familiar","description":"Native transport acceptance fixture","emoji":"🧪"}],"sessions":[],"activeRun":null,"pendingApprovals":approvals}),
         )
     }
     async fn history(&self, familiar: String) -> Result<Value, String> {
         if familiar != "fixture" {
             return Err("Unknown fixture familiar".into());
         }
+        let mut messages = vec![
+            json!({"id":"fixture-history","role":"assistant","text":"Secure companion connected."}),
+        ];
+        if self.answers.lock().unwrap().contains(&"allowed") {
+            messages.push(
+                json!({"id":"fixture-allowed","role":"assistant","text":"Created fixture.txt."}),
+            );
+        }
         Ok(
-            json!({"sessionId":null,"messages":[{"id":"fixture-history","role":"assistant","text":"Secure companion connected."}],"hasMore":false,"activeRunId":self.active().map(|r|r.id.clone())}),
+            json!({"sessionId":null,"messages":messages,"hasMore":false,"activeRunId":self.active().map(|r|r.id.clone())}),
         )
     }
     fn start(&self, input: SendRequest) -> Result<Arc<RunRecord>, String> {
-        let mut active = self.active.lock().unwrap();
-        if active.as_ref().is_some_and(|r| r.running()) {
-            return Err("Busy".into());
+        let run = self.begin(input.request_id, input.familiar_id, &input.prompt)?;
+        if input.prompt.contains("needs permission") {
+            self.approval_open.store(true, Ordering::SeqCst);
+            run.observe(json!({"type":"text_delta","text":"This needs write access."}))?;
+            run.finish(&Ok(json!({})));
+            return Ok(run);
         }
-        self.starts.fetch_add(1, Ordering::SeqCst);
-        let run = RunRecord::new(
-            input.request_id,
-            input.familiar_id,
-            Arc::new(AtomicBool::new(false)),
-        );
-        run.observe(
-            json!({"type":"user","message":{"content":[{"type":"text","text":input.prompt}]}}),
-        )?;
-        *active = Some(run.clone());
         let worker = run.clone();
         tokio::spawn(async move {
             for part in ["Fixture ", "reply ", "arrived."] {
@@ -53,15 +89,13 @@ impl Backend for FixtureBackend {
                 }
                 let _ = worker.observe(json!({"type":"text_delta","text":part}));
             }
-            // Long enough for simulator UI acceptance to exercise Stop.
-            for _ in 0..100 {
-                if worker.cancel.load(Ordering::SeqCst) {
-                    worker.finish(&Err("Stopped".into()));
-                    return;
-                }
+            // The UI flow must exercise Stop, even when XCTest waits longer
+            // than ten seconds for the Send tap to settle on a hosted runner.
+            // Fixture shutdown also ends the worker when a test fails.
+            while !worker.cancel.load(Ordering::SeqCst) {
                 tokio::time::sleep(Duration::from_millis(100)).await;
             }
-            worker.finish(&Ok(json!({})));
+            worker.finish(&Err("Stopped".into()));
         });
         Ok(run)
     }
@@ -80,6 +114,28 @@ impl Backend for FixtureBackend {
             .ok_or("Run not found")?;
         active.cancel.store(true, Ordering::SeqCst);
         Ok(())
+    }
+    fn open_approval(&self, approval_id: &str) -> Result<Option<String>, String> {
+        let open = approval_id == FIXTURE_APPROVAL && self.approval_open.load(Ordering::SeqCst);
+        Ok(open.then(|| "fixture".to_owned()))
+    }
+    fn allow(&self, request_id: String, approval_id: String) -> Result<Arc<RunRecord>, String> {
+        if self.active().is_some() {
+            return Err("Busy".into());
+        }
+        self.answer(&approval_id, "allowed")?;
+        let run = self.begin(request_id, "fixture".into(), "Allowed: Create fixture.txt")?;
+        run.observe(json!({"type":"text_delta","text":"Created fixture.txt."}))?;
+        run.finish(&Ok(json!({})));
+        Ok(run)
+    }
+    fn decline(&self, approval_id: &str) -> Result<(), String> {
+        self.answer(approval_id, "declined")
+    }
+    fn permission_log(&self) -> Result<Value, String> {
+        let answers = self.answers.lock().unwrap();
+        let entries: Vec<Value> = answers.iter().rev().map(|answer| json!({"at":2,"event":answer,"approvalId":FIXTURE_APPROVAL,"familiarId":"fixture","summary":"Create fixture.txt","device":"iphone"})).collect();
+        Ok(json!({"entries":entries}))
     }
 }
 /// The address the fixture listens on. A requested address must be a private
@@ -162,5 +218,39 @@ mod bind_tests {
                 Err(error) => assert!(error.contains("local network"), "{error}"),
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod stream_tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn ui_fixture_stream_remains_running_until_stop() {
+        let backend = FixtureBackend::default();
+        let run = backend
+            .start(SendRequest {
+                request_id: "slow-ui".into(),
+                familiar_id: "fixture".into(),
+                session_id: None,
+                prompt: "Hello from the iPhone".into(),
+            })
+            .unwrap();
+        // A hosted XCTest Send tap took fourteen seconds to return. The old
+        // ten-second fixture expired before the test could exercise Stop.
+        tokio::time::sleep(Duration::from_secs(12)).await;
+        assert!(
+            run.running(),
+            "the fixture finished before the person pressed Stop"
+        );
+        backend.stop(&run.id).unwrap();
+        tokio::time::timeout(Duration::from_secs(2), async {
+            while run.running() {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("Stop must finish the fixture run");
+        assert!(backend.active().is_none());
     }
 }

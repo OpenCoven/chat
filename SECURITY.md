@@ -27,7 +27,11 @@ In either repository, use its private vulnerability reporting rather than a publ
 OpenCoven Chat does not persist authenticated conversation bodies in IndexedDB, `localStorage`,
 or `sessionStorage`. The window keeps only your selected familiar and your Settings choices in
 `localStorage`: display preferences, and the harness, model, reasoning and speed your messages ask
-for. Unsent drafts stay in memory. The desktop host keeps the following in Chat's
+for. Unsent drafts stay in memory. On Windows the window turns WebView2's general autofill off,
+and every text field is marked `autocomplete="off"`, so what you type is not kept in the web view's
+own autofill data either. Versions before v0.0.9 left that autofill on, so each time Chat starts on
+Windows it clears the web view's saved autofill data. It clears nothing else: your selected familiar
+and Settings stay. The desktop host keeps the following in Chat's
 local app data folder (on macOS, `~/Library/Application Support/ai.opencoven.chat`):
 
 - **Transcripts.** Chat saves one transcript per message you send, as
@@ -51,6 +55,8 @@ local app data folder (on macOS, `~/Library/Application Support/ai.opencoven.cha
   Coven owner that accepted it. It keeps no title, prompt, project path or
   result; Chat reads those from Coven. On macOS and Linux only your user account
   can read it. Removing a finished mission removes its record.
+
+Familiar chats run with the desktop user's filesystem and command permissions. Chat uses the same policy for messages sent from the window and from a paired iPhone. Pairing links allow their holders to read conversations and start these runs. **Forget paired phones** rotates the credentials used by all paired phones.
 
 The window can't reach the operating system keyring. Only the Cave adapter and the
 installation-identity commands use it, and the window can call neither
@@ -117,7 +123,7 @@ On Windows and Linux, the matching `SHA256SUMS` line is your integrity check.
 > **Warning:** Treat a macOS build that isn't signed and notarized, or any download whose hash
 > doesn't match its `SHA256SUMS` line, as untrusted.
 
-The app updates itself only when you choose **Restart to update** under **Settings › About**. It reads one feed, the `latest.json` on the `updater` release of this repository, over HTTPS. It installs only an update whose signature verifies against the public key built into the app, and it waits while a reply is running. Versions without the updater (0.0.6 and earlier) don't update themselves; install a newer release by hand.
+The app updates itself only when you choose **Restart to update** under **Settings › About**. It reads one feed, the `latest.json` on the `updater` release of this repository, over HTTPS. It installs only an update whose signature verifies against the public key built into the app, and it waits while a reply is running. Published versions through v0.1.2 have no updater and do not update themselves; install a release containing this feature by hand.
 
 ## iPhone companion boundary
 

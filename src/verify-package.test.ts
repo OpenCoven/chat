@@ -29,6 +29,22 @@ function mutated(change: (input: Input) => void): Input {
 }
 
 describe('verify-package', () => {
+  it.each(['msi', 'nsis', 'deb'])(
+    'rejects a rename that loses the legacy %s install identity',
+    (kind) => {
+      const input = actual();
+      const bundle = input.conf.bundle;
+      if (kind === 'msi') {
+        bundle.windows = { ...bundle.windows, wix: {} };
+      } else if (kind === 'nsis') {
+        bundle.windows = { ...bundle.windows, nsis: {} };
+      } else {
+        bundle.linux.deb = { depends: [] };
+      }
+      expect(verifyPackage(input).failures.join('\n')).toMatch(/legacy.*install identity/i);
+    },
+  );
+
   it('passes the package as declared', () => {
     expect(verifyPackage(actual()).failures).toEqual([]);
   });
@@ -66,6 +82,22 @@ describe('verify-package', () => {
         i.conf.app.withGlobalTauri = true;
       },
       /withGlobalTauri/,
+    ],
+    // WebView2 keeps what is typed in a field in its profile's Web Data while
+    // its general autofill is on, and it is on unless the window says otherwise (#546).
+    [
+      'general autofill left on',
+      (i: Input) => {
+        i.conf.app.windows[0].generalAutofillEnabled = true;
+      },
+      /generalAutofillEnabled/,
+    ],
+    [
+      'general autofill left to its default',
+      (i: Input) => {
+        delete i.conf.app.windows[0].generalAutofillEnabled;
+      },
+      /generalAutofillEnabled/,
     ],
     [
       'unsafe-eval in the CSP',

@@ -1,4 +1,4 @@
-import { type KeyboardEvent, type PointerEvent, useRef } from 'react';
+import { type KeyboardEvent, type PointerEvent, useId, useRef } from 'react';
 import {
   INSPECTOR_MAX_WIDTH,
   INSPECTOR_MIN_WIDTH,
@@ -8,6 +8,20 @@ import {
 } from './inspector-width';
 
 type Drag = Readonly<{ pointerId: number; startX: number; startWidth: number; width: number }>;
+
+const KEYS = 'Arrow keys resize it, Home and End reach the limits.';
+
+/**
+ * True where the screen reader speaks a focused separator's value text:
+ * VoiceOver on macOS and NVDA on Windows. Orca on Linux speaks only its role,
+ * name and description (#545), so there, and on any platform not named here,
+ * the description carries the width.
+ */
+function readerSpeaksSeparatorValue(): boolean {
+  const nav = typeof navigator === 'undefined' ? undefined : navigator;
+  // Only the platform string: a user agent can say "darwin", which holds "win".
+  return /^(Mac|Win)/.test(nav?.platform ?? '');
+}
 
 /**
  * The inspector's draggable left edge: a focusable separator that reports the
@@ -33,6 +47,8 @@ export function InspectorResizer({
   onCommit: (width: number) => void;
 }>) {
   const drag = useRef<Drag | null>(null);
+  const describedBy = useId();
+  const speaksValue = readerSpeaksSeparatorValue();
   const widest = settleInspectorWidth(INSPECTOR_MAX_WIDTH, room);
 
   const finish = (event: PointerEvent<HTMLDivElement>) => {
@@ -59,50 +75,63 @@ export function InspectorResizer({
   };
 
   return (
-    // biome-ignore lint/a11y/useSemanticElements: a focusable separator with a value is the ARIA widget for a draggable edge; <hr> is a rule.
-    <div
-      role="separator"
-      tabIndex={0}
-      className="coven-inspector-resizer"
-      aria-label="Resize inspector"
-      aria-orientation="vertical"
-      aria-controls="coven-familiar-inspector"
-      aria-valuenow={width}
-      aria-valuemin={INSPECTOR_MIN_WIDTH}
-      aria-valuemax={widest}
-      onKeyDown={onKeyDown}
-      onPointerDown={(event) => {
-        if (event.button !== 0 || drag.current) return;
-        event.preventDefault();
-        const node = event.currentTarget;
-        if (typeof node.setPointerCapture === 'function') node.setPointerCapture(event.pointerId);
-        drag.current = {
-          pointerId: event.pointerId,
-          startX: event.clientX,
-          startWidth: width,
-          width,
-        };
-        onPreview(width);
-      }}
-      onPointerMove={(event) => {
-        const current = drag.current;
-        if (!current || current.pointerId !== event.pointerId) return;
-        const travel = (current.startX - event.clientX) * (direction === 'rtl' ? -1 : 1);
-        const next = preferredInspectorWidth(current.startWidth + travel);
-        drag.current = { ...current, width: next };
-        onPreview(next);
-      }}
-      onPointerUp={finish}
-      onPointerCancel={finish}
-      onLostPointerCapture={() => {
-        // Capture can go without an up or cancel (a modal took the window,
-        // say): whatever pointer held it, the drag ends where it was.
-        const current = drag.current;
-        if (!current) return;
-        drag.current = null;
-        onPreview(null);
-        onCommit(current.width);
-      }}
-    />
+    <>
+      {/* biome-ignore lint/a11y/useSemanticElements: a focusable separator with a value is the ARIA widget for a draggable edge; <hr> is a rule. */}
+      <div
+        role="separator"
+        tabIndex={0}
+        className="coven-inspector-resizer"
+        aria-label="Resize inspector"
+        aria-orientation="vertical"
+        aria-controls="coven-familiar-inspector"
+        aria-valuenow={width}
+        aria-valuemin={INSPECTOR_MIN_WIDTH}
+        aria-valuemax={widest}
+        // Without it VoiceOver names the focused handle but not its width, and
+        // on a change speaks a percentage of the range; Settings shows pixels.
+        aria-valuetext={`${width} pixels`}
+        // Orca speaks a focused splitter's role and name, but neither its value
+        // nor its value text; it does speak a description, so on Linux the width
+        // is there too. VoiceOver and NVDA speak the value text and the
+        // description, so on macOS and Windows it is not: they say it once (#579).
+        aria-describedby={describedBy}
+        onKeyDown={onKeyDown}
+        onPointerDown={(event) => {
+          if (event.button !== 0 || drag.current) return;
+          event.preventDefault();
+          const node = event.currentTarget;
+          if (typeof node.setPointerCapture === 'function') node.setPointerCapture(event.pointerId);
+          drag.current = {
+            pointerId: event.pointerId,
+            startX: event.clientX,
+            startWidth: width,
+            width,
+          };
+          onPreview(width);
+        }}
+        onPointerMove={(event) => {
+          const current = drag.current;
+          if (!current || current.pointerId !== event.pointerId) return;
+          const travel = (current.startX - event.clientX) * (direction === 'rtl' ? -1 : 1);
+          const next = preferredInspectorWidth(current.startWidth + travel);
+          drag.current = { ...current, width: next };
+          onPreview(next);
+        }}
+        onPointerUp={finish}
+        onPointerCancel={finish}
+        onLostPointerCapture={() => {
+          // Capture can go without an up or cancel (a modal took the window,
+          // say): whatever pointer held it, the drag ends where it was.
+          const current = drag.current;
+          if (!current) return;
+          drag.current = null;
+          onPreview(null);
+          onCommit(current.width);
+        }}
+      />
+      <span id={describedBy} hidden>
+        {speaksValue ? KEYS : `${width} pixels wide. ${KEYS}`}
+      </span>
+    </>
   );
 }

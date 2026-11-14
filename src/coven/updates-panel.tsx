@@ -49,17 +49,17 @@ export function UpdatesPanel({
   const busy = state.kind === 'checking' || state.kind === 'installing';
   return (
     <div className="coven-settings-row coven-updates" aria-live="polite">
-      <span className="coven-settings-row-copy">
-        <span className="coven-settings-row-label">{copy.label}</span>
-        <span className="coven-settings-row-hint">{copy.hint}</span>
+      <div className="coven-settings-row-copy">
+        <p className="coven-settings-row-label">{copy.label}</p>
+        <p className="coven-settings-row-hint">{copy.hint}</p>
         {state.kind === 'available' && state.notes ? (
           <details className="coven-updates-notes">
             <summary>What's new</summary>
             <p>{state.notes}</p>
           </details>
         ) : null}
-      </span>
-      <span className="coven-settings-row-control coven-updates-actions">
+      </div>
+      <div className="coven-settings-row-control coven-updates-actions">
         {state.kind === 'failed' ? (
           <CopyButton
             className="coven-updates-copy"
@@ -90,7 +90,7 @@ export function UpdatesPanel({
                 : 'Check for updates'}
           </button>
         )}
-      </span>
+      </div>
     </div>
   );
 }

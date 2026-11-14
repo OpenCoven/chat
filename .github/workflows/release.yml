@@ -447,7 +447,7 @@ jobs:
           # the .msi, -setup.exe, .AppImage and .deb themselves and archives
           # only the macOS app (.app.tar.gz), each with a .sig beside it.
           - platform: macos-aarch64
-            runner: macos-14
+            runner: macos-15
             target: aarch64-apple-darwin
             bundles: app,dmg
           - platform: macos-x86_64
@@ -498,19 +498,13 @@ jobs:
       # needs FUSE at build time, which the CI image did not exercise.
       - name: Install Linux build dependencies
         if: runner.os == 'Linux'
+        timeout-minutes: 10
         run: |
           set -euo pipefail
-          sudo apt-get update
-          sudo apt-get install -y \
-            build-essential \
-            libayatana-appindicator3-dev \
-            libgtk-3-dev \
-            libssl-dev \
-            libwebkit2gtk-4.1-dev \
-            librsvg2-dev \
-            patchelf \
-            libfuse2 \
-            file
+          # The first Ubuntu mirror that serves these packages; no single one is pinned.
+          bash scripts/ci/ubuntu-apt.sh \
+            build-essential libayatana-appindicator3-dev libgtk-3-dev libssl-dev \
+            libwebkit2gtk-4.1-dev librsvg2-dev patchelf libfuse2 file
 
       - run: corepack pnpm install --frozen-lockfile
 
@@ -864,16 +858,21 @@ jobs:
           # connection mid-request three times on macos-15-intel on 2026-10-14
           # (#461): once here, twice in the smoke test, each after the ticket
           # had been issued and the image stapled. stapler exits 68 for that
-          # as well as for a missing ticket, so each call gets a few attempts
+          # as well as for a missing ticket, so each call gets several attempts
           # with a pause between. A real rejection fails all of them.
+          # In v0.0.9 the service stayed unreachable for longer than five tries
+          # 20s apart (#568), so the pause grows by 15s after each failure:
+          # 15s, 30s, ... 135s, which is 675s (over 11 minutes) across 10 tries.
           stapler_retry() {
-            local attempt
-            for attempt in 1 2 3 4 5; do
+            local attempt wait
+            for attempt in 1 2 3 4 5 6 7 8 9 10; do
               if xcrun stapler "$@"; then return 0; fi
-              echo "stapler $1 failed (attempt ${attempt} of 5); retrying in 20s..."
-              sleep 20
+              if [ "${attempt}" -eq 10 ]; then break; fi
+              wait=$((attempt * 15))
+              echo "stapler $1 failed (attempt ${attempt} of 10); retrying in ${wait}s..."
+              sleep "${wait}"
             done
-            echo "::error::stapler $* failed on every attempt."
+            echo "::error::stapler $* failed on all 10 attempts."
             return 1
           }
           # Same key file `Build installers` wrote; the next step removes it.
@@ -1015,16 +1014,21 @@ jobs:
           # connection mid-request three times on macos-15-intel on 2026-10-14
           # (#461): once here, twice in the smoke test, each after the ticket
           # had been issued and the image stapled. stapler exits 68 for that
-          # as well as for a missing ticket, so each call gets a few attempts
+          # as well as for a missing ticket, so each call gets several attempts
           # with a pause between. A real rejection fails all of them.
+          # In v0.0.9 the service stayed unreachable for longer than five tries
+          # 20s apart (#568), so the pause grows by 15s after each failure:
+          # 15s, 30s, ... 135s, which is 675s (over 11 minutes) across 10 tries.
           stapler_retry() {
-            local attempt
-            for attempt in 1 2 3 4 5; do
+            local attempt wait
+            for attempt in 1 2 3 4 5 6 7 8 9 10; do
               if xcrun stapler "$@"; then return 0; fi
-              echo "stapler $1 failed (attempt ${attempt} of 5); retrying in 20s..."
-              sleep 20
+              if [ "${attempt}" -eq 10 ]; then break; fi
+              wait=$((attempt * 15))
+              echo "stapler $1 failed (attempt ${attempt} of 10); retrying in ${wait}s..."
+              sleep "${wait}"
             done
-            echo "::error::stapler $* failed on every attempt."
+            echo "::error::stapler $* failed on all 10 attempts."
             return 1
           }
           cd "${STAGE_DIR}"
@@ -1202,8 +1206,8 @@ jobs:
               $name = $installer.VersionInfo.ProductName
               $version = $installer.VersionInfo.ProductVersion
             }
-            if ($name -ne 'OpenCoven Chat') {
-              throw "$($installer.Name) names product '$name', expected 'OpenCoven Chat'."
+            if ($name -ne 'Coven Chat') {
+              throw "$($installer.Name) names product '$name', expected 'Coven Chat'."
             }
             if ($version -ne $env:EXPECTED_VERSION) {
               throw "$($installer.Name) reports version '$version', expected $env:EXPECTED_VERSION."
@@ -1413,7 +1417,7 @@ jobs:
           args=(
             "${TAG}"
             --repo "${{ github.repository }}"
-            --title "OpenCoven Chat ${VERSION}"
+            --title "Coven Chat ${VERSION}"
             --verify-tag
             --draft
           )
@@ -1434,7 +1438,7 @@ jobs:
           else
             windows_note='**Windows:** the `.msi` and `.exe` installers are not code-signed yet, so Windows SmartScreen shows "Windows protected your PC" the first time one runs. Check the download against `SHA256SUMS` first, then choose **More info** and **Run anyway**.'
           fi
-          notes="Automated release of OpenCoven Chat ${VERSION}.
+          notes="Automated release of Coven Chat ${VERSION}.
 
           Verify downloads against \`SHA256SUMS\` in the folder that holds them:
 
@@ -1479,7 +1483,7 @@ jobs:
           if ! gh release view updater --repo "${REPO}" >/dev/null 2>&1; then
             gh release create updater --repo "${REPO}" --target "${SHA}" \
               --title "Auto-update feed" --prerelease --latest=false \
-              --notes "Installed copies of OpenCoven Chat read latest.json from this release to find updates. The release workflow replaces it after each published release. Do not delete this release or its asset: installed apps would stop finding updates. See docs/releasing.md § 4 and § 6.1."
+              --notes "Installed copies of Coven Chat read latest.json from this release to find updates. The release workflow replaces it after each published release. Do not delete this release or its asset: installed apps would stop finding updates. See docs/releasing.md § 4 and § 6.1."
           fi
           gh release upload updater release/latest.json --repo "${REPO}" --clobber
           # Read back what installed apps will fetch, by the URL they use. The

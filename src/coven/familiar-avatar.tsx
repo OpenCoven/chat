@@ -4,7 +4,7 @@ import { cx } from '../design/familiars-ui';
 export type FamiliarAvatarProps = {
   name: string;
   avatarUrl?: string | undefined;
-  size: 22 | 24 | 28 | 36;
+  size: 18 | 22 | 24 | 28 | 36;
   ring?: boolean;
 };
 
@@ -16,7 +16,7 @@ export function FamiliarAvatar({ name, avatarUrl, size, ring }: FamiliarAvatarPr
     /^data:image\/png;base64,[A-Za-z0-9+/]+={0,2}$/.test(avatarUrl)
       ? avatarUrl
       : undefined;
-  const font = size >= 36 ? 14 : size >= 28 ? 12 : size >= 24 ? 11 : 10;
+  const font = size >= 36 ? 14 : size >= 28 ? 12 : size >= 24 ? 11 : size >= 22 ? 10 : 9;
   return (
     <span
       className={cx('fr-avatar', ring && 'fr-avatar--ring')}

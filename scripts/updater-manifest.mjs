@@ -63,7 +63,7 @@ if (process.argv[1] !== undefined && resolve(process.argv[1]) === fileURLToPath(
     const options = parseArguments(process.argv.slice(2));
     const manifest = buildUpdaterManifest({
       ...options,
-      notes: `OpenCoven Chat ${options.version}: https://github.com/${options.repo}/releases/tag/${options.tag}`,
+      notes: `Coven Chat ${options.version}: https://github.com/${options.repo}/releases/tag/${options.tag}`,
       pubDate: new Date().toISOString(),
     });
     writeFileSync(options.out, `${JSON.stringify(manifest, null, 2)}\n`);

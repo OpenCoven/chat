@@ -37,6 +37,18 @@ function MockLayout(props: ChatLayoutProps) {
             {familiar.name}
           </button>
         ))}
+      {props.approvals?.map((approval) => (
+        <div key={approval.id}>
+          <button
+            type="button"
+            onClick={() => props.onAllowApproval?.(approval, choice.value)}
+          >{`Allow ${approval.summary}`}</button>
+          <button
+            type="button"
+            onClick={() => props.onDeclineApproval?.(approval)}
+          >{`Decline ${approval.summary}`}</button>
+        </div>
+      ))}
       <output data-testid="head">{props.sessionId}</output>
       <output data-testid="familiar">{props.familiarId}</output>
       <output data-testid="run-familiar">{props.busy ? props.runFamiliarId : 'idle'}</output>
@@ -204,6 +216,10 @@ function runtime(): CovenRuntime {
     send: vi.fn().mockResolvedValue({ runId: 'run', events: [] }),
     cancel: vi.fn().mockResolvedValue(undefined),
     changeChatLifecycle: vi.fn().mockResolvedValue(undefined),
+    pendingApprovals: vi.fn().mockResolvedValue([]),
+    allow: vi.fn().mockResolvedValue({ runId: 'allowed', events: [] }),
+    decline: vi.fn().mockResolvedValue(undefined),
+    permissionLog: vi.fn().mockResolvedValue([]),
   };
 }
 
@@ -743,9 +759,7 @@ describe('canonical familiar controller', () => {
     draft('work');
     click('Send');
     await waitFor(() =>
-      expect(screen.getByRole('alert')).toHaveTextContent(
-        'Reopen the familiar before sending again',
-      ),
+      expect(screen.getByRole('alert')).toHaveTextContent('Refresh Coven before sending again'),
     );
     expect(screen.getByRole('textbox')).toBeDisabled();
     expect(api.send).toHaveBeenCalledOnce();
@@ -755,6 +769,56 @@ describe('canonical familiar controller', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Archive' }));
     await act(async () => {});
     expect(api.changeChatLifecycle).not.toHaveBeenCalled();
+  });
+
+  it('keeps other familiars usable while the recorded chat is unavailable and recovers its draft', async () => {
+    const api = runtime();
+    const unavailable = {
+      id: first.id,
+      familiarId: 'f',
+      title: 'Unavailable chat',
+      archived: false,
+      unavailable: true as const,
+    };
+    vi.mocked(api.listSessions)
+      .mockResolvedValueOnce([first, second])
+      .mockResolvedValueOnce([unavailable, second])
+      .mockResolvedValueOnce([unavailable, second]);
+    vi.mocked(api.send).mockRejectedValueOnce(new Error('Coven could not open the chat'));
+    await ready(api);
+    draft('retained message');
+    click('Send');
+    await waitFor(() =>
+      expect(screen.getByRole('alert')).toHaveTextContent("Coven couldn't load this chat"),
+    );
+    expect(screen.getByRole('textbox')).toBeDisabled();
+    expect(screen.getByRole('textbox')).toHaveValue('retained message');
+    expect(screen.getByTestId('head')).toHaveTextContent('one');
+
+    click('Other familiar');
+    await waitFor(() => expect(screen.getByRole('textbox')).toBeEnabled());
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    draft('send to the other familiar');
+    click('Send');
+    await waitFor(() => expect(api.send).toHaveBeenCalledTimes(2));
+    expect(vi.mocked(api.send).mock.calls[1]?.[0]).toMatchObject({
+      familiarId: 'g',
+      sessionId: 'two',
+    });
+
+    click('First familiar');
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Refresh' })).toBeEnabled());
+    click('Refresh');
+    await waitFor(() => expect(screen.getByRole('textbox')).toBeEnabled());
+    expect(screen.getByRole('textbox')).toHaveValue('retained message');
+    expect(screen.getByTestId('head')).toHaveTextContent('one');
+    click('Send');
+    await waitFor(() => expect(api.send).toHaveBeenCalledTimes(3));
+    expect(vi.mocked(api.send).mock.calls[2]?.[0]).toMatchObject({
+      familiarId: 'f',
+      sessionId: 'one',
+      prompt: 'retained message',
+    });
   });
 
   it('disables lifecycle controls when a manual refresh fails after a successful load', async () => {
@@ -1178,5 +1242,274 @@ describe('run options from Settings', () => {
     });
     await ready(api);
     await waitFor(() => expect(screen.getByTestId('model')).toHaveTextContent('openai/gpt-5.5'));
+  });
+});
+
+describe('answering a familiar that asks for permission', () => {
+  const approval = {
+    id: 'request-1',
+    familiarId: 'f',
+    summary: 'Create probe.txt',
+    requestedAt: 1,
+    expiresAt: 2,
+  };
+  beforeEach(() => {
+    localStorage.clear();
+    choice.value = runOptions(DEFAULT_PREFERENCES);
+  });
+  function asking() {
+    const api = runtime();
+    vi.mocked(api.pendingApprovals).mockResolvedValue([approval]);
+    return api;
+  }
+
+  it('offers what the host says is open, and shows nothing it does not', async () => {
+    const view = await ready(runtime());
+    expect(screen.queryByRole('button', { name: /^Allow / })).not.toBeInTheDocument();
+    view.unmount();
+    await ready(asking());
+    expect(
+      await screen.findByRole('button', { name: 'Allow Create probe.txt' }),
+    ).toBeInTheDocument();
+  });
+
+  it('names only the request when allowing, and leaves the draft alone', async () => {
+    const api = asking();
+    await ready(api);
+    draft('still typing');
+    fireEvent.click(await screen.findByRole('button', { name: 'Allow Create probe.txt' }));
+    await waitFor(() => expect(api.allow).toHaveBeenCalledOnce());
+    const input = vi.mocked(api.allow).mock.calls[0]?.[0];
+    expect(input).toEqual({ approvalId: 'request-1', runId: expect.any(String) });
+    expect(api.send).not.toHaveBeenCalled();
+    await waitFor(() => expect(screen.getByTestId('run-familiar')).toHaveTextContent('idle'));
+    expect(screen.getByRole('textbox')).toHaveValue('still typing');
+  });
+
+  it('keeps an allowed request away while the host may not have recorded the answer', async () => {
+    const api = asking();
+    const running = deferred<{ runId: string; events: never[] }>();
+    vi.mocked(api.allow).mockReturnValue(running.promise);
+    await ready(api);
+    const allow = await screen.findByRole('button', { name: 'Allow Create probe.txt' });
+    const reads = vi.mocked(api.pendingApprovals).mock.calls.length;
+    fireEvent.click(allow);
+    // A read the run's start set off still lists it, as the host hasn't caught up.
+    await waitFor(() =>
+      expect(vi.mocked(api.pendingApprovals).mock.calls.length).toBeGreaterThan(reads),
+    );
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(screen.queryByRole('button', { name: 'Allow Create probe.txt' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Decline Create probe.txt' })).toBeNull();
+    vi.mocked(api.pendingApprovals).mockResolvedValue([]);
+    await act(async () => {
+      running.resolve({ runId: 'run', events: [] });
+      await running.promise;
+    });
+    await waitFor(() => expect(screen.getByTestId('run-familiar')).toHaveTextContent('idle'));
+  });
+
+  it('asks the host again after a refused Allow, and offers no resend of an empty draft', async () => {
+    const api = asking();
+    vi.mocked(api.allow).mockRejectedValue(
+      new Error('This request expired. Ask the familiar again.'),
+    );
+    await ready(api);
+    fireEvent.click(await screen.findByRole('button', { name: 'Allow Create probe.txt' }));
+    await waitFor(() =>
+      expect(screen.getByRole('alert')).toHaveTextContent('This request expired.'),
+    );
+    await waitFor(() => expect(screen.getByTestId('run-familiar')).toHaveTextContent('idle'));
+    expect(api.pendingApprovals).toHaveBeenCalledTimes(4);
+    expect(screen.queryByRole('button', { name: 'Try again' })).not.toBeInTheDocument();
+    expect(screen.getByRole('textbox')).toHaveValue('');
+  });
+
+  it("won't allow while another run holds the runtime", async () => {
+    const api = asking();
+    const running = deferred<{ runId: string; events: never[] }>();
+    vi.mocked(api.send).mockReturnValue(running.promise);
+    await ready(api);
+    draft('first');
+    click('Send');
+    await waitFor(() => expect(screen.getByTestId('run-familiar')).toHaveTextContent('f'));
+    fireEvent.click(await screen.findByRole('button', { name: 'Allow Create probe.txt' }));
+    expect(api.allow).not.toHaveBeenCalled();
+    await act(async () => running.resolve({ runId: 'run', events: [] }));
+  });
+
+  it('declines through the host, then reads the chat and the requests again', async () => {
+    const api = asking();
+    await ready(api);
+    vi.mocked(api.pendingApprovals).mockResolvedValue([]);
+    const reads = vi.mocked(api.readSession).mock.calls.length;
+    fireEvent.click(await screen.findByRole('button', { name: 'Decline Create probe.txt' }));
+    await waitFor(() => expect(api.decline).toHaveBeenCalledExactlyOnceWith('request-1'));
+    await waitFor(() =>
+      expect(vi.mocked(api.readSession).mock.calls.length).toBeGreaterThan(reads),
+    );
+    await waitFor(() =>
+      expect(
+        screen.queryByRole('button', { name: 'Decline Create probe.txt' }),
+      ).not.toBeInTheDocument(),
+    );
+    expect(api.allow).not.toHaveBeenCalled();
+  });
+
+  // Only the poll's interval is faked: Testing Library waits on real timeouts.
+  function polling() {
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
+  }
+  async function poll() {
+    await act(async () => {
+      vi.advanceTimersByTime(5_000);
+    });
+  }
+
+  it('reads the chat again when the phone answers a request this chat shows', async () => {
+    polling();
+    try {
+      const api = asking();
+      await ready(api);
+      await screen.findByRole('button', { name: 'Decline Create probe.txt' });
+      draft('typing here');
+      const reads = vi.mocked(api.readSession).mock.calls.length;
+      const reading = deferred<Awaited<ReturnType<typeof api.readSession>>>();
+      vi.mocked(api.readSession).mockReturnValueOnce(reading.promise);
+      // Declined on the phone: the host closed it and wrote its line into the chat.
+      vi.mocked(api.pendingApprovals).mockResolvedValue([]);
+      await poll();
+      await waitFor(() =>
+        expect(vi.mocked(api.readSession).mock.calls.length).toBeGreaterThan(reads),
+      );
+      // The read leaves the person typing here alone.
+      expect(screen.getByRole('textbox')).toBeEnabled();
+      expect(screen.getByRole('textbox')).toHaveValue('typing here');
+      const sessionId = vi.mocked(api.readSession).mock.calls.at(-1)?.[0] ?? '';
+      await act(async () => {
+        reading.resolve(
+          await (vi.mocked(api.readSession).getMockImplementation()?.(sessionId) as ReturnType<
+            typeof api.readSession
+          >),
+        );
+      });
+      expect(screen.getByRole('textbox')).toHaveValue('typing here');
+      await waitFor(() =>
+        expect(
+          screen.queryByRole('button', { name: 'Decline Create probe.txt' }),
+        ).not.toBeInTheDocument(),
+      );
+      await waitFor(() =>
+        expect(vi.mocked(api.readSession).mock.calls.length).toBeGreaterThan(reads),
+      );
+      expect(api.decline).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("doesn't read this chat again for another familiar's request", async () => {
+    polling();
+    try {
+      const api = runtime();
+      vi.mocked(api.pendingApprovals).mockResolvedValue([{ ...approval, familiarId: 'other' }]);
+      await ready(api);
+      await waitFor(() => expect(api.pendingApprovals).toHaveBeenCalled());
+      await act(async () => {
+        await Promise.resolve();
+      });
+      const reads = vi.mocked(api.readSession).mock.calls.length;
+      vi.mocked(api.pendingApprovals).mockResolvedValue([]);
+      const asked = vi.mocked(api.pendingApprovals).mock.calls.length;
+      await poll();
+      await waitFor(() =>
+        expect(vi.mocked(api.pendingApprovals).mock.calls.length).toBeGreaterThan(asked),
+      );
+      await act(async () => {
+        await Promise.resolve();
+      });
+      expect(vi.mocked(api.readSession).mock.calls.length).toBe(reads);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  // A read locks the composer, so one right after a run would take the field's focus.
+  it("doesn't read the chat again when this window's message closes the request", async () => {
+    const api = asking();
+    const running = deferred<{ runId: string; events: never[] }>();
+    vi.mocked(api.send).mockReturnValue(running.promise);
+    await ready(api);
+    await screen.findByRole('button', { name: 'Decline Create probe.txt' });
+    draft('never mind');
+    click('Send');
+    await waitFor(() => expect(screen.getByTestId('run-familiar')).toHaveTextContent('f'));
+    // The read the run's start set off may still list it; the host closes it as the message starts.
+    await act(async () => {
+      await Promise.resolve();
+    });
+    vi.mocked(api.pendingApprovals).mockResolvedValue([]);
+    const reads = vi.mocked(api.readSession).mock.calls.length;
+    await act(async () => {
+      running.resolve({ runId: 'run', events: [] });
+      await running.promise;
+    });
+    await waitFor(() => expect(screen.getByTestId('run-familiar')).toHaveTextContent('idle'));
+    await waitFor(() =>
+      expect(
+        screen.queryByRole('button', { name: 'Decline Create probe.txt' }),
+      ).not.toBeInTheDocument(),
+    );
+    await act(async () => {
+      await new Promise((done) => setTimeout(done, 50));
+    });
+    expect(vi.mocked(api.readSession).mock.calls.length).toBe(reads);
+  });
+
+  it('reads the chat after a phone Decline of a request a refused message left open', async () => {
+    polling();
+    try {
+      const api = asking();
+      vi.mocked(api.send).mockRejectedValue(new Error('Coven is not running.'));
+      await ready(api);
+      await screen.findByRole('button', { name: 'Decline Create probe.txt' });
+      draft('never mind');
+      click('Send');
+      await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent('not running'));
+      await waitFor(() => expect(screen.getByTestId('run-familiar')).toHaveTextContent('idle'));
+      await act(async () => {
+        await new Promise((done) => setTimeout(done, 20));
+      });
+      const reads = vi.mocked(api.readSession).mock.calls.length;
+      vi.mocked(api.pendingApprovals).mockResolvedValue([]);
+      await poll();
+      await waitFor(() =>
+        expect(vi.mocked(api.readSession).mock.calls.length).toBeGreaterThan(reads),
+      );
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('reads the chat once after declining here', async () => {
+    const api = asking();
+    await ready(api);
+    const decline = await screen.findByRole('button', { name: 'Decline Create probe.txt' });
+    vi.mocked(api.pendingApprovals).mockResolvedValue([]);
+    const reads = vi.mocked(api.readSession).mock.calls.length;
+    const asked = vi.mocked(api.pendingApprovals).mock.calls.length;
+    fireEvent.click(decline);
+    await waitFor(() =>
+      expect(vi.mocked(api.pendingApprovals).mock.calls.length).toBeGreaterThan(asked),
+    );
+    await waitFor(() =>
+      expect(vi.mocked(api.readSession).mock.calls.length).toBeGreaterThan(reads),
+    );
+    await act(async () => {
+      await new Promise((done) => setTimeout(done, 50));
+    });
+    expect(vi.mocked(api.readSession).mock.calls.length).toBe(reads + 1);
   });
 });

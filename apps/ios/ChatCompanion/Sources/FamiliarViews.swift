@@ -58,6 +58,7 @@ struct FamiliarPicker: View {
   let sessions: [ChatSession]
   let selectedId: String?
   let respondingId: String?
+  var askingIds: Set<String> = []
   let onSelect: (String) -> Void
   @Environment(\.dismiss) private var dismiss
   @State private var query = ""
@@ -115,6 +116,9 @@ struct FamiliarPicker: View {
           HStack(spacing: 8) {
             Text(familiar.displayName).font(.headline).foregroundStyle(Palette.textPrimary)
             if responding { Badge(text: "Replying", color: Palette.online, pulsing: true) }
+            if askingIds.contains(familiar.id) {
+              Badge(text: "Asks permission", color: Palette.warning)
+            }
             if session?.archived == true { Badge(text: "Archived", color: Palette.textMuted) }
           }
           if let description = familiar.description, !description.isEmpty {

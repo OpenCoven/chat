@@ -1,12 +1,12 @@
 use std::{
-    collections::BTreeMap,
+    collections::{BTreeMap, HashSet},
     fs::{self, File},
     io::Read,
     path::Path,
 };
 
 use crate::chat_lifecycle::{self, Lifecycle};
-use serde_json::Value;
+use serde_json::{json, Value};
 
 const FILE: &str = "chat-canonical-v1.json";
 const LIMIT: usize = 2 * 1024 * 1024;
@@ -75,15 +75,27 @@ pub(crate) fn head(data: &Path, familiar: &str) -> Result<Option<String>, String
 }
 
 // Callers serialize every canonical transaction with STORAGE_LOCK.
-pub(crate) fn project(data: &Path, sessions: &[Value]) -> Result<Vec<Value>, String> {
+pub(crate) fn project(
+    data: &Path,
+    sessions: &[Value],
+    mut lookup: impl FnMut(&str) -> Option<Value>,
+) -> Result<Vec<Value>, String> {
     let mut heads = load(data)?;
     let before = heads.clone();
+    let claimed: HashSet<&str> = heads.values().filter_map(|id| id.as_deref()).collect();
     let mut newest: BTreeMap<&str, &Value> = BTreeMap::new();
     for session in sessions {
         let Some(familiar) = session["familiarId"].as_str() else {
             continue;
         };
         crate::coven_runtime::validate_id(familiar)?;
+        if heads.contains_key(familiar)
+            || session["id"]
+                .as_str()
+                .is_some_and(|id| claimed.contains(id))
+        {
+            continue;
+        }
         let candidate = newest.entry(familiar).or_insert(session);
         if (session["updatedAt"].as_str(), session["id"].as_str())
             > (candidate["updatedAt"].as_str(), candidate["id"].as_str())
@@ -92,12 +104,10 @@ pub(crate) fn project(data: &Path, sessions: &[Value]) -> Result<Vec<Value>, Str
         }
     }
     for (familiar, session) in newest {
-        if !heads.contains_key(familiar) {
-            let id = session["id"]
-                .as_str()
-                .ok_or("Coven listed a chat without a usable identifier.")?;
-            heads.insert(familiar.to_owned(), Some(id.to_owned()));
-        }
+        let id = session["id"]
+            .as_str()
+            .ok_or("Coven listed a chat without a usable identifier.")?;
+        heads.insert(familiar.to_owned(), Some(id.to_owned()));
     }
     if heads != before {
         save(data, &heads)?;
@@ -109,11 +119,19 @@ pub(crate) fn project(data: &Path, sessions: &[Value]) -> Result<Vec<Value>, Str
         if states.get(&id) == Some(&Lifecycle::Deleted) {
             continue;
         }
-        let session = sessions.iter().find(|session|
-            session["id"].as_str() == Some(&id) &&
-            session["familiarId"].as_str() == Some(&familiar))
-            .ok_or("A chat Chat recorded for a familiar is no longer in Coven's list. The record was left unchanged and no older chat was opened. Refresh Coven and open the familiar again.")?;
-        let mut session = session.clone();
+        let matches_head = |session: &Value| {
+            session["id"].as_str() == Some(&id) && session["familiarId"].as_str() == Some(&familiar)
+        };
+        // Check the exact identity before reporting a missing head. Keep an
+        // unavailable head visible so it cannot be mistaken for a fresh chat.
+        let mut session = sessions
+            .iter()
+            .find(|session| matches_head(session))
+            .cloned()
+            .or_else(|| lookup(&id).filter(matches_head))
+            .unwrap_or_else(|| {
+                json!({"id":id,"familiarId":familiar,"title":"Unavailable chat","unavailable":true})
+            });
         session["archived"] = Value::Bool(states.get(&id) == Some(&Lifecycle::Archived));
         result.push(session);
     }
@@ -206,21 +224,31 @@ mod tests {
         let old = captured(&data, "old", "2026-09-01");
         let current = captured(&data, "current", "2026-09-02");
         let initial = vec![old.clone(), current.clone()];
-        assert_eq!(project(&data, &initial).unwrap()[0]["id"], "current");
+        assert_eq!(
+            project(&data, &initial, |_| None).unwrap()[0]["id"],
+            "current"
+        );
         let newer = captured(&data, "newer-unrelated", "2026-09-03");
         let all = vec![old, current.clone(), newer.clone()];
-        assert_eq!(project(&data, &all).unwrap()[0]["id"], "current");
+        assert_eq!(project(&data, &all, |_| None).unwrap()[0]["id"], "current");
         assert!(advance(&data, "f", Some("old"), "newer-unrelated").is_err());
         advance(&data, "f", Some("current"), "newer-unrelated").unwrap();
         assert_eq!(
             head(&data, "f").unwrap().as_deref(),
             Some("newer-unrelated")
         );
-        assert_eq!(project(&data, &all).unwrap()[0]["id"], "newer-unrelated");
+        assert_eq!(
+            project(&data, &all, |_| None).unwrap()[0]["id"],
+            "newer-unrelated"
+        );
         assert!(require_current(&data, "current").is_err());
-        assert!(project(&data, &[current])
-            .unwrap_err()
-            .contains("no longer in Coven's list"));
+        let missing = project(&data, &[current], |_| None).unwrap();
+        assert_eq!(missing[0]["id"], "newer-unrelated");
+        assert_eq!(missing[0]["unavailable"], true);
+        assert_eq!(
+            head(&data, "f").unwrap().as_deref(),
+            Some("newer-unrelated")
+        );
         cleanup(&data, &["old", "current", "newer-unrelated"]);
     }
 
@@ -230,7 +258,7 @@ mod tests {
         let old = captured(&data, "old", "2026-09-01");
         let selected = captured(&data, "selected", "2026-09-02");
         let all = vec![old, selected];
-        project(&data, &all).unwrap();
+        project(&data, &all, |_| None).unwrap();
         let old_bytes = fs::read(data.join("coven-transcripts/old.jsonl")).unwrap();
         fs::create_dir_all(data.join("cave-imports")).unwrap();
         fs::write(
@@ -239,17 +267,17 @@ mod tests {
         )
         .unwrap();
         chat_lifecycle::change(&data, "selected", Lifecycle::Archived).unwrap();
-        assert_eq!(project(&data, &all).unwrap()[0]["archived"], true);
+        assert_eq!(project(&data, &all, |_| None).unwrap()[0]["archived"], true);
         chat_lifecycle::change(&data, "selected", Lifecycle::Active).unwrap();
         chat_lifecycle::change(&data, "selected", Lifecycle::Deleted).unwrap();
         // Simulate interruption between the tombstone and explicit empty-head commits.
-        assert!(project(&data, &all).unwrap().is_empty());
+        assert!(project(&data, &all, |_| None).unwrap().is_empty());
         assert_eq!(head(&data, "f").unwrap(), None);
         clear(&data, "selected").unwrap();
         let unrelated = captured(&data, "unrelated", "2026-09-04");
         let mut all = all;
         all.push(unrelated);
-        assert!(project(&data, &all).unwrap().is_empty());
+        assert!(project(&data, &all, |_| None).unwrap().is_empty());
         assert_eq!(load(&data).unwrap().get("f"), Some(&None));
         assert_eq!(
             fs::read(data.join("coven-transcripts/old.jsonl")).unwrap(),
@@ -258,7 +286,7 @@ mod tests {
         let fresh = captured(&data, "fresh", "2026-09-05");
         advance(&data, "f", None, "fresh").unwrap();
         all.push(fresh);
-        assert_eq!(project(&data, &all).unwrap()[0]["id"], "fresh");
+        assert_eq!(project(&data, &all, |_| None).unwrap()[0]["id"], "fresh");
         assert_eq!(
             fs::read_to_string(data.join("cave-imports/existing.json")).unwrap(),
             "retained import data"

@@ -206,10 +206,16 @@ function Step({ title, done, children }: { title: string; done: boolean; childre
 
 function Command({ command }: { command: string }) {
   return (
-    <span className="coven-onboarding-command">
-      <code>{command}</code>
+    <div className="coven-onboarding-command">
+      {/* A paragraph, not a bare inline element: WebKitGTK gave AT-SPI an inline
+          element laid out as a flex item without its text, so on Linux the
+          command read as an empty section beside Copy command (#590). The
+          chat's error alert had the same fix (#581). */}
+      <p className="coven-onboarding-command-text">
+        <code>{command}</code>
+      </p>
       <CopyButton text={command} label="Copy command" />
-    </span>
+    </div>
   );
 }
 
@@ -441,6 +447,7 @@ function FamiliarStep({
       >
         <input
           aria-label="Familiar name"
+          autoComplete="off"
           className="coven-onboarding-input"
           maxLength={64}
           placeholder="Astra"

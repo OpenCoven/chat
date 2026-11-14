@@ -49,18 +49,18 @@ const attestBuildProvenanceAction =
   'actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8';
 const reviewedWindowsPins = {
   OPENCOVEN_WINDOWS_IMAGE_OS: 'win25-vs2026',
-  OPENCOVEN_WINDOWS_IMAGE_VERSION: '20260922.246.2',
-  OPENCOVEN_WINDOWS_PREVIOUS_IMAGE_VERSION: '20260907.229.1',
-  OPENCOVEN_WINDOWS_BUILD: '26100.33438',
+  OPENCOVEN_WINDOWS_IMAGE_VERSION: '20261103.298.1',
+  OPENCOVEN_WINDOWS_PREVIOUS_IMAGE_VERSION: '20260922.246.2',
+  OPENCOVEN_WINDOWS_BUILD: '26100.33674',
   OPENCOVEN_WINDOWS_KERNEL32_VERSION: '10.0.26100.33296',
-  OPENCOVEN_WINDOWS_POWERSHELL_VERSION: '7.6.6',
+  OPENCOVEN_WINDOWS_POWERSHELL_VERSION: '7.6.9',
   OPENCOVEN_WINDOWS_POWERSHELL_PATH: 'C:\\Program Files\\PowerShell\\7\\pwsh.exe',
-  OPENCOVEN_WINDOWS_DOTNET_VERSION: '10.0.12',
-  OPENCOVEN_WINDOWS_VS_VERSION: '18.10.12210.168',
-  OPENCOVEN_WINDOWS_PREVIOUS_VS_VERSION: '18.9.12120.119',
-  OPENCOVEN_WINDOWS_PREVIOUS_BUILD: '26100.33296',
-  OPENCOVEN_WINDOWS_PREVIOUS_POWERSHELL_VERSION: '7.6.5',
-  OPENCOVEN_WINDOWS_PREVIOUS_DOTNET_VERSION: '10.0.11',
+  OPENCOVEN_WINDOWS_DOTNET_VERSION: '10.0.14',
+  OPENCOVEN_WINDOWS_VS_VERSION: '18.11.12328.437',
+  OPENCOVEN_WINDOWS_PREVIOUS_VS_VERSION: '18.10.12210.168',
+  OPENCOVEN_WINDOWS_PREVIOUS_BUILD: '26100.33438',
+  OPENCOVEN_WINDOWS_PREVIOUS_POWERSHELL_VERSION: '7.6.6',
+  OPENCOVEN_WINDOWS_PREVIOUS_DOTNET_VERSION: '10.0.12',
   OPENCOVEN_WINDOWS_VS_PATH: 'C:\\Program Files\\Microsoft Visual Studio\\18\\Enterprise',
   OPENCOVEN_WINDOWS_MSVC_VERSION: '14.44.35207',
   OPENCOVEN_WINDOWS_MSVC_PATH:
@@ -451,13 +451,14 @@ async function workflowFixture() {
       recordPathTemplate: '.artifacts/client-v1-conformance-{platform}.json',
       sourceRef: 'refs/heads/main',
       runnerLabels: {
-        'darwin-arm64': ['macos-14'],
+        'darwin-arm64': ['macos-15'],
         'linux-x64': ['ubuntu-24.04'],
         'win32-x64': ['windows-2025'],
       },
       signerWorkflow: 'OpenCoven/chat/.github/workflows/client-v1-conformance.yml',
       signerDigest: producerCommit,
       sourceDigest: producerCommit,
+      sourceDescent: [],
       predicateType: 'https://slsa.dev/provenance/v1',
       denySelfHostedRunners: true,
     },
@@ -473,6 +474,16 @@ async function workflowFixture() {
 }
 
 describe('client-v1 conformance workflow bootstrap', () => {
+  test('keeps protected macOS ARM64 conformance on the supported image', () => {
+    const workflow = readFileSync(workflowPath, 'utf8');
+    const job = workflowJob(workflow, 'platform-conformance');
+    expect(job).toContain('platform: darwin-arm64\n            runner: macos-15');
+    expect(job).not.toContain('macos-14');
+    expect(job).toContain("if: github.ref == 'refs/heads/main'");
+    expect(job).toContain('environment: client-v1-conformance');
+    expect(job).toContain('runs-on: $' + '{{ matrix.runner }}');
+  });
+
   test('fits the GitHub Actions 500 KiB workflow file limit', () => {
     expect(readFileSync(workflowPath).byteLength).toBeLessThanOrEqual(500 * 1024);
   });
@@ -990,16 +1001,16 @@ describe.skipIf(!validatorAvailable)('protected client-v1 conformance workflow',
 
 describe('Chat-local protected Windows conformance workflow', () => {
   const reviewedImageEnvironment = {
-    OPENCOVEN_WINDOWS_IMAGE_VERSION: '20260922.246.2',
-    OPENCOVEN_WINDOWS_VS_VERSION: '18.10.12210.168',
-    OPENCOVEN_WINDOWS_BUILD: '26100.33438',
-    OPENCOVEN_WINDOWS_POWERSHELL_VERSION: '7.6.6',
-    OPENCOVEN_WINDOWS_DOTNET_VERSION: '10.0.12',
-    OPENCOVEN_WINDOWS_PREVIOUS_IMAGE_VERSION: '20260907.229.1',
-    OPENCOVEN_WINDOWS_PREVIOUS_VS_VERSION: '18.9.12120.119',
-    OPENCOVEN_WINDOWS_PREVIOUS_BUILD: '26100.33296',
-    OPENCOVEN_WINDOWS_PREVIOUS_POWERSHELL_VERSION: '7.6.5',
-    OPENCOVEN_WINDOWS_PREVIOUS_DOTNET_VERSION: '10.0.11',
+    OPENCOVEN_WINDOWS_IMAGE_VERSION: '20261103.298.1',
+    OPENCOVEN_WINDOWS_VS_VERSION: '18.11.12328.437',
+    OPENCOVEN_WINDOWS_BUILD: '26100.33674',
+    OPENCOVEN_WINDOWS_POWERSHELL_VERSION: '7.6.9',
+    OPENCOVEN_WINDOWS_DOTNET_VERSION: '10.0.14',
+    OPENCOVEN_WINDOWS_PREVIOUS_IMAGE_VERSION: '20260922.246.2',
+    OPENCOVEN_WINDOWS_PREVIOUS_VS_VERSION: '18.10.12210.168',
+    OPENCOVEN_WINDOWS_PREVIOUS_BUILD: '26100.33438',
+    OPENCOVEN_WINDOWS_PREVIOUS_POWERSHELL_VERSION: '7.6.6',
+    OPENCOVEN_WINDOWS_PREVIOUS_DOTNET_VERSION: '10.0.12',
   };
 
   function bootstrapSource(): string {
@@ -1009,8 +1020,8 @@ describe('Chat-local protected Windows conformance workflow', () => {
   }
 
   test.each([
+    ['20261103.298.1', '18.11.12328.437|26100.33674|7.6.9|10.0.14'],
     ['20260922.246.2', '18.10.12210.168|26100.33438|7.6.6|10.0.12'],
-    ['20260907.229.1', '18.9.12120.119|26100.33296|7.6.5|10.0.11'],
     ['20260824.214.3', null],
     ['20260923.247.1', null],
   ])(
@@ -1049,11 +1060,11 @@ $p = Get-ReviewedWindowsImageProfile
   );
 
   test.each([
+    ['20261103.298.1', '18.11.12328.437', true],
     ['20260922.246.2', '18.10.12210.168', true],
-    ['20260907.229.1', '18.9.12120.119', true],
-    ['20260922.246.2', '18.9.12120.119', false],
-    ['20260907.229.1', '18.10.12210.168', false],
-    ['20260922.246.2', '18.10.99999.999', false],
+    ['20261103.298.1', '18.10.12210.168', false],
+    ['20260922.246.2', '18.11.12328.437', false],
+    ['20261103.298.1', '18.10.99999.999', false],
   ])(
     'validates the reviewed Windows image/VS pair %s / %s',
     (imageVersion, vsVersion, accepted) => {
@@ -2859,7 +2870,8 @@ ${source.slice(start, end)}
     // entry cannot carry its own condition. Both platforms must still be
     // reachable, and the macOS one must be the gated half.
     expect(job).toContain('"platform":"linux-x64","runner":"ubuntu-24.04"');
-    expect(job).toContain('"platform":"darwin-arm64","runner":"macos-14"');
+    expect(job).toContain('"platform":"darwin-arm64","runner":"macos-15"');
+    expect(job).not.toContain('macos-14');
     expect(job).toContain("contains(github.event.pull_request.labels.*.name, 'ci:full')");
     expect(job).toContain('bash scripts/unix-producer-supervisor.test.sh');
 
