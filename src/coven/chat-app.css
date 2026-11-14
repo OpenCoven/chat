@@ -1109,6 +1109,10 @@
  * focus and warning states they would otherwise hide are restated here.
  */
 .coven-chat .coven-compact-composer {
+  /* WebKit can retain stale intrinsic grid-row heights after a resize until
+     focus forces layout, moving a pressed toolbar button before release. */
+  display: flex;
+  flex-direction: column;
   border-color: var(--border-strong);
   border-radius: 16px;
   background: color-mix(in oklch, var(--bg-raised) 88%, var(--bg-base));
@@ -1498,12 +1502,9 @@
   font-variant-numeric: tabular-nums;
 }
 
-.coven-chat .oc-send-main {
-  border-radius: 8px;
-}
-
 .coven-chat .oc-send-main:not([data-size="icon"]) {
   min-width: 76px;
+  border-radius: 8px;
 }
 
 .coven-chat .coven-rail-tab-cue {

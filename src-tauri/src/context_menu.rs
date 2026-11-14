@@ -150,9 +150,7 @@ mod webview2 {
                     &ClearBrowsingDataCompletedHandler::create(Box::new(
                         |result: windows_core::Result<()>| {
                             if let Err(error) = result {
-                                eprintln!(
-                                    "OpenCoven Chat: could not clear saved autofill: {error}"
-                                );
+                                eprintln!("Coven Chat: could not clear saved autofill: {error}");
                             }
                             Ok(())
                         },

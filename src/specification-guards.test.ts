@@ -2,6 +2,7 @@ import { execFileSync } from 'node:child_process';
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { runInNewContext } from 'node:vm';
+import playwrightConfig from '../playwright.config';
 
 type CapabilityFile = {
   $schema?: string;
@@ -925,8 +926,7 @@ describe('Phase 1 specification guards', () => {
     expect(metadata).toContain('env!("OPENCOVEN_APP_IDENTIFIER")');
   });
 
-  it('pins Playwright to a dedicated fresh preview server', async () => {
-    const { default: playwrightConfig } = await import('../playwright.config');
+  it('pins Playwright to a dedicated fresh preview server', () => {
     const packageManifest = readJson<PackageManifest>('package.json');
     expect(playwrightConfig.use?.baseURL).toBe('http://127.0.0.1:4174');
     expect(playwrightConfig.webServer).toMatchObject({

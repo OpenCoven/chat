@@ -810,24 +810,10 @@ function FamiliarAccess({
         </div>
       )}
       <p className="coven-settings-footnote">
-        Chat shows access as Coven declares it.{' '}
         {/* On Windows a refresh can't show Cave's grants yet (#587). */}
-        {isWindowsPlatform() ? (
-          "To edit grants, open the familiar's Projects tab in Coven Cave."
-        ) : (
-          <>
-            To edit grants, open the familiar's Projects tab in Coven Cave, then{' '}
-            <button
-              type="button"
-              className="coven-settings-link"
-              disabled={refreshDisabled}
-              onClick={onRefresh}
-            >
-              refresh
-            </button>
-            .
-          </>
-        )}{' '}
+        {isWindowsPlatform()
+          ? "To edit grants, open the familiar's Projects tab in Coven Cave."
+          : "To edit grants, open the familiar's Projects tab in Coven Cave, then refresh project access here."}{' '}
         Familiar chats can change files and run commands beyond these projects without asking for
         permission.
       </p>
