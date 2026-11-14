@@ -16,7 +16,7 @@ Primary recovery is no longer awaiting a handoff. Val explicitly requested confl
 4. #590 is already claimed in draft #608, held by its owner until v0.1.2 publishes or Val explicitly changes that release boundary. Its native tree evidence and an actual Orca listen remain separate. The old recommendation to begin #590 is superseded.
 5. Keep #575’s policy decision, #573’s engine/supersede safety gate, #476/#539’s updater keys and two-release proof, #411’s selected eSigner provisioning, physical/operator acceptance and #154/#155’s producer/context decisions distinct. #568 and #356 closed by recorded backlog decisions; #356 redirected the remaining updater/signing work, not declared it delivered.
 
-The trusted authority check currently fails on this docs branch and its unchanged base `b06aae750d81868aea85aa5784ca89bd49603f9b`: `productionDeltas: src-tauri/src/lib.rs` moved beyond the pinned authority. #613 already plans a separate authority repin after its content merge. This task changes no governed path and waits for that canonical repair; it does not bypass the guard or create a competing repin.
+The trusted authority check finds existing drift on this docs branch and its unchanged base `b06aae750d81868aea85aa5784ca89bd49603f9b`: `productionDeltas: src-tauri/src/lib.rs` moved beyond the pin. The workflow enforces this freshness check on pushes to main, not on pull requests, so it is a release/main verification dependency rather than a blocker to protected documentation delivery. #613 already plans a separate post-content-merge authority repin. This task changes no governed path, does not bypass the check and does not create a competing repin; main-push results are reported separately.
 
 ### Original PR dispositions now
 
