@@ -8,14 +8,11 @@ happen. You don't need Cave, a Cave pairing, or a separate demo build.
 
 ## Start here
 
-**[Download a desktop prerelease](https://github.com/OpenCoven/chat/releases)** ·
-[First-run setup](#first-run-setup) · [Build from source](#developer-setup) ·
-[Contribute](CONTRIBUTING.md) · [Report a problem](https://github.com/OpenCoven/chat/issues)
+**[Download a desktop prerelease](https://github.com/OpenCoven/chat/releases)** · [First-run setup](#first-run-setup) · [Build from source](#developer-setup) · [Contribute](CONTRIBUTING.md) · [Report a problem](https://github.com/OpenCoven/chat/issues)
 
 ### Availability
 
-The published **[v0.1.1 prerelease](https://github.com/OpenCoven/chat/releases/tag/v0.1.1)**
-provides the following desktop packages (verified November 13, 2026):
+The published **[v0.1.2 prerelease](https://github.com/OpenCoven/chat/releases/tag/v0.1.2)** provides the following desktop packages (verified November 14, 2026):
 
 | Platform | Package | Before installing |
 | --- | --- | --- |
@@ -25,28 +22,18 @@ provides the following desktop packages (verified November 13, 2026):
 | iPhone companion | Distributed separately through TestFlight | Requires a paired, awake Mac on the same local network; [companion guide](docs/iphone-companion.md) |
 | Browser preview | Developer UI preview only | Cannot reach Coven or run chats; use the desktop app |
 
-This is early `0.x` software without automatic updates. Check the release notes and verify your
-installer against that release's `SHA256SUMS`. The README describes current source; a published
-installer may not include changes merged after its tag.
+This is early `0.x` software without automatic updates. Check the release notes and verify your installer against that release's `SHA256SUMS`. The README describes current source; a published installer may not include changes merged after its tag.
 
-**Access matters:** familiar chats run with full access under your desktop user account. An
-ordinary message can change files and run commands beyond the familiar's workspace without an
-approval prompt. Declared project access does not limit the run. Read **Settings → Access** before
-sending work, including from a paired phone.
+**Access matters:** familiar chats run with full access under your desktop user account. An ordinary message can change files and run commands beyond the familiar's workspace without an approval prompt. Declared project access does not limit the run. Read **Settings → Access** before sending work, including from a paired phone.
 
 ### Your first conversation
 
 1. Install the desktop package for your computer, then open Coven Chat.
-2. Follow **Set up Coven Chat** to install Coven and its engine if missing, sign in with a model
-   provider, and create a familiar. Already configured? Chat opens directly. See the
-   [full setup and recovery steps](#first-run-setup).
-3. Select your familiar and send a small request such as “Say hello and tell me your name.”
-   A real reply appears in that familiar's ongoing conversation. **Stop** cancels a running reply.
-4. Try [adding project context](#referring-to-familiars-and-projects), or read
-   [errors and connection details](#errors-and-connection-details) if the first run fails.
+2. Follow **Set up Coven Chat** to install Coven and its engine if missing, sign in with a model provider, and create a familiar. Already configured? Chat opens directly. See the [full setup and recovery steps](#first-run-setup).
+3. Select your familiar and send a small request such as “Say hello and tell me your name.” A real reply appears in that familiar's ongoing conversation. **Stop** cancels a running reply.
+4. Try [adding project context](#referring-to-familiars-and-projects), or read [errors and connection details](#errors-and-connection-details) if the first run fails.
 
-Coven and a configured model provider are required; Cave is not. Provider sign-in and any provider
-costs are separate from installing Chat.
+Coven and a configured model provider are required; Cave is not. Provider sign-in and any provider costs are separate from installing Chat.
 
 ### Build from source instead
 
