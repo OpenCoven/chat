@@ -4,6 +4,7 @@ app_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 repo_dir="$(cd "$app_dir/../../.." && pwd)"
 fixture_dir="$(mktemp -d "${TMPDIR:-/tmp}/chat-companion-test.XXXXXX")"
 fixture_pid=""
+proxy_pid=""
 simulator=""
 log_pid=""
 alias_added=""
@@ -11,6 +12,7 @@ cleanup() {
   rm -f "$app_dir/TestSupport/LocalPairing.json"
   if [[ -n "$alias_added" ]]; then sudo ifconfig lo0 -alias "$alias_added" 2>/dev/null || true; fi
   if [[ -n "$log_pid" ]]; then kill "$log_pid" 2>/dev/null || true; wait "$log_pid" 2>/dev/null || true; fi
+  if [[ -n "$proxy_pid" ]]; then kill "$proxy_pid" 2>/dev/null || true; wait "$proxy_pid" 2>/dev/null || true; fi
   if [[ -n "$fixture_pid" ]]; then kill "$fixture_pid" 2>/dev/null || true; wait "$fixture_pid" 2>/dev/null || true; fi
   if [[ -n "$simulator" ]]; then xcrun simctl shutdown "$simulator" 2>/dev/null || true; xcrun simctl delete "$simulator"; fi
   rm -rf "$fixture_dir"
@@ -40,6 +42,16 @@ for _ in {1..100}; do
   sleep 0.2
 done
 if [[ ! -s "$fixture_dir/receipt.json" ]]; then echo 'Companion fixture did not start.' >&2; exit 1; fi
+mv "$fixture_dir/receipt.json" "$fixture_dir/upstream.json"
+node "$app_dir/Scripts/fixture-proxy.mjs" "$fixture_dir/upstream.json" \
+  "$fixture_dir/state/companion/identity.json" > "$fixture_dir/receipt.json" &
+proxy_pid=$!
+for _ in {1..100}; do
+  if [[ -s "$fixture_dir/receipt.json" ]]; then break; fi
+  if ! kill -0 "$proxy_pid" 2>/dev/null; then echo 'Companion fault proxy exited before readiness.' >&2; exit 1; fi
+  sleep 0.2
+done
+if [[ ! -s "$fixture_dir/receipt.json" ]]; then echo 'Companion fault proxy did not start.' >&2; exit 1; fi
 mkdir -p "$app_dir/TestSupport"
 cp "$fixture_dir/receipt.json" "$app_dir/TestSupport/LocalPairing.json"
 if [[ -n "${CHAT_IOS_DESTINATION:-}" ]]; then

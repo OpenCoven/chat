@@ -309,4 +309,37 @@ import XCTest
     XCTAssertEqual(restored.draft, "keep until correct receipt")
     XCTAssertFalse(restored.canSend)
   }
+  func testEditedRecoveredDraftAppendsWithoutReplacingCurrentDraft() async throws {
+    let client = api()
+    let current = model(client)
+    await current.refresh()
+    current.draft = "Original text"
+    client.historyValue = History(sessionId: "head-2", messages: [], hasMore: false)
+    client.snapshotValue = Snapshot(version: 1, familiars: client.snapshotValue.familiars,
+      sessions: [ChatSession(id: "head-2", familiarId: "astra", title: "New", archived: false)], activeRun: nil)
+    await current.refresh()
+    current.draft = "Already typing"
+    let revision = try XCTUnwrap(current.recoveredDrafts.first?.revision)
+    current.restoreDraft(revision: revision, text: "Edited recovery")
+    XCTAssertEqual(current.draft, "Already typing\n\nEdited recovery")
+    XCTAssertTrue(current.recoveredDrafts.isEmpty)
+    XCTAssertTrue(client.sent.isEmpty)
+  }
+  func testCompletedOutputRemainsVisibleIfHistoryRefreshFails() async throws {
+    let sender = api()
+    sender.failSend = true
+    let first = model(sender)
+    await first.refresh()
+    first.draft = "finish this"
+    await first.send()
+    let id = try XCTUnwrap(first.pendingRunId)
+    let reader = api()
+    reader.receiptOverride = Run(id: id, familiarId: "astra", status: "completed",
+      messages: [Message(id: "answer", role: "assistant", text: "Completed output")])
+    reader.historyFailure = URLError(.networkConnectionLost)
+    let restored = model(reader)
+    await restored.refresh()
+    XCTAssertEqual(restored.shownRun?.messages.first?.text, "Completed output")
+    XCTAssertNil(restored.pendingRunId)
+  }
 }

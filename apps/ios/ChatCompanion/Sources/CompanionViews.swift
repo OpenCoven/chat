@@ -38,18 +38,8 @@ struct CompanionRoot: View {
       }
     }
     .tint(Palette.accent)
-    .overlay {
-      if phase != .active {
-        Palette.bgBase.ignoresSafeArea().overlay {
-          Label {
-            Text("Coven Chat")
-          } icon: {
-            Image("ChatLogo").resizable().scaledToFit().frame(width: 30, height: 30)
-          }
-          .font(.title2).foregroundStyle(Palette.textPrimary)
-        }
-      }
-    }
+    .modifier(CompanionInactiveCover())
+    .onChange(of: phase) { _, value in if value != .active { model.flushPersistence() } }
     .onOpenURL { url in if model.pairing == nil { link = url.absoluteString } }
     .task(id: "\(phase == .active)-\(model.pairing?.fingerprint ?? "")") {
       discovery.stop()
@@ -89,6 +79,8 @@ private struct Workspace: View {
   @State private var picking = false
   @State private var details = false
   @State private var permissionLog = false
+  @State private var privacy = false
+  @State private var recovering = false
   /// Set from Connection Details, which asks to forget only once it has closed:
   /// a confirmation cannot present while a sheet is still dismissing.
   @State private var forgetAfterDetails = false
@@ -111,6 +103,8 @@ private struct Workspace: View {
     return page
       .sheet(isPresented: $picking) { picker }
       .sheet(isPresented: $permissionLog) { PermissionLogView(model: model) }
+      .sheet(isPresented: $privacy) { MobilePrivacyView(model: model) }
+      .sheet(isPresented: $recovering) { RecoveredDraftsView(model: model) }
       .sheet(isPresented: $details) {
         if forgetAfterDetails {
           forgetAfterDetails = false
@@ -182,6 +176,8 @@ private struct Workspace: View {
       }
       Spacer(minLength: 8)
       Menu {
+        Button("Phone Privacy", systemImage: "lock.shield") { composing = false; privacy = true }
+          .accessibilityIdentifier("mobile-privacy")
         Button("Refresh", systemImage: "arrow.clockwise") { Task { await model.refresh() } }
         Button("Permission Log", systemImage: "hand.raised") { permissionLog = true }
         Button("Connection Details", systemImage: "info.circle") { details = true }
@@ -352,7 +348,17 @@ private struct Workspace: View {
 
   private var composer: some View {
     VStack(alignment: .leading, spacing: 8) {
-      if !model.error.isEmpty { errorCard }
+      if !displayedError.isEmpty { errorCard }
+      if !model.connected, let date = model.cachedAt {
+        Text("Saved on this iPhone · \(date.formatted(date: .abbreviated, time: .shortened))")
+          .font(.caption).foregroundStyle(Palette.textSecondary)
+          .accessibilityIdentifier("cached-history-status")
+      }
+      if !model.recoveredDrafts.isEmpty {
+        Button("Review Recovered Drafts") { composing = false; recovering = true }
+          .font(.footnote.weight(.semibold))
+          .accessibilityIdentifier("recovered-drafts")
+      }
       if let approval = model.approval {
         ApprovalCard(
           approval: approval, name: familiar?.displayName ?? "Your familiar",
@@ -441,11 +447,12 @@ private struct Workspace: View {
     }
   }
 
+  private var displayedError: String { model.persistenceError ?? model.error }
   private var errorCard: some View {
     HStack(alignment: .top, spacing: 10) {
       Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(Palette.warning)
       VStack(alignment: .leading, spacing: 6) {
-        Text(model.error).font(.footnote).foregroundStyle(Palette.textPrimary)
+        Text(displayedError).font(.footnote).foregroundStyle(Palette.textPrimary)
           .fixedSize(horizontal: false, vertical: true)
           .accessibilityIdentifier("connection-error")
         if model.pendingRunId != nil && model.activeRun?.running != true {

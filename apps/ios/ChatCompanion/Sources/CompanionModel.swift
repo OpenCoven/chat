@@ -290,12 +290,12 @@ import Observation
       if let run = result.run {
         accept(run)
       } else {
-        settlePending()
+        settlePending(clearHistory: true)
       }
     } catch CompanionError.message(let refusal) {
       // The Mac answered, so this is certain: no run started.
       guard generation == expected else { return }
-      settlePending()
+      settlePending(clearHistory: true)
       error = refusal
     } catch {
       guard generation == expected else { return }
@@ -343,7 +343,7 @@ import Observation
   }
   /// Explicitly dismisses only an unresolved receipt after the user inspects the chat.
   func dismissUncertainSend() {
-    guard settlePending() else { return }
+    guard settlePending(clearHistory: true) else { return }
     error = ""
     terminalError = ""
   }
@@ -592,12 +592,12 @@ import Observation
       return commit(value)
     } catch { storageFailed(error); return false }
   }
-  @discardableResult private func settlePending() -> Bool {
+  @discardableResult private func settlePending(clearHistory: Bool = false) -> Bool {
     guard var value = saved else { return false }
     value.pending = nil
     guard commit(value) else { return false }
     pendingRunId = nil
-    historyRunId = nil
+    if clearHistory { historyRunId = nil }
     return true
   }
   func setCacheConversationText(_ enabled: Bool) {
@@ -620,11 +620,12 @@ import Observation
       if !connected { messages = [] }
     }
   }
-  func restoreDraft(revision: UUID) {
+  func restoreDraft(revision: UUID, text: String? = nil) {
     guard connected, historyReady, let binding = currentBinding,
       let record = recoveredDrafts.first(where: { $0.revision == revision }),
       record.binding.familiarID == binding.familiarID else { return }
-    let combined = draft.isEmpty ? record.text : draft + "\n\n" + record.text
+    let recovered = text ?? record.text
+    let combined = draft.isEmpty ? recovered : draft + "\n\n" + recovered
     saved?.drafts.removeAll { $0.revision == revision }
     draft = combined
     flushPersistence()

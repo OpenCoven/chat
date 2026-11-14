@@ -25,6 +25,7 @@ import XCTest
   var historyValues: [String: History] = [:]
   var delayHistory = false
   var historyGate: CheckedContinuation<History, Error>?
+  var historyFailure: Error?
   var receiptRequests: [String] = []
   var receiptFailure: Error?
   var receiptOverride: Run?
@@ -40,6 +41,7 @@ import XCTest
     return snapshotValue
   }
   func history(familiarId: String) async throws -> History {
+    if let historyFailure { throw historyFailure }
     if delayHistory {
       delayHistory = false
       return try await withCheckedThrowingContinuation { historyGate = $0 }
