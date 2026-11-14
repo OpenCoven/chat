@@ -44,6 +44,8 @@
 .coven-settings-nav {
   display: flex;
   flex-direction: column;
+  min-height: 0;
+  overflow-y: auto;
   gap: 18px;
   padding: 22px 12px;
   border-right: 1px solid var(--border-hairline);
@@ -194,9 +196,17 @@
 .coven-settings-scroll {
   display: grid;
   align-content: start;
+  min-width: 0;
+  min-height: 0;
   gap: 22px;
   padding: 6px 32px 32px;
   overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.coven-settings-scroll:focus-visible {
+  outline: 2px solid var(--ring-focus);
+  outline-offset: -2px;
 }
 
 .coven-settings-group {
@@ -400,8 +410,12 @@
 
 .coven-text-size input {
   position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  margin: 0;
   opacity: 0;
-  pointer-events: none;
+  cursor: pointer;
 }
 
 .coven-text-size:has(input:focus-visible) {

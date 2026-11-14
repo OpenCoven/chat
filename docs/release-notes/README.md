@@ -68,3 +68,7 @@ small fixes under "Also fixed".
 
 The full changelog line compares with the previous release that has notes here, and it is the
 file's last line. The first public release, v0.0.2, has none.
+
+## Historical drafts
+
+The [unreleased v0.0.10 draft](../design-audits/2026-11-10-unpublished-v0.0.10-draft.md) is retained from earlier local work. Its wording is historical; it does not describe a published release or define a release target.
