@@ -150,6 +150,16 @@ Store Connect API can't create one, so create it once on the website under
 **Apps → New App**. A build appears in TestFlight after Apple finishes
 processing it. External testers need Beta App Review first.
 
+### Verify processing and testing availability
+
+An accepted upload is not evidence that Apple finished processing it. Run the **TestFlight status** workflow from `main` with the exact build number printed in the upload log and its marketing version. For the native persistence upload in run [43573491965](https://github.com/OpenCoven/chat/actions/runs/43573491965), those values are `1910` and `0.3.0`; that run ties the upload to source `181ff52523b6d3aed8c51d5c16b5c92f9ba247c5`. The status query does not establish source provenance on its own.
+
+The workflow uses the existing `release-signing` environment and makes only GET requests to App Store Connect. Its short-lived JWT is scoped to each exact request; it cannot upload builds, assign testers or send notifications. The helper checks the returned app bundle, build number, marketing version, iOS platform, expiry and related beta detail instead of trusting server filters alone. It polls a missing or processing build, or rate limits, for up to 15 minutes. Invalid or unknown metadata, HTTP failures and timeouts fail the workflow; the nonsecret `testflight-status` artifact records the result. No API response bodies, tester details, keys or tokens are retained.
+
+`testing_available` means Apple reports `IN_BETA_TESTING` for at least one audience; `internalTesting` and `externalTesting` distinguish those audiences. `READY_FOR_BETA_TESTING` alone is reported as `action_required`. This is Apple metadata, not proof that a named tester received an invitation, installed the candidate or completed device acceptance. Other results require inspecting the recorded state in App Store Connect; the verifier never changes distribution settings. See Apple's [build API](https://developer.apple.com/documentation/appstoreconnectapi/get-v1-builds), [internal beta states](https://developer.apple.com/documentation/appstoreconnectapi/internalbetastate), [external beta states](https://developer.apple.com/documentation/appstoreconnectapi/externalbetastate) and [scoped tokens](https://developer.apple.com/documentation/appstoreconnectapi/generating-tokens-for-api-requests).
+
+Run the helper's credential-free regressions with `node --test scripts/testflight-status.test.mjs`. For an actual local read, supply `APPLE_API_KEY`, `APPLE_API_ISSUER` and `APPLE_API_KEY_PATH`, then run `node scripts/testflight-status.mjs 1910 0.3.0 /path/to/status.json`. A local fixture pass is not a live Apple status result.
+
 ### Upload from your Mac
 
 `Scripts/testflight.sh` archives the app under the team and uploads it to App
