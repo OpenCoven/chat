@@ -843,18 +843,6 @@ export function ChatLayout(props: ChatLayoutProps) {
           : `${previous.name}'s run ended in another chat`,
     );
   }, [props.busy, runFamiliarId, runName, props.familiarId, props.lastRun, props.finished]);
-  // A chat Coven couldn't load arrives with its whole view, and a screen reader
-  // doesn't treat an alert inside a new view as a change: Orca said only the
-  // familiar's button (#592). The announcements region above stays mounted, so
-  // the reason is spoken each time that chat is opened.
-  const unavailableReason = session?.unavailable ? props.error : '';
-  const announcedUnavailable = useRef('');
-  useEffect(() => {
-    const opened = unavailableReason ? `${props.familiarId}\n${unavailableReason}` : '';
-    if (opened === announcedUnavailable.current) return;
-    announcedUnavailable.current = opened;
-    if (opened) setAnnouncement((prev) => ({ text: unavailableReason, n: prev.n + 1 }));
-  }, [props.familiarId, unavailableReason]);
   const title = windowTitle(familiar?.name, pendingRuns);
   const onWindowTitle = props.onWindowTitle;
   useEffect(() => {
@@ -982,16 +970,27 @@ export function ChatLayout(props: ChatLayoutProps) {
     promptLimit: PROMPT_LIMIT_BYTES,
     onEditDraft: props.onEditDraft,
   });
+  // A chat Coven couldn't load never turns its composer on, so focus stayed on
+  // the familiar's button and Orca said only its name (#592): the alert came
+  // with the new view and wasn't announced. Focus goes to the alert's reason
+  // instead, and a screen reader speaks what has focus.
+  const errorRef = useRef<HTMLParagraphElement>(null);
+  const unavailableReason = session?.unavailable ? props.error : '';
   useEffect(() => {
     if (!composerFocus) return;
     if (composerFocus.id !== props.familiarId) {
       if (composerFocus.from !== props.familiarId) setComposerFocus(null);
       return;
     }
+    if (unavailableReason) {
+      errorRef.current?.focus();
+      setComposerFocus(null);
+      return;
+    }
     if (composerDisabled) return;
     composerRef.current?.focus();
     setComposerFocus(null);
-  }, [composerFocus, props.familiarId, composerDisabled]);
+  }, [composerFocus, props.familiarId, composerDisabled, unavailableReason]);
   const mentionCompletion = useMentionCompletion({
     familiars: props.familiars,
     familiarId: props.familiarId,
@@ -1629,7 +1628,9 @@ export function ChatLayout(props: ChatLayoutProps) {
                   {/* A paragraph, not a span: WebKitGTK gave AT-SPI a span laid out
                     as a flex item without its text, so on Linux the alert held
                     only its Copy error button (native run 43006448055). */}
-                  <p className="coven-error-text">{props.error}</p>
+                  <p className="coven-error-text" ref={errorRef} tabIndex={-1}>
+                    {props.error}
+                  </p>
                   {props.onReloadChat && !props.loading ? (
                     <FamButton size="sm" className="coven-error-retry" onClick={props.onReloadChat}>
                       Reload chat

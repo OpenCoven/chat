@@ -94,45 +94,6 @@ describe('empty transcript copy', () => {
     expect(screen.queryByText(/Send the first message/)).not.toBeInTheDocument();
   });
 
-  it("speaks why a chat Coven couldn't load is locked each time it is opened", () => {
-    // The alert arrives with the whole new view, and Orca announced only the
-    // familiar's button (#592). The announcements region stays mounted, so a
-    // change to its text is spoken.
-    const unreadable = "Coven couldn't load this chat. Refresh Coven to try again.";
-    const props = {
-      ...layoutProps(),
-      familiars: [
-        { id: 'f', name: 'Wren' },
-        { id: 'g', name: 'Astra' },
-      ],
-      sessions: [
-        { id: 's', title: 'Wren', familiarId: 'f', unavailable: true },
-        { id: 't', title: 'Astra', familiarId: 'g' },
-      ],
-      connected: true,
-    };
-    const announcements = () => screen.getByRole('status', { name: 'Run announcements' });
-    const { rerender } = render(
-      <ChatLayout {...props} familiarId="g" sessionId="t" ready error="" />,
-    );
-    expect(announcements()).toHaveTextContent('');
-
-    rerender(
-      <ChatLayout {...props} familiarId="f" sessionId="s" ready={false} error={unreadable} />,
-    );
-    expect(announcements()).toHaveTextContent(unreadable);
-    const first = announcements().firstElementChild;
-
-    rerender(<ChatLayout {...props} familiarId="g" sessionId="t" ready error="" />);
-    expect(announcements()).toHaveTextContent(unreadable);
-    rerender(
-      <ChatLayout {...props} familiarId="f" sessionId="s" ready={false} error={unreadable} />,
-    );
-    // A fresh node, so the same words are spoken again.
-    expect(announcements()).toHaveTextContent(unreadable);
-    expect(announcements().firstElementChild).not.toBe(first);
-  });
-
   it('puts an error in a paragraph, which AT-SPI exposes with its text', () => {
     // On Linux, WebKitGTK exposed a span laid out as a flex item with no text,
     // so the alert held only its Copy error button (native run 43006448055).
@@ -1422,6 +1383,35 @@ describe('choosing a familiar', () => {
     // The host switches the selection; the composer takes focus once it is shown.
     view.rerender(<ChatLayout {...props()} familiarId="b" sessionId="" />);
     expect(screen.getByRole('textbox', { name: 'Message Bram' })).toHaveFocus();
+  });
+
+  it("hands focus to the reason when Coven couldn't load the chosen chat", () => {
+    // Its composer never turns on, so focus stayed on the familiar's button and
+    // Orca said only "Wren push button." (#592). The alert says why.
+    const unreadable = "Coven couldn't load this chat. Refresh Coven to try again.";
+    const sessions = [
+      ...props().sessions,
+      { id: 's-b', familiarId: 'b', title: 'b', unavailable: true },
+    ];
+    const view = render(
+      <ChatLayout {...props()} sessions={sessions} familiarId="a" sessionId="s-a" />,
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Bram' }));
+    view.rerender(
+      <ChatLayout
+        {...props()}
+        sessions={sessions}
+        familiarId="b"
+        sessionId="s-b"
+        ready={false}
+        error={unreadable}
+      />,
+    );
+    expect(screen.getByText(unreadable)).toHaveFocus();
+    // Choosing a familiar whose chat loads still hands focus to its composer.
+    fireEvent.click(screen.getByRole('button', { name: 'Astra' }));
+    view.rerender(<ChatLayout {...props()} sessions={sessions} familiarId="a" sessionId="s-a" />);
+    expect(screen.getByRole('textbox', { name: 'Message Astra' })).toHaveFocus();
   });
 
   it('waits for the thread to load before focusing, and drops a stale request', () => {
