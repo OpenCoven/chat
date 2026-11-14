@@ -143,15 +143,19 @@ export async function unavailableRow(lane, familiar) {
 
       await refreshCoven(lane);
       const openThird = async () => app.click(await app.one('button', THIRD, { timeout: 30_000 }));
-      if (PLATFORM === 'linux') {
-        // What Orca says as the chat opens: the alert is how a Linux screen
-        // reader user learns why the composer is locked.
-        const spoken = await listen(lane, row, 'Orca', openThird);
-        if (spoken) {
-          row.note('Orca said', spoken);
-          row.note("Orca said the chat couldn't load", spoken.join(' ').includes(UNREADABLE));
-        }
-      } else await openThird();
+      // What the screen reader says as the chat opens is how its user learns
+      // why the composer is locked. Orca is judged (#592). VoiceOver and NVDA
+      // are recorded, including whether the alert and the announcement make
+      // them say it twice.
+      const reader = lane.reader?.name ?? 'The screen reader';
+      const spoken = await listen(lane, row, reader, openThird);
+      if (spoken) {
+        const words = spoken.join(' ');
+        row.note(`${reader} said`, spoken);
+        row.note(`times ${reader} said the chat couldn't load`, words.split(UNREADABLE).length - 1);
+        if (PLATFORM === 'linux')
+          row.check(`Orca says why ${THIRD}'s chat is locked`, words.includes(UNREADABLE), spoken);
+      }
       const said = await until(
         `"${UNREADABLE}" on ${THIRD}`,
         async () => {

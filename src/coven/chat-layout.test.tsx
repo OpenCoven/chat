@@ -94,6 +94,45 @@ describe('empty transcript copy', () => {
     expect(screen.queryByText(/Send the first message/)).not.toBeInTheDocument();
   });
 
+  it("speaks why a chat Coven couldn't load is locked each time it is opened", () => {
+    // The alert arrives with the whole new view, and Orca announced only the
+    // familiar's button (#592). The announcements region stays mounted, so a
+    // change to its text is spoken.
+    const unreadable = "Coven couldn't load this chat. Refresh Coven to try again.";
+    const props = {
+      ...layoutProps(),
+      familiars: [
+        { id: 'f', name: 'Wren' },
+        { id: 'g', name: 'Astra' },
+      ],
+      sessions: [
+        { id: 's', title: 'Wren', familiarId: 'f', unavailable: true },
+        { id: 't', title: 'Astra', familiarId: 'g' },
+      ],
+      connected: true,
+    };
+    const announcements = () => screen.getByRole('status', { name: 'Run announcements' });
+    const { rerender } = render(
+      <ChatLayout {...props} familiarId="g" sessionId="t" ready error="" />,
+    );
+    expect(announcements()).toHaveTextContent('');
+
+    rerender(
+      <ChatLayout {...props} familiarId="f" sessionId="s" ready={false} error={unreadable} />,
+    );
+    expect(announcements()).toHaveTextContent(unreadable);
+    const first = announcements().firstElementChild;
+
+    rerender(<ChatLayout {...props} familiarId="g" sessionId="t" ready error="" />);
+    expect(announcements()).toHaveTextContent(unreadable);
+    rerender(
+      <ChatLayout {...props} familiarId="f" sessionId="s" ready={false} error={unreadable} />,
+    );
+    // A fresh node, so the same words are spoken again.
+    expect(announcements()).toHaveTextContent(unreadable);
+    expect(announcements().firstElementChild).not.toBe(first);
+  });
+
   it('puts an error in a paragraph, which AT-SPI exposes with its text', () => {
     // On Linux, WebKitGTK exposed a span laid out as a flex item with no text,
     // so the alert held only its Copy error button (native run 43006448055).

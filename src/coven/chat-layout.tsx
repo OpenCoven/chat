@@ -843,6 +843,18 @@ export function ChatLayout(props: ChatLayoutProps) {
           : `${previous.name}'s run ended in another chat`,
     );
   }, [props.busy, runFamiliarId, runName, props.familiarId, props.lastRun, props.finished]);
+  // A chat Coven couldn't load arrives with its whole view, and a screen reader
+  // doesn't treat an alert inside a new view as a change: Orca said only the
+  // familiar's button (#592). The announcements region above stays mounted, so
+  // the reason is spoken each time that chat is opened.
+  const unavailableReason = session?.unavailable ? props.error : '';
+  const announcedUnavailable = useRef('');
+  useEffect(() => {
+    const opened = unavailableReason ? `${props.familiarId}\n${unavailableReason}` : '';
+    if (opened === announcedUnavailable.current) return;
+    announcedUnavailable.current = opened;
+    if (opened) setAnnouncement((prev) => ({ text: unavailableReason, n: prev.n + 1 }));
+  }, [props.familiarId, unavailableReason]);
   const title = windowTitle(familiar?.name, pendingRuns);
   const onWindowTitle = props.onWindowTitle;
   useEffect(() => {
