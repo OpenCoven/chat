@@ -17,7 +17,7 @@ use sha2::{Digest, Sha256};
 
 /// The Coven release Chat installs. Moving it means updating every digest
 /// below from that release's `SHA256SUMS`.
-pub(crate) const COVEN_VERSION: &str = "0.4.10";
+pub(crate) const COVEN_VERSION: &str = "0.5.0";
 /// Larger than any Coven release asset; a bigger response is refused.
 const MAX_ARCHIVE_BYTES: u64 = 64 * 1024 * 1024;
 const DOWNLOAD_TIMEOUT: Duration = Duration::from_secs(15 * 60);
@@ -41,27 +41,27 @@ pub(crate) fn release_for(os: &str, arch: &str) -> Option<Release> {
     };
     match (os, arch) {
         ("macos", "aarch64") => Some(release(
-            "coven-v0.4.10-macos-aarch64.tar.gz",
-            "3d7fb297aa772e6405afa3e1bfb9fd8f4d99b19dd7339625b83ccbca3bbd624b",
-            12_072_707,
+            "coven-v0.5.0-macos-aarch64.tar.gz",
+            "1a040c749279d5607c498c2f91c629d35e9008f1b490ff5c780e2527801f4a29",
+            17_167_174,
             &["coven", "coven-afs-serve"],
         )),
         ("macos", "x86_64") => Some(release(
-            "coven-v0.4.10-macos-x64.tar.gz",
-            "b194819055c6922ba4e2e5aa6ac10b0e67f76158da8c6669f18b3025a1c67119",
-            12_505_542,
+            "coven-v0.5.0-macos-x64.tar.gz",
+            "d0239c3a0e3b03edd2c62f0d185a532fe7563c5ce32825ed35157ffeb0d6ceb3",
+            17_872_527,
             &["coven", "coven-afs-serve"],
         )),
         ("linux", "x86_64") => Some(release(
-            "coven-v0.4.10-linux-x64.tar.gz",
-            "01589044d05f1dd40823c218531386c6cdc89648a5a3ca4056a0b672c80db7cc",
-            11_233_844,
+            "coven-v0.5.0-linux-x64.tar.gz",
+            "60c329e1f598794c17324804b50f6981a50f925ef1d9696624db828fce014128",
+            16_614_506,
             &["coven"],
         )),
         ("windows", "x86_64") => Some(release(
-            "coven-v0.4.10-windows-x64.zip",
-            "bd6749dd3e2e248827d498d990589c2c6e2dce5853194b1dc9fb025c933c06fc",
-            29_110_900,
+            "coven-v0.5.0-windows-x64.zip",
+            "b9b806aead64bfe4190e55343d36fd952dd54e23e2a97865c760db8ca2f06195",
+            44_336_244,
             &["coven.exe"],
         )),
         _ => None,
