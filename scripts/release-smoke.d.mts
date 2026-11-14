@@ -1,8 +1,13 @@
-export const PRODUCT_NAME: 'OpenCoven Chat';
+export const PRODUCT_NAME: 'Coven Chat';
 export const IDENTIFIER: 'ai.opencoven.chat';
 
 export function assetName(name: string): string;
 export function expectedInstallers(version: string, product?: string): string[];
+export function resolvePublishedInstaller(
+  checksums: string,
+  version: string,
+  suffix: string,
+): string;
 export function expectedUpdaterArtifacts(version: string, product?: string): Map<string, string[]>;
 export function parseChecksums(text: string): { entries: Map<string, string>; problems: string[] };
 

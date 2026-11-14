@@ -3,7 +3,7 @@ import { getCurrentWindow } from '@tauri-apps/api/window';
 import { canUseTauriCommands } from './desktop-host';
 
 /** The window's own name, as `tauri.conf.json` gives it. */
-export const APP_TITLE = 'OpenCoven Chat';
+export const APP_TITLE = 'Coven Chat';
 
 export type SetWindowTitle = (title: string) => void;
 

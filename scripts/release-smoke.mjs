@@ -10,7 +10,7 @@ import { lstatSync, readdirSync, readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-export const PRODUCT_NAME = 'OpenCoven Chat';
+export const PRODUCT_NAME = 'Coven Chat';
 export const IDENTIFIER = 'ai.opencoven.chat';
 const CHECKSUMS = 'SHA256SUMS';
 const UPDATER_MANIFEST = 'latest.json';
@@ -18,7 +18,7 @@ const MAC_TARGETS = ['aarch64-apple-darwin', 'x86_64-apple-darwin'];
 
 /**
  * The name GitHub gives an uploaded asset: it replaces each space with a dot,
- * so `OpenCoven Chat_0.0.3_x64.dmg` is served as `OpenCoven.Chat_0.0.3_x64.dmg`.
+ * so `Coven Chat_0.1.1_x64.dmg` is served as `Coven.Chat_0.1.1_x64.dmg`.
  * The publish job renames the files the same way before writing SHA256SUMS and
  * latest.json, so both name what people actually download (v0.0.2 and v0.0.3
  * listed the spaced names, and `shasum -c` reported every download missing).
@@ -42,6 +42,18 @@ export function expectedInstallers(version, product = PRODUCT_NAME) {
     `${prefix}_amd64.AppImage`,
     `${prefix}_amd64.deb`,
   ];
+}
+
+/** Resolve an exact checksum-listed installer across the desktop product rename. */
+export function resolvePublishedInstaller(checksums, version, suffix) {
+  const { entries, problems } = parseChecksums(checksums);
+  if (problems.length) throw new Error(problems.join(' '));
+  const matches = ['Coven Chat', 'OpenCoven Chat']
+    .flatMap((product) => expectedInstallers(version, product))
+    .filter((name) => name.endsWith(`_${suffix}`) && entries.has(name));
+  if (matches.length !== 1)
+    throw new Error(`Expected exactly one published installer for ${version} ${suffix}.`);
+  return matches[0];
 }
 
 const WINDOWS_SIGNING_STATES = ['signed', 'unsigned'];

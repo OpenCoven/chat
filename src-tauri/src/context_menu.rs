@@ -92,24 +92,24 @@ pub(crate) fn install<R: tauri::Runtime>(app: &tauri::App<R>) {
     {
         use tauri::Manager;
         let Some(window) = app.get_webview_window("main") else {
-            eprintln!("OpenCoven Chat: no main window to keep page actions out of its menu");
+            eprintln!("Coven Chat: no main window to keep page actions out of its menu");
             return;
         };
         if let Err(error) = window.with_webview(|webview| {
             #[cfg(windows)]
             {
                 if let Err(error) = webview2::install(&webview) {
-                    eprintln!("OpenCoven Chat: could not filter the right-click menu: {error}");
+                    eprintln!("Coven Chat: could not filter the right-click menu: {error}");
                 }
                 // A failure is logged by its code only, and Chat still starts.
                 if let Err(error) = webview2::clear_saved_autofill(&webview) {
-                    eprintln!("OpenCoven Chat: could not clear saved autofill: {error}");
+                    eprintln!("Coven Chat: could not clear saved autofill: {error}");
                 }
             }
             #[cfg(target_os = "linux")]
             webkitgtk::install(&webview);
         }) {
-            eprintln!("OpenCoven Chat: could not reach the web view: {error}");
+            eprintln!("Coven Chat: could not reach the web view: {error}");
         }
     }
     #[cfg(not(any(windows, target_os = "linux")))]
@@ -150,9 +150,7 @@ mod webview2 {
                     &ClearBrowsingDataCompletedHandler::create(Box::new(
                         |result: windows_core::Result<()>| {
                             if let Err(error) = result {
-                                eprintln!(
-                                    "OpenCoven Chat: could not clear saved autofill: {error}"
-                                );
+                                eprintln!("Coven Chat: could not clear saved autofill: {error}");
                             }
                             Ok(())
                         },
