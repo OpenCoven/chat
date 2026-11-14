@@ -7,7 +7,7 @@ import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
-import { PLATFORM } from './driver.mjs';
+import { PLATFORM, sleep } from './driver.mjs';
 import { Row } from './rows.mjs';
 
 const ALLOWED = ['opencoven.chat.navigation.v1', 'opencoven.chat.preferences.v1'];
@@ -87,12 +87,13 @@ export function browserFiles() {
 
 /** The files whose bytes hold a needle, as UTF-8 or as UTF-16. */
 export function containing(paths, needle) {
-  return paths.filter((path) => {
-    const bytes = readFileSync(path);
-    return (
-      bytes.includes(Buffer.from(needle, 'utf8')) || bytes.includes(Buffer.from(needle, 'utf16le'))
-    );
-  });
+  return paths.filter((path) => hasNeedle(readFileSync(path), needle));
+}
+
+function hasNeedle(bytes, needle) {
+  return (
+    bytes.includes(Buffer.from(needle, 'utf8')) || bytes.includes(Buffer.from(needle, 'utf16le'))
+  );
 }
 
 function sqliteItems(path) {
@@ -167,119 +168,154 @@ export function sqlitePlaces(path, needle) {
   return places;
 }
 
-export function storageRow() {
-  const row = new Row('504-8', 'Preference-only browser storage, read from disk after quitting');
-  try {
-    const { browser, app } = roots();
-    row.note(
-      'browser storage folders',
-      browser.map((root) => `${root}${existsSync(root) ? '' : ' (absent)'}`),
-    );
-    const listed = browser.flatMap((root) => files(root).map((path) => ({ root, path })));
-    const all = listed.filter(({ root, path }) => !appOwned(root, path)).map(({ path }) => path);
-    const shared = listed.filter(({ root, path }) => appOwned(root, path)).map(({ path }) => path);
-    const home = homedir();
-    row.note(
-      'browser storage files',
-      all.map((path) => path.replace(home, '~')),
-    );
-    if (shared.length)
-      row.note(
-        "Chat's own files in the same folder (not browser storage)",
-        shared.map((path) => path.replace(home, '~')),
-      );
-    const keys = new Map();
-    let preferences;
-    let navigation;
-    const databases = [];
-    for (const path of all) {
-      if (/IndexedDB/i.test(path)) databases.push(path);
-      if (/\.(sqlite3|localstorage)$/.test(path)) {
-        const items = sqliteItems(path);
-        if (!items) continue;
-        for (const [key, value] of items) {
-          keys.set(key, path);
-          if (key === 'opencoven.chat.preferences.v1') preferences = value;
-          if (key === 'opencoven.chat.navigation.v1') navigation = value;
-        }
-      } else if (
-        /(Local Storage|Session Storage)[\\/]leveldb[\\/].*\.(log|ldb)$|Session Storage[\\/].*\.(log|ldb)$/.test(
-          path,
-        )
-      ) {
-        const bytes = readFileSync(path);
-        for (const key of leveldbKeys(bytes)) keys.set(key, path);
-        const latin = bytes.toString('latin1');
-        const utf16 = bytes.toString('utf16le');
-        const pick = (name) => {
-          for (const text of [utf16, latin]) {
-            const at = text.lastIndexOf(
-              name === 'preferences' ? '"inspectorWidth"' : '"familiarId"',
-            );
-            if (at < 0) continue;
-            const start = text.lastIndexOf('{', at);
-            const end = text.indexOf('}', at);
-            if (start >= 0 && end > start) return text.slice(start, end + 1);
-          }
-          return undefined;
-        };
-        preferences ??= pick('preferences');
-        navigation ??= pick('navigation');
-        if (/Session Storage/.test(path))
-          for (const key of leveldbKeys(bytes)) row.note('session storage key', key);
+// A profile can still flush after quit. Retry the entire collection, never
+// individual missing paths: a fresh enumeration must see any replacement files.
+// Privacy findings are terminal even if a later read also encounters churn.
+export async function storageRow() {
+  const retries = [];
+  for (let attempt = 1; attempt <= 3; attempt += 1) {
+    const row = new Row('504-8', 'Preference-only browser storage, read from disk after quitting');
+    if (retries.length) row.note('snapshot retries', [...retries]);
+    try {
+      collectStorage(row);
+    } catch (error) {
+      if (error.code === 'ENOENT' && !row.failures && attempt < 3) {
+        retries.push({ attempt, error: error.message });
+        await sleep(100);
+        continue;
       }
+      row.error =
+        error.code === 'ENOENT'
+          ? `Storage snapshot incomplete after ${attempt} attempt(s): ${error.message}`
+          : error.message;
     }
-    const names = [...keys.keys()].sort();
-    row.note('storage keys found', names);
-    row.check(
-      'only the preferences and navigation keys are stored',
-      names.every((key) => ALLOWED.includes(key)),
-      names,
-    );
-    row.check(
-      'the preferences key was found',
-      names.includes('opencoven.chat.preferences.v1'),
-      names,
-    );
+    return row;
+  }
+}
+
+function checkStoredValues(row, preferences, navigation, partial = false) {
+  if (!partial || preferences !== undefined) {
     let parsed = {};
     try {
       parsed = JSON.parse(preferences ?? '{}');
     } catch {
-      row.note('preferences value (unparsed)', String(preferences).slice(0, 300));
+      if (!partial) row.note('preferences value (unparsed)', String(preferences).slice(0, 300));
     }
-    row.note('stored preferences', parsed);
-    row.expect('inspectorWidth is a number', typeof parsed.inspectorWidth, 'number');
-    if (navigation) {
-      try {
-        row.check(
-          'navigation holds only ids',
-          Object.keys(JSON.parse(navigation)).every((key) =>
-            ['familiarId', 'sessionId'].includes(key),
-          ),
-          navigation,
-        );
-      } catch {
-        row.note('navigation value (unparsed)', String(navigation).slice(0, 200));
+    if (!partial) row.note('stored preferences', parsed);
+    if (!partial || typeof parsed.inspectorWidth !== 'number')
+      row.expect('inspectorWidth is a number', typeof parsed.inspectorWidth, 'number');
+  }
+  if (navigation) {
+    try {
+      const onlyIds = Object.keys(JSON.parse(navigation)).every((key) =>
+        ['familiarId', 'sessionId'].includes(key),
+      );
+      if (!partial || !onlyIds) row.check('navigation holds only ids', onlyIds, navigation);
+    } catch {
+      if (!partial) row.note('navigation value (unparsed)', String(navigation).slice(0, 200));
+    }
+  }
+}
+
+function collectStorage(row) {
+  const { browser, app } = roots();
+  row.note(
+    'browser storage folders',
+    browser.map((root) => `${root}${existsSync(root) ? '' : ' (absent)'}`),
+  );
+  const listed = browser.flatMap((root) => files(root).map((path) => ({ root, path })));
+  const all = listed.filter(({ root, path }) => !appOwned(root, path)).map(({ path }) => path);
+  const shared = listed.filter(({ root, path }) => appOwned(root, path)).map(({ path }) => path);
+  const home = homedir();
+  row.note(
+    'browser storage files',
+    all.map((path) => path.replace(home, '~')),
+  );
+  if (shared.length)
+    row.note(
+      "Chat's own files in the same folder (not browser storage)",
+      shared.map((path) => path.replace(home, '~')),
+    );
+  const keys = new Map();
+  const recordKey = (key, path) => {
+    keys.set(key, path);
+    // Record before the next file can disappear and interrupt this scan.
+    if (!ALLOWED.includes(key))
+      row.check('unexpected storage key observed during snapshot', false, key);
+  };
+  let preferences;
+  let navigation;
+  const databases = [];
+  const needleHits = new Map(NEEDLES.map((needle) => [needle, []]));
+  for (const path of all) {
+    // Inspect every file once, including temporary files. Record unsafe bytes
+    // before the next OS read can fail; a retry must never erase a finding.
+    const bytes = readFileSync(path);
+    for (const needle of NEEDLES) {
+      if (hasNeedle(bytes, needle)) {
+        needleHits.get(needle).push(path);
+        row.check('forbidden content observed during snapshot', false, { needle, path });
       }
     }
-    row.note('IndexedDB files', databases);
-    for (const needle of NEEDLES) {
-      const hits = containing(all, needle);
-      row.expect(`browser storage files containing "${needle}"`, hits, []);
-      for (const path of hits)
-        row.note(
-          `where "${needle}" sits in ${path.replace(home, '~')}`,
-          sqlitePlaces(path, needle),
-        );
+    if (/IndexedDB/i.test(path)) databases.push(path);
+    if (/\.(sqlite3|localstorage)$/.test(path)) {
+      const items = sqliteItems(path);
+      if (!items) continue;
+      for (const [key, value] of items) {
+        recordKey(key, path);
+        if (key === 'opencoven.chat.preferences.v1') preferences = value;
+        if (key === 'opencoven.chat.navigation.v1') navigation = value;
+        checkStoredValues(row, preferences, navigation, true);
+      }
+    } else if (
+      /(Local Storage|Session Storage)[\\/]leveldb[\\/].*\.(log|ldb)$|Session Storage[\\/].*\.(log|ldb)$/.test(
+        path,
+      )
+    ) {
+      for (const key of leveldbKeys(bytes)) recordKey(key, path);
+      const latin = bytes.toString('latin1');
+      const utf16 = bytes.toString('utf16le');
+      const pick = (name) => {
+        for (const text of [utf16, latin]) {
+          const at = text.lastIndexOf(name === 'preferences' ? '"inspectorWidth"' : '"familiarId"');
+          if (at < 0) continue;
+          const start = text.lastIndexOf('{', at);
+          const end = text.indexOf('}', at);
+          if (start >= 0 && end > start) return text.slice(start, end + 1);
+        }
+        return undefined;
+      };
+      preferences ??= pick('preferences');
+      navigation ??= pick('navigation');
+      checkStoredValues(row, preferences, navigation, true);
+      if (/Session Storage/.test(path))
+        for (const key of leveldbKeys(bytes)) row.note('session storage key', key);
     }
-    // Outside browser storage, for the record: Chat's own app data (not judged here).
-    const appFiles = app.flatMap((root) => files(root));
-    row.note(
-      'app data files (not browser storage)',
-      appFiles.map((path) => path.replace(home, '~')),
-    );
-  } catch (error) {
-    row.error = error.message;
   }
-  return row;
+  const names = [...keys.keys()].sort();
+  row.note('storage keys found', names);
+  row.check(
+    'only the preferences and navigation keys are stored',
+    names.every((key) => ALLOWED.includes(key)),
+    names,
+  );
+  row.check(
+    'the preferences key was found',
+    names.includes('opencoven.chat.preferences.v1'),
+    names,
+  );
+  checkStoredValues(row, preferences, navigation);
+  row.note('IndexedDB files', databases);
+  for (const needle of NEEDLES) {
+    const hits = needleHits.get(needle);
+    row.expect(`browser storage files containing "${needle}"`, hits, []);
+    for (const path of hits)
+      row.note(`where "${needle}" sits in ${path.replace(home, '~')}`, sqlitePlaces(path, needle));
+  }
+  // Outside browser storage, for the record: Chat's own app data (not judged here).
+  const appFiles = app.flatMap((root) => files(root));
+  row.note(
+    'app data files (not browser storage)',
+    appFiles.map((path) => path.replace(home, '~')),
+  );
 }

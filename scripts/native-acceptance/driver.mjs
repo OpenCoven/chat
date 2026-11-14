@@ -445,7 +445,7 @@ export class App {
     { button = 'left', mods = [], count = 1, find, verifyLink, receipt } = {},
   ) {
     if (!nodeOrPoint) throw new Error('nothing to click: the control was not found');
-    const node = find ? await this.stableMiddle(find) : nodeOrPoint;
+    const node = find ? await this.stableTarget(find) : nodeOrPoint;
     const at = Array.isArray(node) ? node : center(find ? node : await this.visible(node));
     if (verifyLink) {
       // One helper command verifies the native hit target immediately before
@@ -465,29 +465,28 @@ export class App {
     await sleep(250);
   }
 
-  /** Reacquire a stable target clear of the transcript's header and composer. */
-  async stableMiddle(find) {
+  /** Reacquire a stable, uncovered target; scroll only while it is covered. */
+  async stableTarget(find) {
+    const bounds = () => this.transcriptViewport();
+    const uncovered = (node, { top, bottom, left, right }) => {
+      const [cx] = center(node);
+      return (
+        node.frame.y >= top && node.frame.y + node.frame.h <= bottom && cx > left && cx < right
+      );
+    };
     for (let attempt = 0; attempt < 6; attempt += 1) {
-      const bounds = () => this.transcriptViewport();
-      const positioned = await this.middle(await find(), find, bounds);
+      const initial = await find();
+      // A bottom-anchored reply may be fully visible but impossible to centre.
+      // Messages bounds, not a preferred middle band, establish visibility.
+      const positioned = uncovered(initial, await bounds())
+        ? initial
+        : await this.middle(initial, find, bounds);
       await sleep(100);
-      const { top, bottom, left, right } = await bounds();
+      const visible = await bounds();
       const current = await find();
-      const frame = current?.frame;
-      const previous = positioned?.frame;
-      const [cx, cy] = center(current);
       if (
-        frame &&
-        previous &&
-        ['x', 'y', 'w', 'h'].every((key) => frame[key] === previous[key]) &&
-        frame.y >= top &&
-        frame.y + frame.h <= bottom &&
-        cy >= top + (bottom - top) * 0.25 &&
-        cy <= top + (bottom - top) * 0.6 &&
-        cx > left &&
-        cx < right &&
-        cy > top &&
-        cy < bottom
+        ['x', 'y', 'w', 'h'].every((key) => current.frame[key] === positioned.frame[key]) &&
+        uncovered(current, visible)
       )
         return current;
     }

@@ -379,7 +379,7 @@ try {
   shot('before-quit');
 
   setup.note('app quit by its own shortcut', await quit(app, child, () => lane.front()));
-  rows.push(storageRow());
+  rows.push(await storageRow());
 
   // Row 578 (Windows): last, because it installs v0.0.8 over this build.
   if (options['upgrade-blocked']) {

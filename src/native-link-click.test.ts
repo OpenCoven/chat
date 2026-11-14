@@ -153,3 +153,41 @@ test('a stable link may straddle the middle band edge while remaining fully insi
   expect(await run(h.app.click(h.target(), { find: async () => h.target() }))).toBeNull();
   expect(h.clicks).toEqual([[450, 505]]);
 });
+
+test.each([
+  {
+    name: 'Named login',
+    frame: { x: 592, y: 631, w: 95, h: 21 },
+    messages: { x: 510, y: 122, w: 730, h: 571 },
+    composer: { x: 523, y: 703, w: 704, h: 44 },
+    viewport: { top: 79, bottom: 823, left: 210, right: 1600 },
+    point: [640, 642],
+  },
+  {
+    name: 'Completion boundary',
+    frame: { x: 398, y: 662, w: 163, h: 21 },
+    messages: { x: 340, y: 153, w: 740, h: 571 },
+    composer: { x: 353, y: 734, w: 714, h: 44 },
+    viewport: { top: 110, bottom: 854, left: 40, right: 1440 },
+    point: [480, 673],
+  },
+])(
+  'bottom-anchored $name from native ARM receipts stays clickable without mandatory centering',
+  async (receipt) => {
+    vi.useFakeTimers();
+    const h = harness();
+    const find = async () => ({ role: 'link', name: receipt.name, frame: { ...receipt.frame } });
+    h.app.viewport = async () => receipt.viewport;
+    h.app.snapshot = async () => ({
+      children: [
+        { role: 'log', name: 'Messages', frame: receipt.messages, children: [] },
+        { role: 'textbox', name: 'Message Astra', frame: receipt.composer, children: [] },
+      ],
+    });
+    // The raw before/after trees are identical: this transcript is at its scroll
+    // boundary, so additional wheel input cannot centre its fully visible link.
+    expect(await run(h.app.click(await find(), { find }))).toBeNull();
+    expect(h.clicks).toEqual([receipt.point]);
+    expect(h.commands.filter((command) => command.cmd === 'scroll')).toEqual([]);
+  },
+);

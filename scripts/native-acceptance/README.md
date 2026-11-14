@@ -100,3 +100,5 @@ Windows executable discovery shares `windows/installed-exe.mjs` between the Powe
   still reports blocked if no attempt composes; Orca runs with no speech
   server, so its words come from its debug log; WebView2's context menu is
   read by what UI Automation reports at a point inside it.
+
+Row 504-8 retries the entire profile collection at most three times when an enumerated entry disappears (`ENOENT`), waiting 100 ms between attempts and recording the failed attempts. Each retry enumerates afresh and repeats all storage checks. Temporary files remain included; access errors, exhausted retries and observed privacy findings fail the row. A finding from an earlier partial collection is never discarded to obtain a passing retry.
