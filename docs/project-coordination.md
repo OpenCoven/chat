@@ -1,5 +1,127 @@
 # Chat project coordination
 
+## Follow-up — 2026-11-13
+
+Refreshed at `2026-11-14T04:51:11.664891+00:00` under [#621](https://github.com/OpenCoven/chat/issues/621). This update preserves the frozen scope; the tables later in this file remain the original 2026-11-12 snapshot. Current GitHub issue State blocks and newer owner comments still win. No branch or worktree has been removed by this resumed audit.
+
+Current inventory: **53 worktrees, 50 local branches, 30 server heads, 8 open PRs and 18 open issues**. All 43 original worktree registrations remain present. The read-only repository audit returned 30 keep, 22 check and one primary; zero removable. These verdicts do not authorize touching another owner's work.
+
+Primary recovery is no longer awaiting a handoff. Val explicitly requested conflict resolution on 2026-11-12; signed local merge `fbb3af106657d5b20eda29011ad13bbbe807abd4` and its verified before/after bundles preserve that integration. Another active release/Settings task has since advanced local main to `e4793b82423843e9bc518e02423e707e15e32e53`. It is clean with no unmerged entries, but its local commits are not all on canonical main `b06aae750d81868aea85aa5784ca89bd49603f9b`. Preserve it under #618's current owner; this coordination task does not push or replace it.
+
+### Current delivery order
+
+1. Preserve the release/Settings ownership boundary: #613/#618 owns the candidate and observed native failures, #619 owns the version-specific executable lookup in upgrade row 578, and #620 is a separate Windows MSI fix. These are arrivals outside the frozen retirement batch. Do not take them over.
+2. #601 has merged before #583, and #581/#582/#584/#585/#586/#543 have also merged. Keep #587’s actual Windows-reader requirement, #579’s published VoiceOver evidence and #578’s published upgrade evidence open under their original acceptance. Source delivery does not supply those results.
+3. #588 merged; #589 closed without merge as the alternative. Preserve any unique retained history and original native evidence until its owner releases it. No duplicate fix or PR is needed here.
+4. #590 is already claimed in draft #608, held by its owner until v0.1.2 publishes or Val explicitly changes that release boundary. Its native tree evidence and an actual Orca listen remain separate. The old recommendation to begin #590 is superseded.
+5. Keep #575’s policy decision, #573’s engine/supersede safety gate, #476/#539’s updater keys and two-release proof, #411’s selected eSigner provisioning, physical/operator acceptance and #154/#155’s producer/context decisions distinct. #568 and #356 closed by recorded backlog decisions; #356 redirected the remaining updater/signing work, not declared it delivered.
+
+The trusted authority check finds existing drift on this docs branch and its unchanged base `b06aae750d81868aea85aa5784ca89bd49603f9b`: `productionDeltas: src-tauri/src/lib.rs` moved beyond the pin. The workflow enforces this freshness check on pushes to main, not on pull requests, so it is a release/main verification dependency rather than a blocker to protected documentation delivery. #613 already plans a separate post-content-merge authority repin. This task changes no governed path, does not bypass the check and does not create a competing repin; main-push results are reported separately.
+
+### Original PR dispositions now
+
+| PR | Current disposition | Preserved next gate |
+|---|---|---|
+| [#601](https://github.com/OpenCoven/chat/pull/601) | Merged at `e593d1bf401f6aba112f6cf37b8766f432b21153` on 2026-11-12T07:00:39Z | #587 reader design/owner remains separate. |
+| [#589](https://github.com/OpenCoven/chat/pull/589) | Closed without merge; retained head `ccbc53d57593f69f3e0b774f9bce593bf970b320` | Closed alternative; no owner release for unique retained evidence/history is inferred. |
+| [#588](https://github.com/OpenCoven/chat/pull/588) | Merged at `8a911bbe21910481c3ebf3f59158426148993d3a` on 2026-11-12T06:49:31Z | Preserve exact native evidence and owner release for local retained material. |
+| [#586](https://github.com/OpenCoven/chat/pull/586) | Merged at `4c2df8c2d5c37ff7e9ae22c0f8912377c5c16336` on 2026-11-12T11:29:00Z | #578 remains open; #619 fixes the row before published-upgrade proof. |
+| [#585](https://github.com/OpenCoven/chat/pull/585) | Merged at `a9450ffea805d55f08eefebce358b5e668f0cc0a` on 2026-11-12T07:00:59Z | #579 retains published VoiceOver proof. |
+| [#584](https://github.com/OpenCoven/chat/pull/584) | Merged at `206dce7404f8846e61f4ffa921d994fc5be7597f` on 2026-11-12T11:28:37Z | Model implementation merged; release/Settings work remains with #613/#618. |
+| [#583](https://github.com/OpenCoven/chat/pull/583) | Merged at `06700a254b82caadd80385ce8666311d325db819` on 2026-11-12T07:54:26Z | #587 full reader remains open. |
+| [#582](https://github.com/OpenCoven/chat/pull/582) | Merged at `87e4e9455b89c44672e7034de2ba426e9896092e` on 2026-11-12T06:48:59Z | Managed-home implementation merged; retained owner/evidence material is separate. |
+| [#581](https://github.com/OpenCoven/chat/pull/581) | Merged at `d1c632d18b7fc782645f132055ceeb97db14efe4` on 2026-11-12T06:48:35Z | #592 still needs actual Orca speech on unavailable-chat selection. |
+| [#580](https://github.com/OpenCoven/chat/pull/580) | Merged at `9e88c711e1a940e9142ba5ed4f1ab31d54aed511` on 2026-11-12T06:49:22Z | #568 closed by explicit later backlog decision; reopen on a new exhausted-window log. |
+| [#575](https://github.com/OpenCoven/chat/pull/575) | Draft at `4c4ecb298670396546345d263a46ba3ee6abb495`; existing owner retained | Open owner-held policy reconciliation; do not relabel merged full access as this contract. |
+| [#543](https://github.com/OpenCoven/chat/pull/543) | Merged at `f7649d94f5b077acdd8ab95876532b49e472ef5f` on 2026-11-12T11:29:23Z | Source merged; candidate/release and human gates remain distinct. |
+| [#476](https://github.com/OpenCoven/chat/pull/476) | Draft at `5dbaa66c949d7d15c689d6a0ad8fdb63c917a0af`; existing owner retained | Open owner-held updater code/key prerequisite; #539 owns installed two-release proof. |
+
+### Original worktree dispositions now
+
+Original purposes, evidence pointers and decision holders in the frozen table still apply. A fresh clean/merged status alone never releases the owner or an evidence dependency. No initial worktree was found missing.
+
+| Original worktree | Current head | Git / repository audit | Supported disposition |
+|---|---|---|---|
+| `.` | `e4793b82423843e9bc518e02423e707e15e32e53` | clean; primary | Preserve current #618-owned local main; recovery complete and newer owner work retained. |
+| `$HOME/.codex/worktrees/1fde/chat` | `f34022acc3dfeb55634d5c8132ed41a02181a534` | dirty 1 paths; keep | Retain owner-held edits and original evidence/acceptance; no takeover. |
+| `$HOME/.codex/worktrees/67d4/chat` | `ac09aadeef889c0e759693c1c7351a01e6e56a4f` | dirty 54 paths; keep | Retain owner-held edits and original evidence/acceptance; no takeover. |
+| `$HOME/.codex/worktrees/b52f/chat` | `f34022acc3dfeb55634d5c8132ed41a02181a534` | clean; check | Retain merged evidence/owner material; no lifecycle handoff is inferred from delivery. |
+| `.worktrees/155-context-binding-design` | `a8c76390ff946389224b86e5ff91b8b6c11bf413` | dirty 2 paths; keep | Retain owner-held edits and original evidence/acceptance; no takeover. |
+| `.worktrees/155-m0-prerequisites` | `78bb24b48034270e7911bf47ab5f1d6d5aed4767` | dirty 1 paths; keep | Retain owner-held edits and original evidence/acceptance; no takeover. |
+| `.worktrees/155-m0-refresh-20261106` | `a8c76390ff946389224b86e5ff91b8b6c11bf413` | dirty 4 paths; keep | Retain owner-held edits and original evidence/acceptance; no takeover. |
+| `.worktrees/155-mission-artifact-metadata` | `a8c76390ff946389224b86e5ff91b8b6c11bf413` | dirty 11 paths; keep | Retain owner-held edits and original evidence/acceptance; no takeover. |
+| `.worktrees/465-device-acceptance` | `dcd3d2a700b9d26b5fd3485208b3fb76af4675b2` | dirty 3 paths; keep | Retain owner-held edits and original evidence/acceptance; no takeover. |
+| `.worktrees/515-v008-link-review` | `a8c76390ff946389224b86e5ff91b8b6c11bf413` | dirty 1 paths; keep | Retain owner-held edits and original evidence/acceptance; no takeover. |
+| `.worktrees/520-v008-acceptance` | `a8c76390ff946389224b86e5ff91b8b6c11bf413` | dirty 1 paths; keep | Retain owner-held edits and original evidence/acceptance; no takeover. |
+| `.worktrees/533-readable-text` | `0c0e0abe4d0b91d2ef780870df530931fe86851a` | dirty 18 paths; keep | Retain owner-held edits and original evidence/acceptance; no takeover. |
+| `.worktrees/533-rendered-pass` | `0c0e0abe4d0b91d2ef780870df530931fe86851a` | clean; check | Retain: exact five-tree migration/consumer/retirement approval still pending. |
+| `.worktrees/542-approval-process-lock` | `bb05078f0abb6d0d4bc8458332010c4bc7c8d111` | dirty 1 paths; keep | Retain owner-held edits and original evidence/acceptance; no takeover. |
+| `.worktrees/542-delivery-20261108` | `bb05078f0abb6d0d4bc8458332010c4bc7c8d111` | dirty 46 paths; keep | Retain owner-held edits and original evidence/acceptance; no takeover. |
+| `.worktrees/542-qualification` | `bb05078f0abb6d0d4bc8458332010c4bc7c8d111` | clean; check | Retain: exact five-tree migration/consumer/retirement approval still pending. |
+| `.worktrees/542-qualification-20261108` | `bb05078f0abb6d0d4bc8458332010c4bc7c8d111` | dirty 2 paths; keep | Retain owner-held edits and original evidence/acceptance; no takeover. |
+| `.worktrees/546-webview2-privacy` | `a8c76390ff946389224b86e5ff91b8b6c11bf413` | dirty 5 paths; keep | Retain owner-held edits and original evidence/acceptance; no takeover. |
+| `.worktrees/548-linux-settings-verification` | `365b09ac20eb9a5555fd8fd0c6a213d8b6c7ee3c` | clean; check | Retain: exact five-tree migration/consumer/retirement approval still pending. |
+| `.worktrees/558-coordinated-20261108` | `1aa8b4ec5fa7ea515816720b510f3bb004d43cae` | clean; keep | Retain unique or unreleased history; delivery/ownership is not established. |
+| `.worktrees/558-macos-conformance` | `dcd3d2a700b9d26b5fd3485208b3fb76af4675b2` | dirty 7 paths; keep | Retain owner-held edits and original evidence/acceptance; no takeover. |
+| `.worktrees/558-macos-conformance/.artifacts/558/baseline` | `dcd3d2a700b9d26b5fd3485208b3fb76af4675b2` | clean; check | Retain merged evidence/owner material; no lifecycle handoff is inferred from delivery. |
+| `.worktrees/568-stapler-window` | `bfd21c2c1e486b6a97bb603bb987432161389469` | clean; check | Retain merged evidence/owner material; no lifecycle handoff is inferred from delivery. |
+| `.worktrees/578-clear-old-autofill` | `55a575591707deff3e68a3f24971237a8d087787` | clean; check | Retain merged evidence/owner material; no lifecycle handoff is inferred from delivery. |
+| `.worktrees/579-separator-once` | `d114b66ca3551c6b371eef4275a329dc69c5b034` | clean; check | Retain merged evidence/owner material; no lifecycle handoff is inferred from delivery. |
+| `.worktrees/cave-composer` | `3e9a2dfc5a14cacfbb8c2b752425a390b9724aee` | clean; check | Retain merged evidence/owner material; no lifecycle handoff is inferred from delivery. |
+| `.worktrees/overnight-542-review` | `df484446bffc276c60dbd863146d09e6bb7381d7` | clean; keep | Retain unique or unreleased history; delivery/ownership is not established. |
+| `.worktrees/overnight-543` | `87acb962caffaa4e45dc81c4cd40f50a4cb84c32` | clean; check | Retain merged evidence/owner material; no lifecycle handoff is inferred from delivery. |
+| `.worktrees/persistent-workspace-write` | `4c4ecb298670396546345d263a46ba3ee6abb495` | dirty 1 paths; keep | Retain owner-held edits and original evidence/acceptance; no takeover. |
+| `.worktrees/release-full-access-v010` | `f6ba6e3cfa499945462726c477039f945630a210` | clean; check | Retain: exact five-tree migration/consumer/retirement approval still pending. |
+| `.worktrees/ubuntu-mirror-diagnostic` | `48d9a40b3c708c420d0a996f379c26836d59c0b4` | clean; keep | Retain unique or unreleased history; delivery/ownership is not established. |
+| `.worktrees/updater-356` | `5dbaa66c949d7d15c689d6a0ad8fdb63c917a0af` | clean; keep | Retain unique or unreleased history; delivery/ownership is not established. |
+| `.worktrees/v0010-543` | `53da6c7548dddb381d34840f39c6624e66792781` | clean; check | Retain merged evidence/owner material; no lifecycle handoff is inferred from delivery. |
+| `.worktrees/v0010-567` | `d0f29a4355152d2b1aaae465e0aa074eaac40055` | clean; check | Retain merged evidence/owner material; no lifecycle handoff is inferred from delivery. |
+| `.worktrees/v0010-587` | `5b54a2e12fe95a1b6a95cbb3449bc523f790b20f` | clean; check | Retain merged evidence/owner material; no lifecycle handoff is inferred from delivery. |
+| `.worktrees/v0010-access-refresh` | `e094b27d119a6f716f0abfd6e37c4a5ce85bcc04` | clean; check | Retain merged evidence/owner material; no lifecycle handoff is inferred from delivery. |
+| `.worktrees/v0010-engine-home` | `e77011b87e649ee97e46588e6d865777721320df` | clean; check | Retain merged evidence/owner material; no lifecycle handoff is inferred from delivery. |
+| `.worktrees/v0010-head-lookup` | `c2e62845486560f080fbf1769a53c8213f1cfe2a` | clean; check | Retain merged evidence/owner material; no lifecycle handoff is inferred from delivery. |
+| `.worktrees/v0010-model-picker` | `529462a9546659c0c9a29fe087a966b4b538b879` | clean; check | Retain merged evidence/owner material; no lifecycle handoff is inferred from delivery. |
+| `.worktrees/v0010-rows` | `742a9fcfb2282d2c69255c105cfdf0c19863d8a7` | clean; keep | Retain unique or unreleased history; delivery/ownership is not established. |
+| `.worktrees/v006-macos-acceptance` | `69e890197795b24d784e717b14e0e646ca7194fb` | dirty 1 paths; keep | Retain owner-held edits and original evidence/acceptance; no takeover. |
+| `.worktrees/v006-macos-e88e` | `69e890197795b24d784e717b14e0e646ca7194fb` | dirty 4 paths; keep | Retain owner-held edits and original evidence/acceptance; no takeover. |
+| `.worktrees/v010-authority-repin` | `a80769584d8e16ee4763c3053ac7a31fb81bfd56` | clean; check | Retain: exact five-tree migration/consumer/retirement approval still pending. |
+
+### Original branch coverage
+
+All 58 original non-symbolic refs were matched by identity against the refreshed inventory. Their frozen retain/owner/evidence dispositions remain in force unless an explicit handoff is recorded in #621. No remote or local ref was deleted by this task. The changed-head rows below update the frozen identities; absent refs, if any, describe external state and are not claimed as this task’s pruning.
+
+| Original ref with changed head | Initial head | Observed head | Disposition |
+|---|---|---|---|
+| `refs/heads/feat/access-refresh` | `47f3fe4eccadff74a68a357add52545d99d77d79` | `e094b27d119a6f716f0abfd6e37c4a5ce85bcc04` | Preserve current owner; no deletion authority inferred. |
+| `refs/heads/feat/model-picker` | `828428a6a6208600761019c23f8a93113add88cb` | `529462a9546659c0c9a29fe087a966b4b538b879` | Preserve current owner; no deletion authority inferred. |
+| `refs/heads/fix/578-clear-old-autofill` | `f52820db2ae4be2c9cb6ccb3e3642817187ab3d9` | `55a575591707deff3e68a3f24971237a8d087787` | Preserve current owner; no deletion authority inferred. |
+| `refs/heads/fix/coven-code-managed-home` | `d71e497213171e304b6bfe1b3742b9d03bbeae59` | `e77011b87e649ee97e46588e6d865777721320df` | Preserve current owner; no deletion authority inferred. |
+| `refs/heads/main` | `ac09aadeef889c0e759693c1c7351a01e6e56a4f` | `e4793b82423843e9bc518e02423e707e15e32e53` | Preserve current owner; no deletion authority inferred. |
+| `refs/heads/test/v0010-rows` | `430942069cd01a1103c428322a0294679a4ade7e` | `742a9fcfb2282d2c69255c105cfdf0c19863d8a7` | Preserve current owner; no deletion authority inferred. |
+| `refs/remotes/origin/feat/access-refresh` | `47f3fe4eccadff74a68a357add52545d99d77d79` | `e094b27d119a6f716f0abfd6e37c4a5ce85bcc04` | Preserve current owner; no deletion authority inferred. |
+| `refs/remotes/origin/feat/cave-composer` | `3f3ef5a058fffb7960932ae636f0c32d6cd5a3be` | `53da6c7548dddb381d34840f39c6624e66792781` | Preserve current owner; no deletion authority inferred. |
+| `refs/remotes/origin/feat/model-picker` | `828428a6a6208600761019c23f8a93113add88cb` | `529462a9546659c0c9a29fe087a966b4b538b879` | Preserve current owner; no deletion authority inferred. |
+| `refs/remotes/origin/fix/578-clear-old-autofill` | `f52820db2ae4be2c9cb6ccb3e3642817187ab3d9` | `55a575591707deff3e68a3f24971237a8d087787` | Preserve current owner; no deletion authority inferred. |
+| `refs/remotes/origin/fix/coven-code-managed-home` | `d71e497213171e304b6bfe1b3742b9d03bbeae59` | `e77011b87e649ee97e46588e6d865777721320df` | Preserve current owner; no deletion authority inferred. |
+| `refs/remotes/origin/main` | `ac09aadeef889c0e759693c1c7351a01e6e56a4f` | `b06aae750d81868aea85aa5784ca89bd49603f9b` | Preserve current owner; no deletion authority inferred. |
+| `refs/remotes/origin/test/v0010-rows` | `430942069cd01a1103c428322a0294679a4ade7e` | `742a9fcfb2282d2c69255c105cfdf0c19863d8a7` | Preserve current owner; no deletion authority inferred. |
+
+### Approval packet and arrivals
+
+The five original evidence candidates remain clean and merged but classified check. Complete matching restores and manifests remain in `vault-candidates/`. All five consuming-file hashes still match the exact pending proposal, including the 299 baseline references; no consumer or vault source was changed. Owner approval of `migration-plan.md` is still required before migration, reference updates or retirement. Recheck every source/head/owner/process/reference immediately before any approved mutation.
+
+Task-owned #621, its `docs/621-evidence-retirement` branch/worktree, the older main-sync recovery resources and all arrivals are outside the frozen retirement batch. Arriving worktrees/refs and open issues #612/#616/#618 plus the task issue are retained separately; arriving open PRs are #608/#613/#615/#617/#619/#620. The separate mobile work in #612/#615 remains with its owner.
+
+### Next bounded engineering goal
+
+After the release owner supplies the boundary described in #592, claim and deliver **#592: make Orca speak the unavailable-chat reason on selection**. Reproduce the missing spoken reason on native Linux, coordinate the overlapping chat/Settings files with #613/#618 and #575, make the smallest mounted live-region/focus fix, and prove the actual spoken reason in native row `v010-unavailable`. Preserve draft isolation, composer locking, keyboard behavior and other platforms. Completion needs independent review, signed protected delivery and the original real-Orca evidence; a DOM/tree assertion alone cannot close it. Stop dependent work on a contested ownership boundary or missing native-speech proof and leave the exact operator handoff.
+
+### Follow-up receipts
+
+This follow-up’s full issue bodies/comments, PR states, identity coverage, read-only audit, consumer-hash checks and publication payloads are retained under the primary checkout’s `.artifacts/coordination-retirement-20261112/resumed-20261114T044919Z/`. The original `initial-inventory.json` digest remains `498bceb6e039b310705c777c33800f9189ef3101db7c1dd4853129c45bb010fc`. The prepared external-vault migration remains unexecuted; this document does not declare the overall retirement goal complete.
+
+## Frozen inventory — 2026-11-12
+
 Snapshot: 2026-11-12T04:27:31.682429+00:00; main `ac09aadeef889c0e759693c1c7351a01e6e56a4f`. This is a dated coordination index, not a replacement backlog. GitHub issue bodies and latest owner comments remain authoritative for acceptance. Refresh heads, gates and ownership before any mutation. The initial scope is 43 worktrees, 38 local branches, 20 remote heads, 13 PRs and 16 issues; later arrivals and this goal’s own work are recorded separately.
 
 ## Recovery and ownership

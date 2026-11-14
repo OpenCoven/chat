@@ -90,7 +90,12 @@ for (const colorScheme of ['light', 'dark'] as const) {
       const composer = page.getByRole('textbox', { name: /^Message A familiar/ });
       await expect(composer).toBeEnabled();
       await composer.fill('A short message');
-      await expect(page.getByRole('button', { name: 'Send', exact: true })).toBeInViewport();
+      const send = page.getByRole('button', { name: 'Send', exact: true });
+      await expect(send).toBeInViewport();
+      await expect(send).toHaveAttribute('data-size', 'icon');
+      const sendBounds = await send.boundingBox();
+      expect(sendBounds?.width).toBe(32);
+      expect(sendBounds?.height).toBe(32);
       expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBe(480);
       await page.getByRole('button', { name: 'Show familiars', exact: true }).click();
       const search = page.getByRole('searchbox', { name: 'Search familiars' });

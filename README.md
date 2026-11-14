@@ -216,6 +216,8 @@ or press **Cmd/Ctrl+,**. It has seven sections:
 - **About:** the app version, whether Chat reached the Coven CLI, and what the
   window stores.
 
+Settings content scrolls inside its panel. Tab past **Close settings** to focus the content, then use the arrow or page keys to scroll; on macOS, use Option+Tab if Tab skips controls. Opening another section starts at its top.
+
 **Settings › Model** chooses what runs your messages:
 
 - **Runs on** (Coven Code, Codex or Claude Code) applies when a familiar's chat starts. A chat

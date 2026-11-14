@@ -387,6 +387,7 @@ try {
     blocked.block('staging', options['upgrade-blocked']);
     rows.push(blocked);
   } else if (PLATFORM === 'windows' && options['upgrade-from'] && options['upgrade-to']) {
+    // Row 578 starts v0.0.8 from its own folder, which differs once the product name changed.
     const launch = async (logName, app = options.app) => {
       const started = spawnApp(logName, app);
       const shown = await attach(started, screen);
@@ -400,19 +401,6 @@ try {
         from: { path: options['upgrade-from'], label: 'published msi v0.0.8' },
         to: { path: options['upgrade-to'], label: options.lane },
         exe: options.app,
-        resolveInstalledExe: () =>
-          execFileSync(
-            'powershell.exe',
-            [
-              '-NoProfile',
-              '-NonInteractive',
-              '-ExecutionPolicy',
-              'Bypass',
-              '-File',
-              join(here, 'windows', 'find-installed-exe.ps1'),
-            ],
-            { encoding: 'utf8' },
-          ).trim(),
         installedSha: facts.installedExeSha256,
         launch,
         quit: (shown, started) => quit(shown, started, () => shown.activate()),
