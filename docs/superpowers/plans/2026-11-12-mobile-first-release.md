@@ -8,7 +8,7 @@
 
 **Tech Stack:** SwiftUI, Foundation, CryptoKit and XCTest on iOS 18+; existing Tauri/Rust desktop runtime; Coven-owned Rust transport and opaque WebSocket relay; APNs through an operator-controlled provider service.
 
-**Spec:** [Approved mobile design](../specs/2026-11-12-mobile-first-release-design.md). Tracking issue: [#612](https://github.com/OpenCoven/chat/issues/612). This plan is proposed for execution review; the design was approved on 2026-11-12.
+**Spec:** [Approved mobile design](../specs/2026-11-12-mobile-first-release-design.md). Tracking issue: [#612](https://github.com/OpenCoven/chat/issues/612). Status: current; Val approved this plan and Native execution on 2026-11-13. The design was approved on 2026-11-12.
 
 ## Global Constraints
 
@@ -50,11 +50,11 @@ The recommended execution method is **Native**: this session implements each tas
 - `@MainActor protocol CompanionPersistence` defines `load(for: CacheNamespace) throws -> CompanionSavedState?`, `save(_: CompanionSavedState) throws` and `erase(for: CacheNamespace) throws`.
 - `@MainActor final class ProtectedCompanionStore` implements that protocol with `init(root: URL, installationID: Data, now: @escaping () -> Date = Date.init)`. Production root is Application Support/CompanionCache. Hashed installation/peer components name private files; validate the decoded namespace before use.
 
-- [ ] Write `PersistenceTests.testStateRoundTripsAcrossStoreInstances`, `testDifferentInstallHostOrAuthorizationCannotLoadState`, `testCacheContainsNoBearerOrEndpoint`, `testSevenDayHistoryExpiry`, `testOldestHistoryEvictionAtTwentyMiB`, and `testPendingOperationIsNeverEvicted`. Use temporary directories and a fixed clock, not the real application container.
-- [ ] Run the targeted XCTest selection and observe failure because the persistence types do not exist. Preserve the first result bundle/log.
-- [ ] Implement the value types and file store. Use protected atomic file writes, set `isExcludedFromBackup`, reject symlink/non-regular targets and unsupported schema/namespace, bound reads before decoding, and prune expired/oldest history until the serialized state fits 20 MiB. Do not drop unresolved metadata or drafts to fit; throw visibly if they alone exceed the bound. Timestamps implausibly in the future must not grant indefinite retention.
-- [ ] Add and run `testFilesHaveCompleteProtectionAndBackupExclusion`, `testCorruptOversizedAndUnsupportedStateRefuseWithoutReplacingBytes`, `testSymlinkTargetsRefuseWithoutTouchingDestination`, and `testEraseIsIdempotent`. Use the actual native file-protection attributes on the iOS simulator; physical lock behavior stays a device gate.
-- [ ] Verify all persistence tests pass, run `git diff --check`, and sign a focused commit for the store and tests.
+- [x] Write `PersistenceTests.testStateRoundTripsAcrossStoreInstances`, `testDifferentInstallHostOrAuthorizationCannotLoadState`, `testCacheContainsNoBearerOrEndpoint`, `testSevenDayHistoryExpiry`, `testOldestHistoryEvictionAtTwentyMiB`, and `testPendingOperationIsNeverEvicted`. Use temporary directories and a fixed clock, not the real application container.
+- [x] Run the targeted XCTest selection and observe failure because the persistence types do not exist. Preserve the first result bundle/log.
+- [x] Implement the value types and file store. Use protected atomic file writes, set `isExcludedFromBackup`, reject symlink/non-regular targets and unsupported schema/namespace, bound reads before decoding, and prune expired/oldest history until the serialized state fits 20 MiB. Do not drop unresolved metadata or drafts to fit; throw visibly if they alone exceed the bound. Timestamps implausibly in the future must not grant indefinite retention.
+- [x] Add and run `testFilesHaveCompleteProtectionAndBackupExclusion`, `testCorruptOversizedAndUnsupportedStateRefuseWithoutReplacingBytes`, `testSymlinkTargetsRefuseWithoutTouchingDestination`, and `testEraseIsIdempotent`. Use the actual native file-protection attributes on the iOS simulator; physical lock behavior stays a device gate.
+- [x] Verify all persistence tests pass, run `git diff --check`, and sign a focused commit for the store and tests.
 
 ## Task 2: Recover model state and immutable operation identity
 
@@ -158,4 +158,4 @@ Dedicated editable dictation, then interruptible live voice; mobile chat/familia
 
 ## Baseline checkpoint
 
-On 2026-11-12, the unchanged companion native unit suite completed on the owned iPhone 16 Pro simulator `CA6ED7EF-7DBC-42F7-AC35-E40698E57AC4`, iOS 27.2, Xcode 27.2 (27B52): 44 passed, one pinned-HTTPS fixture case explicitly skipped because this baseline did not start that fixture, zero failures. `xcodebuild` exited successfully and produced `.artifacts/mobile-first-release/Baseline.xcresult`; the complete log is `.artifacts/mobile-first-release/baseline.log`. This is simulator baseline evidence, not new-feature, full-HTTPS-flow or physical-device acceptance. Product implementation has not begun while the required plan review and execution-method selection are pending.
+On 2026-11-12, the unchanged companion native unit suite completed on the owned iPhone 16 Pro simulator `CA6ED7EF-7DBC-42F7-AC35-E40698E57AC4`, iOS 27.2, Xcode 27.2 (27B52): 44 passed, one pinned-HTTPS fixture case explicitly skipped because this baseline did not start that fixture, zero failures. `xcodebuild` exited successfully and produced `.artifacts/mobile-first-release/Baseline.xcresult`; the complete log is `.artifacts/mobile-first-release/baseline.log`. This is simulator baseline evidence, not new-feature, full-HTTPS-flow or physical-device acceptance. At that baseline checkpoint, product implementation had not begun while plan review and execution-method selection were pending.
