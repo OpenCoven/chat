@@ -141,11 +141,35 @@ export async function verifyCompletionFocus(app, row, platform = PLATFORM) {
   row.expect('completion invalidation returns focus to Messages', focused?.name, 'Messages');
 }
 
-async function clickReviewedLink(app, name, row) {
+export async function clickReviewedLink(app, name, row, save) {
   const trace = new ReviewTrace(app, row);
   await trace.sample('before-click');
-  // Resolve after idle, never reuse the live reply's old node or coordinates.
-  await app.click(await linkNamed(app, name));
+  await revealLatest(app, row);
+  const find = () => linkNamed(app, name);
+  const prefix = `${row.id}-review-click-${name.replace(/[^a-z0-9]+/gi, '-').toLowerCase()}`;
+  const saveTree = (phase, tree) => {
+    if (tree) save?.(`${prefix}-${phase}.json`, JSON.stringify(tree, null, 2));
+  };
+  // The same reveal/middle mechanics as the held-stream row, plus bounded
+  // reacquisition: being inside the window is not proof a link is uncovered.
+  saveTree('before-preparation', (await app.snapshot())?.raw);
+  try {
+    await app.click(await find(), {
+      find,
+      verifyLink: PLATFORM === 'windows' ? name : undefined,
+      receipt(value) {
+        const { answer, ...action } = value;
+        row.note('review click action', {
+          ...action,
+          native: answer ? { ...answer.receipt, ok: answer.ok, error: answer.error } : undefined,
+        });
+        saveTree('native-before', answer?.before);
+        saveTree('native-after', answer?.after);
+      },
+    });
+  } finally {
+    saveTree('after-click', (await app.snapshot())?.raw);
+  }
   try {
     await until('the link review to appear', () => trace.sample('after-click'), 15_000);
   } catch (error) {
@@ -600,7 +624,7 @@ export async function linkCompletionRow(lane, familiar, finishReview) {
       await verifyCompletionFocus(app, row);
       row.expect('completion did not launch a browser', browserSnapshot(), browsers);
       // A fresh settled target still opens normally, and dismisses back to it.
-      await clickReviewedLink(app, 'Completion boundary', row);
+      await clickReviewedLink(app, 'Completion boundary', row, lane.save);
       row.expect('fresh review address', (await reviewFacts(app)).address, ADDRESSES.query);
       await app.key('escape');
       await app.gone('dialog', REVIEW);
@@ -915,7 +939,7 @@ export async function linkRows(lane, familiar, browser) {
     // A sign-in name: offered to copy only, and nothing reaches the browser.
     await lane.send(familiar, '[[userinfo]] One more address.', 'link', 'Named login');
     const launches = browserSnapshot();
-    await clickReviewedLink(app, 'Named login', handoff);
+    await clickReviewedLink(app, 'Named login', handoff, lane.save);
     const facts = await reviewFacts(app);
     handoff.expect('buttons in the review of https://name@example.com/', facts.buttons, [
       'Cancel',
