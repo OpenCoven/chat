@@ -18,11 +18,11 @@
   },
   "harness": {
     "repository": "OpenCoven/chat",
-    "revision": "0ba58aa94e73182701255dc44c0d34d550cf017f"
+    "revision": "14f40d19c33d3677d7511e6de5f5a98450d89483"
   },
   "harnessAuthority": {
-    "revision": "0ba58aa94e73182701255dc44c0d34d550cf017f",
-    "tree": "ed90a36bea99f420f6033e353c0fe79e54fb3ac5",
+    "revision": "14f40d19c33d3677d7511e6de5f5a98450d89483",
+    "tree": "a3d03cf8f77866985bc087cc42223c1836bbdb77",
     "files": [
       {
         "path": "scripts/phase1-conformance.mjs",
@@ -153,13 +153,13 @@
     "productionDeltas": [
       {
         "path": "src-tauri/Cargo.toml",
-        "blob": "409376e4a911861bab0873f8f96ed990c2579b75",
-        "sha256": "b15afcfff692895a75075cd47ccb5d632889477662e0d3ce07aa9fc920eff042"
+        "blob": "82397884ca54da33d53000aab398d9f02de0b0ef",
+        "sha256": "db8037a77d76bffe0641037be68d53e97187c24afd1fe24a3803769fbc5e434d"
       },
       {
         "path": "src-tauri/Cargo.lock",
-        "blob": "166d6e46ee0075ac88c1f75f4430ae2e6a1dfe27",
-        "sha256": "d0ff2746026a20cbaa8300678bc27baa70aa28876529b66360066db33dfd2a37"
+        "blob": "bb4f3f84b82a271f9283c8263ce98c95e41d43c8",
+        "sha256": "40dd1612ba7f251d60eb51ed5c015e6f54bff11d4668086c435cb7ccfa916081"
       },
       {
         "path": "src-tauri/src/bin/phase1-native-rpc.rs",
@@ -198,8 +198,8 @@
       },
       {
         "path": "src-tauri/src/lib.rs",
-        "blob": "893ea2c3ad8a5d2bc21d7d5d0aa58d844e3b7550",
-        "sha256": "a726e92294812f88d1928a181ec8c2c69630680fc8065be2643d162263254adb"
+        "blob": "dfaca5165e7b34b4646d5df1f0a234b2b7e52b69",
+        "sha256": "5fbdd1a2c3dc749f6a182d9a36aa4bbac0d0f2683367be18eeca44a76f36fa87"
       }
     ]
   },

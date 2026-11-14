@@ -3100,3 +3100,7 @@ The dependency security patch in PR #599 landed in merge commit `40ac93ccc604b19
 ## v0.1.2 package-version authority
 
 The v0.1.2 release content and Settings repairs in PR #613 landed in merge commit `0ba58aa94e73182701255dc44c0d34d550cf017f`, tree `ed90a36bea99f420f6033e353c0fe79e54fb3ac5`. This separate repin binds all 25 governed files and 10 production deltas to that existing first-parent merge on main. Three production identities change from the previous authority: the application version in `src-tauri/Cargo.toml` and `src-tauri/Cargo.lock`, and the Coven Chat product name in the startup error in `src-tauri/src/lib.rs` from #614. All remaining repository, tool and evidence pins stay unchanged. This records the source authority for the release; it does not claim a new protected SDK validation run.
+
+## Updater source authority after #476
+
+The updater content in PR #476 landed in merge commit `14f40d19c33d3677d7511e6de5f5a98450d89483`, tree `a3d03cf8f77866985bc087cc42223c1836bbdb77`. This separate metadata repin binds all 25 governed files and ten production deltas to that existing first-parent merge on main. Exactly three production identities differ from the previous authority: `src-tauri/Cargo.toml`, `src-tauri/Cargo.lock` and `src-tauri/src/lib.rs`. All Chat, SDK, Cave, Coven, tool, release and evidence pins remain unchanged. This records source authority and does not claim a new protected SDK validation run.
