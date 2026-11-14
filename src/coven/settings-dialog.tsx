@@ -204,7 +204,13 @@ export function SettingsDialog(props: SettingsDialogProps) {
               <Icon name="x" size={15} />
             </button>
           </header>
-          <div className="coven-settings-scroll">
+          <section
+            key={active?.id}
+            className="coven-settings-scroll"
+            aria-label="Settings content"
+            // biome-ignore lint/a11y/noNoninteractiveTabindex: keyboard users need to scroll sections that have no controls, such as Shortcuts.
+            tabIndex={0}
+          >
             {active?.id === 'general' ? <GeneralSection {...props} /> : null}
             {active?.id === 'model' ? <ModelSection {...props} /> : null}
             {active?.id === 'chats' ? <ChatsSection {...props} /> : null}
@@ -212,7 +218,7 @@ export function SettingsDialog(props: SettingsDialogProps) {
             {active?.id === 'devices' ? <DevicesSection {...props} /> : null}
             {active?.id === 'shortcuts' ? <ShortcutsSection /> : null}
             {active?.id === 'about' ? <AboutSection {...props} /> : null}
-          </div>
+          </section>
         </section>
       </div>
     </dialog>

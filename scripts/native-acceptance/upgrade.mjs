@@ -12,12 +12,17 @@
 // and two familiars, so v0.0.8 opens straight to the chat. Installing v0.0.8
 // over the build under test is staging. The step judged is the upgrade a person
 // makes: the build under test installed over v0.0.8, then started.
+//
+// v0.0.8 is OpenCoven Chat and installs to Program Files\OpenCoven Chat. Since
+// #614 the build under test is Coven Chat, in Program Files\Coven Chat, with
+// the same MSI UpgradeCode. So each step finds the app where it is, and the
+// upgrade must leave no copy of v0.0.8 under either name.
 
 import { execFileSync, spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { basename, join } from 'node:path';
+import { basename, join, win32 } from 'node:path';
 import { sleep, until } from './driver.mjs';
 import { Lane, Row, showFamiliars } from './rows.mjs';
 import { browserFiles, containing, sqlitePlaces } from './storage.mjs';
@@ -26,6 +31,23 @@ import { browserFiles, containing, sqlitePlaces } from './storage.mjs';
 export const UPGRADE_PHRASE = 'Autofill left by v0.0.8';
 /** msiexec's success codes: done, and done but a restart is wanted. */
 const INSTALLED = new Set([0, 3010]);
+/** Product names earlier releases installed under. v0.0.8 is OpenCoven Chat. */
+export const EARLIER_NAMES = ['OpenCoven Chat'];
+
+/**
+ * Where an MSI may have put the app: the build under test's own path, then the
+ * same binary under each earlier product name's folder in Program Files.
+ */
+export function installPaths(exe, names = EARLIER_NAMES) {
+  const programFiles = win32.dirname(win32.dirname(exe));
+  const binary = win32.basename(exe);
+  return [...new Set([exe, ...names.map((name) => win32.join(programFiles, name, binary))])];
+}
+
+/** The first of `paths` that exists, or null. */
+export function installedAt(paths, exists = existsSync) {
+  return paths.find((path) => exists(path)) ?? null;
+}
 
 const home = homedir();
 const shown = (path) => path.replace(home, '~');
@@ -141,11 +163,14 @@ export async function autofillUpgradeRow({
       code = msiexec(['/i', from.path], join(out, 'msiexec-v0.0.8.log'));
     }
     row.check('v0.0.8 installed', INSTALLED.has(code), `msiexec ${code}`);
-    const oldVersion = productVersion(exe);
-    row.note('installed app', { version: oldVersion, sha256: sha256(exe) });
+    const paths = installPaths(exe);
+    const oldExe = installedAt(paths.slice().reverse());
+    if (!oldExe) throw new Error(`v0.0.8's app is in none of ${paths.join(', ')}`);
+    const oldVersion = productVersion(oldExe);
+    row.note('installed app', { path: oldExe, version: oldVersion, sha256: sha256(oldExe) });
     row.check('v0.0.8 is the installed app', oldVersion.startsWith('0.0.8'), oldVersion);
 
-    running = await launch('app-v0.0.8.log');
+    running = await launch('app-v0.0.8.log', oldExe);
     const lane = new Lane({ app: running.app, native, shot, requests: () => 0, tokens: () => 0 });
     const screen = await firstScreen(lane.app);
     row.note('v0.0.8 first screen', screen);
@@ -205,9 +230,20 @@ export async function autofillUpgradeRow({
     // The upgrade: the build under test installed over v0.0.8, then started.
     code = msiexec(['/i', to.path], join(out, 'msiexec-upgrade.log'));
     row.check('the build under test installed over v0.0.8', INSTALLED.has(code), `msiexec ${code}`);
-    row.expect('the build under test is the installed app again', sha256(exe), installedSha);
-    row.note('installed app', { version: productVersion(exe) });
-    running = await launch('app-upgraded.log');
+    const upgradedExe = installedAt(paths);
+    if (!upgradedExe) throw new Error(`the upgraded app is in none of ${paths.join(', ')}`);
+    row.note('installed app', { path: upgradedExe, version: productVersion(upgradedExe) });
+    row.expect(
+      'the build under test is the installed app again',
+      sha256(upgradedExe),
+      installedSha,
+    );
+    row.expect(
+      'no copy of v0.0.8 is left installed, under either name',
+      paths.filter((path) => existsSync(path) && sha256(path) !== installedSha),
+      [],
+    );
+    running = await launch('app-upgraded.log', upgradedExe);
     lane.app = running.app;
     const reopened = await firstScreen(lane.app);
     row.expect(

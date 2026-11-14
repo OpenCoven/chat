@@ -74,4 +74,3 @@ struct CompanionSavedState: Codable {
   func erase(for namespace: CacheNamespace) throws
   func eraseUnpairedData() throws
 }
-
