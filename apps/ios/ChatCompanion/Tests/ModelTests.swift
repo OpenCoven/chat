@@ -21,6 +21,13 @@ import XCTest
   var delaySnapshot = false
   var failSnapshot = false
   var invalidated = false
+  var historyValue = History(sessionId: nil, messages: [], hasMore: false)
+  var historyValues: [String: History] = [:]
+  var delayHistory = false
+  var historyGate: CheckedContinuation<History, Error>?
+  var receiptRequests: [String] = []
+  var receiptFailure: Error?
+  var receiptOverride: Run?
   var snapshotValue = Snapshot(
     version: 1, familiars: [Familiar(id: "astra", name: "astra", displayName: "Astra")],
     sessions: [], activeRun: nil)
@@ -33,7 +40,11 @@ import XCTest
     return snapshotValue
   }
   func history(familiarId: String) async throws -> History {
-    History(sessionId: nil, messages: [], hasMore: false)
+    if delayHistory {
+      delayHistory = false
+      return try await withCheckedThrowingContinuation { historyGate = $0 }
+    }
+    return historyValues[familiarId] ?? historyValue
   }
   func send(_ request: SendRequest) async throws -> Run {
     sent.append(request)
@@ -43,7 +54,10 @@ import XCTest
       id: request.requestId, familiarId: request.familiarId, status: "running", messages: [])
   }
   func run(id: String) async throws -> Run {
-    Run(
+    receiptRequests.append(id)
+    if let receiptFailure { throw receiptFailure }
+    if let receiptOverride { return receiptOverride }
+    return Run(
       id: id, familiarId: "astra", status: "completed",
       messages: [Message(id: "reply", role: "assistant", text: "Hello")])
   }
@@ -73,7 +87,7 @@ import XCTest
     let store = suppliedStore ?? MemoryStore()
     store.value = pairing()
     return CompanionModel(
-      store: store, makeClient: { _ in client }, localNetworkBlocks: { _ in false })
+      store: store, persistence: TestCompanionPersistence(), installationID: Data(repeating: 7, count: 16), makeClient: { _ in client }, localNetworkBlocks: { _ in false })
   }
   func link() -> String {
     "coven-chat://pair?endpoint=https://192.168.1.2:8443&token=\(String(repeating: "a", count: 64))&fingerprint=\(String(repeating: "b", count: 64))"
@@ -246,7 +260,7 @@ import XCTest
     let store = MemoryStore()
     store.value = pairing()
     let model = CompanionModel(
-      store: store, makeClient: { p in p.endpoint.port == 8443 ? current : candidate })
+      store: store, persistence: TestCompanionPersistence(), installationID: Data(repeating: 7, count: 16), makeClient: { p in p.endpoint.port == 8443 ? current : candidate })
     await model.refresh()
     let task = Task { await model.tryEndpoint(URL(string: "https://192.168.1.2:8444")!) }
     while candidate.gate == nil { await Task.yield() }
@@ -269,7 +283,7 @@ import XCTest
     let store = MemoryStore()
     store.value = pairing()
     let model = CompanionModel(
-      store: store, makeClient: { p in p.endpoint.port == 8443 ? current : candidate })
+      store: store, persistence: TestCompanionPersistence(), installationID: Data(repeating: 7, count: 16), makeClient: { p in p.endpoint.port == 8443 ? current : candidate })
     await model.refresh()
     model.draft = "hello"
     await model.send()
@@ -320,7 +334,7 @@ import XCTest
     api.failSnapshot = true
     var probed: [URL] = []
     let model = CompanionModel(
-      store: MemoryStore(), makeClient: { _ in api },
+      store: MemoryStore(), persistence: TestCompanionPersistence(), installationID: Data(repeating: 7, count: 16), makeClient: { _ in api },
       localNetworkBlocks: { url in
         probed.append(url)
         return true
@@ -335,7 +349,7 @@ import XCTest
     let api = FakeClient()
     api.failSnapshot = true
     let model = CompanionModel(
-      store: MemoryStore(), makeClient: { _ in api }, localNetworkBlocks: { _ in false })
+      store: MemoryStore(), persistence: TestCompanionPersistence(), installationID: Data(repeating: 7, count: 16), makeClient: { _ in api }, localNetworkBlocks: { _ in false })
     await model.pair(link: link())
     XCTAssertFalse(model.localNetworkDenied)
     XCTAssertFalse(model.error.isEmpty)
@@ -346,7 +360,7 @@ import XCTest
     api.snapshotValue = Snapshot(version: 2, familiars: [], sessions: [], activeRun: nil)
     var probed = false
     let model = CompanionModel(
-      store: MemoryStore(), makeClient: { _ in api },
+      store: MemoryStore(), persistence: TestCompanionPersistence(), installationID: Data(repeating: 7, count: 16), makeClient: { _ in api },
       localNetworkBlocks: { _ in
         probed = true
         return true

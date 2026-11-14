@@ -24,13 +24,21 @@ import Observation
   private var retainedRun: Run?
   private var terminalError = ""
   private(set) var status = "Connect to your Mac"
+  private(set) var cachedAt: Date?
+  private(set) var persistenceError: String?
+  private(set) var cacheConversationText = true
+  private var saved: CompanionSavedState?
+  private var cleanupNamespace: CacheNamespace?
+  @ObservationIgnored private let persistence: CompanionPersistence
+  @ObservationIgnored private let installationID: Data
+  @ObservationIgnored private let now: () -> Date
+  @ObservationIgnored private var saveTask: Task<Void, Never>?
   private var drafts: [String: String] = [:]
   private var sessionId: String?
   private(set) var historyReady = false
   private var generation = 0
   private var selection = 0
   private var refreshing = false
-  private var submittedDraft: (familiar: String, text: String)?
   @ObservationIgnored private let store: PairingStore
   @ObservationIgnored private let makeClient: @MainActor (Pairing) -> CompanionClient
   @ObservationIgnored private let localNetworkBlocks: @MainActor (URL) async -> Bool
@@ -38,10 +46,16 @@ import Observation
 
   init(
     store: PairingStore,
+    persistence: CompanionPersistence,
+    installationID: Data,
     makeClient: @escaping @MainActor (Pairing) -> CompanionClient = { PinnedAPI(pairing: $0) },
-    localNetworkBlocks: @escaping @MainActor (URL) async -> Bool = { await LocalNetwork.blocks($0) }
+    localNetworkBlocks: @escaping @MainActor (URL) async -> Bool = { await LocalNetwork.blocks($0) },
+    now: @escaping () -> Date = Date.init
   ) {
     self.store = store
+    self.persistence = persistence
+    self.installationID = installationID
+    self.now = now
     self.makeClient = makeClient
     self.localNetworkBlocks = localNetworkBlocks
     do {
@@ -49,16 +63,29 @@ import Observation
       if let pairing {
         client = makeClient(pairing)
         status = "Reconnecting to your Mac…"
+        try restoreSavedState(for: pairing)
+      } else {
+        try persistence.eraseUnpairedData()
       }
-    } catch { self.error = Self.explain(error) }
+    } catch { storageFailed(error) }
   }
   var draft: String {
     get { selectedId.flatMap { drafts[$0] } ?? "" }
-    set { if let selectedId { drafts[selectedId] = newValue } }
+    set {
+      guard let selectedId else { return }
+      drafts[selectedId] = newValue
+      let binding = DraftBinding(familiarID: selectedId, sessionID: sessionId)
+      saved?.drafts.removeAll { $0.binding == binding }
+      if !newValue.isEmpty {
+        saved?.drafts.append(SavedDraft(
+          binding: binding, text: newValue, revision: UUID(), updatedAt: now()))
+      }
+      scheduleSave()
+    }
   }
   var archived: Bool { sessions.first(where: { $0.familiarId == selectedId })?.archived == true }
   var canSend: Bool {
-    connected && historyReady && selectedId != nil && !archived && !busy
+    connected && historyReady && persistenceError == nil && selectedId != nil && !archived && !busy
       && activeRun?.running != true && pendingRunId == nil
       && !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && draft.utf8.count <= 32768
   }
@@ -68,7 +95,7 @@ import Observation
   var otherApproval: Approval? { approvals.first { $0.familiarId != selectedId } }
   /// Allow starts a run, so it waits for the same things a message would.
   var canAllow: Bool {
-    connected && historyReady && !archived && !busy && !answering
+    connected && historyReady && persistenceError == nil && !archived && !busy && !answering
       && activeRun?.running != true && pendingRunId == nil
   }
   func name(ofFamiliar id: String) -> String {
@@ -99,6 +126,12 @@ import Observation
       guard snapshot.version == 1 else {
         throw CompanionError.message("Update both Chat apps before pairing.")
       }
+      if let previous = pairing,
+        CacheNamespace(installationID: installationID, pairing: previous)
+          != CacheNamespace(installationID: installationID, pairing: next)
+      {
+        try persistence.erase(for: CacheNamespace(installationID: installationID, pairing: previous))
+      }
       try store.save(next)
       needsPairingCleanup = false
       client?.invalidate()
@@ -107,6 +140,7 @@ import Observation
       generation += 1
       selection += 1
       clearConversation()
+      try restoreSavedState(for: next)
       apply(snapshot)
       connected = true
       status = "Connected to your Mac"
@@ -125,6 +159,9 @@ import Observation
   }
   func refresh() async {
     guard let api = client, !refreshing, !busy else { return }
+    if saved == nil, let pairing {
+      do { try restoreSavedState(for: pairing) } catch { storageFailed(error); return }
+    }
     refreshing = true
     let expected = generation
     defer { if generation == expected { refreshing = false } }
@@ -163,6 +200,9 @@ import Observation
     sessionId = nil
     historyReady = false
     hasMore = false
+    hydrateSelection()
+    saved?.selectedFamiliarID = id
+    flushPersistence()
     await readSelection()
   }
   private func readSelection() async {
@@ -172,12 +212,22 @@ import Observation
     do {
       let history = try await api.history(familiarId: id)
       guard generation == expected, selection == chosen, selectedId == id else { return }
+      if sessionId != history.sessionId {
+        drafts[id] = saved?.drafts.first {
+          $0.binding == DraftBinding(familiarID: id, sessionID: history.sessionId)
+        }?.text ?? ""
+      }
       messages = history.messages
       sessionId = history.sessionId
       hasMore = history.hasMore
       historyReady = true
       historyRunId = history.activeRunId
       if history.activeRunId == nil { retainedRun = nil }
+      cachedAt = now()
+      saved?.conversations.removeAll { $0.familiarID == id }
+      saved?.conversations.append(CachedConversation(familiarID: id, history: history, savedAt: now()))
+      saved?.selectedFamiliarID = id
+      flushPersistence()
     } catch {
       guard generation == expected, selection == chosen else { return }
       historyReady = false
@@ -190,7 +240,8 @@ import Observation
       requestId: UUID().uuidString.lowercased(), familiarId: id, sessionId: sessionId, prompt: draft
     )
     let expected = generation
-    submittedDraft = (id, draft)
+    guard reserve(requestID: request.requestId, kind: .send, familiar: id,
+                  body: request, draftRevision: currentDraftRecord?.revision) else { return }
     pendingRunId = request.requestId
     historyRunId = request.requestId
     terminalError = ""
@@ -200,7 +251,6 @@ import Observation
       let run = try await api.send(request)
       guard generation == expected else { return }
       accept(run)
-      if drafts[id] == request.prompt { drafts[id] = "" }
     } catch {
       guard generation == expected else { return }
       handle(error)
@@ -225,6 +275,8 @@ import Observation
     guard canAllow, let api = client, approval.familiarId == selectedId else { return }
     let answer = ApprovalAnswer(
       requestId: UUID().uuidString.lowercased(), approvalId: approval.id, decision: "allow")
+    guard reserve(requestID: answer.requestId, kind: .allow, familiar: approval.familiarId,
+                  body: answer, draftRevision: nil) else { return }
     let expected = generation
     pendingRunId = answer.requestId
     historyRunId = answer.requestId
@@ -238,14 +290,12 @@ import Observation
       if let run = result.run {
         accept(run)
       } else {
-        pendingRunId = nil
-        historyRunId = nil
+        settlePending()
       }
     } catch CompanionError.message(let refusal) {
       // The Mac answered, so this is certain: no run started.
       guard generation == expected else { return }
-      pendingRunId = nil
-      historyRunId = nil
+      settlePending()
       error = refusal
     } catch {
       guard generation == expected else { return }
@@ -293,20 +343,29 @@ import Observation
   }
   /// Explicitly dismisses only an unresolved receipt after the user inspects the chat.
   func dismissUncertainSend() {
-    pendingRunId = nil
-    submittedDraft = nil
+    guard settlePending() else { return }
     error = ""
     terminalError = ""
   }
   func forget() {
+    saveTask?.cancel()
+    cleanupNamespace = saved?.namespace ?? cleanupNamespace
     var cleanupError = ""
+    var removed = true
     do {
       try store.clear()
-      needsPairingCleanup = false
     } catch {
-      needsPairingCleanup = true
+      removed = false
+    }
+    do {
+      if let cleanupNamespace { try persistence.erase(for: cleanupNamespace) }
+      else { try persistence.eraseUnpairedData() }
+      cleanupNamespace = nil
+    } catch { removed = false }
+    needsPairingCleanup = !removed
+    if !removed {
       cleanupError =
-        "Connection closed, but the saved pairing could not be removed. Retry forgetting this Mac before closing Chat."
+        "Connection closed, but saved pairing or phone data could not be removed. Retry forgetting this Mac before closing Chat."
     }
     generation += 1
     selection += 1
@@ -318,6 +377,9 @@ import Observation
     refreshing = false
     connected = false
     clearConversation()
+    saved = nil
+    persistenceError = nil
+    cachedAt = nil
     status = "Connect to your Mac"
     error = cleanupError
   }
@@ -365,6 +427,15 @@ import Observation
     familiars = snapshot.familiars
     sessions = snapshot.sessions
     approvals = snapshot.pendingApprovals ?? []
+    let visible = Set(snapshot.sessions.map(\.id))
+    let knownFamiliars = Set(snapshot.familiars.map(\.id))
+    saved?.conversations.removeAll {
+      !knownFamiliars.contains($0.familiarID)
+        || ($0.history.sessionId.map { !visible.contains($0) } ?? false)
+    }
+    saved?.drafts.removeAll { !knownFamiliars.contains($0.binding.familiarID) }
+    saved?.snapshot = snapshot
+    saved?.snapshotSavedAt = now()
     if !familiars.contains(where: { $0.id == selectedId }) {
       selectedId = familiars.first?.id
       selection += 1
@@ -380,14 +451,25 @@ import Observation
     }
   }
   private func accept(_ run: Run) {
+    if let pending = saved?.pending,
+      run.id != pending.requestID || run.familiarId != pending.familiarID
+    {
+      error = "The Mac returned a different run. Check this send before sending again."
+      return
+    }
     activeRun = run
     retainedRun = run
-    if let submitted = submittedDraft, drafts[submitted.familiar] == submitted.text {
-      drafts[submitted.familiar] = ""
+    if let revision = saved?.pending?.submittedDraftRevision,
+      let record = saved?.drafts.first(where: { $0.revision == revision })
+    {
+      var candidate = saved!
+      candidate.drafts.removeAll { $0.revision == revision }
+      if commit(candidate), record.binding == currentBinding {
+        drafts[record.binding.familiarID] = ""
+      }
     }
     if !run.running {
-      pendingRunId = nil
-      submittedDraft = nil
+      settlePending()
       terminalError = run.error ?? ""
       error = terminalError
     }
@@ -414,7 +496,6 @@ import Observation
     drafts = [:]
     activeRun = nil
     pendingRunId = nil
-    submittedDraft = nil
     historyReady = false
     sessionId = nil
     hasMore = false
@@ -425,6 +506,128 @@ import Observation
     answering = false
     permissionLog = nil
     permissionLogError = nil
+  }
+
+  private var currentBinding: DraftBinding? {
+    selectedId.map { DraftBinding(familiarID: $0, sessionID: sessionId) }
+  }
+  private var currentDraftRecord: SavedDraft? {
+    saved?.drafts.first { $0.binding == currentBinding }
+  }
+  var recoveredDrafts: [SavedDraft] {
+    saved?.drafts.filter {
+      $0.binding.familiarID == selectedId && $0.binding != currentBinding
+    } ?? []
+  }
+  private func restoreSavedState(for pairing: Pairing) throws {
+    let namespace = CacheNamespace(installationID: installationID, pairing: pairing)
+    let value = try persistence.load(for: namespace) ?? CompanionSavedState(namespace: namespace)
+    saved = value
+    cacheConversationText = value.cacheConversationText
+    if let snapshot = value.snapshot {
+      familiars = snapshot.familiars
+      sessions = snapshot.sessions
+      selectedId = value.selectedFamiliarID ?? familiars.first?.id
+    }
+    hydrateSelection()
+    pendingRunId = value.pending?.requestID
+    historyRunId = pendingRunId
+    persistenceError = nil
+  }
+  private func hydrateSelection() {
+    messages = []
+    hasMore = false
+    cachedAt = nil
+    sessionId = sessions.first { $0.familiarId == selectedId }?.id
+    if let conversation = saved?.conversations.first(where: {
+      $0.familiarID == selectedId && now().timeIntervalSince($0.savedAt) < 7 * 86400
+    }) {
+      messages = conversation.history.messages
+      sessionId = conversation.history.sessionId
+      hasMore = conversation.history.hasMore
+      cachedAt = conversation.savedAt
+    }
+    if let id = selectedId { drafts[id] = currentDraftRecord?.text ?? "" }
+  }
+  private func storageFailed(_ error: Error) {
+    let message = (error as? CompanionError)?.localizedDescription
+      ?? "Chat could not save protected phone data. Unlock your iPhone and check its free space before sending."
+    persistenceError = message
+    self.error = message
+  }
+  @discardableResult private func commit(_ value: CompanionSavedState) -> Bool {
+    do {
+      try persistence.save(value)
+      let previousError = persistenceError
+      saved = value
+      persistenceError = nil
+      if error == previousError { error = "" }
+      return true
+    } catch { storageFailed(error); return false }
+  }
+  func flushPersistence() {
+    saveTask?.cancel()
+    guard pairing != nil, let saved else { return }
+    commit(saved)
+  }
+  private func scheduleSave() {
+    saveTask?.cancel()
+    let expected = generation
+    let namespace = saved?.namespace
+    saveTask = Task { [weak self] in
+      do { try await Task.sleep(for: .milliseconds(250)) } catch { return }
+      guard let self, !Task.isCancelled, self.generation == expected,
+        self.saved?.namespace == namespace else { return }
+      self.flushPersistence()
+    }
+  }
+  private func reserve<T: Encodable>(requestID: String, kind: PendingCompanionOperation.Kind,
+                                    familiar: String, body: T, draftRevision: UUID?) -> Bool {
+    guard var value = saved else { return false }
+    do {
+      value.pending = PendingCompanionOperation(
+        requestID: requestID, kind: kind, familiarID: familiar, sessionID: sessionId,
+        payloadDigest: CacheNamespace.digest(try CompanionRequestEncoding.encode(body)),
+        submittedDraftRevision: draftRevision, createdAt: now())
+      return commit(value)
+    } catch { storageFailed(error); return false }
+  }
+  @discardableResult private func settlePending() -> Bool {
+    guard var value = saved else { return false }
+    value.pending = nil
+    guard commit(value) else { return false }
+    pendingRunId = nil
+    historyRunId = nil
+    return true
+  }
+  func setCacheConversationText(_ enabled: Bool) {
+    guard var value = saved else { return }
+    value.cacheConversationText = enabled
+    if commit(value) { cacheConversationText = enabled }
+  }
+  func clearDownloadedHistory() {
+    guard var value = saved else { return }
+    value.conversations = []
+    if let snapshot = value.snapshot {
+      value.snapshot = Snapshot(version: snapshot.version, familiars: snapshot.familiars,
+        sessions: snapshot.sessions.map {
+          ChatSession(id: $0.id, familiarId: $0.familiarId, title: "", archived: $0.archived)
+        }, activeRun: nil)
+      value.snapshotSavedAt = now()
+    }
+    if commit(value) {
+      cachedAt = nil
+      if !connected { messages = [] }
+    }
+  }
+  func restoreDraft(revision: UUID) {
+    guard connected, historyReady, let binding = currentBinding,
+      let record = recoveredDrafts.first(where: { $0.revision == revision }),
+      record.binding.familiarID == binding.familiarID else { return }
+    let combined = draft.isEmpty ? record.text : draft + "\n\n" + record.text
+    saved?.drafts.removeAll { $0.revision == revision }
+    draft = combined
+    flushPersistence()
   }
   static let localNetworkOffStatus = "Local Network access is off"
   static let localNetworkOff =
