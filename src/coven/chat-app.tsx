@@ -849,7 +849,7 @@ export function ChatApp({
     const init = frames.findLast((event) => event.type === 'system' && event.subtype === 'init');
     if (!init || !init.effectiveAccess || typeof init.effectiveAccess !== 'object') return;
     const scope = init.effectiveAccess as Record<string, unknown>;
-    if (phoneRun && scope.runId !== phoneRun.runId) return;
+    if (scope.runId !== (phoneRun?.runId ?? activeRun.current?.id)) return;
     const roots = scope.writableRoots;
     if (
       scope.enforced === true &&

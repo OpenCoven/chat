@@ -154,7 +154,7 @@ pub(crate) struct ApprovedRoot {
 
 impl ApprovedRoot {
     #[cfg(unix)]
-    fn capture(path: &str) -> Result<Self, String> {
+    pub(crate) fn capture(path: &str) -> Result<Self, String> {
         use std::os::unix::fs::MetadataExt;
         if path.len() > 4096 || path.chars().any(|c| c.is_control() || matches!(c, '\u{061c}' | '\u{200e}' | '\u{200f}' | '\u{202a}'..='\u{202e}' | '\u{2066}'..='\u{2069}')) {
             return Err("A requested folder path cannot be shown safely. Ask for a different folder.".into());
@@ -184,7 +184,11 @@ impl ApprovedRoot {
     fn capture(_path: &str) -> Result<Self, String> {
         Err("This platform cannot verify a one-time folder approval. Use the saved project grants instead.".into())
     }
-    fn verify(&self) -> Result<(), String> {
+    pub(crate) fn path(&self) -> &str {
+        &self.path
+    }
+
+    pub(crate) fn verify(&self) -> Result<(), String> {
         if Self::capture(&self.path)? != *self {
             return Err(
                 "The requested folder changed after review. Ask the familiar to request it again."
@@ -849,7 +853,7 @@ pub(crate) fn granted_roots(
     data: &Path,
     grant: &Grant,
     run_id: &str,
-) -> Result<Vec<String>, String> {
+) -> Result<Vec<ApprovedRoot>, String> {
     let _log = lock(data)?;
     let mut entries = read_file(&data.join(LOG_FILE))?;
     entries.extend(read_file(&data.join(ROTATED_LOG_FILE))?);
@@ -875,7 +879,7 @@ pub(crate) fn granted_roots(
     for root in &answer.roots {
         root.verify()?;
     }
-    Ok(answer.roots.iter().map(|root| root.path.clone()).collect())
+    Ok(answer.roots.clone())
 }
 
 /// Records the answer and returns the request, for the transcript's notice.
@@ -1192,7 +1196,11 @@ mod tests {
         )
         .unwrap();
         assert_eq!(
-            granted_roots(&data.0, &grant, "run-2").unwrap(),
+            granted_roots(&data.0, &grant, "run-2")
+                .unwrap()
+                .iter()
+                .map(|root| root.path().to_owned())
+                .collect::<Vec<_>>(),
             request.writable_roots
         );
         assert!(granted_roots(&data.0, &grant, "other-run").is_err());

@@ -100,9 +100,20 @@ fn root(path: &Path, home: &Path) -> Result<String, String> {
                 .into(),
         );
     }
-    path.to_str()
-        .map(str::to_owned)
-        .ok_or_else(|| "An authorized folder path is not UTF-8.".into())
+    let path = path
+        .to_str()
+        .ok_or_else(|| "An authorized folder path is not UTF-8.".to_owned())?;
+    validate_phone_path(path)?;
+    Ok(path.to_owned())
+}
+
+fn validate_phone_path(path: &str) -> Result<(), String> {
+    if path.len() > 4096 || path.chars().any(char::is_control) {
+        return Err(
+            "An authorized folder path cannot be shown safely on the paired iPhone.".into(),
+        );
+    }
+    Ok(())
 }
 
 impl RunPolicy {
@@ -114,8 +125,11 @@ impl RunPolicy {
         home: &Path,
     ) -> Result<Self, String> {
         crate::coven_runtime::validate_id(run_id)?;
-        let workspace = root(workspace, home)?;
-        let primary_root = root(cwd, home)?;
+        let home = home
+            .canonicalize()
+            .map_err(|_| "Cannot resolve the local user home. Check the home folder and retry.")?;
+        let workspace = root(workspace, &home)?;
+        let primary_root = root(cwd, &home)?;
         let mut writes = BTreeSet::from([workspace]);
         let mut reads = BTreeSet::new();
         for project in projects
@@ -125,7 +139,7 @@ impl RunPolicy {
             let path = project["path"]
                 .as_str()
                 .ok_or("Project access is missing a folder path.")?;
-            let path = root(Path::new(path), home)?;
+            let path = root(Path::new(path), &home)?;
             match project["access"].as_str() {
                 Some("write") => {
                     writes.insert(path);
@@ -150,11 +164,11 @@ impl RunPolicy {
         // Native backends disagree about overlapping read/write grants. Refuse
         // ambiguous layouts rather than accidentally turning a read grant into write.
         if reads.iter().any(|read| {
-            writes
-                .iter()
-                .any(|write| Path::new(read).starts_with(write))
+            writes.iter().any(|write| {
+                Path::new(read).starts_with(write) || Path::new(write).starts_with(read)
+            })
         }) {
-            return Err("A read-only project is inside a writable folder. Separate the folders or correct the project grants before sending.".into());
+            return Err("A read-only and writable project overlap. Separate the folders or correct the project grants before sending.".into());
         }
         Ok(Self {
             version: 1,
@@ -166,11 +180,19 @@ impl RunPolicy {
         })
     }
 
-    pub(crate) fn extend_approved(&mut self, extra: &[String], home: &Path) -> Result<(), String> {
+    pub(crate) fn extend_approved(
+        &mut self,
+        extra: &[crate::chat_approvals::ApprovedRoot],
+        home: &Path,
+    ) -> Result<(), String> {
+        let home = home
+            .canonicalize()
+            .map_err(|_| "Cannot resolve the local user home. Check the home folder and retry.")?;
         for requested in extra {
-            let approved = root(Path::new(requested), home)?;
+            requested.verify()?;
+            let approved = root(Path::new(requested.path()), &home)?;
             let path = Path::new(&approved);
-            if approved != *requested
+            if approved != requested.path()
                 || home.starts_with(path)
                 || self
                     .read_only_roots
@@ -179,6 +201,7 @@ impl RunPolicy {
             {
                 return Err("That folder conflicts with saved read-only access or a protected folder. Correct the saved grants and ask again.".into());
             }
+            requested.verify()?;
             self.writable_roots.push(approved);
         }
         self.writable_roots.sort();
@@ -186,8 +209,18 @@ impl RunPolicy {
         Ok(())
     }
 
+    pub(crate) fn verify_approved_roots(
+        &self,
+        roots: &[crate::chat_approvals::ApprovedRoot],
+    ) -> Result<(), String> {
+        for root in roots {
+            root.verify()?;
+        }
+        Ok(())
+    }
+
     /// The familiar must never be able to rewrite Chat's authority records,
-    /// including when an explicitly granted project contains app storage.
+    /// including by creating a hard link through a writable root on the same filesystem.
     pub(crate) fn protect_host_storage(&self, data: &Path) -> Result<(), String> {
         let data = data.canonicalize().map_err(|_| FAILED)?;
         if self
@@ -196,6 +229,19 @@ impl RunPolicy {
             .any(|write| data.starts_with(write) || Path::new(write).starts_with(&data))
         {
             return Err("A writable folder overlaps Chat's private storage. Choose a separate familiar workspace or narrow the project grant before sending.".into());
+        }
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::MetadataExt;
+            let storage_device = fs::metadata(&data).map_err(|_| FAILED)?.dev();
+            for write in &self.writable_roots {
+                let metadata = fs::metadata(write).map_err(|_| {
+                    "An authorized folder is unavailable. Restore it or update its project grant, then retry."
+                })?;
+                if metadata.dev() == storage_device {
+                    return Err("A writable folder shares a filesystem with Chat's private storage. Choose a separate volume for the workspace and project grants before sending.".into());
+                }
+            }
         }
         Ok(())
     }
@@ -358,6 +404,47 @@ mod tests {
         assert!(RunPolicy::resolve("r", &workspace, &outside, &grants, &f.0).is_err());
     }
     #[test]
+    fn canonical_home_and_phone_path_limits_are_enforced() {
+        let f = Fixture::new();
+        let home = f.folder("home");
+        let workspace = f.folder("familiar");
+        #[cfg(unix)]
+        {
+            let alias = f.0.join("home-alias");
+            std::os::unix::fs::symlink(&home, &alias).unwrap();
+            assert!(RunPolicy::resolve("r", &home, &workspace, &json!([]), &alias).is_err());
+            let approval =
+                crate::chat_approvals::ApprovedRoot::capture(f.0.to_str().unwrap()).unwrap();
+            let mut policy =
+                RunPolicy::resolve("r", &workspace, &workspace, &json!([]), &home).unwrap();
+            assert!(policy
+                .extend_approved(&[approval], &alias)
+                .unwrap_err()
+                .contains("protected folder"));
+        }
+        assert!(validate_phone_path(&"x".repeat(4097)).is_err());
+        assert!(validate_phone_path("/project\nfolder").is_err());
+        assert!(validate_phone_path("/project-folder").is_ok());
+    }
+
+    #[test]
+    fn read_only_and_writable_projects_may_not_overlap_in_either_direction() {
+        let f = Fixture::new();
+        let workspace = f.folder("familiar");
+        let read_only = f.folder("read-only");
+        let writable = read_only.join("nested-write");
+        fs::create_dir(&writable).unwrap();
+        let grants = json!([
+            {"path":read_only, "access":"read"},
+            {"path":writable, "access":"write"},
+        ]);
+        assert!(
+            RunPolicy::resolve("r", &workspace, &workspace, &grants, &f.0)
+                .unwrap_err()
+                .contains("overlap")
+        );
+    }
+    #[test]
     fn receipts_reject_downgrade_full_access_other_run_and_extra_roots() {
         let f = Fixture::new();
         let workspace = f.folder("familiar");
@@ -412,7 +499,10 @@ mod tests {
         let data = f.folder("broad/chat-private");
         let workspace = f.folder("familiar");
         let policy = RunPolicy::resolve("r", &workspace, &workspace, &json!([]), &f.0).unwrap();
-        assert!(policy.protect_host_storage(&data).is_ok());
+        assert!(policy
+            .protect_host_storage(&data)
+            .unwrap_err()
+            .contains("shares a filesystem"));
         let policy = RunPolicy::resolve(
             "r",
             &workspace,
@@ -421,7 +511,30 @@ mod tests {
             &f.0,
         )
         .unwrap();
-        assert!(policy.protect_host_storage(&data).is_err());
+        assert!(policy
+            .protect_host_storage(&data)
+            .unwrap_err()
+            .contains("overlaps"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn approved_folder_identity_is_rechecked_before_launch() {
+        let f = Fixture::new();
+        let workspace = f.folder("familiar");
+        let approved = f.folder("approved");
+        let approval =
+            crate::chat_approvals::ApprovedRoot::capture(approved.to_str().unwrap()).unwrap();
+        let mut policy = RunPolicy::resolve("r", &workspace, &workspace, &json!([]), &f.0).unwrap();
+        policy
+            .extend_approved(std::slice::from_ref(&approval), &f.0)
+            .unwrap();
+        fs::rename(&approved, f.0.join("approved-original")).unwrap();
+        fs::create_dir(&approved).unwrap();
+        assert!(policy
+            .verify_approved_roots(&[approval])
+            .unwrap_err()
+            .contains("changed after review"));
     }
 
     #[cfg(unix)]

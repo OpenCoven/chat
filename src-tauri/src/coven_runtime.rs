@@ -2284,14 +2284,15 @@ fn send_turn(
     let projects = familiar_projects::ProjectAccess::load()
         .map_err(|error| format!("Workspace access could not be read. Correct the project registry or grants, then retry. {error}"))?
         .for_execution(&selected_familiar)?;
+    let home = home()?;
     let mut policy = execution_policy::RunPolicy::resolve(
         &input.run_id,
         Path::new(string(familiar, "workspace")?),
         &workspace,
         &projects,
-        &home()?,
+        &home,
     )?;
-    policy.extend_approved(&extra_roots, &home()?)?;
+    policy.extend_approved(&extra_roots, &home)?;
     policy.protect_host_storage(data)?;
     familiar_projects::ProjectAccess::protect_execution_authority(&policy)?;
     let help = run_process(
@@ -2510,6 +2511,7 @@ fn send_turn(
         Ok(())
     };
     let mut stderr_report = String::new();
+    policy.verify_approved_roots(&extra_roots)?;
     let run = run_process_input(
         &args,
         Some(&workspace),
@@ -2531,19 +2533,28 @@ fn send_turn(
     let failure = match (&run, failed_result) {
         (Ok(_), None) if events.iter().any(is_result) => {
             if crate::chat_approvals::files_requests(input.grant.is_some()) {
-                if let (Some(session), Some(proposal)) = (
-                    input_session.as_deref(),
-                    crate::chat_approvals::proposal_in(&events)
-                        .filter(|proposal| !proposal.writable_roots.is_empty()),
-                ) {
-                    crate::chat_approvals::submit(
-                        data,
-                        &selected_familiar,
-                        session,
-                        &input.run_id,
-                        proposal,
-                        crate::chat_approvals::now_ms(),
-                    )?;
+                if let Some(proposal) = crate::chat_approvals::proposal_in(&events) {
+                    if proposal.writable_roots.is_empty() {
+                        let (Some(file), Some(session)) =
+                            (transcript.as_mut(), input_session.as_deref())
+                        else {
+                            return Err("Coven did not provide a chat session for its workspace access notice.".into());
+                        };
+                        let notice = record_invalid_access_request(file, session)?;
+                        events.push(notice.clone());
+                        on_event(notice)?;
+                    } else if let (Some(session), Some(_file)) =
+                        (input_session.as_deref(), transcript.as_ref())
+                    {
+                        crate::chat_approvals::submit(
+                            data,
+                            &selected_familiar,
+                            session,
+                            &input.run_id,
+                            proposal,
+                            crate::chat_approvals::now_ms(),
+                        )?;
+                    }
                 }
             }
             return Ok(json!({"runId": input.run_id, "events": events}));
@@ -2627,6 +2638,18 @@ fn run_failure_message(report: Option<&str>) -> String {
         Some(_) => "The run failed. Coven's report is the last line of the chat, and Try again resends your message.".into(),
         None => "The run failed, and Coven gave no reason. Try again resends your message.".into(),
     }
+}
+
+fn record_invalid_access_request(file: &mut File, session_id: &str) -> Result<Value, String> {
+    let notice = json!({
+        "type": "system", "subtype": "notice", "source": crate::chat_approvals::NOTICE_SOURCE, "session_id": session_id,
+        "message": {"role": "system", "content": [{"type": "text", "text": "Workspace access was not requested because Coven's request did not name any folders. Ask again and list the exact folders it needs."}]},
+    });
+    serde_json::to_writer(&mut *file, &notice).map_err(|_| "Cannot save Coven transcript.")?;
+    file.write_all(b"\n")
+        .and_then(|_| file.flush())
+        .map_err(|_| "Cannot save Coven transcript.")?;
+    Ok(notice)
 }
 
 /// Keeps a failed run's report on the chat itself, as a notice line at the end
@@ -3740,6 +3763,26 @@ mod tests {
         // Chat's own notices never travel back into the engine as history.
         assert!(replay_turns(&lines).is_empty());
         fs::remove_dir_all(&data).unwrap();
+    }
+
+    #[test]
+    fn malformed_workspace_access_request_is_saved_as_a_chat_notice() {
+        let data = std::env::temp_dir().join(uuid::Uuid::new_v4().to_string());
+        fs::create_dir_all(&data).unwrap();
+        let path = data.join("run.jsonl");
+        let mut file = File::create(&path).unwrap();
+        let notice = record_invalid_access_request(&mut file, "run").unwrap();
+        assert_eq!(notice["type"], "system");
+        assert_eq!(notice["subtype"], "notice");
+        assert_eq!(notice["source"], crate::chat_approvals::NOTICE_SOURCE);
+        assert_eq!(notice["session_id"], "run");
+        assert!(notice["message"]["content"][0]["text"]
+            .as_str()
+            .unwrap()
+            .contains("list the exact folders"));
+        let saved: Value = serde_json::from_slice(&fs::read(path).unwrap()).unwrap();
+        assert_eq!(saved, notice);
+        fs::remove_dir_all(data).unwrap();
     }
 
     #[cfg(unix)]

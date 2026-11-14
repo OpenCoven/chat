@@ -55,6 +55,9 @@ function MockLayout(props: ChatLayoutProps) {
       <output data-testid="drafts">{JSON.stringify(props.drafts ?? {})}</output>
       <output data-testid="finished">{JSON.stringify(props.finished ?? {})}</output>
       <output data-testid="last-run">{props.lastRun ? props.lastRun.outcome : 'none'}</output>
+      <output data-testid="effective-roots">
+        {JSON.stringify(props.effectiveWorkspaceRoots ?? null)}
+      </output>
       <output data-testid="partial">{String(props.partialHistory ?? false)}</output>
       {props.onLoadEarlier && (
         <button type="button" onClick={props.onLoadEarlier}>
@@ -359,6 +362,41 @@ describe('canonical familiar controller', () => {
       sessionId: 'one-next',
       prompt: 'newer unsent',
     });
+  });
+
+  it('does not show a previous run receipt as verified during a new run', async () => {
+    const api = runtime();
+    const previous = deferred<CovenRunResult>();
+    const current = deferred<CovenRunResult>();
+    vi.mocked(api.send).mockReturnValueOnce(previous.promise).mockReturnValueOnce(current.promise);
+    await ready(api);
+    draft('first run');
+    click('Send');
+    const previousRunId = vi.mocked(api.send).mock.calls[0]?.[0].runId;
+    await act(async () =>
+      previous.resolve({
+        runId: previousRunId ?? '',
+        events: [
+          {
+            type: 'system',
+            subtype: 'init',
+            session_id: 'one-next',
+            effectiveAccess: {
+              runId: previousRunId,
+              enforced: true,
+              access: 'workspace-write',
+              writableRoots: ['/work'],
+              readOnlyRoots: [],
+            },
+          } as CovenRunEvent,
+        ],
+      }),
+    );
+    await waitFor(() => expect(screen.getByRole('textbox')).toBeEnabled());
+    draft('second run');
+    click('Send');
+    expect(await screen.findByTestId('effective-roots')).toHaveTextContent('null');
+    await act(async () => current.resolve({ runId: 'current', events: [] }));
   });
 
   it('does not clear a newly retyped identical message when the previous send finishes', async () => {
