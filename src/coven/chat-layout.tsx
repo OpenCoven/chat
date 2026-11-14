@@ -972,9 +972,11 @@ export function ChatLayout(props: ChatLayoutProps) {
   });
   // A chat Coven couldn't load never turns its composer on, so focus stayed on
   // the familiar's button and Orca said only its name (#592): the alert came
-  // with the new view and wasn't announced. Focus goes to the alert's reason
-  // instead, and a screen reader speaks what has focus.
-  const errorRef = useRef<HTMLParagraphElement>(null);
+  // with the new view and wasn't announced. Focus goes to the alert itself, and
+  // a screen reader speaks what has focus. Not to the paragraph inside it: Orca's
+  // WebKitGTK script ignores focus on paragraphs and sections, while a focused
+  // alert is spoken with its text (native run 43580193931).
+  const errorRef = useRef<HTMLDivElement>(null);
   const unavailableReason = session?.unavailable ? props.error : '';
   useEffect(() => {
     if (!composerFocus) return;
@@ -1624,13 +1626,11 @@ export function ChatLayout(props: ChatLayoutProps) {
                 </div>
               ) : null}
               {props.error ? (
-                <div className="coven-error" role="alert">
+                <div className="coven-error" role="alert" ref={errorRef} tabIndex={-1}>
                   {/* A paragraph, not a span: WebKitGTK gave AT-SPI a span laid out
                     as a flex item without its text, so on Linux the alert held
                     only its Copy error button (native run 43006448055). */}
-                  <p className="coven-error-text" ref={errorRef} tabIndex={-1}>
-                    {props.error}
-                  </p>
+                  <p className="coven-error-text">{props.error}</p>
                   {props.onReloadChat && !props.loading ? (
                     <FamButton size="sm" className="coven-error-retry" onClick={props.onReloadChat}>
                       Reload chat

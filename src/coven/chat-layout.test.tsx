@@ -1387,7 +1387,8 @@ describe('choosing a familiar', () => {
 
   it("hands focus to the reason when Coven couldn't load the chosen chat", () => {
     // Its composer never turns on, so focus stayed on the familiar's button and
-    // Orca said only "Wren push button." (#592). The alert says why.
+    // Orca said only "Wren push button." (#592). The alert says why, and takes
+    // focus itself: Orca says nothing when a paragraph is focused.
     const unreadable = "Coven couldn't load this chat. Refresh Coven to try again.";
     const sessions = [
       ...props().sessions,
@@ -1407,7 +1408,9 @@ describe('choosing a familiar', () => {
         error={unreadable}
       />,
     );
-    expect(screen.getByText(unreadable)).toHaveFocus();
+    const alert = screen.getByRole('alert');
+    expect(alert).toHaveFocus();
+    expect(alert).toHaveTextContent(unreadable);
     // Choosing a familiar whose chat loads still hands focus to its composer.
     fireEvent.click(screen.getByRole('button', { name: 'Astra' }));
     view.rerender(<ChatLayout {...props()} sessions={sessions} familiarId="a" sessionId="s-a" />);

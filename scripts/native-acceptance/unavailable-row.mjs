@@ -144,9 +144,9 @@ export async function unavailableRow(lane, familiar) {
       await refreshCoven(lane);
       const openThird = async () => app.click(await app.one('button', THIRD, { timeout: 30_000 }));
       // What the screen reader says as the chat opens is how its user learns
-      // why the composer is locked: focus goes to the alert's reason. Orca is
-      // judged (#592). VoiceOver and NVDA are recorded, including whether the
-      // focused reason and the alert make them say it twice.
+      // why the composer is locked: focus goes to the alert that gives it. Orca
+      // is judged (#592). VoiceOver and NVDA are recorded, including whether
+      // focusing the alert makes them say it twice.
       const reader = lane.reader?.name ?? 'The screen reader';
       const spoken = await listen(lane, row, reader, openThird);
       if (spoken) {
