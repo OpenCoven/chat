@@ -4,9 +4,13 @@ import XCTest
 
 @MainActor final class MemoryStore: PairingStore {
   var failClear = false
+  var failSave = false
   var value: Pairing?
   func load() throws -> Pairing? { value }
-  func save(_ value: Pairing) throws { self.value = value }
+  func save(_ value: Pairing) throws {
+    if failSave { throw CompanionError.message("Locked") }
+    self.value = value
+  }
   func clear() throws {
     if failClear { throw CompanionError.message("Locked") }
     value = nil

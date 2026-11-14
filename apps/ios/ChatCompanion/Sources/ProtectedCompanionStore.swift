@@ -84,13 +84,13 @@ import Foundation
       state.conversations.removeAll {
         date.timeIntervalSince($0.savedAt) >= lifetime || $0.savedAt.timeIntervalSince(date) > 300
       }
-      if let saved = state.snapshotSavedAt,
-        date.timeIntervalSince(saved) >= lifetime || saved.timeIntervalSince(date) > 300
-      {
-        state.snapshot = nil
+      let snapshotIsRecent = state.snapshotSavedAt.map {
+        date.timeIntervalSince($0) < lifetime && $0.timeIntervalSince(date) <= 300
+      } ?? false
+      if !snapshotIsRecent, let snapshot = state.snapshot {
+        state.snapshot = state.draftNavigation(from: snapshot)
         state.snapshotSavedAt = nil
       }
-      if state.snapshotSavedAt == nil { state.snapshot = nil }
     }
     return state
   }

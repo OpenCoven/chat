@@ -88,7 +88,7 @@ The recommended execution method is **Native**: this session implements each tas
 - [x] Show saved/last-updated state with cached history and explain when the Mac is unreachable. Preserve the existing inactive-scene privacy overlay; flush pending edits on scene transition. Do not rely on termination callbacks.
 - [x] Add an installed simulator relaunch test with a deterministic fixture: type a draft, terminate/relaunch, read the recovered draft before network refresh, then simulate an uncertain send and relaunch without dispatching it again. Add a Forget/relaunch test confirming cached text is gone. Keep exact device/runtime, .xcresult and failure receipts.
 - [x] Update the phone storage/privacy contract to describe only the implemented native persistence milestone and remaining LAN-only/attachment/push limitations. State offline deletion/revocation limits honestly. Preserve the browser storage prohibition.
-- [ ] Run the iOS native unit/UI checks and unsigned generic-device build; run the repository agent-doc path check and `git diff --check`. Sign a milestone commit. Obtain fresh whole-branch review and resolve findings before calling this milestone ready.
+- [x] Run the iOS native unit/UI checks and unsigned generic-device build; run the repository agent-doc path check and `git diff --check`. Sign a milestone commit. Obtain fresh whole-branch review and resolve findings before calling this milestone ready.
 
 ## Native verification commands
 

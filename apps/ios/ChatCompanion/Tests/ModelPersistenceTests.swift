@@ -15,10 +15,12 @@ import XCTest
 @MainActor final class FaultingPersistence: CompanionPersistence {
   let backing: ProtectedCompanionStore
   var failSave = false
+  var failLoad = false
   var failErase = false
   init(_ backing: ProtectedCompanionStore) { self.backing = backing }
   func load(for namespace: CacheNamespace) throws -> CompanionSavedState? {
-    try backing.load(for: namespace)
+    if failLoad { throw CocoaError(.fileReadNoPermission) }
+    return try backing.load(for: namespace)
   }
   func save(_ state: CompanionSavedState) throws {
     if failSave { throw CocoaError(.fileWriteOutOfSpace) }
@@ -48,6 +50,15 @@ import XCTest
   }
   private func storage() -> ProtectedCompanionStore {
     ProtectedCompanionStore(root: root, installationID: install, now: { self.date })
+  }
+  private func link(_ value: Pairing) -> String {
+    var parts = URLComponents()
+    parts.scheme = "coven-chat"
+    parts.host = "pair"
+    parts.queryItems = [URLQueryItem(name: "endpoint", value: value.endpoint.absoluteString),
+      URLQueryItem(name: "token", value: value.token),
+      URLQueryItem(name: "fingerprint", value: value.fingerprint)]
+    return parts.url!.absoluteString
   }
   private func api() -> FakeClient {
     let api = FakeClient()
@@ -154,7 +165,7 @@ import XCTest
     await current.refresh()
     XCTAssertEqual(current.draft, "")
     XCTAssertEqual(current.recoveredDrafts.first?.text, "old destination")
-    if let revision = current.recoveredDrafts.first?.revision { current.restoreDraft(revision: revision) }
+    if let revision = current.recoveredDrafts.first?.revision { current.restoreDraft(revision: revision, expectedDestination: current.draftDestination!, namespace: current.cacheNamespace!) }
     XCTAssertEqual(current.draft, "old destination")
     XCTAssertTrue(client.sent.isEmpty)
   }
@@ -320,7 +331,7 @@ import XCTest
     await current.refresh()
     current.draft = "Already typing"
     let revision = try XCTUnwrap(current.recoveredDrafts.first?.revision)
-    current.restoreDraft(revision: revision, text: "Edited recovery")
+    current.restoreDraft(revision: revision, text: "Edited recovery", expectedDestination: current.draftDestination!, namespace: current.cacheNamespace!)
     XCTAssertEqual(current.draft, "Already typing\n\nEdited recovery")
     XCTAssertTrue(current.recoveredDrafts.isEmpty)
     XCTAssertTrue(client.sent.isEmpty)
@@ -341,5 +352,179 @@ import XCTest
     await restored.refresh()
     XCTAssertEqual(restored.shownRun?.messages.first?.text, "Completed output")
     XCTAssertNil(restored.pendingRunId)
+  }
+  func testPairingLoadFailureDoesNotCommitCredentialsOrClient() async {
+    let keychain = MemoryStore()
+    let disk = FaultingPersistence(storage())
+    let candidate = api()
+    let current = CompanionModel(store: keychain, persistence: disk, installationID: install,
+      makeClient: { _ in candidate }, localNetworkBlocks: { _ in false }, now: { self.date })
+    disk.failLoad = true
+    await current.pair(link: link(pairing()))
+    XCTAssertNil(keychain.value)
+    XCTAssertNil(current.pairing)
+    XCTAssertFalse(current.error.isEmpty)
+    XCTAssertTrue(candidate.invalidated)
+  }
+  func testPairingKeychainFailureLeavesNoPartiallyInstalledClient() async {
+    let keychain = MemoryStore()
+    keychain.failSave = true
+    let candidate = api()
+    let current = CompanionModel(store: keychain, persistence: storage(), installationID: install,
+      makeClient: { _ in candidate }, localNetworkBlocks: { _ in false }, now: { self.date })
+    await current.pair(link: link(pairing()))
+    XCTAssertNil(current.pairing)
+    XCTAssertNil(keychain.value)
+    XCTAssertTrue(candidate.invalidated)
+    XCTAssertFalse(current.error.isEmpty)
+  }
+  func testReplacingPairingCannotEraseOldDraftBeforeKeychainFailure() async throws {
+    let keychain = MemoryStore()
+    keychain.value = pairing()
+    let oldClient = api()
+    let candidate = api()
+    var clientsMade = 0
+    let current = CompanionModel(store: keychain, persistence: storage(), installationID: install,
+      makeClient: { value in
+        clientsMade += 1
+        return value.token == self.pairing().token ? oldClient : candidate
+      }, localNetworkBlocks: { _ in false }, now: { self.date })
+    await current.refresh()
+    current.draft = "retain old peer work"
+    current.flushPersistence()
+    keychain.failSave = true
+    oldClient.historyFailure = URLError(.networkConnectionLost)
+    await current.pair(link: link(pairing(String(repeating: "c", count: 64))))
+    XCTAssertEqual(current.pairing, pairing())
+    XCTAssertEqual(keychain.value, pairing())
+    XCTAssertFalse(oldClient.invalidated)
+    XCTAssertEqual(clientsMade, 1, "Replacing a paired Mac requires explicit Forget first")
+    let old = try storage().load(for: CacheNamespace(installationID: install, pairing: pairing()))
+    XCTAssertEqual(old?.drafts.first?.text, "retain old peer work")
+  }
+  func testDeletionIsDurableEvenIfFollowingHistoryRequestFails() async throws {
+    let client = api()
+    let current = model(client)
+    await current.refresh()
+    client.snapshotValue = Snapshot(version: 1, familiars: client.snapshotValue.familiars,
+      sessions: [], activeRun: nil)
+    client.historyFailure = URLError(.networkConnectionLost)
+    await current.refresh()
+    XCTAssertTrue(current.messages.isEmpty)
+    XCTAssertNil(current.cachedAt)
+    let disk = try XCTUnwrap(storage().load(for: CacheNamespace(installationID: install, pairing: pairing())))
+    XCTAssertTrue(disk.conversations.isEmpty)
+    XCTAssertTrue(model(api()).messages.isEmpty, "Observed deletion must survive cold launch")
+  }
+  func testDeletedConversationDoesNotReappearThroughPendingReceipt() async throws {
+    let sender = api()
+    sender.failSend = true
+    let first = model(sender)
+    await first.refresh()
+    first.draft = "Private delivery"
+    await first.send()
+    let id = try XCTUnwrap(first.pendingRunId)
+    let reader = api()
+    reader.snapshotValue = Snapshot(version: 1, familiars: reader.snapshotValue.familiars,
+      sessions: [], activeRun: nil)
+    reader.receiptOverride = Run(id: id, familiarId: "astra", status: "completed",
+      messages: [Message(id: "deleted", role: "assistant", text: "Deleted response")])
+    reader.historyFailure = URLError(.networkConnectionLost)
+    let restored = model(reader)
+    await restored.refresh()
+    XCTAssertTrue(restored.messages.isEmpty)
+    XCTAssertNil(restored.shownRun)
+    XCTAssertNil(restored.pendingRunId, "The matching receipt still reconciles delivery")
+  }
+  func testExpiredHistoryDoesNotHideRetainedDraftsOffline() async {
+    let first = model(api())
+    await first.refresh()
+    first.draft = "retain beyond history expiry"
+    first.flushPersistence()
+    let future = date.addingTimeInterval(8 * 86400)
+    let keychain = MemoryStore()
+    keychain.value = pairing()
+    let client = api()
+    client.failSnapshot = true
+    func reopen() -> CompanionModel {
+      CompanionModel(store: keychain,
+        persistence: ProtectedCompanionStore(root: root, installationID: install, now: { future }),
+        installationID: install, makeClient: { _ in client },
+        localNetworkBlocks: { _ in false }, now: { future })
+    }
+    let restored = reopen()
+    XCTAssertTrue(restored.messages.isEmpty)
+    XCTAssertEqual(restored.draft, "retain beyond history expiry")
+    await restored.refresh()
+    XCTAssertFalse(restored.canSend)
+    restored.draft = "edited while offline"
+    restored.flushPersistence()
+    XCTAssertEqual(reopen().draft, "edited while offline")
+  }
+  func testRecoveredEditorEditsSurviveRelaunchBeforePlacement() async throws {
+    let client = api()
+    let current = model(client)
+    await current.refresh()
+    current.draft = "Original recovery"
+    client.historyValue = History(sessionId: "head-2", messages: [], hasMore: false)
+    client.snapshotValue = Snapshot(version: 1, familiars: client.snapshotValue.familiars,
+      sessions: [ChatSession(id: "head-2", familiarId: "astra", title: "New", archived: false)], activeRun: nil)
+    await current.refresh()
+    let record = try XCTUnwrap(current.recoveredDrafts.first)
+    let namespace = try XCTUnwrap(current.cacheNamespace)
+    current.editRecoveredDraft(binding: record.binding, namespace: namespace, text: "Edited before placement")
+    current.flushPersistence()
+    let restored = model(api())
+    XCTAssertEqual(restored.recoveredDrafts.first?.text, "Edited before placement")
+    XCTAssertEqual(restored.recoveredDrafts.first?.conversationTitle, "Chat")
+    XCTAssertEqual(restored.draft, "")
+    XCTAssertTrue(client.sent.isEmpty)
+  }
+  func testRecoveredEditsSurviveOldReceiptAndRejectAnotherPeer() async throws {
+    let client = api()
+    client.failSend = true
+    let current = model(client)
+    await current.refresh()
+    current.draft = "Submitted words"
+    await current.send()
+    client.receiptFailure = CompanionError.missingRun
+    client.historyValue = History(sessionId: "head-2", messages: [], hasMore: false)
+    client.snapshotValue = Snapshot(version: 1, familiars: client.snapshotValue.familiars,
+      sessions: [ChatSession(id: "head-2", familiarId: "astra", title: "New", archived: false)], activeRun: nil)
+    await current.refresh()
+    let record = try XCTUnwrap(current.recoveredDrafts.first)
+    let namespace = try XCTUnwrap(current.cacheNamespace)
+    current.editRecoveredDraft(binding: record.binding, namespace: namespace, text: "New recovered edit")
+    var otherPeer = namespace
+    otherPeer.hostFingerprint = String(repeating: "d", count: 64)
+    current.editRecoveredDraft(binding: record.binding, namespace: otherPeer, text: "Wrong peer")
+    client.receiptFailure = nil
+    await current.refresh()
+    XCTAssertEqual(current.recoveredDrafts.first?.text, "New recovered edit")
+    XCTAssertNil(current.pendingRunId)
+  }
+  func testRecoveredPlacementRequiresTheReviewedDestination() async throws {
+    let client = api()
+    let current = model(client)
+    await current.refresh()
+    current.draft = "Review this destination"
+    client.historyValue = History(sessionId: "head-2", messages: [], hasMore: false)
+    client.snapshotValue = Snapshot(version: 1, familiars: client.snapshotValue.familiars,
+      sessions: [ChatSession(id: "head-2", familiarId: "astra", title: "Second", archived: false)], activeRun: nil)
+    await current.refresh()
+    let record = try XCTUnwrap(current.recoveredDrafts.first)
+    let namespace = try XCTUnwrap(current.cacheNamespace)
+    let reviewed = try XCTUnwrap(current.draftDestination)
+    client.historyValue = History(sessionId: "head-3", messages: [], hasMore: false)
+    client.snapshotValue = Snapshot(version: 1, familiars: client.snapshotValue.familiars,
+      sessions: [ChatSession(id: "head-3", familiarId: "astra", title: "Third", archived: false)], activeRun: nil)
+    await current.refresh()
+    current.restoreDraft(revision: record.revision, expectedDestination: reviewed, namespace: namespace)
+    XCTAssertEqual(current.draft, "")
+    XCTAssertEqual(current.recoveredDrafts.first?.text, "Review this destination")
+    current.restoreDraft(revision: record.revision,
+      expectedDestination: try XCTUnwrap(current.draftDestination), namespace: namespace)
+    XCTAssertEqual(current.draft, "Review this destination")
+    XCTAssertTrue(client.sent.isEmpty)
   }
 }

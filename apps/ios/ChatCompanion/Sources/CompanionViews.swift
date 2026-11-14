@@ -24,7 +24,7 @@ struct CompanionRoot: View {
           model.forget()
         }
       } message: {
-        Text("You will need a new pairing link to connect again. Your chats remain on the Mac.")
+        Text("Saved phone drafts and downloaded history will be removed. You will need a new pairing link to connect again. Your chats remain on the Mac.")
       }
       .confirmationDialog(
         "Have you checked the conversation on your Mac?", isPresented: $dismissSend,

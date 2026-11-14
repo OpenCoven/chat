@@ -16,7 +16,7 @@ struct CacheNamespace: Codable, Equatable {
   }
 }
 
-struct DraftBinding: Codable, Equatable {
+struct DraftBinding: Codable, Equatable, Hashable {
   var familiarID: String
   var sessionID: String?
 }
@@ -25,6 +25,7 @@ struct SavedDraft: Codable, Equatable {
   var text: String
   var revision: UUID
   var updatedAt: Date
+  var conversationTitle: String? = nil
 }
 struct CachedConversation: Codable {
   var familiarID: String
@@ -51,6 +52,20 @@ struct CompanionSavedState: Codable {
   var conversations: [CachedConversation] = []
   var pending: PendingCompanionOperation?
   var cacheConversationText = true
+
+  /// Draft destinations outlive cached history; transcript, titles and live requests do not.
+  func draftNavigation(from snapshot: Snapshot) -> Snapshot? {
+    var needed = Set(drafts.map { $0.binding.familiarID })
+    if let pending { needed.insert(pending.familiarID) }
+    let familiars = snapshot.familiars.filter { needed.contains($0.id) }.map {
+      Familiar(id: $0.id, name: $0.name, displayName: $0.displayName, emoji: $0.emoji)
+    }
+    guard !familiars.isEmpty else { return nil }
+    return Snapshot(version: snapshot.version, familiars: familiars,
+      sessions: snapshot.sessions.filter { needed.contains($0.familiarId) }.map {
+        ChatSession(id: $0.id, familiarId: $0.familiarId, title: "", archived: $0.archived)
+      }, activeRun: nil)
+  }
 }
 
 @MainActor protocol CompanionPersistence {

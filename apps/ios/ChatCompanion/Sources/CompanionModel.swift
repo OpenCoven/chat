@@ -28,6 +28,7 @@ import Observation
   private(set) var persistenceError: String?
   private(set) var cacheConversationText = true
   private var saved: CompanionSavedState?
+  private var deletedDisplayFamiliars: Set<String> = []
   private var cleanupNamespace: CacheNamespace?
   @ObservationIgnored private let persistence: CompanionPersistence
   @ObservationIgnored private let installationID: Data
@@ -78,7 +79,8 @@ import Observation
       saved?.drafts.removeAll { $0.binding == binding }
       if !newValue.isEmpty {
         saved?.drafts.append(SavedDraft(
-          binding: binding, text: newValue, revision: UUID(), updatedAt: now()))
+          binding: binding, text: newValue, revision: UUID(), updatedAt: now(),
+          conversationTitle: conversationLabel(for: binding)))
       }
       scheduleSave()
     }
@@ -107,6 +109,10 @@ import Observation
 
   func pair(link: String) async {
     guard !busy else { return }
+    guard pairing == nil, !needsPairingCleanup else {
+      error = "Forget the current Mac and finish its phone-data cleanup before pairing again."
+      return
+    }
     busy = true
     error = ""
     localNetworkDenied = false
@@ -126,21 +132,23 @@ import Observation
       guard snapshot.version == 1 else {
         throw CompanionError.message("Update both Chat apps before pairing.")
       }
-      if let previous = pairing,
-        CacheNamespace(installationID: installationID, pairing: previous)
-          != CacheNamespace(installationID: installationID, pairing: next)
-      {
-        try persistence.erase(for: CacheNamespace(installationID: installationID, pairing: previous))
+      let namespace = CacheNamespace(installationID: installationID, pairing: next)
+      let staged: CompanionSavedState
+      do {
+        staged = try persistence.load(for: namespace) ?? CompanionSavedState(namespace: namespace)
+      } catch {
+        throw CompanionError.message("Chat could not open protected phone storage. Unlock your iPhone and check its free space before pairing.")
       }
       try store.save(next)
       needsPairingCleanup = false
       client?.invalidate()
       client = api
+      candidate = nil
       pairing = next
       generation += 1
       selection += 1
       clearConversation()
-      try restoreSavedState(for: next)
+      installSavedState(staged)
       apply(snapshot)
       connected = true
       status = "Connected to your Mac"
@@ -424,11 +432,25 @@ import Observation
     } catch { api.invalidate() }  // Keep the last verified address on discovery failures.
   }
   private func apply(_ snapshot: Snapshot) {
+    let visible = Set(snapshot.sessions.map(\.id))
+    let knownFamiliars = Set(snapshot.familiars.map(\.id))
+    let oldHistoryCount = saved?.conversations.count ?? 0
+    let oldDraftCount = saved?.drafts.count ?? 0
+    let loadedInvalid = sessionId.map { !visible.contains($0) } ?? false
+    let previousSelection = selectedId
+    if let id = selectedId, sessionId != nil,
+      !snapshot.sessions.contains(where: { $0.familiarId == id }),
+      snapshot.activeRun?.familiarId != id
+    { deletedDisplayFamiliars.insert(id) }
+    if let pending = saved?.pending, pending.sessionID != nil,
+      !snapshot.sessions.contains(where: { $0.familiarId == pending.familiarID }),
+      snapshot.activeRun?.id != pending.requestID
+    { deletedDisplayFamiliars.insert(pending.familiarID) }
+    for session in snapshot.sessions { deletedDisplayFamiliars.remove(session.familiarId) }
+    if let active = snapshot.activeRun { deletedDisplayFamiliars.remove(active.familiarId) }
     familiars = snapshot.familiars
     sessions = snapshot.sessions
     approvals = snapshot.pendingApprovals ?? []
-    let visible = Set(snapshot.sessions.map(\.id))
-    let knownFamiliars = Set(snapshot.familiars.map(\.id))
     saved?.conversations.removeAll {
       !knownFamiliars.contains($0.familiarID)
         || ($0.history.sessionId.map { !visible.contains($0) } ?? false)
@@ -439,15 +461,27 @@ import Observation
     if !familiars.contains(where: { $0.id == selectedId }) {
       selectedId = familiars.first?.id
       selection += 1
+    }
+    saved?.selectedFamiliarID = selectedId
+    if loadedInvalid || selectedId != previousSelection
+      || selectedId.map({ deletedDisplayFamiliars.contains($0) }) == true {
+      hydrateSelection()
       historyReady = false
-      messages = []
-      sessionId = nil
+      historyRunId = nil
+      retainedRun = nil
     }
     if let run = snapshot.activeRun {
       activeRun = run
       retainedRun = run
     } else {
       activeRun = nil
+    }
+    if loadedInvalid || selectedId != previousSelection
+      || oldHistoryCount != saved?.conversations.count
+      || oldDraftCount != saved?.drafts.count {
+      // A successful snapshot is already authoritative about deletion. Do not
+      // wait for another network request before removing its cached content.
+      flushPersistence()
     }
   }
   private func accept(_ run: Run) {
@@ -457,8 +491,11 @@ import Observation
       error = "The Mac returned a different run. Check this send before sending again."
       return
     }
-    activeRun = run
-    retainedRun = run
+    let mayDisplay = !deletedDisplayFamiliars.contains(run.familiarId)
+    activeRun = mayDisplay ? run : Run(id: run.id, familiarId: run.familiarId,
+      status: run.status, messages: [], error: nil)
+    retainedRun = mayDisplay ? run : nil
+    if !mayDisplay { historyRunId = nil }
     if let revision = saved?.pending?.submittedDraftRevision,
       let record = saved?.drafts.first(where: { $0.revision == revision })
     {
@@ -470,7 +507,7 @@ import Observation
     }
     if !run.running {
       settlePending()
-      terminalError = run.error ?? ""
+      terminalError = mayDisplay ? run.error ?? "" : ""
       error = terminalError
     }
   }
@@ -489,6 +526,9 @@ import Observation
     }
   }
   private func clearConversation() {
+    saveTask?.cancel()
+    saved = nil
+    deletedDisplayFamiliars = []
     familiars = []
     sessions = []
     messages = []
@@ -514,6 +554,15 @@ import Observation
   private var currentDraftRecord: SavedDraft? {
     saved?.drafts.first { $0.binding == currentBinding }
   }
+  var cacheNamespace: CacheNamespace? { saved?.namespace }
+  var draftDestination: DraftBinding? { currentBinding }
+  func conversationLabel(for binding: DraftBinding?) -> String {
+    guard let binding else { return "No conversation selected" }
+    guard let id = binding.sessionID else { return "New conversation" }
+    if let title = sessions.first(where: { $0.id == id && $0.familiarId == binding.familiarID })?.title,
+      !title.isEmpty { return title }
+    return "Conversation \(id.prefix(8))"
+  }
   var recoveredDrafts: [SavedDraft] {
     saved?.drafts.filter {
       $0.binding.familiarID == selectedId && $0.binding != currentBinding
@@ -522,6 +571,9 @@ import Observation
   private func restoreSavedState(for pairing: Pairing) throws {
     let namespace = CacheNamespace(installationID: installationID, pairing: pairing)
     let value = try persistence.load(for: namespace) ?? CompanionSavedState(namespace: namespace)
+    installSavedState(value)
+  }
+  private func installSavedState(_ value: CompanionSavedState) {
     saved = value
     cacheConversationText = value.cacheConversationText
     if let snapshot = value.snapshot {
@@ -589,7 +641,9 @@ import Observation
         requestID: requestID, kind: kind, familiarID: familiar, sessionID: sessionId,
         payloadDigest: CacheNamespace.digest(try CompanionRequestEncoding.encode(body)),
         submittedDraftRevision: draftRevision, createdAt: now())
-      return commit(value)
+      let accepted = commit(value)
+      if accepted && kind == .send { deletedDisplayFamiliars.remove(familiar) }
+      return accepted
     } catch { storageFailed(error); return false }
   }
   @discardableResult private func settlePending(clearHistory: Bool = false) -> Bool {
@@ -609,23 +663,32 @@ import Observation
     guard var value = saved else { return }
     value.conversations = []
     if let snapshot = value.snapshot {
-      value.snapshot = Snapshot(version: snapshot.version, familiars: snapshot.familiars,
-        sessions: snapshot.sessions.map {
-          ChatSession(id: $0.id, familiarId: $0.familiarId, title: "", archived: $0.archived)
-        }, activeRun: nil)
-      value.snapshotSavedAt = now()
+      value.snapshot = value.draftNavigation(from: snapshot)
+      value.snapshotSavedAt = nil
     }
     if commit(value) {
       cachedAt = nil
       if !connected { messages = [] }
     }
   }
-  func restoreDraft(revision: UUID, text: String? = nil) {
+  func editRecoveredDraft(binding: DraftBinding, namespace: CacheNamespace, text: String) {
+    guard saved?.namespace == namespace, binding != currentBinding,
+      binding.familiarID == selectedId,
+      let index = saved?.drafts.firstIndex(where: { $0.binding == binding }),
+      saved?.drafts[index].text != text else { return }
+    saved?.drafts[index].text = text
+    saved?.drafts[index].revision = UUID()
+    saved?.drafts[index].updatedAt = now()
+    scheduleSave()
+  }
+  func restoreDraft(revision: UUID, text: String? = nil,
+                    expectedDestination: DraftBinding, namespace: CacheNamespace) {
     guard connected, historyReady, let binding = currentBinding,
+      binding == expectedDestination, saved?.namespace == namespace,
       let record = recoveredDrafts.first(where: { $0.revision == revision }),
       record.binding.familiarID == binding.familiarID else { return }
     let recovered = text ?? record.text
-    let combined = draft.isEmpty ? recovered : draft + "\n\n" + recovered
+    let combined = draft.isEmpty ? recovered : recovered.isEmpty ? draft : draft + "\n\n" + recovered
     saved?.drafts.removeAll { $0.revision == revision }
     draft = combined
     flushPersistence()

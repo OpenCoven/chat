@@ -48,7 +48,7 @@ struct RecoveredDraftsView: View {
   var body: some View {
     NavigationStack {
       List {
-        ForEach(model.recoveredDrafts, id: \.revision) { record in
+        ForEach(model.recoveredDrafts, id: \.binding) { record in
           RecoveredDraftEditor(record: record, model: model)
         }
       }
@@ -63,25 +63,45 @@ private struct RecoveredDraftEditor: View {
   let record: SavedDraft
   let model: CompanionModel
   @Environment(\.dismiss) private var dismiss
-  @State private var text: String
+  @State private var namespace: CacheNamespace?
+  @State private var destination: DraftBinding?
   init(record: SavedDraft, model: CompanionModel) {
     self.record = record
     self.model = model
-    _text = State(initialValue: record.text)
+    _namespace = State(initialValue: model.cacheNamespace)
+    _destination = State(initialValue: model.draftDestination)
   }
   var body: some View {
     Section {
       Text(model.name(ofFamiliar: record.binding.familiarID)).font(.headline)
       Text(record.updatedAt, format: .dateTime.month().day().hour().minute()).font(.caption)
-      Text("Saved for an earlier conversation. Review it before adding it here.").font(.footnote)
-      TextEditor(text: $text).frame(minHeight: 120)
+      Text("Saved for: \(record.conversationTitle ?? model.conversationLabel(for: record.binding))")
+        .font(.footnote)
+      Text("Destination: \(model.conversationLabel(for: destination))").font(.footnote)
+      TextEditor(text: Binding(get: {
+        guard model.cacheNamespace == namespace else { return "" }
+        return model.recoveredDrafts.first { $0.binding == record.binding }?.text ?? ""
+      }, set: { value in
+        if let namespace {
+          model.editRecoveredDraft(binding: record.binding, namespace: namespace, text: value)
+        }
+      })).frame(minHeight: 120)
         .accessibilityLabel("Recovered draft text")
         .accessibilityIdentifier("recovered-draft-editor")
       Button("Add to Current Draft") {
-        model.restoreDraft(revision: record.revision, text: text)
+        guard let namespace, let destination else { return }
+        model.restoreDraft(revision: record.revision, expectedDestination: destination, namespace: namespace)
         if !model.recoveredDrafts.contains(where: { $0.revision == record.revision }) { dismiss() }
       }
-      .disabled(!model.connected || !model.historyReady || model.selectedId != record.binding.familiarID)
+      .disabled(!model.connected || !model.historyReady || model.selectedId != record.binding.familiarID
+        || model.cacheNamespace != namespace || model.draftDestination != destination)
+      if model.cacheNamespace != namespace {
+        Text("The connection changed. Close this sheet and review the draft again.").font(.footnote)
+      } else if model.draftDestination != destination {
+        Text("The conversation changed. Review the new destination before adding this draft.").font(.footnote)
+        Button("Review Current Conversation") { destination = model.draftDestination }
+          .disabled(!model.connected || !model.historyReady)
+      }
     }
   }
 }

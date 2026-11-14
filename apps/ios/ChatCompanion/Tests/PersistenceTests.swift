@@ -155,4 +155,22 @@ import XCTest
     try storage.erase(for: namespace())
     XCTAssertNil(try storage.load(for: namespace()))
   }
+  func testExpiredSnapshotRetainsOnlyDraftNavigationMetadata() throws {
+    var value = state()
+    value.snapshot = Snapshot(version: 1,
+      familiars: [Familiar(id: "astra", name: "astra", displayName: "Astra", description: "private-description"),
+                  Familiar(id: "unrelated", name: "other", displayName: "Other")],
+      sessions: [ChatSession(id: "head-1", familiarId: "astra", title: "private-title", archived: false)],
+      activeRun: Run(id: "run", familiarId: "astra", status: "completed",
+                     messages: [Message(id: "m", role: "assistant", text: "private-run")]),
+      pendingApprovals: [Approval(id: "approval", familiarId: "astra", summary: "private-approval", requestedAt: 1, expiresAt: 2)])
+    value.snapshotSavedAt = now.addingTimeInterval(-8 * 86400)
+    try store().save(value)
+    let loaded = try XCTUnwrap(store().load(for: namespace()))
+    XCTAssertEqual(loaded.snapshot?.familiars.map(\.id), ["astra"])
+    XCTAssertEqual(loaded.snapshot?.sessions.first?.id, "head-1")
+    XCTAssertNil(loaded.snapshotSavedAt)
+    let bytes = try Data(contentsOf: XCTUnwrap(files().first))
+    XCTAssertFalse(String(decoding: bytes, as: UTF8.self).contains("private-"))
+  }
 }

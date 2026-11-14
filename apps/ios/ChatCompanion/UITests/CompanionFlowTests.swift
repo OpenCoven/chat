@@ -9,9 +9,7 @@ final class CompanionFlowTests: XCTestCase {
     let app = XCUIApplication()
     app.launch()
     if app.buttons["Connection options"].waitForExistence(timeout: 3) {
-      app.buttons["Connection options"].tap()
-      app.buttons["Forget Mac"].tap()
-      app.buttons["Forget Mac"].tap()
+      forgetMac(in: app)
     }
     // The link field starts folded on a device with a camera, where scanning is
     // the main path; the simulator has no camera, so it starts open.
@@ -85,9 +83,7 @@ final class CompanionFlowTests: XCTestCase {
     XCTAssertTrue(
       app.buttons["familiar-picker"].waitForExistence(timeout: 20),
       "Pairing did not survive relaunch")
-    app.buttons["Connection options"].tap()
-    app.buttons["Forget Mac"].tap()
-    app.buttons["Forget Mac"].tap()
+    forgetMac(in: app)
     XCTAssertTrue(app.buttons["Pair with your Mac"].waitForExistence(timeout: 10))
     app.terminate()
     app.launch()
@@ -104,9 +100,7 @@ final class CompanionFlowTests: XCTestCase {
     let app = XCUIApplication()
     app.launch()
     if app.buttons["Connection options"].waitForExistence(timeout: 3) {
-      app.buttons["Connection options"].tap()
-      app.buttons["Forget Mac"].tap()
-      app.buttons["Forget Mac"].tap()
+      forgetMac(in: app)
     }
     XCTAssertTrue(app.buttons["Pair with your Mac"].waitForExistence(timeout: 10))
     if app.buttons["Enter pairing link"].exists { app.buttons["Enter pairing link"].tap() }
@@ -163,6 +157,18 @@ final class CompanionFlowTests: XCTestCase {
     XCTAssertTrue(app.buttons["recovered-drafts"].waitForExistence(timeout: 15))
     app.buttons["recovered-drafts"].tap()
     XCTAssertTrue(app.textViews["recovered-draft-editor"].waitForExistence(timeout: 5))
+    let recoveredEditor = app.textViews["recovered-draft-editor"]
+    focus(recoveredEditor, in: app)
+    recoveredEditor.typeText(" Edited recovery")
+    let editedRecovery = try XCTUnwrap(recoveredEditor.value as? String)
+    XCTAssertTrue(editedRecovery.contains("Edited recovery"))
+    app.buttons["Done"].tap()
+    app.terminate()
+    app.launch()
+    XCTAssertTrue(app.buttons["recovered-drafts"].waitForExistence(timeout: 15))
+    app.buttons["recovered-drafts"].tap()
+    XCTAssertTrue(recoveredEditor.waitForExistence(timeout: 5))
+    XCTAssertEqual(recoveredEditor.value as? String, editedRecovery)
     app.buttons["Add to Current Draft"].tap()
     XCTAssertTrue((composer.value as? String ?? "").contains("Draft from the previous chat"))
     let afterRecovery = try await control.change()
@@ -190,11 +196,20 @@ final class CompanionFlowTests: XCTestCase {
     app.launch()
     XCTAssertTrue(composer.waitForExistence(timeout: 10))
     XCTAssertFalse((composer.value as? String ?? "").contains("Text only while open"))
-    app.buttons["Connection options"].tap()
-    app.buttons["Forget Mac"].tap()
-    app.buttons["Forget Mac"].tap()
+    forgetMac(in: app)
     app.terminate()
     app.launch()
+    XCTAssertTrue(app.buttons["Pair with your Mac"].waitForExistence(timeout: 10))
+  }
+
+  private func forgetMac(in app: XCUIApplication) {
+    app.buttons["Connection options"].tap()
+    let menuAction = app.buttons["Forget Mac"]
+    XCTAssertTrue(menuAction.waitForExistence(timeout: 5))
+    menuAction.tap()
+    let confirmation = app.sheets.buttons["Forget Mac"].firstMatch
+    XCTAssertTrue(confirmation.waitForExistence(timeout: 10), app.debugDescription)
+    confirmation.tap()
     XCTAssertTrue(app.buttons["Pair with your Mac"].waitForExistence(timeout: 10))
   }
 
