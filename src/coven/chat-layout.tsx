@@ -970,16 +970,29 @@ export function ChatLayout(props: ChatLayoutProps) {
     promptLimit: PROMPT_LIMIT_BYTES,
     onEditDraft: props.onEditDraft,
   });
+  // A chat Coven couldn't load never turns its composer on, so focus stayed on
+  // the familiar's button and Orca said only its name (#592): the alert came
+  // with the new view and wasn't announced. Focus goes to the alert itself, and
+  // a screen reader speaks what has focus. Not to the paragraph inside it: Orca's
+  // WebKitGTK script ignores focus on paragraphs and sections, while a focused
+  // alert is spoken with its text (native run 43580193931).
+  const errorRef = useRef<HTMLDivElement>(null);
+  const unavailableReason = session?.unavailable ? props.error : '';
   useEffect(() => {
     if (!composerFocus) return;
     if (composerFocus.id !== props.familiarId) {
       if (composerFocus.from !== props.familiarId) setComposerFocus(null);
       return;
     }
+    if (unavailableReason) {
+      errorRef.current?.focus();
+      setComposerFocus(null);
+      return;
+    }
     if (composerDisabled) return;
     composerRef.current?.focus();
     setComposerFocus(null);
-  }, [composerFocus, props.familiarId, composerDisabled]);
+  }, [composerFocus, props.familiarId, composerDisabled, unavailableReason]);
   const mentionCompletion = useMentionCompletion({
     familiars: props.familiars,
     familiarId: props.familiarId,
@@ -1613,7 +1626,7 @@ export function ChatLayout(props: ChatLayoutProps) {
                 </div>
               ) : null}
               {props.error ? (
-                <div className="coven-error" role="alert">
+                <div className="coven-error" role="alert" ref={errorRef} tabIndex={-1}>
                   {/* A paragraph, not a span: WebKitGTK gave AT-SPI a span laid out
                     as a flex item without its text, so on Linux the alert held
                     only its Copy error button (native run 43006448055). */}
