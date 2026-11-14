@@ -43,6 +43,22 @@ while ($null -ne ($line = $reader.ReadLine())) {
         [NativeDriver]::Release($modifiers)
         $answer = @{ ok = $true }
       }
+      'clickLink' {
+        $before = [NativeDriver]::Tree($target, 90, 9000)
+        try {
+          $receipt = [NativeDriver]::ClickLink($target, [int]$command.at[0], [int]$command.at[1], [string]$command.name)
+        } catch {
+          # An exception is not evidence whether input was delivered. Preserve
+          # that uncertainty and the pre-tree; never retry the click.
+          $receipt = @{ clicked = $null; error = "$($_.Exception.Message)"; at = $command.at; expectedName = $command.name } | ConvertTo-Json -Compress
+        }
+        $verified = $receipt | ConvertFrom-Json
+        try { $after = [NativeDriver]::Tree($target, 90, 9000) }
+        catch { $after = @{ error = "$($_.Exception.Message)" } | ConvertTo-Json -Compress }
+        $ok = if ($verified.clicked) { 'true' } else { 'false' }
+        $errorJson = @{ error = $verified.error } | ConvertTo-Json -Compress
+        $raw = '{"ok":' + $ok + ',"receipt":' + $receipt + ',"before":' + $before + ',"after":' + $after + ',' + $errorJson.Substring(1)
+      }
       'move' { [NativeDriver]::Move([int]$command.at[0], [int]$command.at[1]); $answer = @{ ok = $true } }
       'down' { [NativeDriver]::Down([int]$command.at[0], [int]$command.at[1]); $answer = @{ ok = $true } }
       'up' { [NativeDriver]::Up([int]$command.at[0], [int]$command.at[1]); $answer = @{ ok = $true } }

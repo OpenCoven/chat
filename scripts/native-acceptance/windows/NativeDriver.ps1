@@ -237,6 +237,8 @@ public static class NativeDriver {
   [StructLayout(LayoutKind.Explicit)] struct UNION { [FieldOffset(0)] public MOUSEINPUT mi; [FieldOffset(0)] public KEYBDINPUT ki; }
   [StructLayout(LayoutKind.Sequential)] struct INPUT { public uint type; public UNION u; }
   [DllImport("user32.dll", SetLastError = true)] static extern uint SendInput(uint n, INPUT[] inputs, int size);
+  [StructLayout(LayoutKind.Sequential)] struct POINT { public int X, Y; }
+  [DllImport("user32.dll")] static extern bool GetCursorPos(out POINT point);
   [DllImport("user32.dll")] static extern bool SetCursorPos(int x, int y);
   [DllImport("user32.dll")] static extern bool SetForegroundWindow(IntPtr hwnd);
   [DllImport("user32.dll")] static extern IntPtr GetForegroundWindow();
@@ -244,11 +246,12 @@ public static class NativeDriver {
   [DllImport("user32.dll")] public static extern bool SetProcessDPIAware();
 
   const uint MOUSE = 0, KEYBOARD = 1;
-  static void Mouse(uint flags, uint data = 0) {
+  static bool Mouse(uint flags, uint data = 0) {
     var input = new INPUT { type = MOUSE };
     input.u.mi = new MOUSEINPUT { dwFlags = flags, mouseData = data };
-    SendInput(1, new[] { input }, Marshal.SizeOf(typeof(INPUT)));
+    var sent = SendInput(1, new[] { input }, Marshal.SizeOf(typeof(INPUT)));
     System.Threading.Thread.Sleep(12);
+    return sent == 1;
   }
 
   public static void Move(int x, int y) { SetCursorPos(x, y); System.Threading.Thread.Sleep(30); Mouse(0x0001); }
@@ -262,6 +265,74 @@ public static class NativeDriver {
     for (var index = 0; index < Math.Max(count, 1); index++) {
       Mouse(Down(button)); System.Threading.Thread.Sleep(40); Mouse(Up(button)); System.Threading.Thread.Sleep(40);
     }
+  }
+
+  /// A single click only when UIA's actual point belongs to this exact link
+  /// inside Chat's foreground window. Text children may resolve to their link.
+  public static string ClickLink(int pid, int x, int y, string name) {
+    Move(x, y);
+    var foreground = ForegroundPid();
+    var hit = AutomationElement.FromPoint(new System.Windows.Point(x, y));
+    var link = hit;
+    var hitAncestors = new List<string>();
+    for (var depth = 0; link != null && depth < 8; depth++) {
+      hitAncestors.Add(Summary(link));
+      if (link.Current.ControlType == ControlType.Hyperlink) break;
+      link = TreeWalker.ControlViewWalker.GetParent(link);
+    }
+    var belongs = false;
+    var window = Window(pid);
+    var parent = link;
+    var windowAncestors = new List<string>();
+    for (var depth = 0; parent != null && window != null && depth < 64; depth++) {
+      windowAncestors.Add(Summary(parent));
+      if (Automation.Compare(parent, window)) { belongs = true; break; }
+      parent = TreeWalker.ControlViewWalker.GetParent(parent);
+    }
+    var matches = foreground == pid && belongs && link != null &&
+      link.Current.ControlType == ControlType.Hyperlink && link.Current.IsEnabled &&
+      string.Equals(link.Current.Name, name, StringComparison.Ordinal);
+    // Capture UIA summaries before the click makes background nodes inert.
+    var hitSummary = hit == null ? "null" : Summary(hit);
+    var linkSummary = link == null ? "null" : Summary(link);
+    // Rich UIA reads above can take time. Recheck the actual point, requested
+    // link and foreground after them, then send input without another read.
+    var sameHit = matches && Automation.Compare(AutomationElement.FromPoint(new System.Windows.Point(x, y)), hit);
+    var finalName = link == null ? null : link.Current.Name;
+    var finalEnabled = link != null && link.Current.IsEnabled;
+    var finalRole = link != null && link.Current.ControlType == ControlType.Hyperlink;
+    var finalForeground = ForegroundPid();
+    POINT cursor;
+    var cursorKnown = GetCursorPos(out cursor);
+    matches = matches && sameHit && finalForeground == pid && cursorKnown &&
+      cursor.X == x && cursor.Y == y && finalEnabled && finalRole &&
+      string.Equals(finalName, name, StringComparison.Ordinal);
+    var down = false;
+    var up = false;
+    if (matches) {
+      down = Mouse(Down("left"));
+      System.Threading.Thread.Sleep(40);
+      up = Mouse(Up("left"));
+      System.Threading.Thread.Sleep(40);
+    }
+    var clicked = matches && down && up;
+    var error = !matches ? "Native point, cursor or foreground changed; no click sent"
+      : !clicked ? "SendInput did not deliver the single link click" : null;
+    return "{\"clicked\":" + (clicked ? "true" : "false") +
+      ",\"foregroundPid\":" + foreground + ",\"foregroundAfter\":" + ForegroundPid() +
+      ",\"cursorKnown\":" + (cursorKnown ? "true" : "false") +
+      ",\"cursor\":[" + cursor.X + "," + cursor.Y + "]" +
+      ",\"finalHitMatches\":" + (sameHit ? "true" : "false") +
+      ",\"finalForegroundPid\":" + finalForeground + ",\"finalName\":" + Quote(finalName) +
+      ",\"finalEnabled\":" + (finalEnabled ? "true" : "false") +
+      ",\"at\":[" + x + "," + y + "],\"expectedName\":" + Quote(name) +
+      ",\"hit\":" + hitSummary +
+      ",\"link\":" + linkSummary +
+      ",\"hitAncestors\":[" + string.Join(",", hitAncestors) + "]" +
+      ",\"windowAncestors\":[" + string.Join(",", windowAncestors) + "]" +
+      ",\"belongsToTargetWindow\":" + (belongs ? "true" : "false") +
+      ",\"downSent\":" + (down ? "true" : "false") + ",\"upSent\":" + (up ? "true" : "false") +
+      ",\"error\":" + Quote(error) + "}";
   }
 
   public static void Drag(int[] path, int holdMs) {

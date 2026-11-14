@@ -440,11 +440,58 @@ export class App {
     return answer.ok ? (answer.text ?? '') : null;
   }
 
-  async click(nodeOrPoint, { button = 'left', mods = [], count = 1 } = {}) {
+  async click(
+    nodeOrPoint,
+    { button = 'left', mods = [], count = 1, find, verifyLink, receipt } = {},
+  ) {
     if (!nodeOrPoint) throw new Error('nothing to click: the control was not found');
-    const at = Array.isArray(nodeOrPoint) ? nodeOrPoint : center(await this.visible(nodeOrPoint));
-    await this.native.must({ cmd: 'click', at, button, mods, count });
+    const node = find ? await this.stableMiddle(find) : nodeOrPoint;
+    const at = Array.isArray(node) ? node : center(find ? node : await this.visible(node));
+    if (verifyLink) {
+      // One helper command verifies the native hit target immediately before
+      // sending one click. A refusal never falls back to a coordinate click.
+      const answer = await this.native.call({ cmd: 'clickLink', at, name: verifyLink });
+      receipt?.({
+        target: { role: node.role, name: node.name, frame: node.frame },
+        at,
+        command: 'clickLink',
+        answer,
+      });
+      if (!answer.ok) throw new Error(`clickLink: ${answer.error ?? 'native hit test refused'}`);
+    } else {
+      receipt?.({ target: { role: node.role, name: node.name, frame: node.frame }, at });
+      await this.native.must({ cmd: 'click', at, button, mods, count });
+    }
     await sleep(250);
+  }
+
+  /** Reacquire a stable target clear of the transcript's header and composer. */
+  async stableMiddle(find) {
+    for (let attempt = 0; attempt < 6; attempt += 1) {
+      const bounds = () => this.transcriptViewport();
+      const positioned = await this.middle(await find(), find, bounds);
+      await sleep(100);
+      const { top, bottom, left, right } = await bounds();
+      const current = await find();
+      const frame = current?.frame;
+      const previous = positioned?.frame;
+      const [cx, cy] = center(current);
+      if (
+        frame &&
+        previous &&
+        ['x', 'y', 'w', 'h'].every((key) => frame[key] === previous[key]) &&
+        frame.y >= top &&
+        frame.y + frame.h <= bottom &&
+        cy >= top + (bottom - top) * 0.25 &&
+        cy <= top + (bottom - top) * 0.6 &&
+        cx > left &&
+        cx < right &&
+        cy > top &&
+        cy < bottom
+      )
+        return current;
+    }
+    throw new Error('The link did not reach a stable, uncovered position; no click sent');
   }
 
   /** The part of the screen where the window's content can be seen. */
@@ -463,6 +510,29 @@ export class App {
     };
   }
 
+  /** The actual transcript, clipped by the window and the editable composer. */
+  async transcriptViewport() {
+    const outer = await this.viewport();
+    const nodes = [...walk(await this.snapshot())];
+    const messages = nodes.find((node) => node.name === 'Messages' && node.frame?.h > 0);
+    const composer = nodes.find(
+      (node) => node.role === 'textbox' && node.name?.startsWith('Message ') && node.frame?.h > 0,
+    );
+    if (!messages || !composer)
+      throw new Error('Native transcript/composer bounds are unavailable');
+    const frame = messages.frame;
+    const bounds = {
+      ...outer,
+      top: Math.max(outer.top, frame.y),
+      bottom: Math.min(outer.bottom, frame.y + frame.h, composer.frame.y),
+      left: Math.max(outer.left, frame.x),
+      right: Math.min(outer.right, frame.x + frame.w),
+    };
+    if (!(bounds.bottom > bounds.top && bounds.right > bounds.left))
+      throw new Error('The native transcript has no uncovered area');
+    return bounds;
+  }
+
   /** Whether a node's whole height and its centre are inside the visible window. */
   async onScreen(node) {
     if (!node?.frame) return false;
@@ -475,10 +545,10 @@ export class App {
    * Scrolls until a node sits in the middle of the window, clear of the header
    * and the composer that cover the transcript's top and bottom edges.
    */
-  async middle(node, find) {
+  async middle(node, find, viewport = () => this.viewport()) {
     let current = node;
     for (let attempt = 0; attempt < 20 && current?.frame; attempt += 1) {
-      const { top, bottom, left, right } = await this.viewport();
+      const { top, bottom, left, right } = await viewport();
       const band = [top + (bottom - top) * 0.25, top + (bottom - top) * 0.6];
       const [, cy] = center(current);
       if (cy >= band[0] && cy <= band[1]) return current;
