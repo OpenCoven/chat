@@ -195,6 +195,7 @@
 
 .coven-settings-scroll {
   display: grid;
+  grid-auto-rows: max-content;
   align-content: start;
   min-width: 0;
   min-height: 0;

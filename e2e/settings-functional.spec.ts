@@ -60,6 +60,9 @@ test('Settings changes persist and project refresh keeps the current draft', asy
     .click();
   await dialog.getByRole('button', { name: 'Access', exact: true }).click();
   await expect(dialog).toContainText('without asking for permission');
+  const projects = dialog.getByRole('region', { name: 'Project access list' });
+  await projects.scrollIntoViewIfNeeded();
+  await expect(projects.getByRole('listitem').first()).toBeInViewport();
   const callsBefore = await page.evaluate(
     () =>
       window.__covenFixture.calls.filter(
