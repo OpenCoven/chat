@@ -224,6 +224,11 @@ function useFocusReturn(
   }, [rail, open, opener, shell, panel]);
 }
 
+/** WebKitGTK, Chat's webview on Linux, which names its platform `X11; … Linux`. */
+function inWebKitGtk(): boolean {
+  return /\(X11;[^)]*\bLinux\b/.test(navigator.userAgent);
+}
+
 /**
  * Copy for the empty transcript. The three states are distinct: a disconnected
  * runtime, a connected runtime with no familiar chosen, and a chosen familiar
@@ -975,13 +980,16 @@ export function ChatLayout(props: ChatLayoutProps) {
   // the familiar's button and Orca said only its name (#592): the alert came
   // with the new view and wasn't announced. Focus goes to the alert itself, and
   // a screen reader speaks what has focus. Not to the paragraph inside it: Orca's
-  // WebKitGTK script ignores focus on paragraphs (native run 43580193931). And
-  // the alert is named by its paragraph: WebKitGTK gives the alert no text of
-  // its own, so Orca said only "notification." (native run 43588758663). Other
-  // errors keep an unnamed alert, which readers announce once, by its content.
+  // WebKitGTK script ignores focus on paragraphs (native run 43580193931). On
+  // Linux the alert is also named by its paragraph: WebKitGTK gives the alert no
+  // text of its own, so Orca said only "notification." (native run 43588758663).
+  // Only there: with the name, VoiceOver read the reason three times, where it
+  // read it once without (native runs 43769831350 and 43588758663). Other errors
+  // keep an unnamed alert, which readers announce once, by its content.
   const errorRef = useRef<HTMLDivElement>(null);
   const errorTextId = useId();
   const unavailableReason = session?.unavailable ? props.error : '';
+  const nameAlertForOrca = Boolean(unavailableReason) && inWebKitGtk();
   useEffect(() => {
     if (!composerFocus) return;
     if (composerFocus.id !== props.familiarId) {
@@ -1635,7 +1643,7 @@ export function ChatLayout(props: ChatLayoutProps) {
                   role="alert"
                   ref={errorRef}
                   tabIndex={unavailableReason ? -1 : undefined}
-                  aria-labelledby={unavailableReason ? errorTextId : undefined}
+                  aria-labelledby={nameAlertForOrca ? errorTextId : undefined}
                 >
                   {/* A paragraph, not a span: WebKitGTK gave AT-SPI a span laid out
                     as a flex item without its text, so on Linux the alert held

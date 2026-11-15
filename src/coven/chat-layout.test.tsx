@@ -1412,12 +1412,45 @@ describe('choosing a familiar', () => {
         error={unreadable}
       />,
     );
-    // Named by its reason, since WebKitGTK gives the alert no text of its own.
-    expect(screen.getByRole('alert', { name: unreadable })).toHaveFocus();
+    const alert = screen.getByRole('alert');
+    expect(alert).toHaveFocus();
+    expect(alert).toHaveTextContent(unreadable);
+    // Unnamed outside WebKitGTK: with a name, VoiceOver read the reason three times.
+    expect(alert).not.toHaveAttribute('aria-labelledby');
     // Choosing a familiar whose chat loads still hands focus to its composer.
     fireEvent.click(screen.getByRole('button', { name: 'Astra' }));
     view.rerender(<ChatLayout {...props()} sessions={sessions} familiarId="a" sessionId="s-a" />);
     expect(screen.getByRole('textbox', { name: 'Message Astra' })).toHaveFocus();
+  });
+
+  it('names that alert by its reason in WebKitGTK, which gives Orca no text of its own', () => {
+    const agent = vi
+      .spyOn(window.navigator, 'userAgent', 'get')
+      .mockReturnValue('Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/605.1.15 (KHTML, like Gecko)');
+    try {
+      const unreadable = "Coven couldn't load this chat. Refresh Coven to try again.";
+      const sessions = [
+        ...props().sessions,
+        { id: 's-b', familiarId: 'b', title: 'b', unavailable: true },
+      ];
+      const view = render(
+        <ChatLayout {...props()} sessions={sessions} familiarId="a" sessionId="s-a" />,
+      );
+      fireEvent.click(screen.getByRole('button', { name: 'Bram' }));
+      view.rerender(
+        <ChatLayout
+          {...props()}
+          sessions={sessions}
+          familiarId="b"
+          sessionId="s-b"
+          ready={false}
+          error={unreadable}
+        />,
+      );
+      expect(screen.getByRole('alert', { name: unreadable })).toHaveFocus();
+    } finally {
+      agent.mockRestore();
+    }
   });
 
   it('waits for the thread to load before focusing, and drops a stale request', () => {
