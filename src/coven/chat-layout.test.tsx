@@ -108,6 +108,10 @@ describe('empty transcript copy', () => {
     );
     const alert = screen.getByRole('alert');
     expect(within(alert).getByText(/Coven couldn't load this chat/).tagName).toBe('P');
+    // Only the alert for a chat that couldn't be loaded takes focus and a name.
+    // Others are announced by their content, once.
+    expect(alert).not.toHaveAttribute('tabindex');
+    expect(alert).not.toHaveAttribute('aria-labelledby');
   });
 
   it.each([
@@ -1408,9 +1412,8 @@ describe('choosing a familiar', () => {
         error={unreadable}
       />,
     );
-    const alert = screen.getByRole('alert');
-    expect(alert).toHaveFocus();
-    expect(alert).toHaveTextContent(unreadable);
+    // Named by its reason, since WebKitGTK gives the alert no text of its own.
+    expect(screen.getByRole('alert', { name: unreadable })).toHaveFocus();
     // Choosing a familiar whose chat loads still hands focus to its composer.
     fireEvent.click(screen.getByRole('button', { name: 'Astra' }));
     view.rerender(<ChatLayout {...props()} sessions={sessions} familiarId="a" sessionId="s-a" />);
