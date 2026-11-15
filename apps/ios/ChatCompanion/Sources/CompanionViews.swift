@@ -102,7 +102,18 @@ private struct Workspace: View {
       .toolbarVisibility(.hidden, for: .navigationBar)
     return page
       .sheet(isPresented: $picking) { picker }
-      .sheet(isPresented: $permissionLog) { PermissionLogView(model: model) }
+      .sheet(isPresented: $permissionLog) {
+        PermissionLogView(model: model).onAppear {
+          #if DEBUG
+          ConnectionMenuProbe.record("permission sheet appeared")
+          #endif
+        }
+      }
+      .onChange(of: permissionLog) { _, value in
+        #if DEBUG
+        ConnectionMenuProbe.record("permission binding=\(value)")
+        #endif
+      }
       .sheet(isPresented: $privacy) { MobilePrivacyView(model: model) }
       .sheet(isPresented: $recovering) { RecoveredDraftsView(model: model) }
       .sheet(isPresented: $details) {
@@ -179,7 +190,12 @@ private struct Workspace: View {
         Button("Phone Privacy", systemImage: "lock.shield") { composing = false; privacy = true }
           .accessibilityIdentifier("mobile-privacy")
         Button("Refresh", systemImage: "arrow.clockwise") { Task { await model.refresh() } }
-        Button("Permission Log", systemImage: "hand.raised") { permissionLog = true }
+        Button("Permission Log", systemImage: "hand.raised") {
+          #if DEBUG
+          ConnectionMenuProbe.record("permission action entered")
+          #endif
+          permissionLog = true
+        }
         Button("Connection Details", systemImage: "info.circle") { details = true }
         Divider()
         Button("Forget Mac", systemImage: "link.badge.plus", role: .destructive) {
