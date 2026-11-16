@@ -29,7 +29,7 @@ vi.mock('../scripts/native-acceptance/driver.mjs', async (original) => ({
   PLATFORM: 'windows',
 }));
 const modulePath = '../scripts/native-acceptance/storage.mjs';
-const { storageRow } = await import(modulePath);
+const { objectAround, storageRow } = await import(modulePath);
 const needles = [
   'three steps',
   'read the source',
@@ -180,6 +180,43 @@ test('missing preferences remains a failure after transient churn', async () => 
   expect(row.observations).toContainEqual(
     expect.objectContaining({ label: 'the preferences key was found', ok: false }),
   );
+});
+
+test('reads a preferences value that holds an object of its own (Windows, #641)', async () => {
+  // As WebView2 left it on the lane: `models` is a nested object after the
+  // width, and the bytes are UTF-16 as Chromium writes non-Latin-1 values.
+  const value = JSON.stringify({
+    textSize: 'larger',
+    groupTools: true,
+    inspectorWidth: 600,
+    harness: 'coven-code',
+    models: { 'coven-code': '' },
+  });
+  put(
+    'Default/Local Storage/leveldb/000001.log',
+    Buffer.concat([
+      Buffer.from('_http://tauri.localhost\0\x01opencoven.chat.preferences.v1\0\0', 'latin1'),
+      Buffer.from(value, 'utf16le'),
+    ]),
+  );
+  const row = await storageRow();
+  expect(row.status).not.toBe('failed');
+  expect(row.observations).toContainEqual(
+    expect.objectContaining({ label: 'stored preferences', value: JSON.parse(value) }),
+  );
+  expect(
+    row.observations.filter((o: { label: string }) => o.label === 'inspectorWidth is a number'),
+  ).not.toContainEqual(expect.objectContaining({ ok: false }));
+});
+
+test('an object around a key is the innermost one whose braces enclose it', () => {
+  const text = 'x{"a":{"b":"}{"},"inspectorWidth":1,"models":{"c":""}}y';
+  expect(objectAround(text, text.indexOf('"inspectorWidth"'))).toBe(
+    '{"a":{"b":"}{"},"inspectorWidth":1,"models":{"c":""}}',
+  );
+  // A value cut off before its closing brace is not an object.
+  expect(objectAround('{"inspectorWidth":1,"models":{}', 1)).toBeUndefined();
+  expect(objectAround('"inspectorWidth":1}', 0)).toBeUndefined();
 });
 
 test('an unexpected storage key remains a failure', async () => {
