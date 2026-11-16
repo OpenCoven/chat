@@ -2573,8 +2573,17 @@ fn run_failure_notice(report: Option<&str>) -> String {
     }
 }
 
+/// Coven Code 0.9.1 and later pass each Sign in with Claude turn's permission
+/// mode to Claude Code, and a Claude Code too old for `--permission-mode` fails
+/// the turn rather than run with wider access. Sending again changes nothing
+/// until Claude Code is updated.
+fn claude_code_too_old(report: &str) -> bool {
+    report.contains("unknown option '--permission-mode'")
+}
+
 fn run_failure_message(report: Option<&str>) -> String {
     match report {
+        Some(report) if claude_code_too_old(report) => "Claude Code is too old for this version of Coven. Run claude update in a terminal, then use Try again.".into(),
         Some(_) => "The run failed. Coven's report is the last line of the chat, and Try again resends your message.".into(),
         None => "The run failed, and Coven gave no reason. Try again resends your message.".into(),
     }
@@ -3684,6 +3693,31 @@ mod tests {
         .unwrap();
         assert_eq!(events.len(), 1);
         assert_eq!(events[0]["message"]["content"][0]["text"], "fixture");
+    }
+
+    #[test]
+    fn a_claude_code_too_old_for_the_engine_says_to_update_it() {
+        // Coven Code 0.9.1 passes each Sign in with Claude turn's mode to
+        // Claude Code, and a Claude Code without --permission-mode fails the
+        // turn. The report, from a hand run on 2026-11-15 (#635):
+        let report = run_failure_report(
+            &RunFailure {
+                engine_error: Some(
+                    r#"coven-code exited with code 1: {"error":"API error: [anthropic] Error: claude CLI exited without producing output: error: unknown option '--permission-mode'","type":"error"}"#
+                        .into(),
+                ),
+                run_error: None,
+            },
+            "",
+        );
+        let message = run_failure_message(report.as_deref());
+        assert!(message.contains("Claude Code is too old"), "{message}");
+        assert!(message.contains("claude update"), "{message}");
+        // Trying again alone can't help, so the message doesn't offer it as the fix.
+        assert!(!message.contains("Try again resends"), "{message}");
+        // Any other failure keeps the usual message.
+        let other = run_failure_message(Some("Coven reported: unknown option '--think'"));
+        assert!(other.contains("Try again resends your message."), "{other}");
     }
 
     #[test]

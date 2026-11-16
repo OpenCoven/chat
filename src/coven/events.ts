@@ -108,6 +108,18 @@ export function summarizeToolInput(input: unknown): { args: string; raw: string 
   return { args, raw };
 }
 
+/**
+ * Coven Code 0.9.1 and later pass each Sign in with Claude turn's permission
+ * mode to Claude Code, and a Claude Code too old for `--permission-mode` fails
+ * the turn. Sending again changes nothing until Claude Code is updated. The
+ * same words as `run_failure_message` in `coven_runtime.rs`.
+ */
+const CLAUDE_CODE_TOO_OLD =
+  'Claude Code is too old for this version of Coven. Run claude update in a terminal, then use Try again.';
+function claudeCodeTooOld(error: string): boolean {
+  return error.includes("unknown option '--permission-mode'");
+}
+
 export function projectEvents(events: readonly CovenRunEvent[]): {
   sessionId: string;
   error: string;
@@ -200,7 +212,9 @@ export function projectEvents(events: readonly CovenRunEvent[]): {
     if (event.type === 'result' && event.is_error === true) {
       error =
         typeof event.error === 'string'
-          ? event.error
+          ? claudeCodeTooOld(event.error)
+            ? CLAUDE_CODE_TOO_OLD
+            : event.error
           : "The run failed. Coven's report, when it gave one, is the last line of the chat. Try again resends your message.";
     }
     const importedSystem = event.type === 'system' && event.source === 'cave-import';

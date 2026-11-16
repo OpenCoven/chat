@@ -283,6 +283,23 @@ describe('genuine Coven event projection', () => {
     expect(result.messages).toEqual([]);
   });
 
+  it('says to update Claude Code when it is too old for the engine', () => {
+    // Coven Code 0.9.1 fails a Sign in with Claude turn whose Claude Code has no
+    // --permission-mode. The result as Coven recorded it in a hand run (#635):
+    const { error } = projectEvents([
+      {
+        type: 'result',
+        is_error: true,
+        session_id: 's',
+        error:
+          'coven-code exited with code 1: {"error":"API error: [anthropic] Error: claude CLI exited without producing output: error: unknown option \'--permission-mode\'","type":"error"}',
+      },
+    ]);
+    expect(error).toBe(
+      'Claude Code is too old for this version of Coven. Run claude update in a terminal, then use Try again.',
+    );
+  });
+
   it('names the kept report and the control when a failed result carries no error text', () => {
     const { error } = projectEvents([
       { type: 'result', is_error: true, error: null, session_id: 's' },

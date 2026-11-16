@@ -7,6 +7,7 @@ import {
   type RefObject,
   useCallback,
   useEffect,
+  useId,
   useLayoutEffect,
   useMemo,
   useRef,
@@ -223,6 +224,11 @@ function useFocusReturn(
       : shell.current?.querySelector<HTMLElement>(`[data-opens="${rail}"]`);
     target?.focus();
   }, [rail, open, opener, shell, panel]);
+}
+
+/** WebKitGTK, Chat's webview on Linux, which names its platform `X11; … Linux`. */
+function inWebKitGtk(): boolean {
+  return /\(X11;[^)]*\bLinux\b/.test(navigator.userAgent);
 }
 
 /**
@@ -978,16 +984,35 @@ export function ChatLayout(props: ChatLayoutProps) {
     promptLimit: PROMPT_LIMIT_BYTES,
     onEditDraft: props.onEditDraft,
   });
+  // A chat Coven couldn't load never turns its composer on, so focus stayed on
+  // the familiar's button and Orca said only its name (#592): the alert came
+  // with the new view and wasn't announced. Focus goes to the alert itself, and
+  // a screen reader speaks what has focus. Not to the paragraph inside it: Orca's
+  // WebKitGTK script ignores focus on paragraphs (native run 43580193931). On
+  // Linux the alert is also named by its paragraph: WebKitGTK gives the alert no
+  // text of its own, so Orca said only "notification." (native run 43588758663).
+  // Only there: with the name, VoiceOver read the reason three times, where it
+  // read it once without (native runs 43769831350 and 43588758663). Other errors
+  // keep an unnamed alert, which readers announce once, by its content.
+  const errorRef = useRef<HTMLDivElement>(null);
+  const errorTextId = useId();
+  const unavailableReason = session?.unavailable ? props.error : '';
+  const nameAlertForOrca = Boolean(unavailableReason) && inWebKitGtk();
   useEffect(() => {
     if (!composerFocus) return;
     if (composerFocus.id !== props.familiarId) {
       if (composerFocus.from !== props.familiarId) setComposerFocus(null);
       return;
     }
+    if (unavailableReason) {
+      errorRef.current?.focus();
+      setComposerFocus(null);
+      return;
+    }
     if (composerDisabled) return;
     composerRef.current?.focus();
     setComposerFocus(null);
-  }, [composerFocus, props.familiarId, composerDisabled]);
+  }, [composerFocus, props.familiarId, composerDisabled, unavailableReason]);
   const mentionCompletion = useMentionCompletion({
     familiars: props.familiars,
     familiarId: props.familiarId,
@@ -1630,11 +1655,19 @@ export function ChatLayout(props: ChatLayoutProps) {
                 </div>
               ) : null}
               {props.error ? (
-                <div className="coven-error" role="alert">
+                <div
+                  className="coven-error"
+                  role="alert"
+                  ref={errorRef}
+                  tabIndex={unavailableReason ? -1 : undefined}
+                  aria-labelledby={nameAlertForOrca ? errorTextId : undefined}
+                >
                   {/* A paragraph, not a span: WebKitGTK gave AT-SPI a span laid out
                     as a flex item without its text, so on Linux the alert held
                     only its Copy error button (native run 43006448055). */}
-                  <p className="coven-error-text">{props.error}</p>
+                  <p className="coven-error-text" id={errorTextId}>
+                    {props.error}
+                  </p>
                   {props.onReloadChat && !props.loading ? (
                     <FamButton size="sm" className="coven-error-retry" onClick={props.onReloadChat}>
                       Reload chat
