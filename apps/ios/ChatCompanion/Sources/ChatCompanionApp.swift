@@ -3,9 +3,6 @@ import SwiftUI
 @main struct ChatCompanionApp: App {
   @State private var model: CompanionModel
   init() {
-    #if DEBUG
-    ConnectionMenuProbe.install()
-    #endif
     let installationID = InstallIdentity().id
     let root = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
       .appendingPathComponent("CompanionCache", isDirectory: true)

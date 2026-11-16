@@ -7,7 +7,6 @@ final class CompanionFlowTests: XCTestCase {
     else { throw XCTSkip("Run Scripts/test-e2e.sh") }
     let fixture = try JSONSerialization.jsonObject(with: Data(contentsOf: url)) as! [String: String]
     let app = XCUIApplication()
-    app.launchEnvironment["CHAT_MENU_PROBE"] = "1"
     app.launch()
     if app.buttons["Connection options"].waitForExistence(timeout: 3) {
       forgetMac(in: app)
@@ -78,7 +77,6 @@ final class CompanionFlowTests: XCTestCase {
         .firstMatch.waitForExistence(timeout: 15), app.debugDescription)
     app.buttons["Done"].tap()
 
-
     app.terminate()
     app.launch()
     XCTAssertTrue(
@@ -99,7 +97,6 @@ final class CompanionFlowTests: XCTestCase {
     else { throw XCTSkip("Run Scripts/test-e2e.sh") }
     let fixture = try JSONSerialization.jsonObject(with: Data(contentsOf: url)) as! [String: String]
     let app = XCUIApplication()
-    app.launchEnvironment["CHAT_MENU_PROBE"] = "1"
     app.launch()
     if app.buttons["Connection options"].waitForExistence(timeout: 3) {
       forgetMac(in: app)

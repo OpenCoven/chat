@@ -179,15 +179,7 @@ private struct Workspace: View {
         Button("Phone Privacy", systemImage: "lock.shield") { composing = false; privacy = true }
           .accessibilityIdentifier("mobile-privacy")
         Button("Refresh", systemImage: "arrow.clockwise") { Task { await model.refresh() } }
-        Button("Permission Log", systemImage: "hand.raised") {
-          #if DEBUG
-          ConnectionMenuProbe.record("permission action entered")
-          #endif
-          permissionLog = true
-          #if DEBUG
-          ConnectionMenuProbe.record("permission binding write=\(permissionLog)")
-          #endif
-        }
+        Button("Permission Log", systemImage: "hand.raised") { permissionLog = true }
         Button("Connection Details", systemImage: "info.circle") { details = true }
         Divider()
         Button("Forget Mac", systemImage: "link.badge.plus", role: .destructive) {
