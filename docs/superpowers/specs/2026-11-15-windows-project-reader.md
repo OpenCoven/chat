@@ -1,0 +1,13 @@
+# Windows project metadata reader (#587)
+
+Status: current implementation specification for the user-authorized #587 goal. Implementation details are delegated to this session.
+
+Chat must read valid local Cave registry and grant stores on Windows without following any filesystem reparse point. Each normal path component is opened relative to a retained parent handle. The bootstrap accepts filesystem drive and UNC roots (including their extended-length spellings), rejects device namespaces, and never opens an accumulated full child path. Opened handles are inspected for disk type, directory/file role and reparse attributes. Parent handles remain retained for the traversal; sharing excludes write and delete so a retained parent cannot be replaced or converted through another write handle. A conflicting existing writer fails visibly.
+
+Use NtCreateFile with RootDirectory, one UTF-16 component, FILE_OPEN_REPARSE_POINT and synchronous I/O. Avoid combining FILE_DIRECTORY_FILE with FILE_OPEN_REPARSE_POINT; inspect the opened handle instead. Use the existing windows-sys dependency for Win32 calls and a small audited ntdll FFI declaration for the relative open, preserving the governed Cargo manifests and workflow files. Status conversion uses RtlNtStatusToDosError. Component validation rejects NUL, separators, colon/streams and non-normal components. No backup privilege is requested.
+
+Preserve MAX_METADATA_BYTES = 8 * 1024 * 1024, MAX_PROJECTS = 1024, schema versions, direct/group grant semantics and missing-only legacy fallback. Denied, malformed, unsafe or oversized stores remain visible errors. Project metadata supplies Settings and context suggestions only. Preserve the existing Unix implementation and tests, full-access/asking-off behavior, #575's hold and all other owners. No releases or tags.
+
+Native acceptance requires the exact Windows candidate to show eight granted projects after refresh, supply those projects in # suggestions, show actionable unreadable-store errors and clear stale errors after recovery. Retain all failed attempts and exact source, collector, OS, installer and installed executable identities. Browser fixtures do not count as native proof.
+
+API references: [NtCreateFile](https://learn.microsoft.com/en-us/windows/win32/api/winternl/nf-winternl-ntcreatefile), [OBJECT_ATTRIBUTES](https://learn.microsoft.com/en-us/windows/win32/api/ntdef/ns-ntdef-_object_attributes), [CreateFileW](https://learn.microsoft.com/en-us/windows/win32/api/fileapi/nf-fileapi-createfilew). The safety claim is scoped to handle-relative traversal and fail-closed sharing; no claim is made that post-open attribute inspection alone freezes a path.

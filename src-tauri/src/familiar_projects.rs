@@ -897,3 +897,7 @@ mod tests {
             loaded.projects.len(), loaded.permissions.project_grants.len(), loaded.permissions.access_groups.len(), members.len());
     }
 }
+
+#[cfg(all(test, windows))]
+#[path = "familiar_projects_windows_tests.rs"]
+mod windows_tests;
