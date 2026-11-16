@@ -1,6 +1,12 @@
 import { Channel } from '@tauri-apps/api/core';
 import { describe, expect, it, vi } from 'vitest';
-import { chatReachable, createSetup, type SetupReport, setupComplete } from './setup';
+import {
+  chatReachable,
+  createSetup,
+  engineOutdated,
+  type SetupReport,
+  setupComplete,
+} from './setup';
 
 vi.mock('@tauri-apps/api/core', () => ({
   invoke: vi.fn(),
@@ -43,6 +49,11 @@ describe('setup bridge', () => {
     { ...complete, familiar: { ok: true, count: -1 } },
     { ...complete, familiar: { ok: true, count: 1.5 } },
     { ...complete, signIn: { ...complete.signIn, claudeInstaller: '' } },
+    { ...complete, engine: { ok: false, installed: 'yes' } },
+    { ...complete, engine: { ok: false, installed: true, override: 'yes' } },
+    { ...complete, engine: { ok: false, installed: true, version: 9 } },
+    { ...complete, engine: { ok: true, required: 'x'.repeat(65) } },
+    { ...complete, engine: { ok: true, command: 'x'.repeat(257) } },
     [],
   ])('rejects a malformed report: %j', async (value) => {
     const invoke = vi.fn().mockResolvedValue(value);
@@ -56,6 +67,40 @@ describe('setup bridge', () => {
     await expect(createSetup({ available: () => true, invoke }).check()).rejects.toThrow(
       'Local Coven is busy. Retry shortly.',
     );
+  });
+
+  it('accepts what the engine step reports about an older engine', async () => {
+    const outdated: SetupReport = {
+      ...complete,
+      engine: {
+        ok: false,
+        installed: true,
+        version: '0.9.0',
+        required: '0.9.1',
+        command: `coven engine install --version 0.9.1 --sha256 ${'a'.repeat(64)}`,
+      },
+    };
+    const invoke = vi.fn().mockResolvedValue(outdated);
+    expect(await createSetup({ available: () => true, invoke }).check()).toEqual(outdated);
+  });
+
+  it('holds the chat back on an older engine, and tells it apart from a missing one', () => {
+    const outdated = { ...complete, engine: { ok: false, installed: true, version: '0.9.0' } };
+    expect(engineOutdated(outdated)).toBe(true);
+    expect(setupComplete(outdated)).toBe(false);
+    expect(chatReachable(outdated)).toBe(false);
+    // The same when the variable chose it, or its version could not be read.
+    for (const engine of [
+      { ok: false, installed: true, version: '0.9.0', override: true },
+      { ok: false, installed: true },
+    ]) {
+      expect(engineOutdated({ ...complete, engine })).toBe(true);
+      expect(chatReachable({ ...complete, engine })).toBe(false);
+    }
+    const missing = { ...complete, engine: { ok: false, installed: false } };
+    expect(engineOutdated(missing)).toBe(false);
+    expect(chatReachable(missing)).toBe(false);
+    expect(engineOutdated(complete)).toBe(false);
   });
 
   it('requires Coven and the engine before the chat is reachable', () => {
