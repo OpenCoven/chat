@@ -21,6 +21,8 @@ const testLock = join(root, 'vendor/glib-0.18.5.test-Cargo.lock');
 const archiveSha256 = '233daaf6e83ae6a12a52055f568f9d7cf4671dabb78ff9560ab6da230ce00ee5';
 const originalSourceSha256 = '1fd02859333761c45321b32f28b24233446b97d0022a90d3a937ed162585b90e';
 const patchedSourceSha256 = 'a0f5ee8acb8faa089bcdfbc9a57372609fce7654026ccef7d9a224d05a654ccc';
+const originalPtrSliceSha256 = '6fcb10ac7d9b4ba58cdbed9dc0ad40a4f4d4f608a3572403f8a7c77fc99c2221';
+const patchedPtrSliceSha256 = 'b0a8b26367b0b8e62fffa7532ead31fd2f43e1adcea524468b35812a7900001d';
 const testLockSha256 = 'fa941347aa72e4e7c7076ceb191288a4cc5ee30eea02016bd59c38d50e6b9699';
 const sha256 = (bytes) => createHash('sha256').update(bytes).digest('hex');
 
@@ -69,6 +71,18 @@ try {
       );
       assert.equal(sha256(expected), patchedSourceSha256);
     }
+    if (path === 'src/collections/ptr_slice.rs') {
+      assert.equal(sha256(expected), originalPtrSliceSha256);
+      expected = Buffer.from(
+        expected
+          .toString('utf8')
+          .replace(
+            '                ptr::drop_in_place::<T>(p as *mut T);\n                ptr::write(\n                    p,\n                    Ptr::from(ptr::null_mut::<<T as GlibPtrDefault>::GlibType>()),\n                );',
+            '                let item = ptr::read(p as *mut T);\n                ptr::write(\n                    p,\n                    Ptr::from(ptr::null_mut::<<T as GlibPtrDefault>::GlibType>()),\n                );\n                drop(item);',
+          ),
+      );
+      assert.equal(sha256(expected), patchedPtrSliceSha256);
+    }
     assert.deepEqual(
       readFileSync(join(vendor, path)),
       expected,
@@ -76,7 +90,7 @@ try {
     );
   }
   console.log(
-    `Verified ${originalFiles.length} published files; only the upstream two-line fix differs.`,
+    `Verified ${originalFiles.length} published files; only the approved source backports differ.`,
   );
 
   if (testArgument === '--test') {
