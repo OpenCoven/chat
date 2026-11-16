@@ -1064,6 +1064,22 @@ pub(crate) async fn blocking<T: Send + 'static>(
     .map_err(|_| "Local Coven worker failed.".to_string())?
 }
 
+/// Whether `coven engine status` reports an engine, and why a chat cannot run
+/// on it. First-run setup applies the same minimum version, so the two never
+/// disagree about an engine older than Chat needs.
+fn engine_readiness(status: &Value) -> Result<(bool, Option<&'static str>), String> {
+    let installed = status
+        .get("installed")
+        .and_then(Value::as_bool)
+        .ok_or("Coven returned invalid engine readiness.")?;
+    let error = if installed {
+        crate::setup::Engine::read(status).problem()
+    } else {
+        Some("The Coven engine is missing. Run coven engine install, then retry.")
+    };
+    Ok((installed, error))
+}
+
 #[tauri::command]
 pub(crate) async fn coven_runtime_status() -> Result<Value, String> {
     blocking(|| {
@@ -1081,10 +1097,7 @@ pub(crate) async fn coven_runtime_status() -> Result<Value, String> {
         Ok(match result {
             Ok(version) => {
                 let engine = cli_json(&["engine", "status", "--json"])?;
-                let installed = engine
-                    .get("installed")
-                    .and_then(Value::as_bool)
-                    .ok_or("Coven returned invalid engine readiness.")?;
+                let (installed, engine_error) = engine_readiness(&engine)?;
                 // The pinned SDK exposes health only. Its real daemon discovery
                 // remains informative; chat uses CLI contracts, never Cave.
                 let sdk_health = if NativeCovenHealth::default().health().is_ok() {
@@ -1093,13 +1106,11 @@ pub(crate) async fn coven_runtime_status() -> Result<Value, String> {
                     "unavailable"
                 };
                 without_nulls(json!({
-                    "available": installed,
+                    "available": installed && engine_error.is_none(),
                     "version": String::from_utf8_lossy(&version).trim(),
                     "sdkHealth": sdk_health,
                     "transport": "cli",
-                    "error": if !installed {
-                        Some("The Coven engine is missing. Run coven engine install, then retry.")
-                    } else { None },
+                    "error": engine_error,
                     "setup": if !installed { Some("install-engine") } else { None },
                 }))
             }
@@ -3457,6 +3468,37 @@ mod tests {
             ["--", "--permission full; touch file"]
         );
         assert_eq!(args.iter().filter(|arg| *arg == "--permission").count(), 1);
+    }
+
+    #[test]
+    fn an_engine_older_than_chat_needs_is_not_available_to_the_chat() {
+        let here = std::env::current_exe().unwrap();
+        let status = |version: &str, source: &str| json!({ "installed": true, "path": here, "pin": "0.9.0", "source": source, "version": version });
+        let managed = "managed (~/.coven/engine)";
+        assert_eq!(
+            engine_readiness(&status("0.9.1", managed)),
+            Ok((true, None))
+        );
+        assert_eq!(
+            engine_readiness(&status("0.10.0", managed)),
+            Ok((true, None))
+        );
+        for version in ["0.9.0", "0.8.0", "unknown"] {
+            let (installed, error) = engine_readiness(&status(version, managed)).unwrap();
+            assert!(installed);
+            let error = error.unwrap();
+            assert!(error.contains("older than Coven Chat needs"), "{error}");
+            assert!(error.contains("choose Update the engine"), "{error}");
+        }
+        let (_, error) = engine_readiness(&status("0.9.0", "COVEN_ENGINE_BIN override")).unwrap();
+        assert!(error
+            .unwrap()
+            .starts_with("COVEN_ENGINE_BIN points to an engine older"));
+
+        let (installed, error) = engine_readiness(&json!({ "installed": false })).unwrap();
+        assert!(!installed);
+        assert!(error.unwrap().contains("The Coven engine is missing"));
+        assert!(engine_readiness(&json!({})).is_err());
     }
 
     #[test]

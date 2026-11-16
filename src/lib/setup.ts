@@ -9,8 +9,10 @@ export type SetupReport = {
   coven: { ok: boolean; version?: string };
   /**
    * `ok` means installed and new enough. `installed` without `ok` is an
-   * engine older than `required`, which still runs but should be updated.
-   * `command` is what installs a usable engine from a terminal.
+   * engine older than `required`, or one whose version could not be read
+   * (then `version` is absent). `command` is what installs a usable engine
+   * from a terminal. `override` means the `COVEN_ENGINE_BIN` variable chose
+   * the older engine, so nothing Chat installs would be used.
    */
   engine: {
     ok: boolean;
@@ -18,6 +20,7 @@ export type SetupReport = {
     version?: string;
     required?: string;
     command?: string;
+    override?: boolean;
   };
   /**
    * `engine` is the engine's own sign-in, `claude` a Claude subscription,
@@ -78,6 +81,7 @@ function report(value: unknown): value is SetupReport {
       (typeof coven.version === 'string' && coven.version.length <= 256)) &&
     step(engine) &&
     (engine.installed === undefined || typeof engine.installed === 'boolean') &&
+    (engine.override === undefined || typeof engine.override === 'boolean') &&
     shortText(engine.version, 64) &&
     shortText(engine.required, 64) &&
     shortText(engine.command, 256) &&
@@ -132,11 +136,11 @@ export function engineOutdated(value: SetupReport): boolean {
  * Coven and its engine are the hard requirements: without them Chat cannot
  * reach anything. Sign-in and familiars can be finished from inside Chat, and
  * a sign-in this check cannot see (an API key in the environment, say) must
- * not lock a working setup out. Nor does an older engine: it still answers,
- * so setup asks for the update without holding the chat back.
+ * not lock a working setup out. An engine older than Chat needs is as hard a
+ * stop as a missing one: no chat runs until it is updated.
  */
 export function chatReachable(value: SetupReport): boolean {
-  return value.platform.ok && value.coven.ok && (value.engine.ok || engineOutdated(value));
+  return value.platform.ok && value.coven.ok && value.engine.ok;
 }
 
 export function createSetup(

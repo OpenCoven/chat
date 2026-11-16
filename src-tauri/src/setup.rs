@@ -5,7 +5,9 @@
 //!
 //! An engine counts only when it is new enough ([`ENGINE_VERSION`]). Coven
 //! keeps running the engine it already has when Coven itself is updated, so
-//! "an engine is installed" says nothing about which one.
+//! "an engine is installed" says nothing about which one. An older engine,
+//! or one whose version cannot be read, holds the chat back until it is
+//! updated; `coven_runtime_status` applies the same rule.
 
 use std::{
     path::{Path, PathBuf},
@@ -201,19 +203,28 @@ pub(crate) fn claude_path() -> Option<PathBuf> {
         .and_then(|search| find_claude(&search, home().ok().as_deref()))
 }
 
+/// Shown where an older engine stops a chat outside the setup screen.
+const ENGINE_OUTDATED: &str = "The Coven engine on this computer is older than Coven Chat needs. Quit and reopen Coven Chat, then choose Update the engine.";
+/// An engine named by `COVEN_ENGINE_BIN` wins over any engine Coven installs,
+/// so installing one would change nothing. The person who set it must act.
+const ENGINE_OVERRIDE_OUTDATED: &str = "COVEN_ENGINE_BIN points to an engine older than Coven Chat needs. Update that engine or remove the variable, then reopen Coven Chat.";
+
 /// What `coven engine status` says about the engine Coven would start.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
-struct Engine {
+pub(crate) struct Engine {
     /// The installed engine executable.
     path: Option<PathBuf>,
-    /// The version that executable reports.
+    /// The version that executable reports. Coven says "unknown" when the
+    /// engine would not tell it.
     version: Option<String>,
     /// The version a plain `coven engine install` would install.
     pin: Option<String>,
+    /// `COVEN_ENGINE_BIN` chose this engine.
+    overridden: bool,
 }
 
 impl Engine {
-    fn read(status: &Value) -> Self {
+    pub(crate) fn read(status: &Value) -> Self {
         let text = |key: &str| {
             status
                 .get(key)
@@ -230,6 +241,8 @@ impl Engine {
             .filter(|path| path.is_absolute() && path.is_file());
         Self {
             version: path.as_ref().and_then(|_| text("version")),
+            overridden: path.is_some()
+                && text("source").is_some_and(|source| source.starts_with("COVEN_ENGINE_BIN")),
             path,
             pin: text("pin"),
         }
@@ -239,16 +252,26 @@ impl Engine {
         self.path.is_some()
     }
 
-    /// Installed, and known to be older than Chat needs. An engine whose
-    /// version Chat cannot read is not called old: a build Chat does not
-    /// recognise must not be replaced or reported as a fault.
-    fn too_old(&self) -> bool {
-        self.installed() && self.version.as_deref().and_then(new_enough) == Some(false)
+    /// Installed and known to be new enough to run familiars.
+    fn ready(&self) -> bool {
+        self.installed() && self.version.as_deref().and_then(new_enough) == Some(true)
     }
 
-    /// Installed and new enough to run familiars.
-    fn ready(&self) -> bool {
-        self.installed() && !self.too_old()
+    /// Installed, but older than Chat needs or of a version Chat cannot
+    /// read. Either way Chat cannot say familiars get the access it asks for.
+    fn outdated(&self) -> bool {
+        self.installed() && !self.ready()
+    }
+
+    /// Why an installed engine cannot run a chat, for the chat window.
+    /// `None` when it can, or when no engine is installed: a missing engine
+    /// has its own message there.
+    pub(crate) fn problem(&self) -> Option<&'static str> {
+        match (self.outdated(), self.overridden) {
+            (false, _) => None,
+            (true, true) => Some(ENGINE_OVERRIDE_OUTDATED),
+            (true, false) => Some(ENGINE_OUTDATED),
+        }
     }
 
     /// The arguments to `coven` that install an engine Chat can use. Coven's
@@ -264,16 +287,37 @@ impl Engine {
         Ok(args)
     }
 
+    /// What the engine step runs: nothing for an engine that is already new
+    /// enough, an install otherwise, and a refusal when `COVEN_ENGINE_BIN`
+    /// chose the older engine, which would still win after any install.
+    fn install_plan(&self, os: &str, arch: &str) -> Result<Option<Vec<String>>, String> {
+        if self.ready() {
+            return Ok(None);
+        }
+        if self.overridden {
+            return Err(ENGINE_OVERRIDE_OUTDATED.into());
+        }
+        self.install_args(os, arch).map(Some)
+    }
+
     fn report(&self, os: &str, arch: &str) -> Value {
         let mut report = json!({
             "ok": self.ready(),
             "installed": self.installed(),
             "required": ENGINE_VERSION,
         });
-        if let Some(version) = &self.version {
+        // Only a version a person can compare with `required`.
+        if let Some(version) = self
+            .version
+            .as_ref()
+            .filter(|v| version_triple(v).is_some())
+        {
             report["version"] = Value::String(version.clone());
         }
-        if let Ok(args) = self.install_args(os, arch) {
+        if self.outdated() && self.overridden {
+            // Nothing Chat installs would be used, so it offers no command.
+            report["override"] = json!(true);
+        } else if let Ok(args) = self.install_args(os, arch) {
             report["command"] = Value::String(format!("coven {}", args.join(" ")));
         }
         report
@@ -503,16 +547,16 @@ fn failed(what: &str, last: &str) -> String {
 
 /// Runs `coven engine install` for an engine Chat can use, replacing one that
 /// is missing or too old. An engine that is already new enough is left alone:
-/// installing over it could put an older one in its place.
+/// installing over it could put an older one in its place. So is an older
+/// one chosen by `COVEN_ENGINE_BIN`, which would still win afterwards.
 fn install_engine(
     cancel: &AtomicBool,
     on_event: &mut dyn FnMut(Value) -> Result<(), String>,
 ) -> Result<Value, String> {
-    let engine = engine_status();
-    if engine.ready() {
+    let Some(args) = engine_status().install_plan(std::env::consts::OS, std::env::consts::ARCH)?
+    else {
         return Ok(json!({ "installed": true }));
-    }
-    let args = engine.install_args(std::env::consts::OS, std::env::consts::ARCH)?;
+    };
     let args: Vec<&str> = args.iter().map(String::as_str).collect();
     let (code, last) = stream_tool(
         &resolve_cli()?,
@@ -712,6 +756,7 @@ mod tests {
             path: version.map(|_| PathBuf::from("/engine/coven-code")),
             version: version.map(str::to_owned),
             pin: pin.map(str::to_owned),
+            overridden: false,
         }
     }
 
@@ -741,7 +786,8 @@ mod tests {
     #[test]
     fn an_engine_older_than_chat_needs_is_installed_but_not_ready() {
         let old = engine(Some("0.9.0"), Some("0.9.0"));
-        assert!(old.installed() && old.too_old() && !old.ready());
+        assert!(old.installed() && old.outdated() && !old.ready());
+        assert_eq!(old.problem(), Some(ENGINE_OUTDATED));
         let report = old.report("macos", "aarch64");
         assert_eq!(report["ok"], json!(false));
         assert_eq!(report["installed"], json!(true));
@@ -750,16 +796,29 @@ mod tests {
 
         for version in [ENGINE_VERSION, "0.9.2", "0.10.0", "1.0.0"] {
             let current = engine(Some(version), Some("0.9.0"));
-            assert!(current.ready(), "{version}");
+            assert!(current.ready() && !current.outdated(), "{version}");
+            assert_eq!(current.problem(), None);
             assert_eq!(current.report("macos", "aarch64")["ok"], json!(true));
         }
 
-        // A version Chat cannot read is left alone, not called old.
-        let unread = engine(Some("dev build"), None);
-        assert!(unread.ready() && !unread.too_old());
+        // Coven says "unknown" when the engine would not give a version.
+        // Chat cannot vouch for that engine, so it is held back like an old
+        // one, and the report carries no version to compare.
+        for version in ["unknown", "dev build"] {
+            let unread = engine(Some(version), Some("0.9.0"));
+            assert!(unread.outdated() && !unread.ready(), "{version}");
+            assert_eq!(unread.problem(), Some(ENGINE_OUTDATED));
+            let report = unread.report("macos", "aarch64");
+            assert_eq!(report["ok"], json!(false));
+            assert_eq!(report["installed"], json!(true));
+            assert!(report.get("version").is_none());
+            assert!(report["command"].as_str().unwrap().contains("--sha256"));
+        }
 
+        // A missing engine is not an outdated one: it has its own step.
         let missing = engine(None, Some("0.9.0"));
-        assert!(!missing.installed() && !missing.too_old() && !missing.ready());
+        assert!(!missing.installed() && !missing.outdated() && !missing.ready());
+        assert_eq!(missing.problem(), None);
         let report = missing.report("macos", "aarch64");
         assert_eq!(report["ok"], json!(false));
         assert_eq!(report["installed"], json!(false));
@@ -809,6 +868,27 @@ mod tests {
             engine(None, Some("0.10.0")).report("linux", "x86_64")["command"],
             json!("coven engine install")
         );
+        // The step runs exactly what it shows, and nothing for an engine
+        // that is already new enough, whatever Coven would choose.
+        let old = engine(Some("0.9.0"), Some("0.9.0"));
+        assert_eq!(
+            old.install_plan("macos", "aarch64")
+                .unwrap()
+                .unwrap()
+                .join(" "),
+            old.report("macos", "aarch64")["command"]
+                .as_str()
+                .unwrap()
+                .trim_start_matches("coven ")
+        );
+        assert_eq!(
+            engine(None, Some("0.9.0")).install_plan("macos", "aarch64"),
+            Ok(Some(explicit.iter().map(|arg| (*arg).to_owned()).collect()))
+        );
+        assert_eq!(
+            engine(Some("0.10.0"), Some("0.8.0")).install_plan("macos", "aarch64"),
+            Ok(None)
+        );
         // No digest, no install: Chat never asks Coven for an unchecked archive.
         let unsupported = engine(None, Some("0.9.0"));
         assert!(unsupported.install_args("linux", "aarch64").is_err());
@@ -816,6 +896,44 @@ mod tests {
             .report("linux", "aarch64")
             .get("command")
             .is_none());
+    }
+
+    #[test]
+    fn an_older_engine_chosen_by_the_override_is_reported_not_replaced() {
+        let chosen = Engine {
+            overridden: true,
+            ..engine(Some("0.9.0"), Some("0.9.0"))
+        };
+        assert!(chosen.outdated());
+        assert_eq!(chosen.problem(), Some(ENGINE_OVERRIDE_OUTDATED));
+        let report = chosen.report("macos", "aarch64");
+        assert_eq!(report["ok"], json!(false));
+        assert_eq!(report["installed"], json!(true));
+        assert_eq!(report["override"], json!(true));
+        assert_eq!(report["version"], json!("0.9.0"));
+        // Whatever Chat installed would not be the engine Coven starts.
+        assert!(report.get("command").is_none());
+        assert_eq!(
+            chosen.install_plan("macos", "aarch64"),
+            Err(ENGINE_OVERRIDE_OUTDATED.to_owned())
+        );
+        for message in [ENGINE_OVERRIDE_OUTDATED, ENGINE_OUTDATED] {
+            assert!(message.contains("older than Coven Chat needs"), "{message}");
+        }
+        assert!(ENGINE_OVERRIDE_OUTDATED.contains("COVEN_ENGINE_BIN"));
+        assert!(ENGINE_OUTDATED.contains("Update the engine"));
+
+        // An override that already points at a usable engine is no fault.
+        let fine = Engine {
+            overridden: true,
+            ..engine(Some(ENGINE_VERSION), Some("0.9.0"))
+        };
+        assert!(fine.ready());
+        assert_eq!(fine.problem(), None);
+        assert_eq!(fine.install_plan("macos", "aarch64"), Ok(None));
+        let report = fine.report("macos", "aarch64");
+        assert_eq!(report["ok"], json!(true));
+        assert!(report.get("override").is_none());
     }
 
     #[test]
@@ -856,8 +974,26 @@ mod tests {
                 path: Some(here.clone()),
                 version: Some("0.9.0".into()),
                 pin: Some("0.9.0".into()),
+                overridden: false,
             }
         );
+        // Coven 0.4.10, 0.5.0 and main all label the override this way.
+        let chosen = json!({
+            "installed": true,
+            "path": here,
+            "pin": "0.9.0",
+            "source": "COVEN_ENGINE_BIN override",
+            "version": "0.9.0",
+        });
+        assert!(Engine::read(&chosen).overridden);
+        for source in [
+            "PATH",
+            "legacy (~/.coven-code/bin)",
+            "managed (~/.coven/engine)",
+        ] {
+            let status = json!({ "installed": true, "path": here, "source": source });
+            assert!(!Engine::read(&status).overridden, "{source}");
+        }
         // Not installed: no path and no version, whatever else is reported.
         let absent =
             json!({ "installed": false, "path": here, "pin": "0.9.1", "version": "0.9.0" });
@@ -867,6 +1003,7 @@ mod tests {
                 path: None,
                 version: None,
                 pin: Some("0.9.1".into()),
+                overridden: false,
             }
         );
         // A path that is not an existing absolute file is not an engine.
@@ -1101,7 +1238,7 @@ mod tests {
         println!("after: {after:?}");
         assert!(after.ready());
         assert_eq!(after.version.as_deref().and_then(new_enough), Some(true));
-        if before.too_old() {
+        if before.outdated() {
             assert_ne!(before.version, after.version);
         }
         assert_eq!(check().unwrap()["engine"]["ok"], json!(true));

@@ -272,7 +272,8 @@ Chat looks for updates in one place: the `updater` release on [GitHub](https://g
 Before the chat opens, Chat checks what it needs:
 
 - **Coven:** the Coven CLI is installed.
-- **Engine:** the Coven engine is installed and is version 0.9.1 or newer.
+- **Engine:** the Coven engine is installed and is version 0.9.1 or newer. An older engine, or one
+  whose version Chat can't read, counts as not ready.
 - **Sign-in:** a model provider is signed in, through the engine's own sign-in, a Claude
   subscription in Claude Code, or ChatGPT.
 - **Familiar:** at least one familiar exists.
@@ -297,8 +298,13 @@ download against.
 computer that had Coven before Chat can still be on an older engine. On an engine older than 0.9.1,
 a familiar that is signed in with Claude does not get the full access Chat asks for: it is refused
 shell loops, folders outside its workspace and most commands. Older engines also lack 0.9.1's
-security fixes. Setup names the engine version it found and offers **Update the engine**, which
-runs the same install. Chat never replaces an engine that is already new enough.
+security fixes. So no chat runs on an older engine: Chat opens on setup, which names the engine
+version it found and offers **Update the engine**. That runs the same install. Chat never replaces
+an engine that is already new enough.
+
+If the `COVEN_ENGINE_BIN` variable points Coven at an older engine, Chat installs nothing, because
+Coven would keep using the one the variable names. Setup says so: update that engine or remove the
+variable, then reopen Chat.
 
 **Controls:**
 
@@ -324,11 +330,9 @@ step is done. If the name is already taken, or has no letters or numbers, setup 
 plain words and changes nothing. **Check again** re-runs every check, and the chat opens as soon as
 they pass.
 
-Coven and its engine are required. When only sign-in or a familiar is missing, or the engine is
-installed but older than Chat needs, **Continue to Chat** opens the chat anyway. That way a sign-in
-the check can't see, such as an API key in the environment, never blocks a working setup, and an
-older engine keeps answering until you update it. Setup comes back each time Chat opens until you
-do.
+Coven and an engine new enough are required. When only sign-in or a familiar is missing,
+**Continue to Chat** opens the chat anyway. That way a sign-in the check can't see, such as an API
+key in the environment, never blocks a working setup.
 
 The checks start Coven, the engine, and Claude Code only to ask their status. Chat installs
 something only when you choose **Install Coven**, **Install the engine** or **Update the engine**.

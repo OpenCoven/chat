@@ -50,6 +50,7 @@ describe('setup bridge', () => {
     { ...complete, familiar: { ok: true, count: 1.5 } },
     { ...complete, signIn: { ...complete.signIn, claudeInstaller: '' } },
     { ...complete, engine: { ok: false, installed: 'yes' } },
+    { ...complete, engine: { ok: false, installed: true, override: 'yes' } },
     { ...complete, engine: { ok: false, installed: true, version: 9 } },
     { ...complete, engine: { ok: true, required: 'x'.repeat(65) } },
     { ...complete, engine: { ok: true, command: 'x'.repeat(257) } },
@@ -83,18 +84,23 @@ describe('setup bridge', () => {
     expect(await createSetup({ available: () => true, invoke }).check()).toEqual(outdated);
   });
 
-  it('asks for an older engine to be updated without holding the chat back', () => {
+  it('holds the chat back on an older engine, and tells it apart from a missing one', () => {
     const outdated = { ...complete, engine: { ok: false, installed: true, version: '0.9.0' } };
     expect(engineOutdated(outdated)).toBe(true);
     expect(setupComplete(outdated)).toBe(false);
-    expect(chatReachable(outdated)).toBe(true);
-    // A missing engine is not an older one: nothing can answer.
+    expect(chatReachable(outdated)).toBe(false);
+    // The same when the variable chose it, or its version could not be read.
+    for (const engine of [
+      { ok: false, installed: true, version: '0.9.0', override: true },
+      { ok: false, installed: true },
+    ]) {
+      expect(engineOutdated({ ...complete, engine })).toBe(true);
+      expect(chatReachable({ ...complete, engine })).toBe(false);
+    }
     const missing = { ...complete, engine: { ok: false, installed: false } };
     expect(engineOutdated(missing)).toBe(false);
     expect(chatReachable(missing)).toBe(false);
     expect(engineOutdated(complete)).toBe(false);
-    // An older engine does not excuse a missing Coven.
-    expect(chatReachable({ ...outdated, coven: { ok: false } })).toBe(false);
   });
 
   it('requires Coven and the engine before the chat is reachable', () => {
