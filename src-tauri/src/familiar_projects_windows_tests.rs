@@ -208,3 +208,62 @@ fn windows_extended_drive_paths_read_and_device_or_stream_names_refuse() {
         );
     }
 }
+
+#[test]
+fn windows_verbatim_overrides_and_registry_roots_load_through_production_resolution() {
+    let f = Fixture::new();
+    f.eight_projects();
+    let mut registry: Value =
+        serde_json::from_slice(&fs::read(f.sources().projects).unwrap()).unwrap();
+    for project in registry["projects"].as_array_mut().unwrap() {
+        let root = PathBuf::from(project["root"].as_str().unwrap())
+            .canonicalize()
+            .unwrap();
+        project["root"] = json!(root);
+    }
+    fs::write(f.sources().projects, registry.to_string()).unwrap();
+    let projects = f.sources().projects.canonicalize().unwrap();
+    let permissions = f.sources().permissions.canonicalize().unwrap();
+    let sources = Sources::resolve(&f.0, |key| match key {
+        "CAVE_PROJECTS_PATH_OVERRIDE" => Some(projects.to_str().unwrap().to_owned()),
+        "CAVE_PROJECT_PERMISSIONS_PATH_OVERRIDE" => Some(permissions.to_str().unwrap().to_owned()),
+        _ => None,
+    })
+    .unwrap();
+    assert_eq!(
+        sources.projects, projects,
+        "production source resolution must preserve verbatim drive prefixes"
+    );
+    let result = ProjectAccess::from_sources(&sources, &f.0)
+        .unwrap()
+        .for_familiar("sage")
+        .unwrap();
+    assert_eq!(
+        result.as_array().unwrap().len(),
+        8,
+        "verbatim registry roots must not be silently dropped"
+    );
+}
+
+#[test]
+fn windows_normalization_preserves_extended_unc_prefixes_and_tilde_paths() {
+    let home = Path::new(r"C:\Users\test");
+    let projects = r"\\?\UNC\server\share\cave\projects.json";
+    let sources = Sources::resolve(home, |key| {
+        (key == "CAVE_PROJECTS_PATH_OVERRIDE").then(|| projects.to_owned())
+    })
+    .unwrap();
+    assert_eq!(sources.projects, Path::new(projects));
+    assert_eq!(
+        normalize_path(r"~\cave\projects.json", home),
+        Some(home.join(r"cave\projects.json"))
+    );
+    assert_eq!(
+        normalize_path("~/cave/projects.json", home),
+        Some(home.join(r"cave\projects.json"))
+    );
+    assert_eq!(
+        normalize_path(r"C:\..\..\projects.json", home),
+        Some(PathBuf::from(r"C:\projects.json"))
+    );
+}
