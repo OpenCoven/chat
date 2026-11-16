@@ -2,9 +2,7 @@ import { join } from 'node:path';
 import { expect, test } from 'vitest';
 
 const path = '../scripts/native-acceptance/access-row.mjs';
-const { around, caveFiles, caveMetadata, idOf, namesIn, UNREADABLE_ON_WINDOWS } = await import(
-  path
-);
+const { around, caveFiles, caveMetadata, idOf, namesIn, UNREADABLE_METADATA } = await import(path);
 
 test('the synthetic grants give one familiar every project, the first writable', () => {
   const { projects, permissions } = caveMetadata('astra', '/work', 3);
@@ -45,10 +43,18 @@ test('project names are read from all of the dialog text, once each', () => {
   expect(namesIn('No project access is declared for Astra')).toEqual([]);
 });
 
-test('the Windows wording is recorded with its surroundings', () => {
-  const text = `Access Astra ${UNREADABLE_ON_WINDOWS}, so Astra's declared access is unknown.`;
-  expect(around(text, UNREADABLE_ON_WINDOWS)).toContain("so Astra's declared access is unknown");
-  expect(around('No project access is declared for Astra', UNREADABLE_ON_WINDOWS)).toBe(
+test('the unreadable-store wording is recorded with its surroundings', () => {
+  const text = `Access Astra ${UNREADABLE_METADATA}, so Astra's declared access is unknown.`;
+  expect(around(text, UNREADABLE_METADATA)).toContain("so Astra's declared access is unknown");
+  expect(around('No project access is declared for Astra', UNREADABLE_METADATA)).toBe(
     'No project access is declared for Astra',
   );
+});
+
+test('the default native fixture supplies all eight projects for Settings and # suggestions', () => {
+  const { projects, permissions } = caveMetadata('sage', '/work');
+  expect(projects.projects).toHaveLength(8);
+  expect(
+    new Set(permissions.projectGrants.map((grant: { projectId: string }) => grant.projectId)),
+  ).toEqual(new Set(projects.projects.map((project: { id: string }) => project.id)));
 });

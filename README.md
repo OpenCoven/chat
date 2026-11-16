@@ -127,12 +127,7 @@ show full identities and paths, so you can tell similar names apart. Picking a s
 visible reference text at your cursor. It doesn't switch the recipient, delegate work, or grant
 file access.
 
-**Settings › Access** lists that same declared access, write grants first, and says plainly that
-Chat neither enforces nor extends it. The **Access** row in the inspector's Overview opens it. When
-no access is declared, it says so. When Chat couldn't read the registry or grants, it says that
-instead, so an unreadable store never looks like an empty one. Chat can't read them on Windows yet:
-there, Settings says so whenever Coven Cave has project metadata, and points to the familiar's
-**Projects** tab in Coven Cave.
+**Settings › Access** lists that same declared access on macOS, Windows and Linux, write grants first, and says plainly that Chat neither enforces nor extends it. The **Access** row in the inspector's Overview opens it. When no access is declared, it says so. When Chat couldn't read the registry or grants, it says that instead, so an unreadable store never looks like an empty one. Check the stores in Coven, then use **Refresh project access** to reread them. Metadata paths containing symbolic links or Windows reparse points are refused rather than followed.
 
 You can also type **`@name`** or **`#project`** directly in your message for inline suggestions.
 Use the arrow keys to choose and **Tab** to confirm, or **Escape** to dismiss. The optional

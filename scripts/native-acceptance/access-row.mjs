@@ -4,17 +4,18 @@
 // runner has none, and removed again before the row ends.
 
 import { spawnSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { PLATFORM, sleep, until, walk } from './driver.mjs';
+import { sleep, until, walk } from './driver.mjs';
 import { Row, showFamiliars } from './rows.mjs';
 
 export const ACCESS_PROJECTS = 8;
 const LIST_REGION = 'Project access list';
 const REFRESH = 'Refresh project access';
-/** What Settings says on Windows, where Chat can't read Cave's grants yet (#587, #601). */
-export const UNREADABLE_ON_WINDOWS = "Chat can't read Coven Cave's project grants on Windows yet";
+/** The actionable unreadable-store explanation on every desktop platform. */
+export const UNREADABLE_METADATA = "Chat could not read Coven's project registry or grants";
 const declaresNone = (familiar) => `No project access is declared for ${familiar}`;
 
 /** Cave's project registry and grants for one familiar, in the shape Chat reads. */
@@ -164,55 +165,19 @@ export async function accessRow(lane, familiar) {
       const metadata = caveMetadata(id, folder);
       for (const project of metadata.projects.projects) mkdirSync(project.root);
       mkdirSync(files.cave, { recursive: true });
-      writeFileSync(files.projects, JSON.stringify(metadata.projects));
-      writeFileSync(files.permissions, JSON.stringify(metadata.permissions));
+      const projectBytes = JSON.stringify(metadata.projects);
+      const permissionBytes = JSON.stringify(metadata.permissions);
+      writeFileSync(files.projects, projectBytes);
+      writeFileSync(files.permissions, permissionBytes);
+      row.note('synthetic metadata', {
+        projects: files.projects,
+        permissions: files.permissions,
+        projectsSha256: createHash('sha256').update(projectBytes).digest('hex'),
+        permissionsSha256: createHash('sha256').update(permissionBytes).digest('hex'),
+      });
 
       // The grants changed while Settings was open; only the button rereads them.
       await app.click(await app.one('button', REFRESH, { within: ['dialog', 'Settings'] }));
-      if (PLATFORM === 'windows') {
-        // Chat can't read Cave's grants on Windows yet, and says so (#587).
-        const said = await until(
-          "Settings to say Chat can't read the grants on Windows",
-          async () => {
-            const text = await settingsText(app);
-            return text.includes(UNREADABLE_ON_WINDOWS) ? text : null;
-          },
-          30_000,
-          500,
-        ).catch(async () => settingsText(app));
-        row.check(
-          "Settings says Chat can't read Coven Cave's grants on Windows",
-          said.includes(UNREADABLE_ON_WINDOWS),
-          around(said, UNREADABLE_ON_WINDOWS),
-        );
-        row.check(
-          'Settings no longer says none is declared',
-          !said.includes(declaresNone(familiar)),
-          around(said, 'declared'),
-        );
-        row.expect('projects listed after Refresh project access', await projectNames(app), []);
-        row.expect('Settings stayed open on Access', await app.count('dialog', 'Settings'), 1);
-        lane.shot('access-refreshed');
-        rmSync(files.projects);
-        rmSync(files.permissions);
-        await app.click(await app.one('button', REFRESH, { within: ['dialog', 'Settings'] }));
-        const after = await until(
-          'Settings to say none is declared once the grants are gone',
-          async () => {
-            const text = await settingsText(app);
-            return text.includes(declaresNone(familiar)) ? text : null;
-          },
-          30_000,
-          500,
-        ).catch(async () => settingsText(app));
-        row.check(
-          'Settings says no access is declared after the grants were removed',
-          after.includes(declaresNone(familiar)),
-          around(after, declaresNone(familiar)),
-        );
-        await closeSettings(app);
-        return;
-      }
       const shown = await until(
         `${ACCESS_PROJECTS} granted projects in Settings`,
         async () => {
@@ -258,6 +223,71 @@ export async function accessRow(lane, familiar) {
         if (focus?.name === LIST_REGION) break;
       }
       row.check('Tab reaches the project list', stops.at(-1)?.endsWith(`"${LIST_REGION}"`), stops);
+
+      await closeSettings(app);
+      await lane.clearComposer(familiar);
+      await app.type('#Access');
+      // Native accessibility APIs expose this named list with different roles.
+      const suggestions = await app.one(undefined, 'Context suggestions');
+      const suggested = namesIn([...walk(suggestions)].map((node) => node.name ?? '').join(' '));
+      row.expect(
+        'composer # suggestions use the eight declared projects',
+        suggested,
+        metadata.projects.projects.map((project) => project.name).sort(),
+      );
+      lane.shot('access-context-suggestions');
+      await app.key('escape');
+      await lane.clearComposer(familiar);
+      await openSettingsAt(app, 'Access');
+
+      // A malformed current store must be visible, remove stale projects, and recover.
+      writeFileSync(files.permissions, '{');
+      await app.click(await app.one('button', REFRESH, { within: ['dialog', 'Settings'] }));
+      const unreadable = await until(
+        'an actionable metadata error',
+        async () => {
+          const text = await settingsText(app);
+          return text.includes(UNREADABLE_METADATA) ? text : null;
+        },
+        30_000,
+        500,
+      );
+      row.check(
+        'unreadable stores say access is unknown and offer recovery',
+        unreadable.includes('declared access is unknown') && unreadable.includes('then refresh'),
+        around(unreadable, UNREADABLE_METADATA),
+      );
+      row.expect('unreadable metadata clears stale projects', await projectNames(app), []);
+      row.check(
+        'unreadable is distinct from absent',
+        !unreadable.includes(declaresNone(familiar)),
+        unreadable,
+      );
+      lane.shot('access-unreadable');
+      writeFileSync(files.permissions, permissionBytes);
+      await app.click(await app.one('button', REFRESH, { within: ['dialog', 'Settings'] }));
+      const recovered = await until(
+        'metadata recovery after repair',
+        async () => {
+          const text = await settingsText(app);
+          return namesIn(text).length === ACCESS_PROJECTS && !text.includes(UNREADABLE_METADATA)
+            ? text
+            : null;
+        },
+        30_000,
+        500,
+      );
+      row.expect(
+        'repair restores all eight projects',
+        namesIn(recovered),
+        metadata.projects.projects.map((project) => project.name).sort(),
+      );
+      row.check(
+        'repair clears stale unreadable error',
+        !recovered.includes('declared access is unknown'),
+        recovered,
+      );
+      lane.shot('access-recovered');
 
       rmSync(files.projects);
       rmSync(files.permissions);
