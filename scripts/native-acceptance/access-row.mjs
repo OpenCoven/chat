@@ -227,7 +227,8 @@ export async function accessRow(lane, familiar) {
       await closeSettings(app);
       await lane.clearComposer(familiar);
       await app.type('#Access');
-      const suggestions = await app.one('listbox', 'Context suggestions');
+      // Native accessibility APIs expose this named list with different roles.
+      const suggestions = await app.one(undefined, 'Context suggestions');
       const suggested = namesIn([...walk(suggestions)].map((node) => node.name ?? '').join(' '));
       row.expect(
         'composer # suggestions use the eight declared projects',
