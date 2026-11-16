@@ -102,18 +102,7 @@ private struct Workspace: View {
       .toolbarVisibility(.hidden, for: .navigationBar)
     return page
       .sheet(isPresented: $picking) { picker }
-      .sheet(isPresented: $permissionLog) {
-        PermissionLogView(model: model).onAppear {
-          #if DEBUG
-          ConnectionMenuProbe.record("permission sheet appeared")
-          #endif
-        }
-      }
-      .onChange(of: permissionLog) { _, value in
-        #if DEBUG
-        ConnectionMenuProbe.record("permission binding=\(value)")
-        #endif
-      }
+      .sheet(isPresented: $permissionLog) { PermissionLogView(model: model) }
       .sheet(isPresented: $privacy) { MobilePrivacyView(model: model) }
       .sheet(isPresented: $recovering) { RecoveredDraftsView(model: model) }
       .sheet(isPresented: $details) {
@@ -195,6 +184,9 @@ private struct Workspace: View {
           ConnectionMenuProbe.record("permission action entered")
           #endif
           permissionLog = true
+          #if DEBUG
+          ConnectionMenuProbe.record("permission binding write=\(permissionLog)")
+          #endif
         }
         Button("Connection Details", systemImage: "info.circle") { details = true }
         Divider()

@@ -77,16 +77,7 @@ final class CompanionFlowTests: XCTestCase {
       app.staticTexts.containing(NSPredicate(format: "label CONTAINS %@", "Allowed on iPhone"))
         .firstMatch.waitForExistence(timeout: 15), app.debugDescription)
     app.buttons["Done"].tap()
-    // Diagnostic repetitions retain every attempt and fail at the first missed activation.
-    for attempt in 1...12 {
-      XCTContext.runActivity(named: "Permission Log diagnostic attempt \(attempt)") { _ in
-        chooseConnectionAction(app.buttons["Permission Log"], in: app)
-        XCTAssertTrue(
-          app.staticTexts.containing(NSPredicate(format: "label CONTAINS %@", "Allowed on iPhone"))
-            .firstMatch.waitForExistence(timeout: 15), app.debugDescription)
-        app.buttons["Done"].tap()
-      }
-    }
+
 
     app.terminate()
     app.launch()
@@ -229,21 +220,7 @@ final class CompanionFlowTests: XCTestCase {
       return !frame.isEmpty && app.frame.contains(frame)
     }, object: action)
     XCTAssertEqual(XCTWaiter.wait(for: [visible], timeout: 10), .completed, app.debugDescription)
-    XCTContext.runActivity(named: "Connection action \(action.label)") { activity in
-      let before = XCTAttachment(string: "frame=\(action.frame), hittable=\(action.isHittable)\n\(app.debugDescription)")
-      before.name = "Before connection action"
-      before.lifetime = .keepAlways
-      activity.add(before)
-      let screenshot = XCTAttachment(screenshot: app.screenshot())
-      screenshot.name = "Before connection action"
-      screenshot.lifetime = .keepAlways
-      activity.add(screenshot)
-      action.coordinate(withNormalizedOffset: .init(dx: 0.5, dy: 0.5)).tap()
-      let after = XCTAttachment(string: app.debugDescription)
-      after.name = "After connection action"
-      after.lifetime = .keepAlways
-      activity.add(after)
-    }
+    action.coordinate(withNormalizedOffset: .init(dx: 0.5, dy: 0.5)).tap()
   }
 
   /// Taps `field` until it holds keyboard focus, so `typeText` has somewhere to

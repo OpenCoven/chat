@@ -4,10 +4,12 @@ import ObjectiveC
 
 /// Temporary #640 diagnostics, enabled only by the native UI test process.
 @MainActor enum ConnectionMenuProbe {
-  static var enabled: Bool { ProcessInfo.processInfo.environment["CHAT_MENU_PROBE"] == "1" }
+  static let enabled = ProcessInfo.processInfo.environment["CHAT_MENU_PROBE"] == "1"
+  private static let output = DispatchQueue(label: "chat.menu-probe.output")
   static func record(_ stage: String) {
     guard enabled else { return }
-    print("CHAT_MENU_PROBE \(Date().timeIntervalSince1970) \(stage)")
+    let message = "CHAT_MENU_PROBE \(Date().timeIntervalSince1970) \(stage)"
+    output.async { print(message) }
   }
   static func install() {
     guard enabled,
@@ -22,7 +24,7 @@ import ObjectiveC
 extension UIApplication {
   @objc fileprivate func chat_probe_sendEvent(_ event: UIEvent) {
     if let touches = event.allTouches {
-      for touch in touches where touch.phase == .began || touch.phase == .ended {
+      for touch in touches where touch.phase == .began || touch.phase == .ended || touch.phase == .cancelled {
         let point = touch.location(in: touch.window)
         var ancestors: [String] = []
         var view = touch.view

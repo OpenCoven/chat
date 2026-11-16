@@ -69,7 +69,12 @@ struct PermissionLogView: View {
         .navigationTitle("Permission Log").navigationBarTitleDisplayMode(.inline)
         .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } } }
     }
-    .task { await model.loadPermissionLog() }
+    .task {
+      #if DEBUG
+      ConnectionMenuProbe.record("permission log task began")
+      #endif
+      await model.loadPermissionLog()
+    }
     .presentationDragIndicator(.visible)
   }
 
