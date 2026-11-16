@@ -138,6 +138,33 @@ function leveldbKeys(bytes) {
 }
 
 /**
+ * The JSON object in `text` that holds position `at`: the nearest `{` before
+ * it whose matching `}`, skipping strings, comes after it. A value can hold
+ * objects of its own (preferences keep a `models` object per engine), so the
+ * first `}` after a key is not the end of its value.
+ */
+export function objectAround(text, at, reach = 4096) {
+  for (let start = text.lastIndexOf('{', at); start >= 0 && at - start <= reach; ) {
+    let depth = 0;
+    let quoted = false;
+    for (let i = start; i < text.length && i - start <= 2 * reach; i += 1) {
+      const c = text[i];
+      if (quoted) {
+        if (c === '\\') i += 1;
+        else if (c === '"') quoted = false;
+      } else if (c === '"') quoted = true;
+      else if (c === '{') depth += 1;
+      else if (c === '}' && --depth === 0) {
+        if (i > at) return text.slice(start, i + 1);
+        break;
+      }
+    }
+    start = start > 0 ? text.lastIndexOf('{', start - 1) : -1;
+  }
+  return undefined;
+}
+
+/**
  * Where in a SQLite file a needle sits: table and column, read-only, from a
  * copy (the profile may still hold a lock). Nothing of the row is kept but
  * the place, the needle being synthetic text the lane typed or showed.
@@ -279,9 +306,8 @@ function collectStorage(row) {
         for (const text of [utf16, latin]) {
           const at = text.lastIndexOf(name === 'preferences' ? '"inspectorWidth"' : '"familiarId"');
           if (at < 0) continue;
-          const start = text.lastIndexOf('{', at);
-          const end = text.indexOf('}', at);
-          if (start >= 0 && end > start) return text.slice(start, end + 1);
+          const value = objectAround(text, at);
+          if (value) return value;
         }
         return undefined;
       };

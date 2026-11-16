@@ -4,7 +4,10 @@
 // records what the engine asked for. The standalone home must stay absent:
 // Coven Code also treats any ancestor's .coven-code/settings.json as project
 // settings, which win over the global file, so a file there would decide the
-// model whichever home the engine used. The row removes what it made.
+// model whichever home the engine used. The managed home itself may already
+// be there: Coven Code 0.9.0 and later create it (goals.sqlite) on their first
+// run, so any earlier turn leaves it. The row adds a settings file only where
+// none is, and removes only what it made.
 
 import { existsSync, mkdirSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
@@ -23,6 +26,20 @@ export function engineHomes(env = process.env, home = homedir()) {
   };
 }
 
+/**
+ * What the row may change. It blocks rather than replace anything: the
+ * standalone home must be absent, and the managed home must not have a
+ * settings file yet. `created` says the row made the managed home itself.
+ */
+export function homePlan(homes, exists = existsSync) {
+  if (homes.reason) return { block: homes.reason };
+  if (exists(homes.standalone))
+    return { block: `${homes.standalone} already exists; the row won't replace it` };
+  const settings = join(homes.managed, 'settings.json');
+  if (exists(settings)) return { block: `${settings} already exists; the row won't replace it` };
+  return { settings, created: !exists(homes.managed) };
+}
+
 /** Coven Code's global settings, choosing only the model. */
 export function settingsFor(model) {
   return { version: 1, config: { model } };
@@ -36,22 +53,17 @@ export function requestedSince(models, before) {
 export async function engineHomeRow(lane, familiar, models) {
   const row = new Row('v012-engine-home', "Coven Code run from Chat reads Coven's managed home");
   const homes = engineHomes();
-  if (homes.reason) {
-    row.block('engine home', homes.reason);
-    return row;
-  }
-  const present = [homes.managed, homes.standalone].filter(existsSync);
-  if (present.length) {
-    row.block('engine home', `${present.join(', ')} already exist; the row won't replace them`);
+  const plan = homePlan(homes);
+  if (plan.block) {
+    row.block('engine home', plan.block);
     return row;
   }
   return lane.attempt(row, async () => {
     try {
+      if (!plan.created)
+        row.note(`${homes.managed} holds before the row`, readdirSync(homes.managed));
       mkdirSync(homes.managed, { recursive: true });
-      writeFileSync(
-        join(homes.managed, 'settings.json'),
-        JSON.stringify(settingsFor(MANAGED_MODEL)),
-      );
+      writeFileSync(plan.settings, JSON.stringify(settingsFor(MANAGED_MODEL)));
       row.note(`${homes.managed}/settings.json names`, MANAGED_MODEL);
       const before = models().length;
       await lane.clearComposer(familiar);
@@ -65,7 +77,11 @@ export async function engineHomeRow(lane, familiar, models) {
       row.note(`${homes.managed} holds after the run`, readdirSync(homes.managed));
       row.expect(`${homes.standalone} exists after the run`, existsSync(homes.standalone), false);
     } finally {
-      rmSync(homes.managed, { recursive: true, force: true });
+      rmSync(plan.settings, { force: true });
+      // A home the row made goes too, unless the engine has since put its own
+      // files there.
+      if (plan.created && existsSync(homes.managed) && !readdirSync(homes.managed).length)
+        rmSync(homes.managed, { recursive: true, force: true });
     }
   });
 }
