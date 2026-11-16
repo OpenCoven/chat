@@ -283,10 +283,15 @@ fn require_id(id: &str) -> Result<(), String> {
 }
 
 fn normalize_path(value: &str, home: &Path) -> Option<PathBuf> {
+    // Windows verbatim prefixes require backslashes; converting them to //?/
+    // changes their meaning before either metadata or project roots are read.
+    #[cfg(windows)]
+    let value = value.trim().replace('/', "\\");
+    #[cfg(not(windows))]
     let value = value.trim().replace('\\', "/");
     let path = if value == "~" {
         home.to_path_buf()
-    } else if let Some(suffix) = value.strip_prefix("~/") {
+    } else if let Some(suffix) = value.strip_prefix(if cfg!(windows) { "~\\" } else { "~/" }) {
         home.join(suffix)
     } else {
         PathBuf::from(value)

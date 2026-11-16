@@ -254,6 +254,19 @@ fn windows_normalization_preserves_extended_unc_prefixes_and_tilde_paths() {
     })
     .unwrap();
     assert_eq!(sources.projects, Path::new(projects));
+    for key in ["COVEN_HOME", "COVEN_CAVE_HOME"] {
+        let sources = Sources::resolve(home, |asked| {
+            (asked == key).then(|| r"\\?\C:\metadata".to_owned())
+        })
+        .unwrap();
+        let expected = if key == "COVEN_HOME" {
+            PathBuf::from(r"\\?\C:\metadata\cave\projects.json")
+        } else {
+            PathBuf::from(r"\\?\C:\metadata\projects.json")
+        };
+        assert_eq!(sources.projects, expected, "{key} must preserve its prefix");
+    }
+
     assert_eq!(
         normalize_path(r"~\cave\projects.json", home),
         Some(home.join(r"cave\projects.json"))
