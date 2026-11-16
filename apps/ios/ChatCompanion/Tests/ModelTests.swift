@@ -169,8 +169,10 @@ import XCTest
     let gate = api.sendGate
     api.sendGate = nil
     gate?.resume(
-      returning: Run(id: "run", familiarId: "astra", status: "completed", messages: []))
+      returning: Run(
+        id: api.sent.first?.requestId ?? "run", familiarId: "astra", status: "completed", messages: []))
     await sending
+    XCTAssertNil(model.pendingRunId, "The held send must settle after cleanup")
   }
   func testARefusedAllowIsCertainAndStartsNothing() async {
     let api = FakeClient()
