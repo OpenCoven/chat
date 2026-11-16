@@ -300,7 +300,8 @@ a familiar that is signed in with Claude does not get the full access Chat asks 
 shell loops, folders outside its workspace and most commands. Older engines also lack 0.9.1's
 security fixes. So no chat runs on an older engine: Chat opens on setup, which names the engine
 version it found and offers **Update the engine**. That runs the same install. Chat never replaces
-an engine that is already new enough.
+an engine that is already new enough. When the install finishes, Chat asks Coven again which engine
+it starts. If that is still an older one, the step fails and says which engine Coven starts.
 
 If the `COVEN_ENGINE_BIN` variable points Coven at an older engine, Chat installs nothing, because
 Coven would keep using the one the variable names. Setup says so: update that engine or remove the

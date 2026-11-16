@@ -248,7 +248,7 @@ impl Engine {
         }
     }
 
-    fn installed(&self) -> bool {
+    pub(crate) fn installed(&self) -> bool {
         self.path.is_some()
     }
 
@@ -298,6 +298,30 @@ impl Engine {
             return Err(ENGINE_OVERRIDE_OUTDATED.into());
         }
         self.install_args(os, arch).map(Some)
+    }
+
+    /// The engine step's answer once `coven engine install` has finished,
+    /// read from the status Coven reports afterwards. An install that
+    /// succeeded but left Coven starting something else is a failure the
+    /// person must hear about, not a step that quietly comes back.
+    fn installed_outcome(&self) -> Result<Value, String> {
+        if self.ready() {
+            return Ok(json!({ "installed": true }));
+        }
+        let found = if !self.installed() {
+            "finds no engine".to_owned()
+        } else if let Some(version) = self
+            .version
+            .as_ref()
+            .filter(|v| version_triple(v).is_some())
+        {
+            format!("starts engine {version}")
+        } else {
+            "starts an engine whose version Chat cannot read".to_owned()
+        };
+        Err(format!(
+            "The engine install finished, but Coven still {found}. Coven Chat needs {ENGINE_VERSION} or newer. Run coven engine status in a terminal to see which engine Coven starts and where it comes from."
+        ))
     }
 
     fn report(&self, os: &str, arch: &str) -> Value {
@@ -568,7 +592,9 @@ fn install_engine(
     if code != 0 {
         return Err(failed("The engine install", &last));
     }
-    Ok(json!({ "installed": true }))
+    // Coven decides which engine it starts. Ask it again rather than take
+    // the install's word for it.
+    engine_status().installed_outcome()
 }
 
 /// Starts a provider's own browser sign-in and waits for the person to
@@ -934,6 +960,44 @@ mod tests {
         let report = fine.report("macos", "aarch64");
         assert_eq!(report["ok"], json!(true));
         assert!(report.get("override").is_none());
+    }
+
+    #[test]
+    fn an_install_that_did_not_take_says_what_coven_still_starts() {
+        assert_eq!(
+            engine(Some(ENGINE_VERSION), Some("0.9.0")).installed_outcome(),
+            Ok(json!({ "installed": true }))
+        );
+        assert_eq!(
+            engine(Some("0.10.0"), Some("0.10.0")).installed_outcome(),
+            Ok(json!({ "installed": true }))
+        );
+        for (after, found) in [
+            (
+                engine(Some("0.9.0"), Some("0.9.0")),
+                "still starts engine 0.9.0.",
+            ),
+            (
+                engine(Some("unknown"), Some("0.9.0")),
+                "still starts an engine whose version Chat cannot read.",
+            ),
+            (engine(None, Some("0.9.0")), "still finds no engine."),
+        ] {
+            let message = after.installed_outcome().unwrap_err();
+            assert!(
+                message.starts_with("The engine install finished, but Coven "),
+                "{message}"
+            );
+            assert!(message.contains(found), "{message}");
+            assert!(
+                message.contains(&format!("Coven Chat needs {ENGINE_VERSION} or newer.")),
+                "{message}"
+            );
+            assert!(
+                message.contains("Run coven engine status in a terminal"),
+                "{message}"
+            );
+        }
     }
 
     #[test]

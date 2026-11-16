@@ -1068,12 +1068,15 @@ pub(crate) async fn blocking<T: Send + 'static>(
 /// on it. First-run setup applies the same minimum version, so the two never
 /// disagree about an engine older than Chat needs.
 fn engine_readiness(status: &Value) -> Result<(bool, Option<&'static str>), String> {
-    let installed = status
+    let reported = status
         .get("installed")
         .and_then(Value::as_bool)
         .ok_or("Coven returned invalid engine readiness.")?;
+    // Setup counts an engine only when its executable is there; so does this.
+    let engine = crate::setup::Engine::read(status);
+    let installed = reported && engine.installed();
     let error = if installed {
-        crate::setup::Engine::read(status).problem()
+        engine.problem()
     } else {
         Some("The Coven engine is missing. Run coven engine install, then retry.")
     };
@@ -3495,9 +3498,20 @@ mod tests {
             .unwrap()
             .starts_with("COVEN_ENGINE_BIN points to an engine older"));
 
-        let (installed, error) = engine_readiness(&json!({ "installed": false })).unwrap();
-        assert!(!installed);
-        assert!(error.unwrap().contains("The Coven engine is missing"));
+        // No engine, or one Coven names but that is not there: setup calls
+        // both missing, and so does the chat.
+        for status in [
+            json!({ "installed": false }),
+            json!({ "installed": true, "path": "/no/such/coven-code", "version": "0.9.1" }),
+            json!({ "installed": true, "version": "0.9.1" }),
+        ] {
+            let (installed, error) = engine_readiness(&status).unwrap();
+            assert!(!installed, "{status}");
+            assert!(
+                error.unwrap().contains("The Coven engine is missing"),
+                "{status}"
+            );
+        }
         assert!(engine_readiness(&json!({})).is_err());
     }
 
