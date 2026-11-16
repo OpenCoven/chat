@@ -489,10 +489,16 @@ fn open_metadata(path: &Path) -> io::Result<File> {
     Ok(directory)
 }
 
-/// Windows has no reader that refuses links yet (#587). A store that isn't
-/// there is still absent, so "no access is declared" stays true for someone
-/// without Coven Cave; one that is there is reported as unreadable.
-#[cfg(not(unix))]
+#[cfg(windows)]
+#[path = "familiar_projects_windows.rs"]
+mod windows_reader;
+
+#[cfg(windows)]
+fn open_metadata(path: &Path) -> io::Result<File> {
+    windows_reader::open(path)
+}
+
+#[cfg(not(any(unix, windows)))]
 fn open_metadata(path: &Path) -> io::Result<File> {
     std::fs::symlink_metadata(path)?;
     Err(io::Error::new(
