@@ -127,12 +127,7 @@ show full identities and paths, so you can tell similar names apart. Picking a s
 visible reference text at your cursor. It doesn't switch the recipient, delegate work, or grant
 file access.
 
-**Settings › Access** lists that same declared access, write grants first, and says plainly that
-Chat neither enforces nor extends it. The **Access** row in the inspector's Overview opens it. When
-no access is declared, it says so. When Chat couldn't read the registry or grants, it says that
-instead, so an unreadable store never looks like an empty one. Chat can't read them on Windows yet:
-there, Settings says so whenever Coven Cave has project metadata, and points to the familiar's
-**Projects** tab in Coven Cave.
+**Settings › Access** lists that same declared access on macOS, Windows and Linux, write grants first, and says plainly that Chat neither enforces nor extends it. The **Access** row in the inspector's Overview opens it. When no access is declared, it says so. When Chat couldn't read the registry or grants, it says that instead, so an unreadable store never looks like an empty one. Check the stores in Coven, then use **Refresh project access** to reread them. Metadata paths containing symbolic links or Windows reparse points are refused rather than followed.
 
 You can also type **`@name`** or **`#project`** directly in your message for inline suggestions.
 Use the arrow keys to choose and **Tab** to confirm, or **Escape** to dismiss. The optional
@@ -272,7 +267,8 @@ Chat looks for updates in one place: the `updater` release on [GitHub](https://g
 Before the chat opens, Chat checks what it needs:
 
 - **Coven:** the Coven CLI is installed.
-- **Engine:** the Coven engine is installed.
+- **Engine:** the Coven engine is installed and is version 0.9.1 or newer. An older engine, or one
+  whose version Chat can't read, counts as not ready.
 - **Sign-in:** a model provider is signed in, through the engine's own sign-in, a Claude
   subscription in Claude Code, or ChatGPT.
 - **Familiar:** at least one familiar exists.
@@ -289,7 +285,22 @@ When everything is in place, you see no setup screen and the chat opens as usual
 4. It then goes straight on to install the engine.
 
 **Install the engine:** Chat runs `coven engine install`, which downloads and verifies the engine
-itself, and shows its output as it goes.
+itself, and shows its output as it goes. When the installed Coven would choose an engine older than
+0.9.1, Chat asks it for 0.9.1 by version, with a SHA-256 built into Chat that Coven checks the
+download against.
+
+**Update the engine:** Coven keeps the engine it already has when Coven itself is updated, so a
+computer that had Coven before Chat can still be on an older engine. On an engine older than 0.9.1,
+a familiar that is signed in with Claude does not get the full access Chat asks for: it is refused
+shell loops, folders outside its workspace and most commands. Older engines also lack 0.9.1's
+security fixes. So no chat runs on an older engine: Chat opens on setup, which names the engine
+version it found and offers **Update the engine**. That runs the same install. Chat never replaces
+an engine that is already new enough. When the install finishes, Chat asks Coven again which engine
+it starts. If that is still an older one, the step fails and says which engine Coven starts.
+
+If the `COVEN_ENGINE_BIN` variable points Coven at an older engine, Chat installs nothing, because
+Coven would keep using the one the variable names. Setup says so: update that engine or remove the
+variable, then reopen Chat.
 
 **Controls:**
 
@@ -315,12 +326,13 @@ step is done. If the name is already taken, or has no letters or numbers, setup 
 plain words and changes nothing. **Check again** re-runs every check, and the chat opens as soon as
 they pass.
 
-Coven and its engine are required. When only sign-in or a familiar is missing, **Continue to Chat**
-opens the chat anyway. That way a sign-in the check can't see, such as an API key in the
-environment, never blocks a working setup.
+Coven and an engine new enough are required. When only sign-in or a familiar is missing,
+**Continue to Chat** opens the chat anyway. That way a sign-in the check can't see, such as an API
+key in the environment, never blocks a working setup.
 
 The checks start Coven, the engine, and Claude Code only to ask their status. Chat installs
-something only when you choose **Install Coven** or **Install the engine**. Sign-in always happens
+something only when you choose **Install Coven**, **Install the engine** or **Update the engine**.
+Sign-in always happens
 in your browser, with the provider; Chat never sees your password or keys.
 
 ## Local runtime

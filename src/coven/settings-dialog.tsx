@@ -68,12 +68,6 @@ const SECTIONS: readonly Readonly<{
   { id: 'about', label: 'About', icon: 'info', blurb: 'This app and the Coven CLI it talks to.' },
 ];
 
-/** True on Windows, where Chat can't read Coven Cave's project metadata yet (#587). */
-export function isWindowsPlatform(): boolean {
-  const nav = typeof navigator === 'undefined' ? undefined : navigator;
-  return /^Win/.test(nav?.platform ?? '');
-}
-
 /** True on Apple platforms, where shortcuts read ⌘ and ⇧ rather than Ctrl and Shift. */
 export function isApplePlatform(): boolean {
   const nav = typeof navigator === 'undefined' ? undefined : navigator;
@@ -823,20 +817,15 @@ function FamiliarAccess({
           <Icon name="folder-open" size={22} />
           <p>
             {familiar.projectAccessUnavailable
-              ? isWindowsPlatform()
-                ? `Chat can't read Coven Cave's project grants on Windows yet, so ${familiar.name}'s declared access is unknown. See ${familiar.name}'s Projects tab in Coven Cave.`
-                : `Chat could not read Coven's project registry or grants, so ${familiar.name}'s declared access is unknown. Check them in Coven, then refresh.`
+              ? `Chat could not read Coven's project registry or grants, so ${familiar.name}'s declared access is unknown. Check them in Coven, then refresh.`
               : `No project access is declared for ${familiar.name} in Coven's project registry or grants.`}
           </p>
         </div>
       )}
       <p className="coven-settings-footnote">
-        {/* On Windows a refresh can't show Cave's grants yet (#587). */}
-        {isWindowsPlatform()
-          ? "To edit grants, open the familiar's Projects tab in Coven Cave."
-          : "To edit grants, open the familiar's Projects tab in Coven Cave, then refresh project access here."}{' '}
-        Familiar chats can change files and run commands beyond these projects without asking for
-        permission.
+        To edit grants, open the familiar's Projects tab in Coven Cave, then refresh project access
+        here. Familiar chats can change files and run commands beyond these projects without asking
+        for permission.
       </p>
     </>
   );

@@ -1991,13 +1991,16 @@ describe('declared access and error copying', () => {
     expect(access()).not.toHaveTextContent('No project access is declared');
   });
 
-  it("says on Windows that Chat can't read Cave's grants there yet, instead of offering a refresh", () => {
-    // A refresh can't help on Windows: Chat has no safe reader there (#587).
+  it('offers actionable Windows metadata recovery and clears stale errors after refresh', async () => {
     Object.defineProperty(navigator, 'platform', { configurable: true, get: () => 'Win32' });
     try {
-      render(
+      const props = {
+        ...layoutProps(),
+        onRefreshProjectAccess: vi.fn().mockResolvedValue(undefined),
+      };
+      const { rerender } = render(
         <ChatLayout
-          {...layoutProps()}
+          {...props}
           connected
           ready
           familiars={[{ id: 'b', name: 'Bram', projectAccessUnavailable: true }]}
@@ -2005,21 +2008,39 @@ describe('declared access and error copying', () => {
         />,
       );
       openSettingsAt('Access');
-      const access = screen.getByRole('region', { name: 'Access' });
-      const said = within(access).getByText(/Coven Cave's project grants on Windows/);
-      expect(said).toHaveTextContent(
-        "Chat can't read Coven Cave's project grants on Windows yet, so Bram's declared access is unknown. See Bram's Projects tab in Coven Cave.",
+      const access = () => screen.getByRole('region', { name: 'Access' });
+      expect(access()).toHaveTextContent(
+        "Chat could not read Coven's project registry or grants, so Bram's declared access is unknown. Check them in Coven, then refresh.",
       );
-      expect(said).not.toHaveTextContent('refresh');
-      expect(access).not.toHaveTextContent('No project access is declared');
-      // Nor does the footnote send the reader to a refresh that can't help.
-      expect(access).toHaveTextContent(
-        "To edit grants, open the familiar's Projects tab in Coven Cave.",
-      );
-      expect(access).not.toHaveTextContent('then refresh project access here');
-      expect(access).toHaveTextContent(
+      expect(access()).toHaveTextContent('then refresh project access here');
+      expect(access()).not.toHaveTextContent('No project access is declared');
+      expect(access()).toHaveTextContent(
         'Familiar chats can change files and run commands beyond these projects without asking for permission.',
       );
+      await act(async () => {
+        fireEvent.click(within(access()).getByRole('button', { name: 'Refresh project access' }));
+      });
+      expect(props.onRefreshProjectAccess).toHaveBeenCalledOnce();
+      rerender(
+        <ChatLayout
+          {...props}
+          connected
+          ready
+          familiars={[
+            {
+              id: 'b',
+              name: 'Bram',
+              projectAccess: [
+                { name: 'Recovered project', path: 'C:/work/project', access: 'read' },
+              ],
+            },
+          ]}
+          familiarId="b"
+        />,
+      );
+      expect(access()).toHaveTextContent('Recovered project');
+      expect(access()).not.toHaveTextContent('declared access is unknown');
+      expect(access()).not.toHaveTextContent('could not read');
     } finally {
       Reflect.deleteProperty(navigator, 'platform');
     }

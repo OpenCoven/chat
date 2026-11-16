@@ -6,6 +6,7 @@ import { Icon } from '../design/minimal-icons';
 import {
   chatReachable,
   createSetup,
+  engineOutdated,
   type Setup,
   type SetupReport,
   type SetupRunEvent,
@@ -60,7 +61,8 @@ function advance(run: Run, event: SetupRunEvent): Run {
  * needs (Coven, its engine, a model sign-in, a familiar) and shows the chat
  * as soon as everything is in place. Coven and its engine are required; the
  * rest can be skipped with **Continue to Chat**, so a sign-in this check
- * cannot see never locks out a working setup.
+ * cannot see never locks out a working setup. An engine older than Chat needs
+ * cannot be skipped: the engine step offers the update instead.
  */
 export function Onboarding({
   setup = defaultSetup,
@@ -321,7 +323,52 @@ function CovenStep({ report, runner }: { report: SetupReport; runner: Runner }) 
   );
 }
 
+/** What Chat found and what it needs, in the reader's terms. */
+function engineVersions({ version, required, override }: SetupReport['engine']) {
+  const need = required ? `Chat needs ${required} or newer.` : 'Chat needs a newer one.';
+  if (override) {
+    const found = version ? `engine ${version}` : 'an engine whose version Chat could not read';
+    return `The COVEN_ENGINE_BIN variable points to ${found}. ${need}`;
+  }
+  const found = version
+    ? `This computer has engine ${version}.`
+    : 'Chat could not read the version of the engine on this computer.';
+  return `${found} ${need}`;
+}
+
 function EngineStep({ report, runner }: { report: SetupReport; runner: Runner }) {
+  const command = report.engine.command ?? 'coven engine install';
+  if (engineOutdated(report)) {
+    return (
+      <Step title="Coven engine" done={false}>
+        <p>{engineVersions(report.engine)}</p>
+        <p>
+          Familiars cannot run until the engine is updated. On an older engine, a familiar that is
+          signed in with Claude is refused many commands and any folder outside its workspace, and
+          security fixes are missing.
+        </p>
+        {report.engine.override ? (
+          <p>
+            Update the engine that variable points to, or remove the variable so Coven uses its own
+            engine. Then reopen Coven Chat.
+          </p>
+        ) : runner.available ? (
+          <>
+            <RunControls step="install_engine" label="Update the engine" runner={runner} />
+            <details className="coven-onboarding-manual">
+              <summary>Update it in a terminal instead</summary>
+              <Command command={command} />
+            </details>
+          </>
+        ) : (
+          <>
+            <p>To update it, run this in a terminal:</p>
+            <Command command={command} />
+          </>
+        )}
+      </Step>
+    );
+  }
   return (
     <Step title="Coven engine" done={report.engine.ok}>
       {report.engine.ok ? (
@@ -332,13 +379,13 @@ function EngineStep({ report, runner }: { report: SetupReport; runner: Runner })
           <RunControls step="install_engine" label="Install the engine" runner={runner} />
           <details className="coven-onboarding-manual">
             <summary>Install it in a terminal instead</summary>
-            <Command command="coven engine install" />
+            <Command command={command} />
           </details>
         </>
       ) : report.coven.ok ? (
         <>
           <p>The engine is what answers your messages. Run this in a terminal:</p>
-          <Command command="coven engine install" />
+          <Command command={command} />
         </>
       ) : (
         <p>Install Coven first.</p>

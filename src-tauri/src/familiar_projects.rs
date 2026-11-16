@@ -283,10 +283,15 @@ fn require_id(id: &str) -> Result<(), String> {
 }
 
 fn normalize_path(value: &str, home: &Path) -> Option<PathBuf> {
+    // Windows verbatim prefixes require backslashes; converting them to //?/
+    // changes their meaning before either metadata or project roots are read.
+    #[cfg(windows)]
+    let value = value.trim().replace('/', "\\");
+    #[cfg(not(windows))]
     let value = value.trim().replace('\\', "/");
     let path = if value == "~" {
         home.to_path_buf()
-    } else if let Some(suffix) = value.strip_prefix("~/") {
+    } else if let Some(suffix) = value.strip_prefix(if cfg!(windows) { "~\\" } else { "~/" }) {
         home.join(suffix)
     } else {
         PathBuf::from(value)
@@ -489,10 +494,16 @@ fn open_metadata(path: &Path) -> io::Result<File> {
     Ok(directory)
 }
 
-/// Windows has no reader that refuses links yet (#587). A store that isn't
-/// there is still absent, so "no access is declared" stays true for someone
-/// without Coven Cave; one that is there is reported as unreadable.
-#[cfg(not(unix))]
+#[cfg(windows)]
+#[path = "familiar_projects_windows.rs"]
+mod windows_reader;
+
+#[cfg(windows)]
+fn open_metadata(path: &Path) -> io::Result<File> {
+    windows_reader::open(path)
+}
+
+#[cfg(not(any(unix, windows)))]
 fn open_metadata(path: &Path) -> io::Result<File> {
     std::fs::symlink_metadata(path)?;
     Err(io::Error::new(
@@ -897,3 +908,7 @@ mod tests {
             loaded.projects.len(), loaded.permissions.project_grants.len(), loaded.permissions.access_groups.len(), members.len());
     }
 }
+
+#[cfg(all(test, windows))]
+#[path = "familiar_projects_windows_tests.rs"]
+mod windows_tests;
