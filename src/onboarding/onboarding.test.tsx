@@ -127,6 +127,52 @@ describe('first-run setup', () => {
     expect(screen.queryByRole('button', { name: 'Continue to Chat' })).not.toBeInTheDocument();
   });
 
+  it('names the command the check reports for a missing engine', async () => {
+    const command = `coven engine install --version 0.9.1 --sha256 ${'b'.repeat(64)}`;
+    await renderWith(setupReturning(report({ engine: { ok: false, installed: false, command } })));
+    expect(within(step('Coven engine')).getByText(command)).toBeInTheDocument();
+    expect(within(step('Coven engine')).queryByText(/older engine/)).not.toBeInTheDocument();
+  });
+
+  it('asks for an older engine to be updated, says why, and still lets a person continue', async () => {
+    const command = `coven engine install --version 0.9.1 --sha256 ${'c'.repeat(64)}`;
+    const outdated = report({
+      engine: { ok: false, installed: true, version: '0.9.0', required: '0.9.1', command },
+    });
+    const run = vi.fn(async () => {});
+    const setup = { ...setupReturning(outdated, report()), run };
+    await renderWith(setup);
+    const engine = step('Coven engine');
+    expect(within(engine).getByRole('heading')).toHaveTextContent('Coven engine (needed)');
+    expect(engine).toHaveTextContent('This computer has engine 0.9.0. Chat needs 0.9.1 or newer.');
+    expect(engine).toHaveTextContent(/signed in with Claude is refused many commands/);
+    expect(within(engine).getByText(command)).toBeInTheDocument();
+    expect(within(engine).queryByRole('button', { name: 'Install the engine' })).toBeNull();
+    // The older engine still answers, so the chat is not held back.
+    expect(screen.getByRole('button', { name: 'Continue to Chat' })).toBeInTheDocument();
+    await act(async () => {
+      fireEvent.click(within(engine).getByRole('button', { name: 'Update the engine' }));
+    });
+    expect(run).toHaveBeenCalledWith(expect.any(String), 'install_engine', expect.any(Function));
+    expect(screen.getByText('The chat')).toBeInTheDocument();
+  });
+
+  it('shows the update command when Chat cannot run the step itself', async () => {
+    const command = `coven engine install --version 0.9.1 --sha256 ${'d'.repeat(64)}`;
+    await renderWith(
+      setupReturning(
+        report({ engine: { ok: false, installed: true, required: '0.9.1', command } }),
+      ),
+    );
+    const engine = step('Coven engine');
+    expect(engine).toHaveTextContent(
+      'This computer has an older engine. Chat needs 0.9.1 or newer.',
+    );
+    expect(engine).toHaveTextContent('To update it, run this in a terminal:');
+    expect(within(engine).getByText(command)).toBeInTheDocument();
+    expect(within(engine).queryByRole('button', { name: 'Update the engine' })).toBeNull();
+  });
+
   it('offers the Windows installer for Claude Code on Windows', async () => {
     await renderWith(
       setupReturning(

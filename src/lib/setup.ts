@@ -7,7 +7,18 @@ export type SignInState = 'signed-in' | 'signed-out' | 'missing' | 'unknown';
 export type SetupReport = {
   platform: { ok: boolean; os: string };
   coven: { ok: boolean; version?: string };
-  engine: { ok: boolean };
+  /**
+   * `ok` means installed and new enough. `installed` without `ok` is an
+   * engine older than `required`, which still runs but should be updated.
+   * `command` is what installs a usable engine from a terminal.
+   */
+  engine: {
+    ok: boolean;
+    installed?: boolean;
+    version?: string;
+    required?: string;
+    command?: string;
+  };
   /**
    * `engine` is the engine's own sign-in, `claude` a Claude subscription,
    * `chatgpt` ChatGPT. `claudeInstaller` is the command that installs Claude
@@ -52,6 +63,9 @@ function record(value: unknown): value is Record<string, unknown> {
 function step(value: unknown): value is Record<string, unknown> & { ok: boolean } {
   return record(value) && typeof value.ok === 'boolean';
 }
+function shortText(value: unknown, limit: number): boolean {
+  return value === undefined || (typeof value === 'string' && value.length <= limit);
+}
 function report(value: unknown): value is SetupReport {
   if (!record(value)) return false;
   const { platform, coven, engine, signIn, familiar } = value;
@@ -63,6 +77,10 @@ function report(value: unknown): value is SetupReport {
     (coven.version === undefined ||
       (typeof coven.version === 'string' && coven.version.length <= 256)) &&
     step(engine) &&
+    (engine.installed === undefined || typeof engine.installed === 'boolean') &&
+    shortText(engine.version, 64) &&
+    shortText(engine.required, 64) &&
+    shortText(engine.command, 256) &&
     step(signIn) &&
     ['engine', 'claude', 'chatgpt'].every(
       (route) => typeof signIn[route] === 'string' && SIGN_IN_STATES.includes(signIn[route]),
@@ -105,14 +123,20 @@ export function setupComplete(value: SetupReport): boolean {
   );
 }
 
+/** An engine is installed, but it is older than Chat needs. */
+export function engineOutdated(value: SetupReport): boolean {
+  return !value.engine.ok && value.engine.installed === true;
+}
+
 /**
  * Coven and its engine are the hard requirements: without them Chat cannot
  * reach anything. Sign-in and familiars can be finished from inside Chat, and
  * a sign-in this check cannot see (an API key in the environment, say) must
- * not lock a working setup out.
+ * not lock a working setup out. Nor does an older engine: it still answers,
+ * so setup asks for the update without holding the chat back.
  */
 export function chatReachable(value: SetupReport): boolean {
-  return value.platform.ok && value.coven.ok && value.engine.ok;
+  return value.platform.ok && value.coven.ok && (value.engine.ok || engineOutdated(value));
 }
 
 export function createSetup(

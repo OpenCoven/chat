@@ -6,6 +6,7 @@ import { Icon } from '../design/minimal-icons';
 import {
   chatReachable,
   createSetup,
+  engineOutdated,
   type Setup,
   type SetupReport,
   type SetupRunEvent,
@@ -60,7 +61,8 @@ function advance(run: Run, event: SetupRunEvent): Run {
  * needs (Coven, its engine, a model sign-in, a familiar) and shows the chat
  * as soon as everything is in place. Coven and its engine are required; the
  * rest can be skipped with **Continue to Chat**, so a sign-in this check
- * cannot see never locks out a working setup.
+ * cannot see never locks out a working setup. An engine older than Chat needs
+ * is asked to be updated, and can be skipped the same way.
  */
 export function Onboarding({
   setup = defaultSetup,
@@ -321,7 +323,38 @@ function CovenStep({ report, runner }: { report: SetupReport; runner: Runner }) 
   );
 }
 
+/** Why an installed engine is not enough, in the reader's terms. */
+function outdatedEngine({ version, required }: SetupReport['engine']) {
+  const have = version
+    ? `This computer has engine ${version}.`
+    : 'This computer has an older engine.';
+  const need = required ? `Chat needs ${required} or newer.` : 'Chat needs a newer one.';
+  return `${have} ${need} On an older engine, a familiar that is signed in with Claude is refused many commands and any folder outside its workspace, and security fixes are missing.`;
+}
+
 function EngineStep({ report, runner }: { report: SetupReport; runner: Runner }) {
+  const command = report.engine.command ?? 'coven engine install';
+  if (engineOutdated(report)) {
+    return (
+      <Step title="Coven engine" done={false}>
+        <p>{outdatedEngine(report.engine)}</p>
+        {runner.available ? (
+          <>
+            <RunControls step="install_engine" label="Update the engine" runner={runner} />
+            <details className="coven-onboarding-manual">
+              <summary>Update it in a terminal instead</summary>
+              <Command command={command} />
+            </details>
+          </>
+        ) : (
+          <>
+            <p>To update it, run this in a terminal:</p>
+            <Command command={command} />
+          </>
+        )}
+      </Step>
+    );
+  }
   return (
     <Step title="Coven engine" done={report.engine.ok}>
       {report.engine.ok ? (
@@ -332,13 +365,13 @@ function EngineStep({ report, runner }: { report: SetupReport; runner: Runner })
           <RunControls step="install_engine" label="Install the engine" runner={runner} />
           <details className="coven-onboarding-manual">
             <summary>Install it in a terminal instead</summary>
-            <Command command="coven engine install" />
+            <Command command={command} />
           </details>
         </>
       ) : report.coven.ok ? (
         <>
           <p>The engine is what answers your messages. Run this in a terminal:</p>
-          <Command command="coven engine install" />
+          <Command command={command} />
         </>
       ) : (
         <p>Install Coven first.</p>
