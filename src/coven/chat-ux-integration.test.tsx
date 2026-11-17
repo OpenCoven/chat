@@ -247,6 +247,7 @@ describe('the inspector handle beside the dialogs', () => {
       textSize: 'default',
       groupTools: true,
       inspectorWidth: 376,
+      maxTurns: 50,
       harness: 'coven-code',
       model: '',
       think: false,

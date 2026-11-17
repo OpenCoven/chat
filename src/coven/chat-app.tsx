@@ -360,11 +360,17 @@ export function ChatApp({
     void observePhoneRuns((value) => {
       if (!alive) return;
       if (value.status !== 'running') {
-        if (value.status === 'failed') setError(value.error || 'The iPhone run failed.');
+        const unfinished = value.outcome === 'turn_budget_exhausted';
+        if (value.status === 'failed' && !unfinished)
+          setError(value.error || 'The iPhone run failed.');
         if (navigationRef.current.familiarId !== value.familiarId && value.status !== 'stopped')
           setFinished((old) => ({
             ...old,
-            [value.familiarId]: value.status === 'failed' ? 'error' : 'reply',
+            [value.familiarId]: unfinished
+              ? 'unfinished'
+              : value.status === 'failed'
+                ? 'error'
+                : 'reply',
           }));
       }
       if (value.status === 'running') {

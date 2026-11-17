@@ -1032,6 +1032,36 @@ describe('canonical familiar controller', () => {
 });
 
 describe('phone run synchronization', () => {
+  it('marks exhausted phone work unfinished without announcing a reply or provider failure', async () => {
+    const api = runtime();
+    let receive: (value: import('../lib/companion-runs').CompanionRunEvent) => void = () => {};
+    await act(async () => {
+      render(
+        <ChatApp
+          runtime={api}
+          observePhoneRuns={async (callback) => {
+            receive = callback;
+            return () => {};
+          }}
+        />,
+      );
+    });
+    await waitFor(() => expect(screen.getByRole('textbox')).toBeEnabled());
+    await act(async () =>
+      receive({
+        runId: 'phone-budget',
+        familiarId: 'g',
+        status: 'failed',
+        outcome: 'turn_budget_exhausted',
+        error: 'Work is unfinished.',
+      }),
+    );
+    await waitFor(() =>
+      expect(screen.getByTestId('finished')).toHaveTextContent('"g":"unfinished"'),
+    );
+    expect(screen.queryByRole('alert')).toBeNull();
+  });
+
   it('coalesces phone events while an authoritative history read is slow', async () => {
     localStorage.clear();
     const api = runtime();

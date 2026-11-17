@@ -2030,6 +2030,32 @@ fn input_record(id: &str, input: &SendInput) -> Value {
     record
 }
 
+pub(crate) fn run_outcome(result: &Result<Value, String>, cancelled: bool) -> &'static str {
+    if cancelled {
+        return "stopped";
+    }
+    match result {
+        Ok(value)
+            if value
+                .get("events")
+                .and_then(Value::as_array)
+                .and_then(|events| events.last())
+                .is_some_and(|event| {
+                    event["type"] == "system"
+                        && event["subtype"] == "run_budget"
+                        && event["source"] == "chat-run-budget"
+                        && event["settled"] == true
+                        && event["outcome"] == "turn_budget_exhausted"
+                }) =>
+        {
+            "unfinished"
+        }
+        Ok(_) => "completed",
+        Err(error) if error == RUN_CANCELLED => "stopped",
+        Err(_) => "failed",
+    }
+}
+
 fn send_local(
     data: &Path,
     input: SendInput,
@@ -2040,11 +2066,7 @@ fn send_local(
     let run_id = input.run_id.clone();
     let result = send_turn(data, input, cancel, on_event);
     if let Some(grant) = grant {
-        let outcome = match &result {
-            Ok(_) => "completed",
-            Err(error) if error == RUN_CANCELLED => "stopped",
-            Err(_) => "failed",
-        };
+        let outcome = run_outcome(&result, cancel.load(Ordering::SeqCst));
         crate::chat_approvals::record_finished(
             data,
             &grant,
@@ -3453,6 +3475,21 @@ mod tests {
         let input = run_input(json!({}));
         let args = run_arguments(&input, "coven-code", Path::new("/safe"), &input.prompt).unwrap();
         assert!(args.windows(2).any(|pair| pair == ["--max-turns", "50"]));
+    }
+
+    #[test]
+    fn a_successful_exhaustion_transport_never_records_completed_work() {
+        let result = Ok(json!({"runId":"r","events":[{
+            "type":"system","subtype":"run_budget","source":"chat-run-budget",
+            "settled":true,"outcome":"turn_budget_exhausted"
+        }]}));
+        assert_eq!(run_outcome(&result, false), "unfinished");
+        assert_eq!(run_outcome(&result, true), "stopped");
+        assert_eq!(run_outcome(&Err(RUN_CANCELLED.into()), false), "stopped");
+        assert_eq!(
+            run_outcome(&Err("Authentication failed".into()), false),
+            "failed"
+        );
     }
 
     #[test]
