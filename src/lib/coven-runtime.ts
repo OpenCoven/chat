@@ -67,6 +67,8 @@ export type CovenSendInput = {
   think?: boolean;
   /** `coven run --speed`: a latency and reasoning hint. Not for Codex. */
   speed?: 'fast' | 'balanced' | 'thorough';
+  /** Positive finite model rounds; Coven Code only. Native default is 50. */
+  maxTurns?: number;
   attachments?: readonly { name: string; bytes: readonly number[] }[];
 };
 export type CovenRunResult = { runId: string; sessionId?: string; events: CovenRunEvent[] };
@@ -86,6 +88,7 @@ export type CovenAllowInput = {
   model?: string;
   think?: boolean;
   speed?: 'fast' | 'balanced' | 'thorough';
+  maxTurns?: number;
 };
 export type PermissionLogEntry = {
   at: number;

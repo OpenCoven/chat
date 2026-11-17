@@ -215,6 +215,7 @@ fn companion_run(
                 model: None,
                 think: false,
                 speed: None,
+                max_turns: None,
                 attachments: Vec::new(),
                 grant,
             };
