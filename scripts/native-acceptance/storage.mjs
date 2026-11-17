@@ -120,7 +120,8 @@ function sqliteItems(path) {
 }
 
 /** LevelDB keys for local storage look like `_<origin>\0\1<key>`; values follow, often UTF-16. */
-function leveldbKeys(bytes) {
+function leveldbKeys(bytes, table = false) {
+  if (table) return [...latestTableRecords(bytes).keys()];
   const text = bytes.toString('latin1');
   const keys = new Set();
   // Chromium writes NUL then SOH between the origin and the key.
@@ -137,13 +138,159 @@ function leveldbKeys(bytes) {
   return [...keys];
 }
 
+function leveldbVarint(bytes, at) {
+  let value = 0;
+  for (let shift = 0; shift <= 28 && at < bytes.length; shift += 7, at += 1) {
+    const byte = bytes[at];
+    value += (byte & 0x7f) * 2 ** shift;
+    if (!(byte & 0x80)) return { value, next: at + 1 };
+  }
+  return undefined;
+}
+
+function tableUserKey(internalKey) {
+  if (internalKey.length < 9) return undefined;
+  const userKey = internalKey.subarray(0, -8).toString('latin1');
+  const separator = userKey.indexOf(String.fromCharCode(0, 1));
+  if (separator < 0 || separator > 300 || !/^_https?:\/\/[!-~]+$/.test(userKey.slice(0, separator)))
+    return undefined;
+  const key = userKey.slice(separator + 2);
+  return key && key.length <= 200 ? key : undefined;
+}
+
+function blockHandle(bytes, at, limit = bytes.length) {
+  const offset = leveldbVarint(bytes, at);
+  const size = offset && leveldbVarint(bytes, offset.next);
+  return size && size.next <= limit
+    ? { offset: offset.value, size: size.value, next: size.next }
+    : undefined;
+}
+
+function snappyBlock(bytes) {
+  const expected = leveldbVarint(bytes, 0);
+  if (!expected) return undefined;
+  const out = [];
+  let at = expected.next;
+  while (at < bytes.length && out.length < expected.value) {
+    const tag = bytes[at++];
+    const type = tag & 3;
+    if (type === 0) {
+      let length = tag >> 2;
+      if (length < 60) length += 1;
+      else {
+        const octets = length - 59;
+        if (at + octets > bytes.length) return undefined;
+        length = 1;
+        for (let i = 0; i < octets; i += 1) length += bytes[at++] * 2 ** (8 * i);
+      }
+      if (at + length > bytes.length) return undefined;
+      for (const byte of bytes.subarray(at, at + length)) out.push(byte);
+      at += length;
+      continue;
+    }
+    const length = type === 1 ? 4 + ((tag >> 2) & 7) : 1 + (tag >> 2);
+    let offset;
+    if (type === 1) {
+      if (at >= bytes.length) return undefined;
+      offset = ((tag & 0xe0) << 3) | bytes[at++];
+    } else {
+      const octets = type;
+      if (at + octets > bytes.length) return undefined;
+      offset = 0;
+      for (let i = 0; i < octets; i += 1) offset += bytes[at++] * 2 ** (8 * i);
+    }
+    if (!offset || offset > out.length) return undefined;
+    for (let i = 0; i < length; i += 1) out.push(out[out.length - offset]);
+  }
+  return out.length === expected.value ? Buffer.from(out) : undefined;
+}
+
+function tableBlock(file, handle) {
+  if (handle.offset + handle.size + 5 > file.length) return undefined;
+  const bytes = file.subarray(handle.offset, handle.offset + handle.size);
+  const compression = file[handle.offset + handle.size];
+  if (compression === 0) return bytes;
+  return compression === 1 ? snappyBlock(bytes) : undefined;
+}
+
+function blockEntries(bytes) {
+  if (bytes.length < 4) return [];
+  const restartCount = bytes.readUInt32LE(bytes.length - 4);
+  const entriesEnd = bytes.length - 4 - restartCount * 4;
+  if (entriesEnd < 0) return [];
+  const entries = [];
+  let at = 0;
+  let previous = Buffer.alloc(0);
+  while (at < entriesEnd) {
+    const shared = leveldbVarint(bytes, at);
+    const suffix = shared && leveldbVarint(bytes, shared.next);
+    const value = suffix && leveldbVarint(bytes, suffix.next);
+    if (!value || shared.value > previous.length) return [];
+    const suffixEnd = value.next + suffix.value;
+    const valueEnd = suffixEnd + value.value;
+    if (valueEnd > entriesEnd) return [];
+    const key = Buffer.concat([
+      previous.subarray(0, shared.value),
+      bytes.subarray(value.next, suffixEnd),
+    ]);
+    entries.push({ key, value: bytes.subarray(suffixEnd, valueEnd) });
+    previous = key;
+    at = valueEnd;
+  }
+  return at === entriesEnd ? entries : [];
+}
+
+function tableRecords(bytes) {
+  const magic = Buffer.from('57fb808b247547db', 'hex');
+  if (bytes.length < 48 || !bytes.subarray(-8).equals(magic)) return [];
+  const footer = bytes.length - 48;
+  const meta = blockHandle(bytes, footer, footer + 40);
+  const index = meta && blockHandle(bytes, meta.next, footer + 40);
+  const indexBlock = index && tableBlock(bytes, index);
+  if (!indexBlock) return [];
+  const records = [];
+  for (const entry of blockEntries(indexBlock)) {
+    const handle = blockHandle(entry.value, 0);
+    const data = handle && tableBlock(bytes, handle);
+    if (!data) continue;
+    for (const item of blockEntries(data)) {
+      const key = tableUserKey(item.key);
+      if (!key) continue;
+      const trailer = item.key.readBigUInt64LE(item.key.length - 8);
+      const type = Number(trailer & 0xffn);
+      if (type <= 1) records.push({ key, sequence: trailer >> 8n, type, value: item.value });
+    }
+  }
+  return records;
+}
+
+function latestTableRecords(bytes) {
+  const latest = new Map();
+  for (const record of tableRecords(bytes)) {
+    const prior = latest.get(record.key);
+    if (!prior || record.sequence > prior.sequence) latest.set(record.key, record);
+  }
+  return latest;
+}
+
+function latestLeveldbRecord(bytes, key, table = false) {
+  if (table) return latestTableRecords(bytes).get(key)?.value;
+  const framedKey = Buffer.from(`\0\x01${key}`, 'latin1');
+  const start = bytes.lastIndexOf(framedKey);
+  if (start < 0) return undefined;
+  const length = leveldbVarint(bytes, start + framedKey.length);
+  if (!length || length.value > bytes.length - length.next) return undefined;
+  return bytes.subarray(length.next, length.next + length.value);
+}
+
 /**
  * The JSON object in `text` that holds position `at`: the nearest `{` before
  * it whose matching `}`, skipping strings, comes after it. A value can hold
  * objects of its own (preferences keep a `models` object per engine), so the
  * first `}` after a key is not the end of its value.
  */
-export function objectAround(text, at, reach = 4096) {
+function objectsAround(text, at, reach) {
+  const found = [];
   for (let start = text.lastIndexOf('{', at); start >= 0 && at - start <= reach; ) {
     let depth = 0;
     let quoted = false;
@@ -155,11 +302,31 @@ export function objectAround(text, at, reach = 4096) {
       } else if (c === '"') quoted = true;
       else if (c === '{') depth += 1;
       else if (c === '}' && --depth === 0) {
-        if (i > at) return text.slice(start, i + 1);
+        if (i > at) found.push(text.slice(start, i + 1));
         break;
       }
     }
     start = start > 0 ? text.lastIndexOf('{', start - 1) : -1;
+  }
+  return found;
+}
+
+export function objectAround(text, at, reach = 4096) {
+  return objectsAround(text, at, reach)[0];
+}
+
+function completeJsonObjectAround(text, at, reach = 4096) {
+  const onlyFraming = (value) => [...value].every((character) => character.charCodeAt(0) <= 0x20);
+  for (const candidate of objectsAround(text, at, reach).reverse()) {
+    const start = text.lastIndexOf(candidate, at);
+    if (start < 0 || !onlyFraming(text.slice(0, start))) continue;
+    if (!onlyFraming(text.slice(start + candidate.length))) continue;
+    try {
+      JSON.parse(candidate);
+      return candidate;
+    } catch {
+      return undefined;
+    }
   }
   return undefined;
 }
@@ -251,7 +418,10 @@ function collectStorage(row) {
     browser.map((root) => `${root}${existsSync(root) ? '' : ' (absent)'}`),
   );
   const listed = browser.flatMap((root) => files(root).map((path) => ({ root, path })));
-  const all = listed.filter(({ root, path }) => !appOwned(root, path)).map(({ path }) => path);
+  const all = listed
+    .filter(({ root, path }) => !appOwned(root, path))
+    .map(({ path }) => path)
+    .sort();
   const shared = listed.filter(({ root, path }) => appOwned(root, path)).map(({ path }) => path);
   const home = homedir();
   row.note(
@@ -272,6 +442,10 @@ function collectStorage(row) {
   };
   let preferences;
   let navigation;
+  let preferencesSequence = -1n;
+  let navigationSequence = -1n;
+  let preferencesFromLog = false;
+  let navigationFromLog = false;
   const databases = [];
   const needleHits = new Map(NEEDLES.map((needle) => [needle, []]));
   for (const path of all) {
@@ -299,23 +473,56 @@ function collectStorage(row) {
         path,
       )
     ) {
-      for (const key of leveldbKeys(bytes)) recordKey(key, path);
-      const latin = bytes.toString('latin1');
-      const utf16 = bytes.toString('utf16le');
+      const table = path.endsWith('.ldb');
+      const tableValues = table ? latestTableRecords(bytes) : undefined;
+      const foundKeys = table ? [...tableValues.keys()] : leveldbKeys(bytes);
+      for (const key of foundKeys) recordKey(key, path);
       const pick = (name) => {
-        for (const text of [utf16, latin]) {
+        const key = `opencoven.chat.${name}.v1`;
+        const tableRecord = tableValues?.get(key);
+        const record = tableRecord?.value ?? latestLeveldbRecord(bytes, key);
+        if (!record) return undefined;
+        for (const text of [
+          record.toString('utf16le'),
+          record.subarray(1).toString('utf16le'),
+          record.toString('latin1'),
+        ]) {
           const at = text.lastIndexOf(name === 'preferences' ? '"inspectorWidth"' : '"familiarId"');
           if (at < 0) continue;
-          const value = objectAround(text, at);
-          if (value) return value;
+          const value = completeJsonObjectAround(text, at);
+          if (value) return { value, sequence: tableRecord?.sequence };
         }
         return undefined;
       };
-      preferences ??= pick('preferences');
-      navigation ??= pick('navigation');
+      if (foundKeys.includes('opencoven.chat.preferences.v1')) {
+        const picked = pick('preferences');
+        if (!table) {
+          preferencesFromLog = true;
+          preferences = picked?.value;
+        } else {
+          const record = tableValues.get('opencoven.chat.preferences.v1');
+          if (!preferencesFromLog && record.sequence > preferencesSequence) {
+            preferencesSequence = record.sequence;
+            preferences = record.type === 0 ? undefined : picked?.value;
+          }
+        }
+      }
+      if (foundKeys.includes('opencoven.chat.navigation.v1')) {
+        const picked = pick('navigation');
+        if (!table) {
+          navigationFromLog = true;
+          navigation = picked?.value;
+        } else {
+          const record = tableValues.get('opencoven.chat.navigation.v1');
+          if (!navigationFromLog && record.sequence > navigationSequence) {
+            navigationSequence = record.sequence;
+            navigation = record.type === 0 ? undefined : picked?.value;
+          }
+        }
+      }
       checkStoredValues(row, preferences, navigation, true);
       if (/Session Storage/.test(path))
-        for (const key of leveldbKeys(bytes)) row.note('session storage key', key);
+        for (const key of foundKeys) row.note('session storage key', key);
     }
   }
   const names = [...keys.keys()].sort();
