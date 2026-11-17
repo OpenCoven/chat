@@ -55,7 +55,9 @@ the bug is fixed. Currently listed:
 
 ## What is real, and the one stand-in
 
-Packaged Chat starts with an empty profile, and first-run setup is done through the window:
+Current-source CI builds the signed producer commits listed in `scripts/packaged-acceptance/runtime-candidate.json` using `runtime-candidate.mjs`. Each run creates a new Coven home and state directory, verifies source signatures and executable hashes, probes run-budget v1, and records source/build/capability metadata with the observations. Linux app data, configuration, cache and opener registration use that scratch profile. Windows native Chat/WebView storage follows Known Folders rather than environment overrides, so candidate preparation and launch are restricted to fresh GitHub-hosted Windows accounts; this mode refuses local or self-hosted Windows accounts. **Create familiar** still runs through the packaged window. This candidate mode credits unpublished source integration; published CLI download and installation remain separate acceptance. Product installers and governed conformance pins are unchanged.
+
+Published-release runs start with an empty profile, and first-run setup is done through the window:
 **Install Coven** runs Chat's pinned installer (Coven 0.4.10, checked against its SHA-256),
 **Install the engine** runs `coven engine install` for engine 0.9.1, by version and checked
 against its SHA-256, because Coven 0.4.10 alone would choose 0.8.0. **Create familiar** names the

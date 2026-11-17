@@ -27,6 +27,7 @@ import {
   switchRow,
   tableRow,
 } from './rows.mjs';
+import { assertCandidateHost, readRuntime, runtimeEnvironment } from './runtime-candidate.mjs';
 import { Session, Stop, sleep, until } from './webdriver.mjs';
 
 const { values: options } = parseArgs({
@@ -40,6 +41,7 @@ const { values: options } = parseArgs({
     port: { type: 'string', default: '4444' },
     // Windows test builds carry --remote-debugging-port in their WebView2 arguments.
     'debug-port': { type: 'string' },
+    'runtime-candidate': { type: 'string' },
   },
 });
 if (!options.application || !options.out) {
@@ -51,6 +53,11 @@ const out = resolve(options.out);
 mkdirSync(out, { recursive: true });
 const FIRST = 'Astra';
 const SECOND = 'Sage';
+const runtime = options['runtime-candidate']
+  ? readRuntime(resolve(options['runtime-candidate']))
+  : null;
+const runtimeEnv = runtimeEnvironment(runtime);
+if (runtime) assertCandidateHost();
 
 // Product failures already filed. Such a row is reported as a known failure and
 // does not fail the lane; a listed failure that stops reproducing does, so the
@@ -78,6 +85,7 @@ const HAND_RUN = [
 ];
 
 function covenCli() {
+  if (runtime) return runtime.coven.path;
   return process.platform === 'win32'
     ? join(process.env.LOCALAPPDATA ?? '', 'Programs', 'OpenCoven', 'Coven', 'coven.exe')
     : join(homedir(), '.local', 'bin', 'coven');
@@ -89,6 +97,7 @@ function tryRun(command, args) {
       encoding: 'utf8',
       timeout: 30_000,
       stdio: ['ignore', 'pipe', 'pipe'],
+      env: runtimeEnv,
     }).trim();
   } catch (error) {
     return `unavailable (${error.message.split('\n')[0]})`;
@@ -124,6 +133,7 @@ function facts(userAgent) {
     result.packageSha256 = createHash('sha256').update(readFileSync(options.package)).digest('hex');
   }
   result.coven = tryRun(covenCli(), ['--version']);
+  if (runtime) result.runtimeCandidate = runtime;
   return result;
 }
 
@@ -377,9 +387,18 @@ async function setUp(s, setupRow) {
     });
   // Install Coven carries straight on to the engine. The familiar form appears
   // as soon as Coven is in, so wait for the engine step itself to finish.
-  await (await s.one('button', 'Install Coven')).click();
-  await next('Install Coven, then its engine', 'heading', 'Coven engine (done)', 20 * 60_000);
-  setupRow.note('Install Coven', 'Coven and then its engine installed');
+  if (runtime) {
+    await next('Verify isolated candidate Coven', 'heading', 'Coven (done)', 60_000);
+    await next('Verify isolated candidate engine', 'heading', 'Coven engine (done)', 60_000);
+    setupRow.note(
+      'runtime preparation',
+      'Exact unpublished producer commits were built in a fresh disposable profile; this row does not credit published CLI download or installation.',
+    );
+  } else {
+    await (await s.one('button', 'Install Coven')).click();
+    await next('Install Coven, then its engine', 'heading', 'Coven engine (done)', 20 * 60_000);
+    setupRow.note('Install Coven', 'Coven and then its engine installed');
+  }
   setupRow.note('setup progress lines', progress.slice(-40));
   const name = await s.one('textbox', 'Familiar name');
   await name.click();
@@ -441,12 +460,13 @@ const requests = () =>
   readFileSync(modelLog, 'utf8')
     .split('\n')
     .filter((line) => line.includes('"/v1/messages"')).length;
-const opened = registerRecorder(join(out, 'opened.jsonl'));
+const opened = registerRecorder(join(out, 'opened.jsonl'), runtimeEnv);
 const env = {
-  ...process.env,
+  ...runtimeEnv,
   ...opened.env,
   ANTHROPIC_BASE_URL: `http://127.0.0.1:${fixture.port}`,
   ANTHROPIC_API_KEY: 'sk-ant-packaged-acceptance-fixture',
+  ...(runtime ? { COVEN_CODE_API_BASE: `http://127.0.0.1:${fixture.port}` } : {}),
 };
 const rows = [];
 let driver;
