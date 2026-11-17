@@ -78,6 +78,7 @@ pub(super) fn settle(
         "continuation": {"session_id": receipt.continuation.session_id, "resumable": settled && receipt.continuation.resumable},
         "is_error": receipt.is_error, "outcome": receipt.outcome,
         "settled": settled, "duration_ms": receipt.duration_ms,
+        "process_exit_code": exit_code,
     }))
 }
 
@@ -92,6 +93,12 @@ mod tests {
     }
     #[test]
     fn continuation_requires_final_receipt_and_expected_process_settlement() {
+        for exit in [None, Some(0), Some(1), Some(7)] {
+            assert_eq!(
+                settle(&receipt(), "ledger", 10, exit).unwrap()["process_exit_code"],
+                json!(exit)
+            );
+        }
         assert_eq!(
             settle(&receipt(), "ledger", 10, Some(1)).unwrap()["continuation"]["resumable"],
             true
