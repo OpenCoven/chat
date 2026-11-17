@@ -3,7 +3,7 @@
   "purpose": "unmerged-run-budget-qualification",
   "coven": {
     "repository": "OpenCoven/coven",
-    "commit": "28e52da5f1027715f45b5ab32d3100ffac13702b",
+    "commit": "1233592ce4e4f2c151cb0a33bf6981a005d5b417",
     "toolchain": "1.99.1"
   },
   "engine": {
