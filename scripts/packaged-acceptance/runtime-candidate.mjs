@@ -11,9 +11,12 @@ import {
   realpathSync,
   writeFileSync,
 } from 'node:fs';
-import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
+import { dirname, isAbsolute, join, relative, resolve, win32 } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
+import { prepareLinuxBuildDependencies } from './linux-build-deps.mjs';
+
+export { readVerifiedPackage } from './linux-build-deps.mjs';
 
 const definitionFile = join(dirname(fileURLToPath(import.meta.url)), 'runtime-candidate.json');
 const fail = (message) => {
@@ -49,12 +52,11 @@ export function readDefinition(path = definitionFile) {
   return value;
 }
 
-export function runtimeEnvironment(runtime, inherited = process.env) {
+export function runtimeEnvironment(runtime, inherited = process.env, platform = process.platform) {
   if (!runtime) return { ...inherited };
   const env = {
     ...inherited,
     HOME: runtime.home,
-    USERPROFILE: runtime.home,
     COVEN_HOME: runtime.covenHome,
     COVEN_ENGINE_BIN: runtime.engine.path,
     COVEN_CODE_DISABLE_MODELS_FETCH: '1',
@@ -63,9 +65,15 @@ export function runtimeEnvironment(runtime, inherited = process.env) {
     XDG_CACHE_HOME: join(runtime.home, '.cache'),
     XDG_STATE_HOME: join(runtime.home, '.local', 'state'),
   };
-  if (process.platform === 'win32') {
-    env.APPDATA = join(runtime.home, 'AppData', 'Roaming');
-    env.LOCALAPPDATA = join(runtime.home, 'AppData', 'Local');
+  if (platform === 'win32') {
+    // Keep the fresh hosted account's native Known Folder environment intact.
+    // A synthetic USERPROFILE can make app_local_data_dir unavailable.
+    const path = windowsEnv(inherited, 'PATH') ?? '';
+    for (const key of Object.keys(env)) if (key.toUpperCase() === 'PATH') delete env[key];
+    const candidate = runtime.coven?.path
+      ? win32.dirname(runtime.coven.path)
+      : win32.join(runtime.home, '.local', 'bin');
+    env.PATH = `${candidate};${path}`;
   }
   for (const key of [
     'OPENAI_API_KEY',
@@ -77,6 +85,63 @@ export function runtimeEnvironment(runtime, inherited = process.env) {
   ])
     delete env[key];
   return env;
+}
+
+function windowsEnv(env, name) {
+  const key = Object.keys(env)
+    .filter((key) => key.toUpperCase() === name)
+    .sort()[0];
+  return key === undefined ? undefined : env[key];
+}
+
+export function verifyWindowsCandidateSelection(
+  runtime,
+  env,
+  platform = process.platform,
+  exists = existsSync,
+) {
+  if (platform !== 'win32') return null;
+  const profile = windowsEnv(env, 'USERPROFILE');
+  const roaming = windowsEnv(env, 'APPDATA');
+  const local = windowsEnv(env, 'LOCALAPPDATA');
+  if (
+    ![profile, roaming, local, runtime.coven.path].every(
+      (path) => typeof path === 'string' && win32.isAbsolute(path),
+    )
+  )
+    fail('Windows candidate requires the native hosted account profile');
+  const directory = win32.dirname(runtime.coven.path);
+  if ((windowsEnv(env, 'PATH') ?? '').split(';')[0].toLowerCase() !== directory.toLowerCase())
+    fail('Windows candidate must be first on PATH');
+  const npm = (root) =>
+    win32.join(
+      root,
+      '@opencoven',
+      'cli',
+      'node_modules',
+      '@opencoven',
+      'cli-windows',
+      'bin',
+      'coven.exe',
+    );
+  // Keep this list aligned with coven_runtime.rs::cli_candidates. These are
+  // searched before the candidate directory's direct coven.exe PATH entry.
+  const checkedAbsent = [
+    npm(win32.join(profile, '.local', 'lib', 'node_modules')),
+    win32.join(local, 'Programs', 'OpenCoven', 'Coven', 'coven.exe'),
+    npm(win32.join(roaming, 'npm', 'node_modules')),
+    win32.join(profile, '.local', 'bin', 'coven.exe'),
+    win32.join(profile, '.cargo', 'bin', 'coven.exe'),
+    npm(win32.join(directory, 'node_modules')),
+  ];
+  for (const path of checkedAbsent)
+    if (exists(path)) fail(`Existing Windows CLI shadows candidate: ${path}`);
+  return {
+    candidate: runtime.coven.path,
+    checkedAbsent,
+    pathPrefix: directory,
+    nativeProfilePreserved: true,
+  };
 }
 
 export function assertCandidateHost(platform = process.platform, env = process.env) {
@@ -127,8 +192,10 @@ function run(command, args, cwd, env, log) {
     maxBuffer: 32 * 1024 * 1024,
   });
   writeFileSync(log, `${result.stdout ?? ''}${result.stderr ?? ''}`, { flag: 'a' });
-  if (result.error || result.status !== 0)
+  if (result.error || result.status !== 0) {
+    console.error(`${result.stdout ?? ''}${result.stderr ?? ''}`.slice(-16 * 1024));
     fail(`Candidate command failed (${result.status ?? result.error?.code}); retained log: ${log}`);
+  }
   return result.stdout;
 }
 
@@ -171,6 +238,11 @@ export async function prepareRuntime(output, definition = readDefinition()) {
   const buildEnv = { ...process.env };
   delete buildEnv.GITHUB_TOKEN;
   delete buildEnv.GH_TOKEN;
+  const linuxBuild = await prepareLinuxBuildDependencies(root, buildEnv, run);
+  if (linuxBuild) {
+    Object.assign(buildEnv, linuxBuild.environment);
+    metadata.linuxBuildDependencies = linuxBuild.receipt;
+  }
   for (const key of ['coven', 'engine']) {
     const producer = definition[key];
     const log = join(root, `${key}-build.log`);
@@ -246,6 +318,7 @@ export async function prepareRuntime(output, definition = readDefinition()) {
     };
   }
   Object.assign(env, runtimeEnvironment(metadata));
+  metadata.windowsSelection = verifyWindowsCandidateSelection(metadata, env);
   const caps = JSON.parse(
     run(metadata.engine.path, ['--run-budget-capabilities'], root, env, join(root, 'probes.log')),
   );

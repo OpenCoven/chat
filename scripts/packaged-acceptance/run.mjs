@@ -27,7 +27,12 @@ import {
   switchRow,
   tableRow,
 } from './rows.mjs';
-import { assertCandidateHost, readRuntime, runtimeEnvironment } from './runtime-candidate.mjs';
+import {
+  assertCandidateHost,
+  readRuntime,
+  runtimeEnvironment,
+  verifyWindowsCandidateSelection,
+} from './runtime-candidate.mjs';
 import { Session, Stop, sleep, until } from './webdriver.mjs';
 
 const { values: options } = parseArgs({
@@ -58,6 +63,12 @@ const runtime = options['runtime-candidate']
   : null;
 const runtimeEnv = runtimeEnvironment(runtime);
 if (runtime) assertCandidateHost();
+const runtimeSelection = runtime ? verifyWindowsCandidateSelection(runtime, runtimeEnv) : null;
+if (runtimeSelection)
+  writeFileSync(
+    join(out, 'runtime-selection.json'),
+    `${JSON.stringify(runtimeSelection, null, 2)}\n`,
+  );
 
 // Product failures already filed. Such a row is reported as a known failure and
 // does not fail the lane; a listed failure that stops reproducing does, so the
@@ -134,6 +145,7 @@ function facts(userAgent) {
   }
   result.coven = tryRun(covenCli(), ['--version']);
   if (runtime) result.runtimeCandidate = runtime;
+  if (runtimeSelection) result.runtimeSelection = runtimeSelection;
   return result;
 }
 

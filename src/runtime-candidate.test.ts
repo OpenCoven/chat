@@ -10,7 +10,7 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, win32 } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { afterEach, expect, it } from 'vitest';
 import {
@@ -18,7 +18,9 @@ import {
   prepareRuntime,
   readDefinition,
   readRuntime,
+  readVerifiedPackage,
   runtimeEnvironment,
+  verifyWindowsCandidateSelection,
   // @ts-expect-error Node qualification module has no renderer declarations.
 } from '../scripts/packaged-acceptance/runtime-candidate.mjs';
 
@@ -107,6 +109,64 @@ it('refuses Windows candidate launches outside a disposable hosted runner accoun
   ).not.toThrow();
 });
 
+it('preserves native Windows profile resolution and selects the candidate CLI through PATH', () => {
+  const runtime = {
+    home: 'D:\\qa\\home',
+    covenHome: 'D:\\qa\\state',
+    coven: { path: 'D:\\qa\\home\\.local\\bin\\coven.exe' },
+    engine: { path: 'D:\\qa\\engine.exe' },
+  };
+  for (const pathKey of ['PATH', 'Path']) {
+    const inherited = {
+      HOME: 'C:\\Users\\runneradmin',
+      USERPROFILE: 'C:\\Users\\runneradmin',
+      APPDATA: 'C:\\Users\\runneradmin\\AppData\\Roaming',
+      LOCALAPPDATA: 'C:\\Users\\runneradmin\\AppData\\Local',
+      [pathKey]: 'C:\\Windows\\System32',
+    };
+    const env = runtimeEnvironment(runtime, inherited, 'win32');
+    expect(env.USERPROFILE).toBe(inherited.USERPROFILE);
+    expect(env.APPDATA).toBe(inherited.APPDATA);
+    expect(env.LOCALAPPDATA).toBe(inherited.LOCALAPPDATA);
+    expect(env.PATH).toBe(`${win32.dirname(runtime.coven.path)};C:\\Windows\\System32`);
+    expect(Object.keys(env).filter((key) => key.toUpperCase() === 'PATH')).toEqual(['PATH']);
+    expect(env.HOME).toBe(runtime.home);
+    expect(env.COVEN_HOME).toBe(runtime.covenHome);
+    expect(env.COVEN_ENGINE_BIN).toBe(runtime.engine.path);
+  }
+});
+
+it('refuses a Windows CLI that would shadow the checked candidate before PATH discovery', () => {
+  const runtime = {
+    home: 'D:\\qa\\home',
+    covenHome: 'D:\\qa\\state',
+    coven: { path: 'D:\\qa\\home\\.local\\bin\\coven.exe' },
+    engine: { path: 'D:\\qa\\engine.exe' },
+  };
+  const env = runtimeEnvironment(
+    runtime,
+    {
+      USERPROFILE: 'C:\\Users\\runneradmin',
+      APPDATA: 'C:\\Users\\runneradmin\\AppData\\Roaming',
+      LOCALAPPDATA: 'C:\\Users\\runneradmin\\AppData\\Local',
+      Path: 'C:\\Windows\\System32',
+    },
+    'win32',
+  );
+  const clean = verifyWindowsCandidateSelection(runtime, env, 'win32', () => false);
+  expect(clean.candidate).toBe(runtime.coven.path);
+  expect(clean.checkedAbsent).toContain('C:\\Users\\runneradmin\\.cargo\\bin\\coven.exe');
+  for (const shadow of [
+    'C:\\Users\\runneradmin\\.local\\bin\\coven.exe',
+    'C:\\Users\\runneradmin\\AppData\\Local\\Programs\\OpenCoven\\Coven\\coven.exe',
+    'D:\\qa\\home\\.local\\bin\\node_modules\\@opencoven\\cli\\node_modules\\@opencoven\\cli-windows\\bin\\coven.exe',
+  ]) {
+    expect(() =>
+      verifyWindowsCandidateSelection(runtime, env, 'win32', (path: string) => path === shadow),
+    ).toThrow('shadows');
+  }
+});
+
 it.skipIf(process.platform === 'win32')(
   'registers and probes the Linux opener in the app profile',
   () => {
@@ -175,4 +235,19 @@ it('refuses arbitrary source repositories and noncanonical candidate commits', (
     writeFileSync(path, JSON.stringify({ ...readDefinition(), coven }));
     expect(() => readDefinition(path)).toThrow('candidate identity');
   }
+});
+
+it('checks Linux build-header download bytes before extraction', async () => {
+  const bytes = Buffer.from('qualification headers');
+  const sha = createHash('sha256').update(bytes).digest('hex');
+  await expect(readVerifiedPackage(new Response(bytes), bytes.length, sha)).resolves.toEqual(bytes);
+  await expect(
+    readVerifiedPackage(new Response(bytes), bytes.length, '0'.repeat(64)),
+  ).rejects.toThrow('digest');
+  await expect(readVerifiedPackage(new Response(bytes), bytes.length - 1, sha)).rejects.toThrow(
+    'size',
+  );
+  await expect(readVerifiedPackage(new Response(bytes), bytes.length + 1, sha)).rejects.toThrow(
+    'size',
+  );
 });
