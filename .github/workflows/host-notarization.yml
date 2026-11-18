@@ -1,0 +1,49 @@
+name: Notarize the approved desktop installer
+
+on:
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: approved-desktop-notarization
+  cancel-in-progress: false
+
+jobs:
+  notarize:
+    if: github.repository == 'OpenCoven/chat' && github.ref == 'refs/heads/main' && github.actor == 'BunsDev'
+    runs-on: macos-15
+    timeout-minutes: 45
+    environment: release-signing
+    steps:
+      - name: Retrieve the single approved input and verify its digest
+        shell: bash
+        env:
+          DOWNLOAD: ${{ secrets.HOST_NOTARY_DOWNLOAD_011 }}
+        run: |
+          set -euo pipefail
+          umask 077
+          case "$DOWNLOAD" in
+            https://release-assets.githubusercontent.com/*) ;;
+            *) echo "::error::The private release download is missing or expired."; exit 1 ;;
+          esac
+          curl --fail --silent --proto '=https' --output "$RUNNER_TEMP/host.zip" --url "$DOWNLOAD"
+          cd "$RUNNER_TEMP"
+          printf '%s  %s\n' 'c72e7cb19ffdf1a7b4e73d7b65407e64e147643ebf4da913944618e914f3c762' host.zip | shasum -a 256 -c -
+      - name: Submit verified bytes to Apple
+        shell: bash
+        env:
+          KEY_DATA: ${{ secrets.APPLE_API_KEY_BASE64 }}
+          KEY_ID: ${{ secrets.APPLE_API_KEY }}
+          ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+        run: |
+          set -euo pipefail
+          umask 077
+          cd "$RUNNER_TEMP"
+          trap 'rm -f host.zip notary-key.p8' EXIT
+          printf %s "$KEY_DATA" | base64 -D > notary-key.p8
+          unset KEY_DATA
+          xcrun notarytool submit host.zip --key "$PWD/notary-key.p8" --key-id "$KEY_ID" --issuer "$ISSUER" --wait --timeout 35m --output-format json > submission.json
+          status=$(jq -r '.status' submission.json)
+          printf 'Apple submission %s: %s\n' "$(jq -r '.id' submission.json)" "$status"
+          test "$status" = Accepted
