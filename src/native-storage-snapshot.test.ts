@@ -53,6 +53,129 @@ function put(name: string, bytes: string | Buffer) {
   return path;
 }
 
+function varintBytes(input: number) {
+  let value = input;
+  const varint = [];
+  do {
+    const byte = value & 0x7f;
+    value = Math.floor(value / 128);
+    varint.push(value ? byte | 0x80 : byte);
+  } while (value);
+  return Buffer.from(varint);
+}
+
+function leveldbRecord(
+  key: string,
+  value: string,
+  encoding: BufferEncoding = 'latin1',
+  valuePrefix = Buffer.alloc(0),
+) {
+  const payload = Buffer.concat([valuePrefix, Buffer.from(value, encoding)]);
+  return Buffer.concat([
+    Buffer.from(`_http://tauri.localhost\0\x01${key}`, 'latin1'),
+    varintBytes(payload.length),
+    payload,
+  ]);
+}
+
+function leveldbTableEntry(
+  key: string,
+  value: string,
+  encoding: BufferEncoding,
+  valuePrefix: Buffer,
+  sequence = 1,
+  type = 1,
+) {
+  const userKey = Buffer.from(`_http://tauri.localhost\0\x01${key}`, 'latin1');
+  const trailer = Buffer.alloc(8);
+  trailer.writeBigUInt64LE((BigInt(sequence) << 8n) | BigInt(type));
+  const encodedKey = Buffer.concat([userKey, trailer]);
+  const payload = Buffer.concat([valuePrefix, Buffer.from(value, encoding)]);
+  return leveldbTable(
+    Buffer.concat([
+      varintBytes(0),
+      varintBytes(encodedKey.length),
+      varintBytes(payload.length),
+      encodedKey,
+      payload,
+    ]),
+    encoding === 'utf16le',
+  );
+}
+
+function leveldbSharedTableEntries(entries: { key: string; value: string; sequence: number }[]) {
+  const output = [];
+  let previous = Buffer.alloc(0);
+  for (const { key, value, sequence } of entries) {
+    const userKey = Buffer.from(`_http://tauri.localhost\0\x01${key}`, 'latin1');
+    const trailer = Buffer.alloc(8);
+    trailer.writeBigUInt64LE((BigInt(sequence) << 8n) | 1n);
+    const internalKey = Buffer.concat([userKey, trailer]);
+    let shared = 0;
+    while (shared < previous.length && previous[shared] === internalKey[shared]) shared += 1;
+    const suffix = internalKey.subarray(shared);
+    const payload = Buffer.concat([Buffer.from([1]), Buffer.from(value, 'latin1')]);
+    output.push(
+      varintBytes(shared),
+      varintBytes(suffix.length),
+      varintBytes(payload.length),
+      suffix,
+      payload,
+    );
+    previous = internalKey;
+  }
+  return leveldbTable(Buffer.concat(output));
+}
+
+function snappyLiteral(bytes: Buffer) {
+  const length = bytes.length - 1;
+  const tag =
+    length < 60
+      ? Buffer.from([length << 2])
+      : length < 256
+        ? Buffer.from([60 << 2, length])
+        : Buffer.from([61 << 2, length & 0xff, length >> 8]);
+  return Buffer.concat([varintBytes(bytes.length), tag, bytes]);
+}
+
+function leveldbTable(entries: Buffer, compressed = false) {
+  const blockContents = (body: Buffer, restartCount = 1) => {
+    const restarts = Buffer.alloc(4 + restartCount * 4);
+    if (restartCount) restarts.writeUInt32LE(0, 0);
+    restarts.writeUInt32LE(restartCount, restartCount * 4);
+    return Buffer.concat([body, restarts]);
+  };
+  const storedBlock = (contents: Buffer, useCompression = false) => {
+    const stored = useCompression ? snappyLiteral(contents) : contents;
+    return Buffer.concat([stored, Buffer.from([useCompression ? 1 : 0]), Buffer.alloc(4)]);
+  };
+  const data = storedBlock(blockContents(entries), compressed);
+  const metaOffset = data.length;
+  const meta = storedBlock(blockContents(Buffer.alloc(0), 0));
+  const indexOffset = metaOffset + meta.length;
+  const handle = Buffer.concat([varintBytes(0), varintBytes(data.length - 5)]);
+  const indexEntry = Buffer.concat([
+    varintBytes(0),
+    varintBytes(1),
+    varintBytes(handle.length),
+    Buffer.from('z'),
+    handle,
+  ]);
+  const index = storedBlock(blockContents(indexEntry));
+  const footerHandles = Buffer.concat([
+    varintBytes(metaOffset),
+    varintBytes(meta.length - 5),
+    varintBytes(indexOffset),
+    varintBytes(index.length - 5),
+  ]);
+  const footer = Buffer.concat([
+    footerHandles,
+    Buffer.alloc(40 - footerHandles.length),
+    Buffer.from('57fb808b247547db', 'hex'),
+  ]);
+  return Buffer.concat([data, meta, index, footer]);
+}
+
 beforeEach(() => {
   root = fs.mkdtempSync(join(tmpdir(), 'chat-storage-'));
   profile = join(root, 'ai.opencoven.chat', 'EBWebView');
@@ -61,7 +184,7 @@ beforeEach(() => {
   enumerations = 0;
   put(
     'Default/Local Storage/leveldb/000001.log',
-    '_http://tauri.localhost\0\x01opencoven.chat.preferences.v1\0{"inspectorWidth":400}',
+    leveldbRecord('opencoven.chat.preferences.v1', '{"inspectorWidth":400}'),
   );
 });
 afterEach(() => {
@@ -194,10 +317,7 @@ test('reads a preferences value that holds an object of its own (Windows, #641)'
   });
   put(
     'Default/Local Storage/leveldb/000001.log',
-    Buffer.concat([
-      Buffer.from('_http://tauri.localhost\0\x01opencoven.chat.preferences.v1\0\0', 'latin1'),
-      Buffer.from(value, 'utf16le'),
-    ]),
+    leveldbRecord('opencoven.chat.preferences.v1', value, 'utf16le', Buffer.from([0])),
   );
   const row = await storageRow();
   expect(row.status).not.toBe('failed');
@@ -207,6 +327,188 @@ test('reads a preferences value that holds an object of its own (Windows, #641)'
   expect(
     row.observations.filter((o: { label: string }) => o.label === 'inspectorWidth is a number'),
   ).not.toContainEqual(expect.objectContaining({ ok: false }));
+});
+
+test.each([
+  {
+    encoding: 'latin1' as const,
+    value:
+      '{"inspectorWidth":610,"panels":[{"label":"brace } quote \\" slash \\\\"}],"models":{"coven-code":""}}',
+  },
+  {
+    encoding: 'utf16le' as const,
+    value:
+      '{"inspectorWidth":620,"panels":[{"label":"brace { quote \\" slash \\\\"}],"models":{"coven-code":""}}',
+  },
+])(
+  'reads nested arrays and escaped JSON from a $encoding LevelDB value',
+  async ({ encoding, value }) => {
+    put(
+      'Default/Local Storage/leveldb/000001.log',
+      leveldbRecord(
+        'opencoven.chat.preferences.v1',
+        value,
+        encoding,
+        encoding === 'utf16le' ? Buffer.from([0]) : Buffer.alloc(0),
+      ),
+    );
+
+    const row = await storageRow();
+
+    expect(row.status).not.toBe('failed');
+    expect(row.observations).toContainEqual(
+      expect.objectContaining({
+        label: 'stored preferences',
+        value:
+          encoding === 'latin1'
+            ? {
+                inspectorWidth: 610,
+                panels: [{ label: 'brace } quote " slash \\' }],
+                models: { 'coven-code': '' },
+              }
+            : {
+                inspectorWidth: 620,
+                panels: [{ label: 'brace { quote " slash \\' }],
+                models: { 'coven-code': '' },
+              },
+      }),
+    );
+  },
+);
+
+test('reconstructs a shared-prefix SSTable entry and selects by internal sequence', async () => {
+  fs.rmSync(join(profile, 'Default/Local Storage/leveldb/000001.log'));
+  put(
+    'Default/Local Storage/leveldb/000002.ldb',
+    leveldbSharedTableEntries([
+      {
+        key: 'opencoven.chat.navigation.v1',
+        value: '{"familiarId":"familiar-1"}',
+        sequence: 9,
+      },
+      {
+        key: 'opencoven.chat.preferences.v1',
+        value: '{"inspectorWidth":650,"models":{"coven-code":""}}',
+        sequence: 12,
+      },
+      {
+        key: 'opencoven.chat.preferences.v1',
+        value: '{"inspectorWidth":300}',
+        sequence: 4,
+      },
+    ]),
+  );
+
+  const row = await storageRow();
+
+  expect(row.status).not.toBe('failed');
+  expect(row.observations).toContainEqual(
+    expect.objectContaining({
+      label: 'stored preferences',
+      value: { inspectorWidth: 650, models: { 'coven-code': '' } },
+    }),
+  );
+});
+
+test('selects the newest internal sequence across SSTable files, not the last filename', async () => {
+  fs.rmSync(join(profile, 'Default/Local Storage/leveldb/000001.log'));
+  put(
+    'Default/Local Storage/leveldb/000002.ldb',
+    leveldbTableEntry(
+      'opencoven.chat.preferences.v1',
+      '{"inspectorWidth":660}',
+      'latin1',
+      Buffer.from([1]),
+      20,
+    ),
+  );
+  put(
+    'Default/Local Storage/leveldb/000099.ldb',
+    leveldbTableEntry(
+      'opencoven.chat.preferences.v1',
+      '{"inspectorWidth":200}',
+      'latin1',
+      Buffer.from([1]),
+      3,
+    ),
+  );
+
+  const row = await storageRow();
+
+  expect(row.status).not.toBe('failed');
+  expect(row.observations).toContainEqual(
+    expect.objectContaining({ label: 'stored preferences', value: { inspectorWidth: 660 } }),
+  );
+});
+
+test('a newer SSTable tombstone suppresses an older value in another file', async () => {
+  fs.rmSync(join(profile, 'Default/Local Storage/leveldb/000001.log'));
+  put(
+    'Default/Local Storage/leveldb/000002.ldb',
+    leveldbTableEntry(
+      'opencoven.chat.preferences.v1',
+      '{"inspectorWidth":200}',
+      'latin1',
+      Buffer.from([1]),
+      3,
+    ),
+  );
+  put(
+    'Default/Local Storage/leveldb/000003.ldb',
+    leveldbTableEntry('opencoven.chat.preferences.v1', '', 'latin1', Buffer.alloc(0), 20, 0),
+  );
+
+  const row = await storageRow();
+
+  expect(row.status).toBe('failed');
+  expect(row.observations).toContainEqual(
+    expect.objectContaining({ label: 'inspectorWidth is a number', ok: false }),
+  );
+  expect(row.observations).not.toContainEqual(
+    expect.objectContaining({ label: 'stored preferences', value: { inspectorWidth: 200 } }),
+  );
+});
+
+test.each([
+  ['latin1' as const, Buffer.from([1]), 630],
+  ['utf16le' as const, Buffer.from([0]), 640],
+])(
+  'reads a framed $0 preference value from an SSTable .ldb entry',
+  async (encoding, tag, width) => {
+    const value = JSON.stringify({ inspectorWidth: width, models: { 'coven-code': '' } });
+    fs.rmSync(join(profile, 'Default/Local Storage/leveldb/000001.log'));
+    put(
+      'Default/Local Storage/leveldb/000002.ldb',
+      leveldbTableEntry('opencoven.chat.preferences.v1', value, encoding, tag),
+    );
+
+    const row = await storageRow();
+
+    expect(row.status).not.toBe('failed');
+    expect(row.observations).toContainEqual(
+      expect.objectContaining({
+        label: 'stored preferences',
+        value: { inspectorWidth: width, models: { 'coven-code': '' } },
+      }),
+    );
+  },
+);
+
+test.each([
+  ['balanced but malformed', '{"inspectorWidth":600,}'],
+  ['incomplete', '{"inspectorWidth":600,"models":{}'],
+] as const)('fails a %s LevelDB preference record', async (_name, value) => {
+  put(
+    'Default/Local Storage/leveldb/000001.log',
+    leveldbRecord('opencoven.chat.preferences.v1', value),
+  );
+
+  const row = await storageRow();
+
+  expect(row.status).toBe('failed');
+  expect(row.observations).toContainEqual(
+    expect.objectContaining({ label: 'inspectorWidth is a number', ok: false }),
+  );
 });
 
 test('an object around a key is the innermost one whose braces enclose it', () => {
@@ -219,11 +521,184 @@ test('an object around a key is the innermost one whose braces enclose it', () =
   expect(objectAround('"inspectorWidth":1}', 0)).toBeUndefined();
 });
 
-test('an unexpected storage key remains a failure', async () => {
+test('object extraction stays within its finite search bounds', () => {
+  const distantStart = `{"padding":"${'x'.repeat(32)}","inspectorWidth":1}`;
+  expect(objectAround(distantStart, distantStart.indexOf('"inspectorWidth"'), 16)).toBeUndefined();
+
+  const distantEnd = `{"inspectorWidth":1,"padding":"${'x'.repeat(64)}"}`;
+  expect(objectAround(distantEnd, distantEnd.indexOf('"inspectorWidth"'), 16)).toBeUndefined();
+});
+
+test('reads the newest complete preference object when a LevelDB log holds multiple records', async () => {
+  put(
+    'Default/Local Storage/leveldb/000001.log',
+    Buffer.concat([
+      leveldbRecord('opencoven.chat.preferences.v1', '{"inspectorWidth":400}'),
+      leveldbRecord(
+        'opencoven.chat.preferences.v1',
+        '{"inspectorWidth":640,"models":{"coven-code":""}}',
+      ),
+    ]),
+  );
+
+  const row = await storageRow();
+
+  expect(row.status).not.toBe('failed');
+  expect(row.observations).toContainEqual(
+    expect.objectContaining({
+      label: 'stored preferences',
+      value: { inspectorWidth: 640, models: { 'coven-code': '' } },
+    }),
+  );
+});
+
+test('does not reuse an older preference value when the latest LevelDB record is malformed', async () => {
+  put(
+    'Default/Local Storage/leveldb/000001.log',
+    Buffer.concat([
+      leveldbRecord('opencoven.chat.preferences.v1', '{"inspectorWidth":400}'),
+      leveldbRecord('opencoven.chat.preferences.v1', '{"models":{"coven-code":""}}'),
+    ]),
+  );
+
+  const row = await storageRow();
+
+  expect(row.status).toBe('failed');
+  expect(row.observations).toContainEqual(
+    expect.objectContaining({ label: 'inspectorWidth is a number', ok: false }),
+  );
+  expect(row.observations).not.toContainEqual(
+    expect.objectContaining({ label: 'stored preferences', value: { inspectorWidth: 400 } }),
+  );
+});
+
+test('does not reuse a preference value from an older LevelDB file', async () => {
+  put(
+    'Default/Local Storage/leveldb/000001.log',
+    leveldbRecord('opencoven.chat.preferences.v1', '{"inspectorWidth":400}'),
+  );
   put(
     'Default/Local Storage/leveldb/000002.log',
-    '_http://tauri.localhost\0\x01conversation.body\0private',
+    leveldbRecord('opencoven.chat.preferences.v1', '{"models":{"coven-code":""}}'),
   );
+
+  const row = await storageRow();
+
+  expect(row.status).toBe('failed');
+  expect(row.observations).toContainEqual(
+    expect.objectContaining({ label: 'inspectorWidth is a number', ok: false }),
+  );
+  expect(row.observations).not.toContainEqual(
+    expect.objectContaining({ label: 'stored preferences', value: { inspectorWidth: 400 } }),
+  );
+});
+
+test.each([
+  ['an origin marker', '_http marker'],
+  ['the preference key', 'opencoven.chat.preferences.v1'],
+] as const)('does not treat %s inside a JSON string as LevelDB framing', async (_name, label) => {
+  const value = JSON.stringify({
+    inspectorWidth: 640,
+    label,
+    models: { 'coven-code': '' },
+  });
+  put(
+    'Default/Local Storage/leveldb/000001.log',
+    leveldbRecord('opencoven.chat.preferences.v1', value),
+  );
+
+  const row = await storageRow();
+
+  expect(row.status).not.toBe('failed');
+  expect(row.observations).toContainEqual(
+    expect.objectContaining({
+      label: 'stored preferences',
+      value: { inspectorWidth: 640, label, models: { 'coven-code': '' } },
+    }),
+  );
+});
+
+test('does not treat a UTF-16LE U+0100 code point as a LevelDB record delimiter', async () => {
+  const value = JSON.stringify({
+    inspectorWidth: 640,
+    label: 'Ā',
+    models: { 'coven-code': '' },
+  });
+  put(
+    'Default/Local Storage/leveldb/000001.log',
+    leveldbRecord('opencoven.chat.preferences.v1', value, 'utf16le', Buffer.from([0])),
+  );
+
+  const row = await storageRow();
+
+  expect(row.status).not.toBe('failed');
+  expect(row.observations).toContainEqual(
+    expect.objectContaining({
+      label: 'stored preferences',
+      value: { inspectorWidth: 640, label: 'Ā', models: { 'coven-code': '' } },
+    }),
+  );
+});
+
+test('extracts the complete preference object when a nested object repeats inspectorWidth', async () => {
+  const value = {
+    inspectorWidth: 640,
+    panel: { inspectorWidth: 200 },
+    models: { 'coven-code': '' },
+  };
+  put(
+    'Default/Local Storage/leveldb/000001.log',
+    leveldbRecord('opencoven.chat.preferences.v1', JSON.stringify(value)),
+  );
+
+  const row = await storageRow();
+
+  expect(row.status).not.toBe('failed');
+  expect(row.observations).toContainEqual(
+    expect.objectContaining({ label: 'stored preferences', value }),
+  );
+});
+
+test.each([
+  ['incomplete', '{"panel":{"inspectorWidth":200}'],
+  ['malformed', '{"panel":{"inspectorWidth":200},'],
+] as const)(
+  'does not accept a valid nested object from an %s preference record',
+  async (_name, value) => {
+    put(
+      'Default/Local Storage/leveldb/000001.log',
+      leveldbRecord('opencoven.chat.preferences.v1', value),
+    );
+
+    const row = await storageRow();
+
+    expect(row.status).toBe('failed');
+    expect(row.observations).toContainEqual(
+      expect.objectContaining({ label: 'inspectorWidth is a number', ok: false }),
+    );
+  },
+);
+
+test.each([
+  ['array wrapper', '[{"inspectorWidth":200}]'],
+  ['extra opening brace', '{{"inspectorWidth":200}'],
+  ['printable prefix', 'x{"inspectorWidth":200}'],
+] as const)('does not accept a preference object with an %s', async (_name, value) => {
+  put(
+    'Default/Local Storage/leveldb/000001.log',
+    leveldbRecord('opencoven.chat.preferences.v1', value),
+  );
+
+  const row = await storageRow();
+
+  expect(row.status).toBe('failed');
+  expect(row.observations).toContainEqual(
+    expect.objectContaining({ label: 'inspectorWidth is a number', ok: false }),
+  );
+});
+
+test('an unexpected storage key remains a failure', async () => {
+  put('Default/Local Storage/leveldb/000002.log', leveldbRecord('conversation.body', 'private'));
   const row = await storageRow();
   expect(row.status).toBe('failed');
   expect(row.observations).toContainEqual(
@@ -238,7 +713,7 @@ test('an unexpected storage key remains a failure', async () => {
 test('a privacy failure survives a later disappearing file without a retry', async () => {
   const invalid = put(
     'Default/Local Storage/leveldb/000002.log',
-    '_http://tauri.localhost\0\x01conversation.body\0private',
+    leveldbRecord('conversation.body', 'private'),
   );
   const temporary = put('Default/Preferences.tmp', 'temporary bytes');
   boundary.read = (path) => {
@@ -283,7 +758,7 @@ test.each(['needle', 'key'] as const)(
         ? put('Default/a-forbidden.tmp', 'three steps')
         : put(
             'Default/Local Storage/leveldb/000002.log',
-            '_http://tauri.localhost\0\x01conversation.body\0private',
+            leveldbRecord('conversation.body', 'private'),
           );
     const later =
       kind === 'needle'
@@ -309,15 +784,18 @@ test.each(['needle', 'key'] as const)(
 test.each(['navigation', 'needle-in-key-file', 'preferences'] as const)(
   'an interrupted scan preserves invalid %s already read',
   async (kind) => {
-    const bytes =
+    const record =
       kind === 'navigation'
-        ? '_http://tauri.localhost\0\x01opencoven.chat.navigation.v1\0{"familiarId":"f","body":"private conversation"}'
+        ? leveldbRecord(
+            'opencoven.chat.navigation.v1',
+            '{"familiarId":"f","body":"private conversation"}',
+          )
         : kind === 'preferences'
-          ? '_http://tauri.localhost\0\x01opencoven.chat.preferences.v1\0{"inspectorWidth":"private"}'
-          : '_http://tauri.localhost\0\x01opencoven.chat.navigation.v1\0{"familiarId":"three steps"}';
+          ? leveldbRecord('opencoven.chat.preferences.v1', '{"inspectorWidth":"private"}')
+          : leveldbRecord('opencoven.chat.navigation.v1', '{"familiarId":"three steps"}');
     if (kind === 'preferences')
       fs.unlinkSync(join(profile, 'Default/Local Storage/leveldb/000001.log'));
-    const found = put('Default/Local Storage/leveldb/000002.log', bytes);
+    const found = put('Default/Local Storage/leveldb/000002.log', record);
     const later = put('Default/Local Storage/leveldb/000003.log', 'temporary');
     boundary.read = (path) => {
       if (path !== later) return;
