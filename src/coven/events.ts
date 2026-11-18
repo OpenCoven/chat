@@ -120,16 +120,79 @@ function claudeCodeTooOld(error: string): boolean {
   return error.includes("unknown option '--permission-mode'");
 }
 
+export type RunBudgetEvidence = Readonly<{
+  limit: number;
+  consumed: number;
+  source: 'explicit' | 'agent' | 'configured' | 'default';
+  unfinished: boolean;
+  canContinue: boolean;
+  sessionId: string;
+}>;
+
+function appliedBudget(event: CovenRunEvent, sessionId: string): RunBudgetEvidence | undefined {
+  const budget = event.turn_budget;
+  const continuation = event.continuation;
+  if (
+    event.run_budget_version !== 1 ||
+    !sessionId ||
+    event.session_id !== sessionId ||
+    !budget ||
+    typeof budget !== 'object' ||
+    !continuation ||
+    typeof continuation !== 'object'
+  )
+    return;
+  const { max_turns: limit, consumed, source } = budget as Record<string, unknown>;
+  const saved = continuation as Record<string, unknown>;
+  if (
+    typeof limit !== 'number' ||
+    !Number.isInteger(limit) ||
+    limit < 1 ||
+    limit > 4294967295 ||
+    typeof consumed !== 'number' ||
+    !Number.isInteger(consumed) ||
+    consumed < 0 ||
+    consumed > limit ||
+    event.num_turns !== consumed ||
+    !['explicit', 'agent', 'configured', 'default'].includes(String(source)) ||
+    typeof saved.resumable !== 'boolean' ||
+    typeof saved.session_id !== 'string' ||
+    !saved.session_id ||
+    saved.session_id.length > 4096 ||
+    saved.session_id !== event.harness_session_id
+  )
+    return;
+  const unfinished = event.outcome === 'turn_budget_exhausted';
+  if (unfinished && (event.is_error !== true || consumed !== limit)) return;
+  return {
+    limit,
+    consumed,
+    source: source as RunBudgetEvidence['source'],
+    unfinished,
+    sessionId,
+    canContinue:
+      unfinished &&
+      saved.resumable &&
+      event.type === 'system' &&
+      event.subtype === 'run_budget' &&
+      event.source === 'chat-run-budget' &&
+      event.settled === true,
+  };
+}
+
 export function projectEvents(events: readonly CovenRunEvent[]): {
   sessionId: string;
   error: string;
   /** The model the latest run named in `system.init` or `result`; '' if none did. */
   model: string;
+  budget?: RunBudgetEvidence;
   messages: ChatMessage[];
 } {
   let sessionId = '';
   let error = '';
   let model = '';
+  let budget: RunBudgetEvidence | undefined;
+  let budgetSessionId = '';
   const messages: ChatMessage[] = [];
   let deltaMessage: (typeof messages)[number] | undefined;
   let deltaSession: unknown;
@@ -158,6 +221,10 @@ export function projectEvents(events: readonly CovenRunEvent[]): {
     }
   };
   for (const [index, event] of events.entries()) {
+    if (event.type === 'system' && event.subtype === 'init') {
+      budget = undefined;
+      budgetSessionId = typeof event.session_id === 'string' ? event.session_id : '';
+    }
     if (event.type === 'text_delta' && typeof event.text === 'string') {
       if (!event.text) continue;
       if (!deltaMessage || deltaSession !== event.session_id) {
@@ -209,9 +276,18 @@ export function projectEvents(events: readonly CovenRunEvent[]): {
       if (typeof event.session_id === 'string') sessionId = event.session_id;
       if (typeof event.model === 'string' && event.model) model = event.model;
     }
+    if (
+      event.type === 'result' ||
+      (event.type === 'system' &&
+        event.subtype === 'run_budget' &&
+        event.source === 'chat-run-budget')
+    ) {
+      budget = appliedBudget(event, budgetSessionId || sessionId);
+    }
     if (event.type === 'result' && event.is_error === true) {
-      error =
-        typeof event.error === 'string'
+      error = budget?.unfinished
+        ? ''
+        : typeof event.error === 'string'
           ? claudeCodeTooOld(event.error)
             ? CLAUDE_CODE_TOO_OLD
             : event.error
@@ -316,6 +392,7 @@ export function projectEvents(events: readonly CovenRunEvent[]): {
   return {
     sessionId,
     error,
+    ...(budget ? { budget } : {}),
     model,
     messages: messages.flatMap((message) => {
       if (message.role !== 'assistant') return [message];
