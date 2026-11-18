@@ -22,7 +22,7 @@ The published **[v0.1.2 prerelease](https://github.com/OpenCoven/chat/releases/t
 | iPhone companion | Distributed separately through TestFlight | Requires a paired, awake Mac on the same local network; [companion guide](docs/iphone-companion.md) |
 | Browser preview | Developer UI preview only | Cannot reach Coven or run chats; use the desktop app |
 
-This is early `0.x` software without automatic updates. Check the release notes and verify your installer against that release's `SHA256SUMS`. The README describes current source; a published installer may not include changes merged after its tag.
+This is early `0.x` software. Chat checks for updates and installs one only when you choose **Restart to update** (see [Updates](#updates)). Versions through v0.1.2 can't update themselves, so install a newer one from the Releases page by hand. Check the release notes and verify your installer against that release's `SHA256SUMS`. The README describes current source; a published installer may not include changes merged after its tag.
 
 **Access matters:** familiar chats run with full access under your desktop user account. An ordinary message can change files and run commands beyond the familiar's workspace without an approval prompt. Declared project access does not limit the run. Read **Settings → Access** before sending work, including from a paired phone.
 
