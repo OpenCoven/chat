@@ -3104,3 +3104,7 @@ The v0.1.2 release content and Settings repairs in PR #613 landed in merge commi
 ## Updater source authority after #476
 
 The updater content in PR #476 landed in merge commit `14f40d19c33d3677d7511e6de5f5a98450d89483`, tree `a3d03cf8f77866985bc087cc42223c1836bbdb77`. This separate metadata repin binds all 25 governed files and ten production deltas to that existing first-parent merge on main. Exactly three production identities differ from the previous authority: `src-tauri/Cargo.toml`, `src-tauri/Cargo.lock` and `src-tauri/src/lib.rs`. All Chat, SDK, Cave, Coven, tool, release and evidence pins remain unchanged. This records source authority and does not claim a new protected SDK validation run.
+
+## v0.1.3 package-version authority
+
+The v0.1.3 release content in PR #646 landed in merge commit `fecb22bbe68c1ee5b3f65f8e91c683a78e3ebeaa`, tree `d41471653b840b3b6ae72bd26a7099dfb44bd110`. This separate repin binds all 25 governed files and 10 production deltas to that existing first-parent merge on main. Only the application version in `src-tauri/Cargo.toml` and `src-tauri/Cargo.lock` changes from the previous authority. All Chat, SDK, Cave, Coven, tool, release and evidence pins remain unchanged. This records the source authority for the release; it does not claim a new protected SDK validation run.
