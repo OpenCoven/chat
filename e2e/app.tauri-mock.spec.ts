@@ -1285,7 +1285,6 @@ test('resizes the inspector by pointer and keyboard within the room the window l
     inspectorWidth: 600,
     harness: 'coven-code',
     model: '',
-    maxTurns: 50,
     think: false,
     speed: 'default',
   });

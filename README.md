@@ -253,7 +253,6 @@ Settings content scrolls inside its panel. Tab past **Close settings** to focus 
   use them. Codex ignores them, so Chat doesn't send them to a Codex chat.
 - Model choices apply to messages sent from this window on the same engine, in new and existing chats. Thinking and speed remain window preferences. Messages sent from the iPhone companion use the engine's defaults.
 - When a run reports its model, the inspector's **Activity** tab shows it under **Model**.
-- **Model rounds** sets a positive whole-number allowance from 1 to 4294967295 for each Coven Code message or continuation, with a default of 50. Other engines keep their own behavior. The inspector shows the applied value, consumed rounds and source reported by the runtime; a saved preference alone does not prove application. This allowance is separate from token, cost and time limits. Paired iPhone sends use Chat's default of 50 for Coven Code.
 
 The presets include GPT-6 Astra, GPT-6.1 Sol, GPT-6.1 Terra and GPT-6 Luna, plus Claude Fable 5.2 and Opus, Sonnet and Haiku 5.5. Coven Code's GPT choices use Codex sign-in; standalone Codex receives bare model IDs. Older saved IDs remain editable under **Custom model** for their engine and are sent unchanged. A legacy Claude choice paired with Codex is retained for Coven Code, leaving Codex on its own default. A legacy bare GPT or OpenAI reasoning-model choice paired with Claude Code is retained for Codex. Legacy provider-qualified OpenAI/Codex IDs remain with Coven Code; other legacy custom IDs stay with the previously selected engine. Custom IDs are not checked against a preset allowlist, so their availability still depends on that engine and your provider account.
 
@@ -392,9 +391,13 @@ Chat and Cave are separate applications. There's no Cave import action or runtim
 and Cave history doesn't appear in Chat. Chat doesn't automatically delete previously saved import
 files or submit them to a model. Only app-owned history can become a familiar's one Chat thread.
 
-Claude Code and Codex threads continue from the harness's own session store. Coven Code messages require a Coven adapter and engine that declare run-budget v1 support. They resume the actual saved engine transcript, including tool results. Chat never substitutes text-only replay or starts a fresh conversation when that history is missing, stale or mismatched. A failed or unconfirmed save disables saved continuation.
-
-When a Coven Code message exhausts its model-round allowance, Chat keeps partial output and marks the work unfinished. **Continue saved work** appears only after the native runtime settles and confirms saved backing history; it starts another finite allowance on the same engine conversation. Stop, provider and authentication failures remain separate outcomes.
+Claude Code and Codex threads continue from the harness's own session store. The bundled Coven
+Code engine can't reopen a thread's earlier turns that way. So when you continue a Coven Code chat,
+Chat replays the most recent turns from its saved transcript into the new run: newest turns first,
+up to 24 KiB, with each message capped at 4 KiB. It also adds a notice to the thread saying how many
+turns were replayed and whether older ones were left out. That notice is a quiet line between
+messages, not a reply from anyone. The saved transcript keeps only your original message, not the
+replayed prompt.
 
 The chat's actions live behind the **Chat actions** control, the ⋯ in the thread header. Focus
 returns there after the delete dialog closes. **Archive chat** keeps the saved history and removes

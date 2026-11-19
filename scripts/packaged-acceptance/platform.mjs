@@ -46,10 +46,9 @@ function delivered(log, address) {
     .some((line) => JSON.parse(line).address === address);
 }
 
-function registerLinux(log, profileEnv) {
-  const home = profileEnv.HOME || homedir();
-  const data = profileEnv.XDG_DATA_HOME || join(home, '.local', 'share');
-  const config = profileEnv.XDG_CONFIG_HOME || join(home, '.config');
+function registerLinux(log) {
+  const data = process.env.XDG_DATA_HOME || join(homedir(), '.local', 'share');
+  const config = process.env.XDG_CONFIG_HOME || join(homedir(), '.config');
   const name = 'chat-acceptance-browser.desktop';
   mkdirSync(join(data, 'applications'), { recursive: true });
   mkdirSync(config, { recursive: true });
@@ -81,7 +80,6 @@ function registerLinux(log, profileEnv) {
   );
   const chosen = execFileSync('xdg-mime', ['query', 'default', 'x-scheme-handler/https'], {
     encoding: 'utf8',
-    env: profileEnv,
   }).trim();
   if (chosen !== name) throw new Error(`xdg-mime chose ${chosen || 'nothing'}, not ${name}`);
 
@@ -98,10 +96,10 @@ function registerLinux(log, profileEnv) {
   };
   let env = {};
   let via = `xdg-open through ${name} (mimeapps.list)`;
-  if (!reaches(profileEnv)) {
+  if (!reaches(process.env)) {
     env = { BROWSER: browser };
     via = 'xdg-open through BROWSER';
-    if (!reaches({ ...profileEnv, ...env })) {
+    if (!reaches({ ...process.env, ...env })) {
       throw new Error('xdg-open reached the recorder neither through mimeapps.list nor BROWSER.');
     }
   }
@@ -170,11 +168,10 @@ function registerWindows(log) {
 }
 
 /** Makes the recorder the default browser and returns how to read what it received. */
-export function registerRecorder(log, profileEnv = process.env) {
+export function registerRecorder(log) {
   mkdirSync(dirname(log), { recursive: true });
   writeFileSync(log, '');
-  const registration =
-    process.platform === 'win32' ? registerWindows(log) : registerLinux(log, profileEnv);
+  const registration = process.platform === 'win32' ? registerWindows(log) : registerLinux(log);
   return {
     ...registration,
     received: () =>

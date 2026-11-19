@@ -48,7 +48,7 @@ function lastText(messages) {
   return '';
 }
 
-/** The newest marker selects a reply when earlier turns are restored by the engine. */
+/** Chat replays earlier turns into each prompt, so the newest token decides. */
 export function replyFor(messages) {
   const tokens = [...lastText(messages).matchAll(/\[\[(links|table|other)\]\]/g)];
   const token = tokens.at(-1)?.[1];

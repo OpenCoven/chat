@@ -29,8 +29,6 @@ export type Preferences = Readonly<{
   think: boolean;
   /** Latency and reasoning hint (`coven run --speed`). */
   speed: Speed;
-  /** Finite model-round allowance for a Coven Code reply. */
-  maxTurns?: number;
 }>;
 
 export const HARNESSES: readonly Harness[] = ['coven-code', 'codex', 'claude'];
@@ -57,13 +55,6 @@ export const SPEED_LABEL: Readonly<Record<Speed, string>> = {
 
 /** The longest model id Chat stores or sends. */
 export const MODEL_MAX = 200;
-
-export const DEFAULT_MAX_TURNS = 50;
-export const MAX_TURNS = 4294967295;
-
-export function isValidMaxTurns(value: unknown): value is number {
-  return typeof value === 'number' && Number.isInteger(value) && value >= 1 && value <= MAX_TURNS;
-}
 
 /**
  * A model id is empty (the harness's default) or a token that starts with a
@@ -100,7 +91,6 @@ export const DEFAULT_PREFERENCES: Preferences = {
   model: '',
   think: false,
   speed: 'default',
-  maxTurns: DEFAULT_MAX_TURNS,
 };
 
 export const PREFERENCES_KEY = 'opencoven.chat.preferences.v1';
@@ -141,7 +131,6 @@ export function readPreferences(): Preferences {
       speed: SPEEDS.includes(record.speed as Speed)
         ? (record.speed as Speed)
         : DEFAULT_PREFERENCES.speed,
-      maxTurns: isValidMaxTurns(record.maxTurns) ? record.maxTurns : DEFAULT_MAX_TURNS,
     };
   } catch {
     return DEFAULT_PREFERENCES;
@@ -179,9 +168,7 @@ export function usePreferences(): Preferences {
 }
 
 /** What the reader asked messages to run with. */
-export type RunOptions = Readonly<
-  Pick<Preferences, 'harness' | 'model' | 'think' | 'speed' | 'maxTurns'>
->;
+export type RunOptions = Readonly<Pick<Preferences, 'harness' | 'model' | 'think' | 'speed'>>;
 
 export function modelsByHarness(
   preferences: Preferences,
@@ -206,15 +193,7 @@ export function runOptions(preferences: Preferences, chatHarness?: string): RunO
     : preferences.harness;
   const { think, speed } = preferences;
   const model = modelsByHarness(preferences)[harness] ?? '';
-  return {
-    harness,
-    model,
-    think,
-    speed,
-    ...(harness === 'coven-code'
-      ? { maxTurns: preferences.maxTurns === undefined ? DEFAULT_MAX_TURNS : preferences.maxTurns }
-      : {}),
-  };
+  return { harness, model, think, speed };
 }
 
 /**
@@ -231,26 +210,15 @@ function runsOn(options: RunOptions, chatHarness?: string): string {
 
 /**
  * The run fields one send carries. The harness is named only when a chat
- * starts, since an existing chat keeps its own. Model defaults stay with the
- * harness; Coven Code always receives its finite round allowance. Codex is
- * never sent reasoning or speed.
+ * starts, since an existing chat keeps its own. Defaults are left out, so the
+ * harness decides. Codex is never sent reasoning or speed.
  */
 export function sendOptions(
   options: RunOptions,
   chatHarness?: string,
-): {
-  harness?: Harness;
-  model?: string;
-  think?: boolean;
-  speed?: Exclude<Speed, 'default'>;
-  maxTurns?: number;
-} {
+): { harness?: Harness; model?: string; think?: boolean; speed?: Exclude<Speed, 'default'> } {
   const harness = runsOn(options, chatHarness);
   const reasoning = REASONING_HARNESSES.has(harness);
-  const maxTurns = options.maxTurns === undefined ? DEFAULT_MAX_TURNS : options.maxTurns;
-  if (harness === 'coven-code' && !isValidMaxTurns(maxTurns)) {
-    throw new Error('Choose a whole number of model rounds between 1 and 4294967295.');
-  }
   return {
     ...(chatHarness === undefined && options.harness !== 'coven-code'
       ? { harness: options.harness }
@@ -258,7 +226,6 @@ export function sendOptions(
     ...(harness === options.harness && options.model ? { model: options.model } : {}),
     ...(reasoning && options.think ? { think: true } : {}),
     ...(reasoning && options.speed !== 'default' ? { speed: options.speed } : {}),
-    ...(harness === 'coven-code' ? { maxTurns } : {}),
   };
 }
 

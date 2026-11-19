@@ -41,9 +41,7 @@ struct RunContent {
     events: Vec<Value>,
     bytes: usize,
     error: Option<&'static str>,
-    outcome: Option<&'static str>,
 }
-
 impl RunRecord {
     pub fn new(id: String, familiar_id: String, cancel: Arc<AtomicBool>) -> Arc<Self> {
         Arc::new(Self {
@@ -58,7 +56,6 @@ impl RunRecord {
                 events: Vec::new(),
                 bytes: 0,
                 error: None,
-                outcome: None,
             }),
         })
     }
@@ -78,21 +75,16 @@ impl RunRecord {
     }
     pub fn finish(&self, result: &Result<Value, String>) {
         if let Ok(mut inner) = self.inner.lock() {
-            let outcome =
-                crate::coven_runtime::run_outcome(result, self.cancel.load(Ordering::SeqCst));
-            // Keep the existing phone status vocabulary. The additive typed
-            // outcome and readable error identify unfinished budget exhaustion.
-            inner.status = if outcome == "unfinished" {
-                "failed"
+            inner.status = if self.cancel.load(Ordering::SeqCst) {
+                "stopped"
+            } else if result.is_ok() {
+                "completed"
             } else {
-                outcome
+                "failed"
             };
-            inner.outcome = (outcome == "unfinished").then_some("turn_budget_exhausted");
-            inner.error = match outcome {
-                "unfinished" => Some("The model-round allowance was exhausted. Work is unfinished; check desktop Chat for saved continuation."),
-                "failed" => Some("The run could not finish. Check Chat on your Mac."),
-                _ => None,
-            };
+            if inner.status == "failed" {
+                inner.error = Some("The run could not finish. Check Chat on your Mac.");
+            }
         }
     }
     pub fn value(&self) -> Value {
@@ -100,9 +92,6 @@ impl RunRecord {
         let mut value = json!({"id":self.id,"familiarId":self.familiar_id,"status":inner.status,"messages":project_messages(&inner.events)});
         if let Some(error) = inner.error {
             value["error"] = json!(error);
-        }
-        if let Some(outcome) = inner.outcome {
-            value["outcome"] = json!(outcome);
         }
         value
     }
@@ -179,31 +168,4 @@ pub(crate) fn session_alias(id: &str) -> String {
         "chat-{}",
         super::credentials::hex(&Sha256::digest(id.as_bytes()))
     )
-}
-
-#[cfg(test)]
-mod budget_tests {
-    use super::*;
-
-    #[test]
-    fn exhausted_transport_is_unfinished_for_phone_clients() {
-        let cancel = Arc::new(AtomicBool::new(false));
-        let record = RunRecord::new("r".into(), "f".into(), cancel.clone());
-        let result = Ok(json!({"runId":"r","events":[{
-            "type":"system","subtype":"run_budget","source":"chat-run-budget",
-            "settled":true,"outcome":"turn_budget_exhausted"
-        }]}));
-        record.finish(&result);
-        assert_eq!(record.value()["status"], "failed");
-        assert_eq!(record.value()["outcome"], "turn_budget_exhausted");
-        assert!(record.value()["error"]
-            .as_str()
-            .unwrap()
-            .contains("unfinished"));
-        assert!(!record.running());
-        cancel.store(true, Ordering::SeqCst);
-        record.finish(&result);
-        assert_eq!(record.value()["status"], "stopped");
-        assert!(record.value().get("outcome").is_none());
-    }
 }
