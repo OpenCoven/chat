@@ -9,7 +9,6 @@ export type CompanionRunEvent = {
   status: 'running' | 'completed' | 'failed' | 'stopped';
   event?: CovenRunEvent | null;
   error?: string;
-  outcome?: 'turn_budget_exhausted';
 };
 export type ObserveCompanionRuns = (
   receive: (value: CompanionRunEvent) => void,
@@ -21,7 +20,6 @@ function valid(value: unknown): value is CompanionRunEvent {
     typeof v.runId === 'string' &&
     typeof v.familiarId === 'string' &&
     ['running', 'completed', 'failed', 'stopped'].includes(String(v.status)) &&
-    (v.outcome === undefined || (v.outcome === 'turn_budget_exhausted' && v.status === 'failed')) &&
     (v.event == null ||
       (typeof v.event === 'object' &&
         v.event !== null &&

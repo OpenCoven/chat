@@ -142,9 +142,6 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           persist-credentials: false
-      - name: Record the container evidence root
-        id: evidence
-        run: echo "root=$RUNNER_TEMP" >> "$GITHUB_OUTPUT"
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version-file: .node-version
@@ -153,11 +150,6 @@ jobs:
           toolchain: 1.95.0
       - name: Install tauri-driver
         run: cargo install tauri-driver --locked --version "${TAURI_DRIVER_VERSION}"
-      - name: Build isolated run-budget producer candidates
-        if: env.RELEASE == ''
-        env:
-          GITHUB_TOKEN: ${{ github.token }}
-        run: node scripts/packaged-acceptance/runtime-candidate.mjs --out "$RUNNER_TEMP/run-budget-runtime"
       - name: Fetch this run's bundle
         if: env.RELEASE == ''
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
@@ -219,26 +211,19 @@ jobs:
           elif [ "${label}" = appimage ]; then
             label="${label}, built on ubuntu-22.04"
           fi
-          runtime_args=()
-          if [ -z "$RELEASE" ]; then
-            runtime_args=(--runtime-candidate "$RUNNER_TEMP/run-budget-runtime/runtime.json")
-          fi
           dbus-run-session -- xvfb-run -a --server-args="-screen 0 1600x1000x24" \
             node scripts/packaged-acceptance/run.mjs \
               --application "${{ steps.install.outputs.application }}" \
               --package "${{ steps.install.outputs.package }}" \
               --lane "Linux WebKitGTK (${label})" \
               --tauri-driver "$HOME/.cargo/bin/tauri-driver" \
-              --out "$RUNNER_TEMP/packaged-acceptance" "${runtime_args[@]}"
+              --out "$RUNNER_TEMP/packaged-acceptance"
       - name: Upload the observations
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: packaged-acceptance-linux-${{ matrix.package }}
-          path: |
-            ${{ steps.evidence.outputs.root }}/packaged-acceptance
-            ${{ steps.evidence.outputs.root }}/run-budget-runtime/*.json
-            ${{ steps.evidence.outputs.root }}/run-budget-runtime/*.log
+          path: ${{ runner.temp }}/packaged-acceptance
           if-no-files-found: warn
 
   windows:
@@ -307,14 +292,6 @@ jobs:
       - name: Install tauri-driver
         shell: bash
         run: cargo install tauri-driver --locked --version "${TAURI_DRIVER_VERSION}"
-      - name: Build isolated run-budget producer candidates
-        if: env.RELEASE == ''
-        shell: pwsh
-        env:
-          GITHUB_TOKEN: ${{ github.token }}
-        run: |
-          node scripts/packaged-acceptance/runtime-candidate.mjs --out (Join-Path $env:RUNNER_TEMP 'run-budget-runtime')
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       # msedgedriver must match the WebView2 runtime the app will load.
       - name: Fetch the matching msedgedriver
         id: edge
@@ -352,8 +329,7 @@ jobs:
         shell: pwsh
         run: |
           $debug = if ($env:RELEASE) { @() } else { @('--debug-port', '9333') }
-          $runtime = if ($env:RELEASE) { @() } else { @('--runtime-candidate', (Join-Path $env:RUNNER_TEMP 'run-budget-runtime/runtime.json')) }
-          node scripts/packaged-acceptance/run.mjs @debug @runtime `
+          node scripts/packaged-acceptance/run.mjs @debug `
             --application "${{ steps.install.outputs.application }}" `
             --package "${{ steps.install.outputs.package }}" `
             --lane "Windows WebView2 (msi$(if ($env:RELEASE) { ", $env:RELEASE" } else { ', test build with a debugging port' }))" `
@@ -397,8 +373,5 @@ jobs:
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: packaged-acceptance-windows-msi
-          path: |
-            ${{ runner.temp }}/packaged-acceptance
-            ${{ runner.temp }}/run-budget-runtime/*.json
-            ${{ runner.temp }}/run-budget-runtime/*.log
+          path: ${{ runner.temp }}/packaged-acceptance
           if-no-files-found: warn

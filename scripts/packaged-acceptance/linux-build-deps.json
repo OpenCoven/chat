@@ -1,7 +1,0 @@
-{
-  "purpose": "linux-x64-candidate-build-headers",
-  "publisherIndex": "https://archive.ubuntu.com/ubuntu/dists/noble-updates/main/binary-amd64/Packages.xz",
-  "url": "https://archive.ubuntu.com/ubuntu/pool/main/a/alsa-lib/libasound2-dev_1.2.11-1ubuntu0.3_amd64.deb",
-  "size": 115386,
-  "sha256": "b83795b1ba0e40cfa8363359fd17a06260838d8ae0f315531771a62f7c7e215a"
-}

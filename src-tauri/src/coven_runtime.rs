@@ -18,9 +18,6 @@ use tauri::{ipc::Channel, AppHandle, Manager, State};
 
 use crate::coven::{CovenHealth, NativeCovenHealth};
 
-#[path = "chat_run_budget.rs"]
-mod run_budget;
-
 #[path = "chat_attachments.rs"]
 pub(crate) mod attachments;
 
@@ -86,6 +83,17 @@ impl Budget {
         })
     }
 }
+/// Harnesses whose own session store cannot reopen a Chat thread. The bundled
+/// engine treats `--session-id` as a tracking tag and never saves print-mode
+/// turns, so `coven run coven-code --continue <id>` launches a context-free
+/// run (the CLI declares the same in `spec_supports_chat_resume`; verified
+/// against engines 0.7.0 and 0.8.0). Chat replays its own captured history
+/// into those turns instead and says so in the thread.
+const REPLAY_HARNESSES: [&str; 1] = ["coven-code"];
+/// Upper bound on replayed history bytes per turn, newest turns first.
+const REPLAY_LIMIT: usize = 24 * 1024;
+/// Upper bound on one replayed message before it is truncated.
+const REPLAY_MESSAGE_LIMIT: usize = 4 * 1024;
 type Runs = Arc<Mutex<HashMap<String, Arc<AtomicBool>>>>;
 
 #[derive(Default)]
@@ -280,8 +288,6 @@ pub(crate) struct SendInput {
     think: bool,
     /// `coven run --speed`: `fast`, `balanced` or `thorough`.
     speed: Option<String>,
-    /// Finite model rounds for Coven Code; absent uses Chat's default of 50.
-    max_turns: Option<std::num::NonZeroU32>,
     #[serde(default)]
     attachments: Vec<attachments::Attachment>,
     /// Legacy approval receipt. Only the host can attach it. It does not select
@@ -643,7 +649,7 @@ fn run_process_input(
     timeout: Duration,
     on_event: Option<&mut dyn FnMut(Value) -> Result<(), String>>,
     input_file: Option<File>,
-    diagnostics: Option<&mut ProcessReport>,
+    diagnostics: Option<&mut String>,
 ) -> Result<Vec<u8>, String> {
     let mut command = child_env::command(resolve_cli()?);
     command
@@ -691,23 +697,16 @@ fn execute_command(
     execute_command_bounded(command, cancel, timeout, on_event, OUTPUT_LIMIT, None)
 }
 
-#[derive(Default)]
-struct ProcessReport {
-    stderr: String,
-    /// Set only after complete stream validation and natural child settlement.
-    exit_code: Option<i32>,
-}
-
 fn execute_command_bounded(
     mut command: Command,
     cancel: &AtomicBool,
     timeout: Duration,
     mut on_event: Option<&mut dyn FnMut(Value) -> Result<(), String>>,
     output_limit: usize,
-    mut diagnostics: Option<&mut ProcessReport>,
+    mut diagnostics: Option<&mut String>,
 ) -> Result<Vec<u8>, String> {
     if let Some(sink) = diagnostics.as_deref_mut() {
-        *sink = ProcessReport::default();
+        sink.clear();
     }
     if cancel.load(Ordering::SeqCst) {
         return Err(RUN_CANCELLED.into());
@@ -757,7 +756,7 @@ fn execute_command_bounded(
                     // Keep collected diagnostics even when stream validation, a callback,
                     // or the timeout ends the operation before the process exits.
                     if let Some(sink) = diagnostics.as_deref_mut() {
-                        sink.stderr = stderr_text(&errors);
+                        *sink = stderr_text(&errors);
                     }
                     continue;
                 }
@@ -792,9 +791,6 @@ fn execute_command_bounded(
     }
     if !pending.is_empty() {
         return Err("Coven returned an incomplete stream event.".into());
-    }
-    if let Some(sink) = diagnostics {
-        sink.exit_code = status.and_then(|status| status.code());
     }
     let diagnostic = stderr_text(&errors);
     if !status.is_some_and(|status| status.success()) {
@@ -976,7 +972,7 @@ fn validate_input(input: &SendInput) -> Result<(), String> {
     Ok(())
 }
 
-/// `prompt` is the text handed to the harness. It may carry a host-owned turn note,
+/// `prompt` is the text handed to the harness. It may carry replayed history,
 /// so it is passed separately from the validated, user-submitted `input`.
 fn run_arguments(
     input: &SendInput,
@@ -999,17 +995,6 @@ fn run_arguments(
         "--cwd".into(),
         cwd.to_str().ok_or("Workspace path is not UTF-8.")?.into(),
     ];
-    if harness == "coven-code" {
-        args.extend([
-            "--max-turns".into(),
-            input
-                .max_turns
-                .map_or(50, std::num::NonZeroU32::get)
-                .to_string(),
-        ]);
-    } else if input.max_turns.is_some() {
-        return Err("This engine does not support model-round budgets. Choose Coven Code in Settings › Model.".into());
-    }
     if let Some(id) = &input.session_id {
         validate_id(id)?;
         args.extend(["--continue".into(), id.clone()]);
@@ -1633,14 +1618,181 @@ fn read_captured_history(
     Ok(Some((result, partial)))
 }
 
-/// An attachment-only message supplies a bounded instruction; otherwise the
-/// engine receives the person's actual message and its own persisted history.
-fn turn_text(prompt: &str, has_attachments: bool) -> &str {
-    if has_attachments && prompt.trim().is_empty() {
-        attachments::ATTACHMENTS_ONLY_PROMPT
+/// History replayed into a harness turn because the harness cannot reopen
+/// the thread from its own session store.
+struct Replay {
+    prompt: String,
+    replayed: usize,
+    omitted: bool,
+}
+
+fn text_blocks(event: &Value, separator: &str) -> String {
+    event
+        .pointer("/message/content")
+        .and_then(Value::as_array)
+        .map(|content| {
+            content
+                .iter()
+                .filter(|block| block["type"] == "text")
+                .filter_map(|block| block["text"].as_str())
+                .collect::<Vec<_>>()
+                .join(separator)
+        })
+        .unwrap_or_default()
+}
+
+/// What the engine reads as this turn's message, before Chat's note. A message
+/// that is only attachments still has to say something.
+fn turn_text<'a>(prompt: &'a str, has_attachments: bool, replay: Option<&'a str>) -> &'a str {
+    match replay {
+        Some(replay) => replay,
+        None if has_attachments && prompt.trim().is_empty() => attachments::ATTACHMENTS_ONLY_PROMPT,
+        None => prompt,
+    }
+}
+
+/// Collapse a captured Chat history into ordered `(role, text)` turns: the
+/// submitted user prompts (plus attachment names) and the assistant text of
+/// each run. Tool traffic, raw output and runtime frames are not replayed.
+fn replay_turns(events: &[Value]) -> Vec<(&'static str, String)> {
+    let mut turns: Vec<(&'static str, String)> = Vec::new();
+    let mut delta_session: Option<String> = None;
+    for event in events {
+        let kind = event.get("type").and_then(Value::as_str);
+        if kind == Some("text_delta") {
+            let Some(text) = event.get("text").and_then(Value::as_str) else {
+                continue;
+            };
+            let session = event
+                .get("session_id")
+                .and_then(Value::as_str)
+                .map(str::to_owned);
+            match turns.last_mut() {
+                Some((role, existing)) if *role == "assistant" && delta_session == session => {
+                    existing.push_str(text);
+                }
+                _ => turns.push(("assistant", text.to_owned())),
+            }
+            delta_session = session;
+            continue;
+        }
+        delta_session = None;
+        if is_captured_input(event) {
+            let mut text = text_blocks(event, "\n");
+            let names = event
+                .get("attachments")
+                .and_then(Value::as_array)
+                .map(|files| {
+                    files
+                        .iter()
+                        .filter_map(|file| file.get("name").and_then(Value::as_str))
+                        .collect::<Vec<_>>()
+                })
+                .unwrap_or_default();
+            if !names.is_empty() {
+                if !text.is_empty() {
+                    text.push('\n');
+                }
+                text.push_str(&format!("[Attached: {}]", names.join(", ")));
+            }
+            if !text.trim().is_empty() {
+                turns.push(("user", text));
+            }
+        } else if kind == Some("assistant") {
+            let text = text_blocks(event, "\n\n");
+            if !text.trim().is_empty() {
+                turns.push(("assistant", text));
+            }
+        }
+    }
+    // A request became a dialog; it isn't part of what the familiar said.
+    for (role, text) in &mut turns {
+        if *role == "assistant" {
+            *text = crate::chat_approvals::strip_requests(text);
+        }
+    }
+    turns.retain(|(_, text)| !text.trim().is_empty());
+    turns
+}
+
+const TRUNCATION_MARKER: &str = " …[truncated by Coven Chat]";
+
+/// Truncate to `limit` bytes *including* the marker, so a truncated message
+/// never exceeds the cap it is being held to and never borrows replay budget
+/// from the turns that follow it.
+fn truncate_utf8(text: &str, limit: usize) -> String {
+    if text.len() <= limit {
+        return text.to_owned();
+    }
+    let mut end = limit.saturating_sub(TRUNCATION_MARKER.len());
+    while end > 0 && !text.is_char_boundary(end) {
+        end -= 1;
+    }
+    format!("{}{TRUNCATION_MARKER}", &text[..end])
+}
+
+/// Build the prompt for a replayed turn: the newest turns that fit in
+/// `REPLAY_LIMIT`, oldest first, followed by the user's latest message.
+///
+/// `history_truncated` is the capped/missing/deleted-lineage flag from
+/// `read_captured_history`. Turns can be dropped before they ever reach the
+/// byte budget here, so the notice must report those too.
+fn build_replay(prompt: &str, turns: &[(&str, String)], history_truncated: bool) -> Option<Replay> {
+    let mut selected = Vec::new();
+    let mut used = 0;
+    let mut omitted = history_truncated;
+    for (role, text) in turns.iter().rev() {
+        let label = if *role == "user" { "User" } else { "Assistant" };
+        let line = format!(
+            "{label}: {}",
+            truncate_utf8(text.trim(), REPLAY_MESSAGE_LIMIT)
+        );
+        if used + line.len() + 2 > REPLAY_LIMIT {
+            omitted = true;
+            break;
+        }
+        used += line.len() + 2;
+        selected.push(line);
+    }
+    if selected.is_empty() {
+        return None;
+    }
+    selected.reverse();
+    let mut out = String::from(
+        "[Coven Chat replay]\nThe Coven Code engine cannot reopen this chat's earlier turns from \
+         its own session store, so Coven Chat is replaying the most recent turns below. Treat \
+         them as the conversation so far; only the latest message is new. Reply to the latest \
+         message.\n\n",
+    );
+    if omitted {
+        out.push_str("(Earlier turns are omitted.)\n\n");
+    }
+    out.push_str("Earlier turns:\n");
+    for line in &selected {
+        out.push_str(line);
+        out.push_str("\n\n");
+    }
+    out.push_str("Latest message:\n");
+    out.push_str(if prompt.trim().is_empty() {
+        "Read the attached text files."
     } else {
         prompt
-    }
+    });
+    Some(Replay {
+        prompt: out,
+        replayed: selected.len(),
+        omitted,
+    })
+}
+
+/// The thread-visible disclosure that a turn carried replayed history.
+fn replay_notice(replay: &Replay) -> String {
+    format!(
+        "Coven Code can't reopen this chat's earlier turns on its own, so Chat replayed the last {} {} into this message.{}",
+        replay.replayed,
+        if replay.replayed == 1 { "turn" } else { "turns" },
+        if replay.omitted { " Older turns were left out." } else { "" },
+    )
 }
 
 fn is_captured_input(event: &Value) -> bool {
@@ -1873,7 +2025,6 @@ pub(crate) struct AllowInput {
     #[serde(default)]
     think: bool,
     speed: Option<String>,
-    max_turns: Option<std::num::NonZeroU32>,
 }
 
 fn granted_input(
@@ -1892,7 +2043,6 @@ fn granted_input(
         model,
         think,
         speed,
-        max_turns: None,
         attachments: Vec::new(),
         grant: Some(grant),
     }
@@ -1929,8 +2079,7 @@ pub(crate) async fn coven_runtime_allow(
         })
         .await?
     };
-    let mut send = granted_input(grant, input.run_id, input.model, input.think, input.speed);
-    send.max_turns = input.max_turns;
+    let send = granted_input(grant, input.run_id, input.model, input.think, input.speed);
     run_in_window(state, data, send, cancel, registration, on_event).await
 }
 
@@ -2030,32 +2179,6 @@ fn input_record(id: &str, input: &SendInput) -> Value {
     record
 }
 
-pub(crate) fn run_outcome(result: &Result<Value, String>, cancelled: bool) -> &'static str {
-    if cancelled {
-        return "stopped";
-    }
-    match result {
-        Ok(value)
-            if value
-                .get("events")
-                .and_then(Value::as_array)
-                .and_then(|events| events.last())
-                .is_some_and(|event| {
-                    event["type"] == "system"
-                        && event["subtype"] == "run_budget"
-                        && event["source"] == "chat-run-budget"
-                        && event["settled"] == true
-                        && event["outcome"] == "turn_budget_exhausted"
-                }) =>
-        {
-            "unfinished"
-        }
-        Ok(_) => "completed",
-        Err(error) if error == RUN_CANCELLED => "stopped",
-        Err(_) => "failed",
-    }
-}
-
 fn send_local(
     data: &Path,
     input: SendInput,
@@ -2066,7 +2189,11 @@ fn send_local(
     let run_id = input.run_id.clone();
     let result = send_turn(data, input, cancel, on_event);
     if let Some(grant) = grant {
-        let outcome = run_outcome(&result, cancel.load(Ordering::SeqCst));
+        let outcome = match &result {
+            Ok(_) => "completed",
+            Err(error) if error == RUN_CANCELLED => "stopped",
+            Err(_) => "failed",
+        };
         crate::chat_approvals::record_finished(
             data,
             &grant,
@@ -2120,7 +2247,7 @@ fn send_turn(
             crate::chat_approvals::now_ms(),
         );
     }
-    let (harness, workspace, _resumed) = if let Some(id) = &input.session_id {
+    let (harness, workspace, resumed) = if let Some(id) = &input.session_id {
         let session = get_session(id)?;
         if let Some(requested) = &input.harness {
             if requested != string(&session, "harness")? {
@@ -2168,12 +2295,21 @@ fn send_turn(
             "Coven requires a dedicated project workspace, not a filesystem or home root.".into(),
         );
     }
-    if harness == "coven-code" {
-        run_budget::require_adapter(&cli_json(&["adapter", "list", "--json"])?)?;
-    }
-    // Coven verifies persisted engine history, including every old ledger alias.
-    // Never substitute Chat's text-only transcript for a missing native session.
-    let conversation = turn_text(&input.prompt, !input.attachments.is_empty());
+    // A harness that cannot reopen the thread natively gets the captured
+    // history replayed into this turn; the saved input stays the user's text.
+    let replay = match &resumed {
+        Some(session) if REPLAY_HARNESSES.contains(&harness.as_str()) => {
+            read_captured_history(data, session, Budget::BASE, get_session)?.and_then(
+                |(events, partial)| build_replay(&input.prompt, &replay_turns(&events), partial),
+            )
+        }
+        _ => None,
+    };
+    let conversation = turn_text(
+        &input.prompt,
+        !input.attachments.is_empty(),
+        replay.as_ref().map(|replay| replay.prompt.as_str()),
+    );
     let sent_prompt = match crate::chat_approvals::turn_note(
         data,
         input.session_id.as_deref(),
@@ -2255,6 +2391,7 @@ fn send_turn(
             record_actions(action_reader.read(&event))?;
         }
         let mut captured_input = None;
+        let mut replay_notice_event = None;
         let mut grant_notice_event = None;
         if transcript.is_none()
             && event.get("type").and_then(Value::as_str) == Some("system")
@@ -2277,6 +2414,12 @@ fn send_turn(
             // Preserve the exact submitted input even when the engine does not
             // echo it. Matching CLI user echoes are suppressed above.
             captured_input = Some(input_record(id, &input));
+            replay_notice_event = replay.as_ref().map(|replay| {
+                json!({
+                    "type": "system", "subtype": "notice", "source": "chat-replay", "session_id": id,
+                    "message": {"role": "system", "content": [{"type": "text", "text": replay_notice(replay)}]},
+                })
+            });
             grant_notice_event = input.grant.as_ref().map(|_| {
                 json!({
                     "type": "system", "subtype": "notice",
@@ -2294,6 +2437,7 @@ fn send_turn(
         for event in std::iter::once(event)
             .chain(captured_input)
             .chain(grant_notice_event)
+            .chain(replay_notice_event)
         {
             serde_json::to_writer(&mut *file, &event)
                 .map_err(|_| "Cannot save Coven transcript.")?;
@@ -2334,7 +2478,7 @@ fn send_turn(
         }
         Ok(())
     };
-    let mut process_report = ProcessReport::default();
+    let mut stderr_report = String::new();
     let run = run_process_input(
         &args,
         Some(&workspace),
@@ -2342,49 +2486,12 @@ fn send_turn(
         RUN_TIMEOUT,
         Some(&mut observe),
         input_file,
-        Some(&mut process_report),
+        Some(&mut stderr_report),
     );
     record_actions(action_reader.finish())?;
     // Stopping a run is the user's own action; it leaves no report behind.
     if matches!(&run, Err(error) if error == RUN_CANCELLED) {
         return Err(RUN_CANCELLED.into());
-    }
-    if harness == "coven-code" {
-        let settled = events
-            .iter()
-            .rev()
-            .find(|event| event["type"] == "result")
-            // Provider/authentication failures before a budget receipt retain
-            // their own diagnostic instead of becoming a capability error.
-            .filter(|event| {
-                event.get("run_budget_version").is_some()
-                    || (run.is_ok() && event["is_error"] != true)
-            })
-            .zip(input_session.as_deref())
-            .map(|(event, id)| {
-                run_budget::settle(
-                    event,
-                    id,
-                    input.max_turns.map_or(50, std::num::NonZeroU32::get),
-                    process_report.exit_code,
-                )
-            })
-            .transpose()?;
-        if let Some(event) = settled {
-            let file = transcript
-                .as_mut()
-                .ok_or("Coven omitted its session identity.")?;
-            serde_json::to_writer(&mut *file, &event)
-                .map_err(|_| "Cannot save run-budget settlement.")?;
-            file.write_all(b"\n")
-                .and_then(|_| file.sync_all())
-                .map_err(|_| "Cannot persist run-budget settlement.")?;
-            events.push(event.clone());
-            on_event(event.clone())?;
-            if event["settled"] == true && event["outcome"] == "turn_budget_exhausted" {
-                return Ok(json!({"runId": input.run_id, "events": events}));
-            }
-        }
     }
     let is_result = |event: &Value| event.get("type").and_then(Value::as_str) == Some("result");
     let failed_result = events.iter().find(|event| {
@@ -2427,7 +2534,7 @@ fn send_turn(
     let Some((file, id)) = transcript.as_mut().zip(input_session.as_deref()) else {
         return Err(run.err().unwrap_or_else(|| NO_TERMINAL_RESULT.into()));
     };
-    let (notice, message) = record_run_failure(file, id, &failure, &process_report.stderr)?;
+    let (notice, message) = record_run_failure(file, id, &failure, &stderr_report)?;
     events.push(notice.clone());
     on_event(notice)?;
     Err(message)
@@ -2865,7 +2972,6 @@ mod tests {
             model: None,
             think: false,
             speed: None,
-            max_turns: None,
             attachments: vec![attachments::Attachment {
                 name: "notes.txt".into(),
                 bytes: b"secret".to_vec(),
@@ -2877,7 +2983,6 @@ mod tests {
         assert_eq!(record["parent_session_id"], "parent");
         assert_eq!(record["attachments"][0]["name"], "notes.txt");
         let plain = SendInput {
-            max_turns: None,
             attachments: vec![],
             ..attached
         };
@@ -3269,7 +3374,6 @@ mod tests {
             model: None,
             think: false,
             speed: None,
-            max_turns: None,
             attachments: vec![],
             grant: None,
         };
@@ -3351,7 +3455,6 @@ mod tests {
             model: None,
             think: false,
             speed: None,
-            max_turns: None,
             attachments: vec![],
             grant: None,
         };
@@ -3423,7 +3526,6 @@ mod tests {
             model: None,
             think: false,
             speed: None,
-            max_turns: None,
             attachments: vec![],
             grant: None,
         };
@@ -3458,65 +3560,6 @@ mod tests {
             .unwrap()
             .extend(options.as_object().unwrap().clone());
         serde_json::from_value(input).unwrap()
-    }
-
-    #[test]
-    fn model_round_budget_is_explicit_finite_and_before_prompt_data() {
-        for value in [1_u32, 12, u32::MAX] {
-            let input = run_input(json!({ "maxTurns": value }));
-            let args =
-                run_arguments(&input, "coven-code", Path::new("/safe"), &input.prompt).unwrap();
-            let end = args.iter().position(|arg| arg == "--").unwrap();
-            assert!(args[..end]
-                .windows(2)
-                .any(|pair| pair == ["--max-turns", &value.to_string()]));
-            assert_eq!(&args[end..], ["--", "--think; hello"]);
-        }
-        let input = run_input(json!({}));
-        let args = run_arguments(&input, "coven-code", Path::new("/safe"), &input.prompt).unwrap();
-        assert!(args.windows(2).any(|pair| pair == ["--max-turns", "50"]));
-    }
-
-    #[test]
-    fn a_successful_exhaustion_transport_never_records_completed_work() {
-        let result = Ok(json!({"runId":"r","events":[{
-            "type":"system","subtype":"run_budget","source":"chat-run-budget",
-            "settled":true,"outcome":"turn_budget_exhausted"
-        }]}));
-        assert_eq!(run_outcome(&result, false), "unfinished");
-        assert_eq!(run_outcome(&result, true), "stopped");
-        assert_eq!(run_outcome(&Err(RUN_CANCELLED.into()), false), "stopped");
-        assert_eq!(
-            run_outcome(&Err("Authentication failed".into()), false),
-            "failed"
-        );
-    }
-
-    #[test]
-    fn model_round_budget_rejects_invalid_or_unsupported_requests() {
-        for value in [
-            json!(0),
-            json!(-1),
-            json!(1.5),
-            json!(4294967296_u64),
-            json!("12"),
-        ] {
-            assert!(
-                serde_json::from_value::<SendInput>(json!({
-                    "runId": "run-1", "prompt": "hello", "maxTurns": value
-                }))
-                .is_err(),
-                "invalid value: {value}"
-            );
-        }
-        let input = run_input(json!({ "maxTurns": 12 }));
-        for harness in ["codex", "claude"] {
-            assert!(run_arguments(&input, harness, Path::new("/safe"), &input.prompt).is_err());
-            let ordinary = run_input(json!({}));
-            let args =
-                run_arguments(&ordinary, harness, Path::new("/safe"), &ordinary.prompt).unwrap();
-            assert!(!args.iter().any(|arg| arg == "--max-turns"));
-        }
     }
 
     #[test]
@@ -3842,6 +3885,8 @@ mod tests {
             lines[2]["message"]["content"][0]["text"],
             "This run failed, and Coven gave no reason."
         );
+        // Chat's own notices never travel back into the engine as history.
+        assert!(replay_turns(&lines).is_empty());
         fs::remove_dir_all(&data).unwrap();
     }
 
@@ -3850,7 +3895,7 @@ mod tests {
     fn process_failure_hands_back_stderr_for_the_report() {
         let mut command = Command::new("/bin/sh");
         command.arg("-c").arg("echo oops >&2; exit 3");
-        let mut report = ProcessReport::default();
+        let mut report = String::new();
         let error = execute_command_bounded(
             command,
             &AtomicBool::new(false),
@@ -3861,14 +3906,10 @@ mod tests {
         )
         .unwrap_err();
         assert_eq!(error, "Coven command failed. oops");
-        assert_eq!(report.stderr, "oops");
-        assert_eq!(report.exit_code, Some(3));
+        assert_eq!(report, "oops");
         let mut command = Command::new("/usr/bin/printf");
         command.arg("");
-        let mut report = ProcessReport {
-            stderr: "stale".into(),
-            exit_code: Some(99),
-        };
+        let mut report = String::from("stale");
         execute_command_bounded(
             command,
             &AtomicBool::new(false),
@@ -3878,8 +3919,7 @@ mod tests {
             Some(&mut report),
         )
         .unwrap();
-        assert_eq!(report.stderr, "");
-        assert_eq!(report.exit_code, Some(0));
+        assert_eq!(report, "");
     }
 
     #[cfg(unix)]
@@ -3889,10 +3929,7 @@ mod tests {
         command
             .arg("-c")
             .arg("echo 'engine failure' >&2; printf '{'; exit 3");
-        let mut report = ProcessReport {
-            stderr: "stale".into(),
-            exit_code: Some(99),
-        };
+        let mut report = String::from("stale");
         let error = execute_command_bounded(
             command,
             &AtomicBool::new(false),
@@ -3903,8 +3940,121 @@ mod tests {
         )
         .unwrap_err();
         assert_eq!(error, "Coven returned an incomplete stream event.");
-        assert_eq!(report.stderr, "engine failure");
-        assert_eq!(report.exit_code, None);
+        assert_eq!(report, "engine failure");
+    }
+
+    #[test]
+    fn engine_turns_replay_captured_history_in_order_and_skip_tool_traffic() {
+        let events = vec![
+            json!({"type":"system","subtype":"init","session_id":"first"}),
+            json!({"type":"user","source":"chat-input","session_id":"first","parent_session_id":null,
+                "attachments":[{"name":"notes.txt","size":3}],
+                "message":{"role":"user","content":[{"type":"text","text":"First question"}]}}),
+            json!({"type":"text_delta","session_id":"first","text":"First "}),
+            json!({"type":"text_delta","session_id":"first","text":"answer"}),
+            json!({"type":"output","session_id":"first","text":"⚒ Bash(ls)"}),
+            json!({"type":"result","session_id":"first","subtype":"success"}),
+            json!({"type":"system","subtype":"init","session_id":"second"}),
+            json!({"type":"user","source":"chat-input","session_id":"second","parent_session_id":"first",
+                "message":{"role":"user","content":[{"type":"text","text":"Second question"}]}}),
+            json!({"type":"assistant","session_id":"second","message":{"role":"assistant","content":[
+                {"type":"tool_use","name":"shell"},{"type":"text","text":"Second answer"}]}}),
+        ];
+        let turns = replay_turns(&events);
+        assert_eq!(
+            turns,
+            vec![
+                ("user", "First question\n[Attached: notes.txt]".to_string()),
+                ("assistant", "First answer".to_string()),
+                ("user", "Second question".to_string()),
+                ("assistant", "Second answer".to_string()),
+            ]
+        );
+        let replay = build_replay("Latest question", &turns, false).unwrap();
+        assert_eq!(replay.replayed, 4);
+        assert!(!replay.omitted);
+        assert!(replay.prompt.ends_with("Latest message:\nLatest question"));
+        let first = replay.prompt.find("User: First question").unwrap();
+        let second = replay.prompt.find("User: Second question").unwrap();
+        assert!(first < second);
+        assert!(!replay.prompt.contains("Bash(ls)"));
+        assert!(!replay.prompt.contains("omitted"));
+        assert!(build_replay("Latest question", &[], false).is_none());
+        assert!(build_replay("", &turns, false)
+            .unwrap()
+            .prompt
+            .ends_with("Latest message:\nRead the attached text files."));
+        assert_eq!(
+            replay_notice(&replay),
+            "Coven Code can't reopen this chat's earlier turns on its own, so Chat replayed the last 4 turns into this message."
+        );
+    }
+
+    #[test]
+    fn engine_replay_truncation_stays_inside_the_message_cap() {
+        for text in [
+            "x".repeat(REPLAY_MESSAGE_LIMIT * 2),
+            "é".repeat(REPLAY_MESSAGE_LIMIT),
+            "🜲".repeat(REPLAY_MESSAGE_LIMIT),
+        ] {
+            let truncated = truncate_utf8(&text, REPLAY_MESSAGE_LIMIT);
+            assert!(
+                truncated.len() <= REPLAY_MESSAGE_LIMIT,
+                "{} exceeded the cap",
+                truncated.len()
+            );
+            assert!(truncated.ends_with(TRUNCATION_MARKER));
+        }
+    }
+
+    #[test]
+    fn engine_replay_reports_history_dropped_before_the_byte_budget() {
+        let turns: Vec<(&str, String)> = vec![
+            ("user", "only surviving question".to_owned()),
+            ("assistant", "only surviving answer".to_owned()),
+        ];
+        // Everything left fits, so the budget alone would report nothing missing.
+        let complete = build_replay("now", &turns, false).unwrap();
+        assert!(!complete.omitted);
+        assert!(!complete.prompt.contains("(Earlier turns are omitted.)"));
+        assert!(!replay_notice(&complete).ends_with("Older turns were left out."));
+
+        // Capped, missing or deleted lineage must still be disclosed.
+        let partial = build_replay("now", &turns, true).unwrap();
+        assert!(partial.omitted);
+        assert_eq!(partial.replayed, complete.replayed);
+        assert!(partial.prompt.contains("(Earlier turns are omitted.)"));
+        assert!(replay_notice(&partial).ends_with("Older turns were left out."));
+    }
+
+    #[test]
+    fn engine_replay_keeps_the_newest_turns_within_the_budget() {
+        let long = "x".repeat(REPLAY_MESSAGE_LIMIT * 2);
+        let turns: Vec<(&str, String)> = (0..40)
+            .map(|index| {
+                (
+                    if index % 2 == 0 { "user" } else { "assistant" },
+                    format!("turn {index} {long}"),
+                )
+            })
+            .collect();
+        let replay = build_replay("now", &turns, false).unwrap();
+        assert!(replay.omitted);
+        assert!(replay.replayed >= 1 && replay.replayed < turns.len());
+        assert!(
+            replay.prompt.len() <= REPLAY_LIMIT + 1024,
+            "{}",
+            replay.prompt.len()
+        );
+        assert!(replay.prompt.contains("Assistant: turn 39 "));
+        assert!(!replay.prompt.contains("turn 0 "));
+        assert!(replay.prompt.contains("(Earlier turns are omitted.)"));
+        assert!(replay.prompt.contains("…[truncated by Coven Chat]"));
+        assert!(replay_notice(&replay).ends_with("Older turns were left out."));
+        let multibyte = "é".repeat(REPLAY_MESSAGE_LIMIT);
+        let truncated = truncate_utf8(&multibyte, REPLAY_MESSAGE_LIMIT);
+        assert!(truncated.starts_with("éé") && truncated.ends_with("…[truncated by Coven Chat]"));
+        assert_eq!(truncate_utf8("short", REPLAY_MESSAGE_LIMIT), "short");
     }
 
     #[test]
@@ -3918,19 +4068,13 @@ mod tests {
             model: None,
             think: false,
             speed: None,
-            max_turns: None,
             attachments: vec![],
             grant: None,
         };
-        let args = run_arguments(
-            &input,
-            "coven-code",
-            Path::new("/workspace"),
-            "message plus host note",
-        )
-        .unwrap();
+        let args =
+            run_arguments(&input, "coven-code", Path::new("/workspace"), "replayed").unwrap();
         assert_eq!(&args[..2], ["run", "coven-code"]);
-        assert_eq!(&args[args.len() - 2..], ["--", "message plus host note"]);
+        assert_eq!(&args[args.len() - 2..], ["--", "replayed"]);
         assert!(args
             .windows(2)
             .any(|pair| pair == ["--continue", "session-1"]));
@@ -3949,7 +4093,6 @@ mod tests {
             model: None,
             think: false,
             speed: None,
-            max_turns: None,
             attachments: vec![],
             grant: None,
         };
@@ -3964,9 +4107,12 @@ mod tests {
 
     #[test]
     fn a_message_of_only_attachments_still_says_something_under_the_note() {
-        assert_eq!(turn_text(" ", true), attachments::ATTACHMENTS_ONLY_PROMPT);
-        assert_eq!(turn_text("Read this", true), "Read this");
-        assert_eq!(turn_text("Hi", false), "Hi");
+        assert_eq!(
+            turn_text(" ", true, None),
+            attachments::ATTACHMENTS_ONLY_PROMPT
+        );
+        assert_eq!(turn_text("Read this", true, None), "Read this");
+        assert_eq!(turn_text("Hi", false, Some("replayed")), "replayed");
     }
 
     /// A person who sent a message has moved on, whether or not the message
@@ -4007,7 +4153,6 @@ mod tests {
                 model: None,
                 think: false,
                 speed: None,
-                max_turns: None,
                 attachments: vec![],
                 grant: None,
             },
@@ -4077,6 +4222,19 @@ mod tests {
                 "{field}"
             );
         }
+    }
+
+    #[test]
+    fn a_replay_leaves_out_the_request_the_familiar_made() {
+        let block = "```coven-permission-request\n{\"summary\":\"S\"}\n```";
+        let events = [
+            json!({"type":"assistant","message":{"content":[{"type":"text","text":format!("Needs access.\n\n{block}")}]}}),
+            json!({"type":"assistant","message":{"content":[{"type":"text","text":block}]}}),
+        ];
+        assert_eq!(
+            replay_turns(&events),
+            vec![("assistant", "Needs access.".to_owned())]
+        );
     }
 
     #[test]
@@ -4230,8 +4388,8 @@ mod tests {
             .to_owned();
         let workspace = PathBuf::from(workspace).canonicalize().unwrap();
         // The third turn only passes when the engine actually receives the
-        // earlier turns: this exercises the persisted engine-history path
-        // end to end without text-only replay.
+        // earlier turns: the bundled engine cannot reopen them itself, so
+        // this exercises the replayed-history path end to end.
         let markers = ["COVEN_CHAT_READY", "COVEN_CHAT_RESUMED", "COVEN_CHAT_READY"];
         for (turn, prompt) in [
             "Reply exactly COVEN_CHAT_READY. Do not use tools or access files.",
@@ -4250,7 +4408,6 @@ mod tests {
                 model: None,
                 think: false,
                 speed: None,
-                max_turns: None,
                 attachments: vec![],
                 grant: None,
             };
@@ -4287,7 +4444,7 @@ mod tests {
                     && event["subtype"] == "notice"
                     && event["source"] == "chat-replay")
                 .count();
-            assert_eq!(replay_notices, 0);
+            assert_eq!(replay_notices, usize::from(turn > 0));
             assert!(
                 observed
                     .iter()
@@ -4394,7 +4551,6 @@ mod tests {
             model: None,
             think: false,
             speed: None,
-            max_turns: None,
             attachments: vec![attachments::Attachment {
                 name: "marker.txt".into(),
                 bytes: format!("{marker}\n").into_bytes(),

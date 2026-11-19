@@ -42,7 +42,7 @@ import { ChatLifecycleControls } from './chat-lifecycle';
 import { CompanionPanel } from './companion-panel';
 import { ContextPicker } from './context-picker';
 import { CopyButton } from './copy-button';
-import type { ChatMessage, RunBudgetEvidence } from './events';
+import type { ChatMessage } from './events';
 import { LinkReviewContext } from './external-link-review';
 import { FamiliarAvatar } from './familiar-avatar';
 import { FormattedMessage, REVEAL_EVENT, ToolActivity, type ToolRow } from './formatted-message';
@@ -155,12 +155,12 @@ export type ChatLayoutProps = Readonly<{
   /** When the active run started (epoch ms); the status shows how long it has run. */
   runStartedAt?: number;
   /** How the shown familiar's most recent run in this window ended, and how long it took. */
-  lastRun?: Readonly<{ ms: number; outcome: 'reply' | 'error' | 'stopped' | 'unfinished' }>;
+  lastRun?: Readonly<{ ms: number; outcome: 'reply' | 'error' | 'stopped' }>;
   /**
    * Familiars whose run ended while another was shown, by outcome, until they
    * are opened again. Their rows say so.
    */
-  finished?: Readonly<Record<string, 'reply' | 'error' | 'unfinished'>>;
+  finished?: Readonly<Record<string, 'reply' | 'error'>>;
   /** Requests familiars are waiting on an answer for, across every chat. */
   approvals?: readonly CovenApproval[];
   /** A Decline is on its way to the host. */
@@ -177,9 +177,6 @@ export type ChatLayoutProps = Readonly<{
   onDismissError?: () => void;
   /** Sends the restored draft again; present only while a failed run's error shows. */
   onRetry?: (options: RunOptions) => void;
-  /** Actual applied metadata from the runtime, independent of preferences. */
-  budget?: RunBudgetEvidence;
-  onContinue?: (options: RunOptions) => void;
   /** Reads the chat's history again; present only while a failed read's error shows. */
   onReloadChat?: () => void;
   /** The host-side VNC relay; absent in the browser, where the pane says so. */
@@ -361,13 +358,10 @@ export function accessSummary(
 }
 
 /** The Activity tab's account of the most recent run: how it ended, and how long it took. */
-export function lastRunText(
-  run: Readonly<{ ms: number; outcome: 'reply' | 'error' | 'stopped' | 'unfinished' }>,
-) {
+export function lastRunText(run: Readonly<{ ms: number; outcome: 'reply' | 'error' | 'stopped' }>) {
   const took = formatElapsed(run.ms);
   if (run.outcome === 'reply') return `Replied in ${took}`;
   if (run.outcome === 'error') return `Failed after ${took}`;
-  if (run.outcome === 'unfinished') return `Unfinished after ${took}`;
   return `Stopped after ${took}`;
 }
 
@@ -1370,12 +1364,7 @@ export function ChatLayout(props: ChatLayoutProps) {
                   const live = props.busy && item.id === runFamiliarId;
                   const draft = props.drafts?.[item.id]?.trim() ?? '';
                   const done = live ? undefined : props.finished?.[item.id];
-                  const doneLabel =
-                    done === 'unfinished'
-                      ? 'Work unfinished'
-                      : done === 'error'
-                        ? 'Run failed'
-                        : 'New reply';
+                  const doneLabel = done === 'error' ? 'Run failed' : 'New reply';
                   const asks = !live && props.approvals?.some((a) => a.familiarId === item.id);
                   return (
                     <button
@@ -1720,25 +1709,6 @@ export function ChatLayout(props: ChatLayoutProps) {
                   onShowCard={onShowCard}
                 />
               </LinkReviewContext.Provider>
-              {props.budget?.unfinished ? (
-                <div className="coven-notice coven-history-notice" aria-live="polite">
-                  <p>
-                    Unfinished: model-round allowance exhausted ({props.budget.consumed}/
-                    {props.budget.limit}). Partial output is retained.
-                  </p>
-                  {props.onContinue && !props.busy && !props.loading ? (
-                    <FamButton size="sm" onClick={() => props.onContinue?.(run)}>
-                      Continue saved work
-                    </FamButton>
-                  ) : (
-                    <span>
-                      {props.busy
-                        ? 'Waiting for runtime settlement.'
-                        : 'Saved continuation is unavailable.'}
-                    </span>
-                  )}
-                </div>
-              ) : null}
               {liveRow ? (
                 <div className="fr-thinking-row coven-live-row">
                   <FamiliarAvatar name={name} avatarUrl={familiar?.avatarUrl} size={22} />
@@ -2194,14 +2164,6 @@ export function ChatLayout(props: ChatLayoutProps) {
                       <div className="fr-row">
                         <span className="fr-row-label">Last run</span>
                         <span className="fr-row-value">{lastRunText(props.lastRun)}</span>
-                      </div>
-                    ) : null}
-                    {props.budget ? (
-                      <div className="fr-row">
-                        <span className="fr-row-label">Model rounds</span>
-                        <span className="fr-row-value">
-                          {props.budget.consumed}/{props.budget.limit} · {props.budget.source}
-                        </span>
                       </div>
                     ) : null}
                     {props.model ? (
