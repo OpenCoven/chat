@@ -116,9 +116,9 @@ if (skipWithoutPinnedToolchain) {
       : [`Node is ${process.version}, not ${pinnedNodeVersion} from .node-version`]),
     ...(rustupAvailable ? [] : ['rustup is not on PATH']),
   ];
-  console.warn(
+  process.stderr.write(
     `phase1-conformance.test.ts: ${gaps.join(' and ')}, so the tests that need CI's toolchain ` +
-      'are skipped. CI runs them.',
+      'are skipped. CI runs them.\n',
   );
 }
 
