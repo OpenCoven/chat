@@ -300,6 +300,24 @@ describe('genuine Coven event projection', () => {
     );
   });
 
+  it('names the server Coven could not reach and the control that sends again', () => {
+    // A ChatGPT familiar's run on Coven Code 0.9.1, as Coven recorded it (#686).
+    const failed = (error: string) =>
+      projectEvents([{ type: 'result', is_error: true, session_id: 's', error }]).error;
+    expect(
+      failed(
+        'coven-code exited with code 1: WARN Failed to create Anthropic client for semantic extraction\n{"error":"API error: [codex] Error: HTTP request failed: error sending request for url (https://chatgpt.com/backend-api/codex/responses)","type":"error"}',
+      ),
+    ).toBe(
+      "Coven couldn't reach chatgpt.com, so this run stopped. Check your internet connection, then use Try again.",
+    );
+    expect(failed('API error: [codex] Error: HTTP request failed: error sending request')).toBe(
+      "Coven couldn't reach the model's server, so this run stopped. Check your internet connection, then use Try again.",
+    );
+    // Any other failure keeps Coven's text.
+    expect(failed('[codex] Rate limited')).toBe('[codex] Rate limited');
+  });
+
   it('names the kept report and the control when a failed result carries no error text', () => {
     const { error } = projectEvents([
       { type: 'result', is_error: true, error: null, session_id: 's' },

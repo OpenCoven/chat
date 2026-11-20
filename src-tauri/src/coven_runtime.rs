@@ -2566,10 +2566,13 @@ fn result_error(result: &Value) -> Option<String> {
 /// exit with nothing on stderr says only that it failed, which is no report.
 fn run_failure_report(failure: &RunFailure, stderr: &str) -> Option<String> {
     if let Some(error) = &failure.engine_error {
-        return Some(format!("Coven reported: {error}"));
+        return Some(format!("Coven reported: {}", readable_report(error)));
     }
     if !stderr.is_empty() {
-        return Some(format!("Coven's error output:\n{stderr}"));
+        return Some(format!(
+            "Coven's error output:\n{}",
+            readable_report(stderr)
+        ));
     }
     failure.run_error.as_deref().and_then(|error| {
         let text = error
@@ -2578,6 +2581,88 @@ fn run_failure_report(failure: &RunFailure, stderr: &str) -> Option<String> {
             .trim();
         (!text.is_empty()).then(|| text.to_owned())
     })
+}
+
+/// What the engine printed, without the parts that aren't about the failure.
+/// Coven passes on the engine's stderr after "<engine> exited with code N: ",
+/// and that holds the engine's own log lines as well as its error. A log line
+/// below ERROR is never the reason a run failed. One that Coven Code's
+/// WebFetch prints names Anthropic on a familiar that doesn't use it. The
+/// engine also wraps its error as `{"error": …, "type": "error"}`, so the kept
+/// report shows the error itself. If nothing else is left, the report stays as
+/// it was.
+fn readable_report(report: &str) -> String {
+    let plain = strip_terminal_escapes(report);
+    let (prefix, body) = exit_prefix(&plain);
+    let lines: Vec<String> = body
+        .lines()
+        .filter(|line| !is_engine_log_line(line))
+        .map(unwrap_error_envelope)
+        .filter(|line| !line.trim().is_empty())
+        .collect();
+    if lines.is_empty() {
+        return report.to_owned();
+    }
+    format!("{prefix}{}", lines.join("\n"))
+}
+
+/// Coven's "coven-code exited with code 1: " in front of the engine's stderr.
+fn exit_prefix(report: &str) -> (&str, &str) {
+    let Some((head, _)) = report.split_once(": ") else {
+        return ("", report);
+    };
+    let exit = head
+        .split_once(" exited with code ")
+        .is_some_and(|(engine, code)| {
+            !engine.is_empty()
+                && !engine.contains(char::is_whitespace)
+                && code.trim_start_matches('-').parse::<u32>().is_ok()
+        });
+    if exit {
+        report.split_at(head.len() + 2)
+    } else {
+        ("", report)
+    }
+}
+
+/// Coven Code's headless log format: the level, padded to five characters,
+/// then the message. No time or target is printed.
+fn is_engine_log_line(line: &str) -> bool {
+    ["WARN ", "INFO ", "DEBUG ", "TRACE "]
+        .iter()
+        .any(|level| line.trim_start().starts_with(level))
+}
+
+fn unwrap_error_envelope(line: &str) -> String {
+    serde_json::from_str::<Value>(line.trim())
+        .ok()
+        .filter(|value| value.get("type").and_then(Value::as_str) == Some("error"))
+        .and_then(|value| {
+            value
+                .get("error")
+                .and_then(Value::as_str)
+                .map(str::to_owned)
+        })
+        .unwrap_or_else(|| line.to_owned())
+}
+
+/// Removes colour and other CSI sequences a log line may carry.
+fn strip_terminal_escapes(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut chars = text.chars().peekable();
+    while let Some(c) = chars.next() {
+        if c == '\u{1b}' && chars.peek() == Some(&'[') {
+            chars.next();
+            for c in chars.by_ref() {
+                if ('\u{40}'..='\u{7e}').contains(&c) {
+                    break;
+                }
+            }
+        } else {
+            out.push(c);
+        }
+    }
+    out
 }
 
 fn run_failure_notice(report: Option<&str>) -> String {
@@ -2595,9 +2680,32 @@ fn claude_code_too_old(report: &str) -> bool {
     report.contains("unknown option '--permission-mode'")
 }
 
+/// The engine's HTTP client says "error sending request for url (<url>)" when
+/// a request to the model's server got no response: no connection, a dropped
+/// one, or a timeout. Gives the server's host when the report names it.
+fn unreachable_server(report: &str) -> Option<Option<String>> {
+    let (_, rest) = report.split_once("error sending request")?;
+    let host = rest
+        .strip_prefix(" for url (")
+        .and_then(|rest| rest.split_once(')'))
+        .and_then(|(url, _)| url::Url::parse(url).ok())
+        .and_then(|url| url.host_str().map(str::to_owned));
+    Some(host)
+}
+
+/// The same words as `unreachableServer` in `src/coven/events.ts`.
+fn unreachable_message(host: Option<&str>) -> String {
+    format!(
+        "Coven couldn't reach {}, so this run stopped. Check your internet connection, then use Try again.",
+        host.unwrap_or("the model's server")
+    )
+}
+
 fn run_failure_message(report: Option<&str>) -> String {
+    let unreachable = report.and_then(unreachable_server);
     match report {
         Some(report) if claude_code_too_old(report) => "Claude Code is too old for this version of Coven. Run claude update in a terminal, then use Try again.".into(),
+        Some(_) if unreachable.is_some() => unreachable_message(unreachable.flatten().as_deref()),
         Some(_) => "The run failed. Coven's report is the last line of the chat, and Try again resends your message.".into(),
         None => "The run failed, and Coven gave no reason. Try again resends your message.".into(),
     }
@@ -3774,6 +3882,78 @@ mod tests {
         // Any other failure keeps the usual message.
         let other = run_failure_message(Some("Coven reported: unknown option '--think'"));
         assert!(other.contains("Try again resends your message."), "{other}");
+    }
+
+    #[test]
+    fn a_server_coven_couldnt_reach_is_named_with_try_again() {
+        // A ChatGPT familiar's run on Coven Code 0.9.1 (#686): WebFetch's
+        // warning, then the engine's error envelope, as Coven reported them.
+        let engine_error = r#"coven-code exited with code 1: WARN Failed to create Anthropic client for semantic extraction
+{"error":"API error: [codex] Error: HTTP request failed: error sending request for url (https://chatgpt.com/backend-api/codex/responses)","type":"error"}"#;
+        let report = run_failure_report(
+            &RunFailure {
+                engine_error: Some(engine_error.into()),
+                run_error: None,
+            },
+            "",
+        )
+        .unwrap();
+        assert_eq!(
+            report,
+            "Coven reported: coven-code exited with code 1: API error: [codex] Error: HTTP request failed: error sending request for url (https://chatgpt.com/backend-api/codex/responses)"
+        );
+        assert_eq!(
+            run_failure_message(Some(&report)),
+            "Coven couldn't reach chatgpt.com, so this run stopped. Check your internet connection, then use Try again."
+        );
+        // Without a URL it still says what happened.
+        assert_eq!(
+            run_failure_message(Some("Coven reported: error sending request")),
+            "Coven couldn't reach the model's server, so this run stopped. Check your internet connection, then use Try again."
+        );
+        // Other failures keep the usual message.
+        let other = run_failure_message(Some("Coven reported: [codex] Rate limited"));
+        assert!(other.contains("Try again resends your message."), "{other}");
+    }
+
+    #[test]
+    fn the_kept_report_leaves_out_engine_log_lines_and_the_error_envelope() {
+        // Coloured and padded as the engine's logger prints them.
+        assert_eq!(
+            readable_report(
+                "coven-code exited with code 1: \u{1b}[33m WARN\u{1b}[0m noise\n\u{1b}[32m INFO\u{1b}[0m more\nDEBUG x\nTRACE y\nthe cause"
+            ),
+            "coven-code exited with code 1: the cause"
+        );
+        // An ERROR line can be the reason, so it stays.
+        assert_eq!(readable_report("ERROR the cause"), "ERROR the cause");
+        // With nothing else left, the report stays as it was.
+        assert_eq!(
+            readable_report("coven-code exited with code 1: WARN only a warning"),
+            "coven-code exited with code 1: WARN only a warning"
+        );
+        // A colon in the error itself isn't Coven's exit prefix.
+        assert_eq!(
+            readable_report("API error: [anthropic] Error: WARN x"),
+            "API error: [anthropic] Error: WARN x"
+        );
+        // JSON that isn't the error envelope stays.
+        assert_eq!(
+            readable_report(r#"{"type":"result","error":"x"}"#),
+            r#"{"type":"result","error":"x"}"#
+        );
+        assert_eq!(readable_report("exit 1"), "exit 1");
+        assert_eq!(
+            run_failure_report(
+                &RunFailure {
+                    engine_error: None,
+                    run_error: Some("Coven command failed. exit 1".into()),
+                },
+                " WARN noise\nexit 1",
+            )
+            .as_deref(),
+            Some("Coven's error output:\nexit 1")
+        );
     }
 
     #[test]
