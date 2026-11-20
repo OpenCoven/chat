@@ -4115,8 +4115,6 @@ mod tests {
         assert_eq!(turn_text("Hi", false, Some("replayed")), "replayed");
     }
 
-    /// A person who sent a message has moved on, whether or not the message
-    /// got as far as the engine. The request must not come back afterwards.
     /// While asking is on, a send whose supersede the log can't record must
     /// stop here, before anything runs, and leave the request to its person (#573).
     #[test]
@@ -4182,6 +4180,8 @@ mod tests {
         );
     }
 
+    /// A person who sent a message has moved on, whether or not the message
+    /// got as far as the engine. The request must not come back afterwards.
     #[test]
     fn a_message_that_never_starts_still_closes_the_request() {
         let data = std::env::temp_dir().join(uuid::Uuid::new_v4().to_string());

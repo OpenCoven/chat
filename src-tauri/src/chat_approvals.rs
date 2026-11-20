@@ -33,8 +33,10 @@ pub(crate) const LOG_UNAVAILABLE: &str =
     "Chat can't reach its permission log. Check the disk, then try again.";
 /// A send refused because the log couldn't record that it replaces the
 /// familiar's open request (#573).
-/// The usual cause is another copy of Chat holding the log.
-pub(crate) const SEND_UNRECORDED: &str = "Chat couldn't update its permission log, so this message wasn't sent. Close any other copy of Chat that's open, then send it again.";
+/// Returned for any supersede error. The usual cause is another copy of Chat
+/// holding the log; a full disk or a damaged log file are the rest. Companion
+/// sends reach it too, so it names the Mac.
+pub(crate) const SEND_UNRECORDED: &str = "Chat on your Mac couldn't update its permission log, so this message wasn't sent. Close any other copy of Chat on the Mac and send it again. If it keeps happening, check that the Mac has free disk space, then restart Chat.";
 /// The same keys, in the same order, as `SUMMARY_KEYS` in `src/coven/events.ts`.
 const DETAIL_KEYS: [&str; 7] = [
     "command",
