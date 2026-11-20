@@ -1,0 +1,40 @@
+name: ci:full label
+# ci.yml runs its Rust, Phase 1, Windows and macOS supervisor jobs on a pull
+# request only under the `ci:full` label. Without it they report `skipped`, and
+# branch protection reads that as passing. This fails instead when a pull
+# request changes what those jobs test without the label. The rules are in
+# scripts/ci-full-check.mjs; ci.yml is governed by the conformance lock, so
+# this lives in its own file.
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, labeled, unlabeled]
+permissions:
+  contents: read
+  pull-requests: read
+concurrency:
+  group: ci-full-label-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+jobs:
+  check:
+    name: ci:full when needed
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version-file: '.node-version'
+      - name: Check the label against the changed paths
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+          PULL_NUMBER: ${{ github.event.pull_request.number }}
+          LABELS: ${{ join(github.event.pull_request.labels.*.name, ',') }}
+        run: |
+          set -euo pipefail
+          # A renamed file counts under its old path too.
+          gh api "repos/${REPOSITORY}/pulls/${PULL_NUMBER}/files" --paginate \
+            --jq '.[] | .filename, (.previous_filename // empty)' > "${RUNNER_TEMP}/changed-paths"
+          node scripts/ci-full-check.mjs --labels "${LABELS}" < "${RUNNER_TEMP}/changed-paths"
