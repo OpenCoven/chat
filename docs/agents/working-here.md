@@ -53,7 +53,9 @@ label those jobs report `skipped`, branch protection accepts `skipped`, and the 
 with that code never built.
 
 - Add `ci:full` to any PR that touches `src-tauri/`, the supervisors, or Windows paths, before you
-  call it green.
+  call it green. Once #671 lands, the `Full checks requested` job fails such a PR until the label
+  is on it; `Changed paths` lists the files that made it ask. It is not a required check, so read
+  its red X as "add the label", not as optional.
 - Read `skipped` on `Rust` as "not tested".
 - Adding the label starts a new run (`labeled` is a trigger) and cancels the one in progress.
   Check-run lists keep entries from the cancelled run, so read the newest run's jobs.
@@ -88,17 +90,40 @@ gh api -X POST repos/OpenCoven/chat/actions/runs/<run-id>/rerun-failed-jobs
 - Chromium drops focus as soon as a field is disabled; WebKit does it later. Focus logic that
   passes in one engine can fail in the other.
 
-## Local checks that fail without your change (verified 2026-11-12)
+## Local checks that fail without your change (verified 2026-11-20)
 
-Compare against an unchanged worktree before chasing any of these as a regression:
+Compare against an unchanged worktree before chasing any of these as a regression. Entries marked
+"after #670" or "after #677" describe main once that PR has landed.
 
-- **`src/client-v1-conformance-workflow.test.ts`** fails with `spawnSync pwsh ENOENT` on a machine
-  without PowerShell. CI has it.
-- **`test:unit` stops early.** It runs the normal suite `&&` the heavy suite, so the failures above
-  stop it before the heavy half. Run
-  `corepack pnpm@10.34.0 --ignore-workspace test:unit:heavy` on its own.
-- **`src/phase1-conformance.test.ts`** (heavy) needs the exact Node version in `.node-version`
-  and `rustup` on `PATH`. A newer Node or a toolchain without rustup fails it.
+- **PowerShell tests.** Without `pwsh` on PATH, 26 tests in four files fail with
+  `spawnSync pwsh ENOENT`: `src/client-v1-conformance-workflow.test.ts` (21),
+  `src/native-installed-exe.test.ts` (3), `src/native-link-protocol.test.ts` and
+  `src/native-link-guard.test.ts`. After #670 they skip off CI and print
+  "PowerShell (pwsh) is not on PATH: skipping the tests that run it". CI and Windows still run
+  them.
+- **`test:unit` stops early** while those fail: it runs the normal suite `&&` the heavy suite.
+  Until #670 lands, run `corepack pnpm@10.34.0 --ignore-workspace test:unit:heavy` on its own.
+- **`src/phase1-conformance.test.ts`** (heavy) observes the exact release toolchain: Node 24.18.1
+  from `.node-version`, and Rust through `rustup`. Five tests fail with another Node or without
+  `rustup` on PATH. After #670 they skip off CI and say which part is missing. To run them for
+  real, put rustup's `~/.cargo/bin` first on PATH and use Node 24.18.1.
+- **A single heavy file** needs the heavy config, because the default config excludes it:
+  `corepack pnpm exec vitest run --config vitest.heavy.config.ts src/phase1-conformance.test.ts`.
+- **`cargo` may not be rustup's.** `rust-toolchain.toml` pins 1.95.0, but only rustup reads it.
+  On the Mac in use on 2026-11-20, `/opt/homebrew/bin/cargo` (1.99.1) comes before
+  `~/.cargo/bin` on PATH. The CLAUDE.md cargo commands then pass on 1.99.1 (374 tests, clippy
+  clean) while CI builds with 1.95.0. Check `cargo --version`; prefix
+  `PATH="$HOME/.cargo/bin:$PATH"` to get the pinned toolchain.
+- **Port 4173 may be taken.** `pnpm dev` and `app:dev` bind it with `strictPort`, and another
+  worktree's dev server or an unrelated local server may hold it: on 2026-11-20 a week-old static
+  server did. `lsof -nP -iTCP:4173 -sTCP:LISTEN` shows the holder; don't stop a process you
+  didn't start. After #677, `app:dev` says so before Tauri starts, and
+  `OPENCOVEN_CHAT_DEV_PORT=<port> corepack pnpm app:dev` moves the dev server and Tauri's devUrl
+  for that run.
+- **A scratch `HOME` does not isolate the `app:dev` WebView on macOS.** WebKit uses the account's
+  home directory, not `$HOME`, so a dev run writes `~/Library/WebKit/opencoven-chat` and
+  `~/Library/Caches/opencoven-chat` even when `HOME` and `COVEN_HOME` point at scratch. Coven state
+  does follow `COVEN_HOME`. Say so when your task requires a scratch home.
 - **Playwright WebKit** skips buttons on Tab (Safari's default keyboard setting), so the cross-browser suite uses Option+Tab in WebKit. Its clipboard permissions and RTL Range geometry checks remain Chromium-only, with explicit WebKit skips. The e2e suite runs Chromium and WebKit, and rendered captures provide the text-position check.
 - `e2e/design-review/` is a capture harness for rendered design checks. Run it with
   `--config e2e/design-review/playwright.config.ts`.
