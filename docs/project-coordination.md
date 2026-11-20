@@ -31,7 +31,7 @@ None of these merge without Val. #682, #683 and #684 target other PRs' branches,
 | [#679](https://github.com/OpenCoven/chat/pull/679) | #660 agent notes | `abdcf97` | green | [#684](https://github.com/OpenCoven/chat/pull/684) aligns it with #674, against #679's branch (two nits). #679 still names #671's job, closed in favor of #675 |
 | [#678](https://github.com/OpenCoven/chat/pull/678) | #665 iOS relaunch test | `2ed5e38` | green | No code findings. Merging uploads a TestFlight build |
 | [#645](https://github.com/OpenCoven/chat/pull/645) | #640 iOS held send | `bbb29c5` | green | Waiting only on the TestFlight decision |
-| [#680](https://github.com/OpenCoven/chat/pull/680) | #573 unwritten supersede | `b897239` | rerunning, `ci:full` | Reworked after an independent review: while asking is on, a send the log can't record is refused. Asking stays off |
+| [#680](https://github.com/OpenCoven/chat/pull/680) | #573 unwritten supersede | `e7cb6a6` | green, `ci:full` | Two independent reviews, no open findings. Reworked after the first: while asking is on, a send the log can't record is refused. Asking stays off |
 | [#649](https://github.com/OpenCoven/chat/pull/649) | code-scanning alert 12 | draft | | Disposition owned by #661 |
 | [#575](https://github.com/OpenCoven/chat/pull/575) | persistent workspace write | draft | | On Val's hold since 2026-11-14 |
 
