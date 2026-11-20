@@ -446,7 +446,10 @@ restores its text only if you haven't edited the new draft; later edits are neve
 While a failed run's error notice shows and the restored text or attachments are still in the
 composer, the notice offers **Try again**, which sends them once more. What Coven reported about
 the failure stays as the last line of the chat, with its own **Copy** control, so it's still there
-after you dismiss the notice or reopen the app. When Coven gave no reason, the line says so.
+after you dismiss the notice or reopen the app. When Coven gave no reason, the line says so. That
+line leaves out the engine's own log lines below ERROR, which are never the reason a run failed.
+When Coven couldn't reach the model's server, the notice names the server and says to check your
+internet connection, then use **Try again**.
 
 Assistant replies render Markdown headings, lists, emphasis, quotes, code, tables, and task lists.
 Wide code and tables scroll inside the message. Raw HTML is disabled, and remote Markdown images
