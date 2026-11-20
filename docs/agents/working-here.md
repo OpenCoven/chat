@@ -92,21 +92,12 @@ gh api -X POST repos/OpenCoven/chat/actions/runs/<run-id>/rerun-failed-jobs
 
 ## Local checks that fail without your change (verified 2026-11-20)
 
-Compare against an unchanged worktree before chasing any of these as a regression. Entries marked
-"after #670" or "after #677" describe main once that PR has landed.
+Compare against an unchanged worktree before diagnosing a local failure. Check whether your branch includes the test-runner change from #674.
 
-- **PowerShell tests.** Without `pwsh` on PATH, 26 tests in four files fail with
-  `spawnSync pwsh ENOENT`: `src/client-v1-conformance-workflow.test.ts` (21),
-  `src/native-installed-exe.test.ts` (3), `src/native-link-protocol.test.ts` and
-  `src/native-link-guard.test.ts`. After #670 they skip off CI and print
-  "PowerShell (pwsh) is not on PATH: skipping the tests that run it". CI and Windows still run
-  them.
-- **`test:unit` stops early** while those fail: it runs the normal suite `&&` the heavy suite.
-  Until #670 lands, run `corepack pnpm@10.34.0 --ignore-workspace test:unit:heavy` on its own.
-- **`src/phase1-conformance.test.ts`** (heavy) observes the exact release toolchain: Node 24.18.1
-  from `.node-version`, and Rust through `rustup`. Five tests fail with another Node or without
-  `rustup` on PATH. After #670 they skip off CI and say which part is missing. To run them for
-  real, put rustup's `~/.cargo/bin` first on PATH and use Node 24.18.1.
+- **PowerShell tests.** With the corrected #674 runner, off-CI macOS and Linux runs identify missing PowerShell and skip the tests that invoke it. CI and Windows require PowerShell. Install PowerShell 7 to exercise those tests locally. On earlier checkouts, look for `spawnSync pwsh ENOENT` in the client-v1 conformance workflow, native installed-executable, native link-protocol, and native link-guard tests.
+- **Both unit suites.** With #674, `corepack pnpm test` runs the normal and heavy suites and exits nonzero when either fails. On earlier revisions the normal suite can stop the command before the heavy suite starts. Run `corepack pnpm@10.34.0 --ignore-workspace test:unit:heavy` separately on those revisions.
+- **Release toolchain.** Use the Node version in `.node-version` and put rustup’s `~/.cargo/bin` first on PATH. With #674, a Node mismatch skips the exact-version observation locally. Missing rustup also skips the four Cargo-resolution cases. CI keeps the requirements.
+
 - **A single heavy file** needs the heavy config, because the default config excludes it:
   `corepack pnpm exec vitest run --config vitest.heavy.config.ts src/phase1-conformance.test.ts`.
 - **`cargo` may not be rustup's.** `rust-toolchain.toml` pins 1.95.0, but only rustup reads it.
