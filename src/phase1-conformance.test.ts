@@ -99,6 +99,27 @@ const { bindMacosKeychainSessionEnvironment, cloneExactCheckout: cloneSchemaV2Ex
   schemaV2Producer;
 const projectRoot = resolve(import.meta.dirname, '..');
 
+// A few tests below observe the exact release toolchain: Node 24.18.1 from
+// .node-version, and Rust through `rustup`, which honours rust-toolchain.toml.
+// CI provides both. A developer machine often has another Node, or a cargo on
+// PATH that is not rustup's, and those tests then failed on every run with no
+// change in the code. Off CI they skip and say why; under CI a missing or
+// different toolchain still fails them.
+const offCi = !process.env.CI;
+const rustupAvailable = spawnSync('rustup', ['--version'], { stdio: 'ignore' }).status === 0;
+const releaseNodePresent = process.version === 'v24.18.1';
+const skipWithoutRustup = offCi && !rustupAvailable;
+const skipWithoutReleaseToolchain = offCi && (!rustupAvailable || !releaseNodePresent);
+const releaseToolchainSkipReason = `the exact release toolchain is missing (${[
+  releaseNodePresent ? '' : `Node is ${process.version}, not v24.18.1`,
+  rustupAvailable ? '' : 'rustup is not on PATH',
+]
+  .filter(Boolean)
+  .join('; ')}); CI runs this test`;
+if (skipWithoutReleaseToolchain) {
+  process.stderr.write(`Skipping the tests that observe ${releaseToolchainSkipReason}.\n`);
+}
+
 test.each([false, true])(
   'Windows Chat fetches retain frozen production for local clones (separate branch: %s)',
   (separateBranch) => {
@@ -4273,7 +4294,8 @@ describe('Phase 1 real-authority conformance harness', () => {
     70_000,
   );
 
-  test('observes the exact Node, pnpm, and Rust release toolchain', () => {
+  test('observes the exact Node, pnpm, and Rust release toolchain', ({ skip }) => {
+    skip(skipWithoutReleaseToolchain, releaseToolchainSkipReason);
     const root = mkdtempSync(join(tmpdir(), 'phase1-pnpm-version-'));
     const command = resolve(root, process.platform === 'win32' ? 'pnpm.cmd' : 'pnpm');
     const originalPath = process.env.PATH;
@@ -6350,7 +6372,7 @@ describe('Phase 1 real-authority conformance harness', () => {
     }
   });
 
-  test.each([
+  test.skipIf(skipWithoutRustup).each([
     ['schema-v1', 'supervisor'],
     ['schema-v1', 'empty'],
     ['schema-v2', 'supervisor'],

@@ -3,6 +3,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, normalize, resolve } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
+import { skipWithoutPwsh } from './test/pwsh';
 
 const roots: string[] = [];
 const shell = process.env.CHAT_TEST_PWSH ?? 'pwsh';
@@ -38,7 +39,9 @@ function fixture() {
   };
 }
 
-describe('Windows lane executable discovery', () => {
+// Without PowerShell the three refusal cases below would pass only because the
+// missing binary throws, so the whole block skips rather than half-passing.
+describe.skipIf(skipWithoutPwsh && shell === 'pwsh')('Windows lane executable discovery', () => {
   it('finds the earlier name when only the old installation exists', () => {
     const f = fixture();
     const old = f.put(f.programs, 'OpenCoven Chat');

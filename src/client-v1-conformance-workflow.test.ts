@@ -8,6 +8,7 @@ import { fileURLToPath } from 'node:url';
 import * as ts from 'typescript';
 import { afterAll, describe, expect, test } from 'vitest';
 import { decodeWindowsSupervisorSource } from '../scripts/windows-supervisor-source.mjs';
+import { pwshSkipReason, skipWithoutPwsh } from './test/pwsh';
 
 const projectRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const workflowPath = resolve(projectRoot, '.github', 'workflows', 'client-v1-conformance.yml');
@@ -623,7 +624,8 @@ describe('client-v1 conformance workflow bootstrap', () => {
     );
   });
 
-  test('validates all frozen Chat source pins before fetching', () => {
+  test('validates all frozen Chat source pins before fetching', ({ skip }) => {
+    skip(skipWithoutPwsh, pwshSkipReason);
     const cases = [
       { repository: 'OpenCoven/chat', revision: 'a'.repeat(40), result: 'accepted' },
       { repository: 'OpenCoven/other', revision: 'a'.repeat(40), result: 'rejected' },
@@ -1019,7 +1021,7 @@ describe('Chat-local protected Windows conformance workflow', () => {
     ).replace(/^ {10}/gmu, '');
   }
 
-  test.each([
+  test.skipIf(skipWithoutPwsh).each([
     ['20261103.298.1', '18.11.12328.437|26100.33674|7.6.9|10.0.14'],
     ['20260922.246.2', '18.10.12210.168|26100.33438|7.6.6|10.0.12'],
     ['20260824.214.3', null],
@@ -1059,7 +1061,7 @@ $p = Get-ReviewedWindowsImageProfile
     30_000,
   );
 
-  test.each([
+  test.skipIf(skipWithoutPwsh).each([
     ['20261103.298.1', '18.11.12328.437', true],
     ['20260922.246.2', '18.10.12210.168', true],
     ['20261103.298.1', '18.10.12210.168', false],
@@ -1275,15 +1277,17 @@ ${source.slice(start, end)}
     expect(runBody).toContain('OPENCOVEN_VALIDATOR_REVISION = $validatorRevision');
   });
 
-  test.each([
-    "'; Write-Host injected; '",
-    '$' + '{{ github.token }}',
-    '{not-an-oid}',
-    'a'.repeat(39),
-    'A'.repeat(40),
-    `${'a'.repeat(20)}\n${'b'.repeat(20)}`,
-    `${'a'.repeat(20)};${'b'.repeat(19)}`,
-  ])(
+  test
+    .skipIf(skipWithoutPwsh)
+    .each([
+      "'; Write-Host injected; '",
+      '$' + '{{ github.token }}',
+      '{not-an-oid}',
+      'a'.repeat(39),
+      'A'.repeat(40),
+      `${'a'.repeat(20)}\n${'b'.repeat(20)}`,
+      `${'a'.repeat(20)};${'b'.repeat(19)}`,
+    ])(
     'the exact workflow validator rejects adversarial revision %j',
     (revision) => {
       const workflow = readFileSync(workflowPath, 'utf8');
@@ -3118,7 +3122,7 @@ ${source.slice(start, end)}
     );
   });
 
-  test.skipIf(process.platform === 'win32' || !existsSync('/bin/sh'))(
+  test.skipIf(process.platform === 'win32' || !existsSync('/bin/sh') || skipWithoutPwsh)(
     'the extracted Invoke-Checked ignores a stale $LASTEXITCODE and reports the real process exit code',
     () => {
       const workflow = readFileSync(workflowPath, 'utf8');
@@ -3148,7 +3152,10 @@ try {
     30_000,
   );
 
-  test('the extracted Invoke-Checked does not fail closed on a stale nonzero $LASTEXITCODE after a real success', () => {
+  test('the extracted Invoke-Checked does not fail closed on a stale nonzero $LASTEXITCODE after a real success', ({
+    skip,
+  }) => {
+    skip(skipWithoutPwsh, pwshSkipReason);
     const workflow = readFileSync(workflowPath, 'utf8');
     const childBootstrap = embeddedWindowsChildBootstrapSource(workflow);
     const invokeChecked = extractPowerShellFunction(childBootstrap, 'Invoke-Checked');
@@ -3208,7 +3215,8 @@ Invoke-Checked -FilePath '/bin/sh' -ArgumentList @('-c', 'exit 0') -Label 'Zero 
     expect(childBootstrap).toContain('(& $node $pnpmCli exec tauri --version).Trim()');
   });
 
-  test('builds the parent environment without reading child-only tool variables', () => {
+  test('builds the parent environment without reading child-only tool variables', ({ skip }) => {
+    skip(skipWithoutPwsh, pwshSkipReason);
     const workflow = readFileSync(workflowPath, 'utf8');
     const environmentAssignment = workflow.match(
       /\$childEnvironment = \[ordered\]@\{[\s\S]*?\n {12}\}/u,
@@ -3247,7 +3255,8 @@ ${environmentAssignment}
     ).toBe('False');
   }, 30_000);
 
-  test('keeps every reviewed Windows tool directory as a distinct PATH entry', () => {
+  test('keeps every reviewed Windows tool directory as a distinct PATH entry', ({ skip }) => {
+    skip(skipWithoutPwsh, pwshSkipReason);
     const workflow = readFileSync(workflowPath, 'utf8');
     const childBootstrap = embeddedWindowsChildBootstrapSource(workflow);
     const pathStart = childBootstrap.indexOf('$env:PATH = @(');
@@ -3430,7 +3439,7 @@ ${pathAssignment}
     }
   });
 
-  test.each([
+  test.skipIf(skipWithoutPwsh).each([
     {
       name: 'quota exceeded',
       overrides: { ResourceQuotaExceeded: true, ResourceQuotaLabel: 'bootstrap aggregate' },
@@ -3536,7 +3545,8 @@ ${bootstrap.slice(start, end)}
     30_000,
   );
 
-  test('fits the measured Cave working tree without raising aggregate disk limits', () => {
+  test('fits the measured Cave working tree without raising aggregate disk limits', ({ skip }) => {
+    skip(skipWithoutPwsh, pwshSkipReason);
     const workflow = readFileSync(workflowPath, 'utf8');
     const supervisor = embeddedWindowsSupervisorSource(workflow);
     const quotaClass = supervisor.slice(

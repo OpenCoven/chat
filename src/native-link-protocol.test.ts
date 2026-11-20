@@ -3,8 +3,12 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { expect, test } from 'vitest';
+import { pwshSkipReason, skipWithoutPwsh } from './test/pwsh';
 
-test('Windows server routes one verified link command and preserves complete success/refusal receipts', () => {
+test('Windows server routes one verified link command and preserves complete success/refusal receipts', ({
+  skip,
+}) => {
+  skip(skipWithoutPwsh, pwshSkipReason);
   const directory = mkdtempSync(join(tmpdir(), 'native-link-protocol-'));
   try {
     const server = resolve('scripts/native-acceptance/windows/serve.ps1');
