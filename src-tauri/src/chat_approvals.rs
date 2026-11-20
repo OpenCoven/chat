@@ -9,9 +9,10 @@
 //! request, durably, before the turn starts, so one click is never two turns.
 
 use std::{
+    collections::BTreeMap,
     fs::{self, OpenOptions},
     io::{self, Read, Seek, SeekFrom, Write},
-    path::Path,
+    path::{Path, PathBuf},
     sync::Mutex,
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
@@ -56,8 +57,32 @@ const PROSE_LIMIT: usize = 64 * 1024;
 pub(crate) const GRANT_NOTICE: &str =
     "You allowed this turn to change files and run commands. That access ends when this reply does.";
 pub(crate) const NOTICE_SOURCE: &str = "chat-approval";
+const MOVED_ON: &str = "This chat has moved on since the request. Ask the familiar again.";
 
 static LOG_LOCK: Mutex<()> = Mutex::new(());
+
+/// Familiars whose `supersede` couldn't be written, with the latest time it was
+/// tried. A person who sends a message has moved on even when the log is busy or
+/// unwritable, so a request made at or before that time can't be answered and
+/// isn't open (#573). The next supersede that is written clears it. This lives
+/// only as long as the process: after a restart, a request the log never
+/// recorded as superseded is open again until its hour runs out or the chat
+/// moves on.
+static UNWRITTEN_SUPERSEDES: Mutex<BTreeMap<(PathBuf, String), u64>> = Mutex::new(BTreeMap::new());
+
+fn unwritten_supersedes() -> std::sync::MutexGuard<'static, BTreeMap<(PathBuf, String), u64>> {
+    UNWRITTEN_SUPERSEDES
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
+/// Whether a request this familiar made at `at` was superseded by a send the log
+/// couldn't record.
+fn superseded_unwritten(data: &Path, familiar: &str, at: u64) -> bool {
+    unwritten_supersedes()
+        .get(&(data.to_path_buf(), familiar.to_owned()))
+        .is_some_and(|&tried| at <= tried)
+}
 
 pub(crate) fn now_ms() -> u64 {
     SystemTime::now()
@@ -672,7 +697,10 @@ fn pending(data: &Path, now: u64) -> Result<Vec<Approval>, String> {
     };
     let mut open: Vec<&Entry> = Vec::new();
     for entry in &entries {
-        if entry.event == "requested" && within_its_hour(entry.at, now) {
+        if entry.event == "requested"
+            && within_its_hour(entry.at, now)
+            && !superseded_unwritten(data, &entry.familiar_id, entry.at)
+        {
             open.push(entry);
         } else if is_answer(&entry.event) {
             open.retain(|request| request.approval_id != entry.approval_id);
@@ -731,6 +759,9 @@ fn open_request(data: &Path, id: &str, now: u64) -> Result<Entry, String> {
     {
         return Err("This request was already answered.".into());
     }
+    if superseded_unwritten(data, &request.familiar_id, request.at) {
+        return Err(MOVED_ON.into());
+    }
     if !within_its_hour(request.at, now) {
         return Err("This request expired. Ask the familiar again.".into());
     }
@@ -755,7 +786,7 @@ fn allow(data: &Path, id: &str, device: Device, run_id: &str, now: u64) -> Resul
             .lock()
             .map_err(|_| "Chat's archive and delete records are unavailable.")?;
         if crate::chat_canonical::head(data, &request.familiar_id)?.as_deref() != Some(&session) {
-            return Err("This chat has moved on since the request. Ask the familiar again.".into());
+            return Err(MOVED_ON.into());
         }
         crate::chat_lifecycle::require_active(data, &session)?;
     }
@@ -803,8 +834,26 @@ pub(crate) fn decline(data: &Path, id: &str, device: Device, now: u64) -> Result
     Ok(request)
 }
 
-/// A new turn replaces whatever the familiar was still waiting on.
+/// A new turn replaces whatever the familiar was still waiting on. If the log
+/// can't record that, the familiar's older requests still can't be answered;
+/// see [`UNWRITTEN_SUPERSEDES`].
 pub(crate) fn supersede(data: &Path, familiar: &str, now: u64) -> Result<(), String> {
+    let written = write_supersede(data, familiar, now);
+    let key = (data.to_path_buf(), familiar.to_owned());
+    let mut unwritten = unwritten_supersedes();
+    if written.is_ok() {
+        // A failure tried later than this write may cover requests it didn't.
+        if unwritten.get(&key).is_some_and(|&tried| tried <= now) {
+            unwritten.remove(&key);
+        }
+    } else {
+        let tried = unwritten.entry(key).or_insert(now);
+        *tried = (*tried).max(now);
+    }
+    written
+}
+
+fn write_supersede(data: &Path, familiar: &str, now: u64) -> Result<(), String> {
     let _log = lock(data)?;
     let entries = read_file(&data.join(LOG_FILE))?;
     let waiting: Vec<&Entry> = entries
@@ -1728,6 +1777,88 @@ mod tests {
         worker.join().unwrap();
         assert_eq!(answer.unwrap(), Err(LOG_UNAVAILABLE.into()));
         assert!(allow(&data.0, &request.id, Device::Desktop, "run-2", 2_000).is_ok());
+    }
+
+    /// The send that supersedes a request can find the log busy: `lock` gives up
+    /// after `LOCK_TIMEOUT` and the message goes ahead. The request must not be
+    /// answerable once the log is free again (#573).
+    #[test]
+    fn a_supersede_the_busy_log_could_not_record_still_leaves_nothing_to_answer() {
+        let data = Data::new();
+        data.head("astra", "session-1");
+        data.head("bram", "session-b");
+        let request = submit(&data.0, "astra", "session-1", "run-1", proposal(), 1_000).unwrap();
+        let other = submit(&data.0, "bram", "session-b", "run-b", proposal(), 1_000).unwrap();
+        let held = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(data.0.join(LOCK_FILE))
+            .unwrap();
+        fs2::FileExt::lock_exclusive(&held).unwrap();
+        let (send, receive) = std::sync::mpsc::sync_channel(1);
+        let path = data.0.clone();
+        let worker = std::thread::spawn(move || {
+            let _ = send.send(supersede(&path, "astra", 2_000));
+        });
+        let superseded = receive.recv_timeout(LOCK_TIMEOUT + Duration::from_secs(10));
+        drop(held);
+        worker.join().unwrap();
+        assert_eq!(superseded.unwrap(), Err(LOG_UNAVAILABLE.into()));
+        assert_eq!(recent(&data.0, 1).unwrap()[0].event, "requested");
+
+        // The log is free again, and still records nothing about the send.
+        assert_eq!(pending(&data.0, 2_500).unwrap(), vec![other.clone()]);
+        assert_eq!(
+            allow(&data.0, &request.id, Device::Desktop, "run-2", 2_500).unwrap_err(),
+            MOVED_ON
+        );
+        assert_eq!(
+            decline(&data.0, &request.id, Device::Iphone, 2_500).unwrap_err(),
+            MOVED_ON
+        );
+        // Another familiar's request is untouched.
+        assert!(allow(&data.0, &other.id, Device::Desktop, "run-c", 2_500).is_ok());
+
+        // The turn after the send can still ask.
+        let next = submit(&data.0, "astra", "session-1", "run-3", proposal(), 3_000).unwrap();
+        assert_eq!(pending(&data.0, 3_500).unwrap(), vec![next.clone()]);
+
+        // The next send the log records writes the answer down and clears the note.
+        supersede(&data.0, "astra", 4_000).unwrap();
+        let log = recent(&data.0, 2).unwrap();
+        assert!(log.iter().all(|entry| entry.event == "superseded"));
+        assert_eq!(
+            allow(&data.0, &request.id, Device::Desktop, "run-4", 4_500).unwrap_err(),
+            "This request was already answered."
+        );
+        let later = submit(&data.0, "astra", "session-1", "run-5", proposal(), 1_500).unwrap();
+        assert!(allow(&data.0, &later.id, Device::Desktop, "run-6", 5_000).is_ok());
+    }
+
+    /// Two sends can race: an older supersede that the log records must not
+    /// clear the note left by a newer one it couldn't.
+    #[test]
+    fn an_older_recorded_supersede_keeps_a_newer_unrecorded_one() {
+        let data = Data::new();
+        data.head("astra", "session-1");
+        let path = data.0.join(LOCK_FILE);
+        let _ = fs::remove_file(&path);
+        fs::create_dir(&path).unwrap();
+        assert_eq!(
+            supersede(&data.0, "astra", 5_000),
+            Err(LOG_UNAVAILABLE.into())
+        );
+        fs::remove_dir(&path).unwrap();
+        supersede(&data.0, "astra", 3_000).unwrap();
+        let request = submit(&data.0, "astra", "session-1", "run-1", proposal(), 4_000).unwrap();
+        assert!(pending(&data.0, 5_500).unwrap().is_empty());
+        assert_eq!(
+            allow(&data.0, &request.id, Device::Desktop, "run-2", 5_500).unwrap_err(),
+            MOVED_ON
+        );
+        supersede(&data.0, "astra", 6_000).unwrap();
+        let after = submit(&data.0, "astra", "session-1", "run-3", proposal(), 5_500).unwrap();
+        assert!(allow(&data.0, &after.id, Device::Desktop, "run-4", 6_500).is_ok());
     }
 
     #[cfg(unix)]

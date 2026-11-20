@@ -2238,8 +2238,9 @@ fn send_turn(
     }
     // A person who sends a message has moved on from whatever was waiting, even
     // if this turn never gets as far as the engine. An allowed turn has already
-    // answered its own request. A log that can't be written can't spend a request
-    // either, so that failure leaves nothing to allow and needn't stop the message.
+    // answered its own request. If the log can't record this (busy or
+    // unwritable), `supersede` still leaves the older request unanswerable for
+    // as long as Chat runs, so that failure needn't stop the message (#573).
     if input.grant.is_none() {
         let _ = crate::chat_approvals::supersede(
             data,
