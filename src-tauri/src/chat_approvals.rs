@@ -31,6 +31,12 @@ const REASON_LIMIT: usize = 600;
 const DETAIL_LIMIT: usize = 240;
 pub(crate) const LOG_UNAVAILABLE: &str =
     "Chat can't reach its permission log. Check the disk, then try again.";
+/// A send refused because the log couldn't record that it replaces the
+/// familiar's open request (#573).
+/// Returned for any supersede error. The usual cause is another copy of Chat
+/// holding the log; a full disk or a damaged log file are the rest. Companion
+/// sends reach it too, so it names the Mac.
+pub(crate) const SEND_UNRECORDED: &str = "Chat on your Mac couldn't update its permission log, so this message wasn't sent. Close any other copy of Chat on the Mac and send it again. If it keeps happening, check that the Mac has free disk space, then restart Chat.";
 /// The same keys, in the same order, as `SUMMARY_KEYS` in `src/coven/events.ts`.
 const DETAIL_KEYS: [&str; 7] = [
     "command",
@@ -801,6 +807,49 @@ pub(crate) fn decline(data: &Path, id: &str, device: Device, now: u64) -> Result
         },
     )?;
     Ok(request)
+}
+
+/// A person who sends a message has moved on from whatever the familiar was
+/// waiting on, so the send supersedes it first. While familiars can ask, a send
+/// the log can't record would leave the older request open: a later Allow, in
+/// this process, another Chat process, or after a restart, would then run a turn
+/// the person had moved past (#573). So that send doesn't go ahead. With asking
+/// off nothing can be allowed, and the message goes ahead as before.
+pub(crate) fn supersede_before_send(data: &Path, familiar: &str, now: u64) -> Result<(), String> {
+    supersede_before_send_while(asking_for_sends(), data, familiar, now)
+}
+
+#[cfg(test)]
+thread_local! {
+    /// Lets a send-path test on this thread run as if asking were on, so the
+    /// call site in `coven_runtime` is pinned without switching asking on.
+    static SENDS_AS_IF_ASKING: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// For `coven_runtime`'s send-path test; see `SENDS_AS_IF_ASKING`.
+#[cfg(test)]
+pub(crate) fn send_as_if_asking_on_this_thread(on: bool) {
+    SENDS_AS_IF_ASKING.with(|cell| cell.set(on));
+}
+
+fn asking_for_sends() -> bool {
+    #[cfg(test)]
+    if SENDS_AS_IF_ASKING.with(std::cell::Cell::get) {
+        return true;
+    }
+    ASKING_ENABLED
+}
+
+fn supersede_before_send_while(
+    asking: bool,
+    data: &Path,
+    familiar: &str,
+    now: u64,
+) -> Result<(), String> {
+    match supersede(data, familiar, now) {
+        Err(_) if asking => Err(SEND_UNRECORDED.into()),
+        _ => Ok(()),
+    }
 }
 
 /// A new turn replaces whatever the familiar was still waiting on.
@@ -1728,6 +1777,66 @@ mod tests {
         worker.join().unwrap();
         assert_eq!(answer.unwrap(), Err(LOG_UNAVAILABLE.into()));
         assert!(allow(&data.0, &request.id, Device::Desktop, "run-2", 2_000).is_ok());
+    }
+
+    /// The send's supersede can find the log busy: `lock` gives up after
+    /// `LOCK_TIMEOUT`. While familiars can ask, the send must not go ahead
+    /// leaving the older request answerable (#573).
+    #[test]
+    fn a_send_the_busy_log_cannot_record_does_not_go_ahead_while_asking() {
+        let data = Data::new();
+        data.head("astra", "session-1");
+        let request = submit(&data.0, "astra", "session-1", "run-1", proposal(), 1_000).unwrap();
+        let held = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(data.0.join(LOCK_FILE))
+            .unwrap();
+        fs2::FileExt::lock_exclusive(&held).unwrap();
+        let (send, receive) = std::sync::mpsc::sync_channel(1);
+        let path = data.0.clone();
+        let worker = std::thread::spawn(move || {
+            let _ = send.send(supersede_before_send_while(true, &path, "astra", 2_000));
+        });
+        let sent = receive.recv_timeout(LOCK_TIMEOUT + Duration::from_secs(10));
+        drop(held);
+        worker.join().unwrap();
+        assert_eq!(sent.unwrap(), Err(SEND_UNRECORDED.into()));
+        // Nothing was sent, so the request is still the person's to answer.
+        assert_eq!(pending(&data.0, 2_500).unwrap(), vec![request.clone()]);
+
+        // Sending again once the log is free supersedes it.
+        supersede_before_send_while(true, &data.0, "astra", 3_000).unwrap();
+        assert_eq!(recent(&data.0, 1).unwrap()[0].event, "superseded");
+        assert!(pending(&data.0, 3_500).unwrap().is_empty());
+        assert_eq!(
+            allow(&data.0, &request.id, Device::Desktop, "run-2", 3_500).unwrap_err(),
+            "This request was already answered."
+        );
+    }
+
+    /// With asking off nothing can be allowed, so an unwritable log doesn't
+    /// stop anyone sending. The `supersede_before_send` line is a deliberate
+    /// tripwire: it fails the day `ASKING_ENABLED` turns on, so that change has
+    /// to update this test and say what a refused send now shows.
+    #[test]
+    fn a_send_the_log_cannot_record_still_goes_ahead_with_asking_off() {
+        let data = Data::new();
+        data.head("astra", "session-1");
+        submit(&data.0, "astra", "session-1", "run-1", proposal(), 1_000).unwrap();
+        let path = data.0.join(LOCK_FILE);
+        let _ = fs::remove_file(&path);
+        fs::create_dir(&path).unwrap();
+        assert_eq!(
+            supersede_before_send_while(false, &data.0, "astra", 2_000),
+            Ok(())
+        );
+        assert_eq!(supersede_before_send(&data.0, "astra", 2_000), Ok(()));
+        fs::remove_dir(&path).unwrap();
+        assert_eq!(
+            allow_request(&data.0, "any", Device::Desktop, "run-2", 2_500).unwrap_err(),
+            ASKING_OFF
+        );
     }
 
     #[cfg(unix)]
