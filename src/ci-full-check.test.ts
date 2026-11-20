@@ -57,11 +57,16 @@ describe('ci-full-check', () => {
     for (const id of ciFullJobs) {
       const body = jobs.get(id) ?? '';
       for (const match of body.matchAll(
-        /(?:^|[\s'"=.(/])((?:scripts|src-tauri|src|\.github\/workflows)\/[A-Za-z0-9_./-]*[A-Za-z0-9_])/gmu,
+        /(?:^|[\s'"=.(/])((?:tools|scripts|src-tauri|src|\.github\/workflows)\/[A-Za-z0-9_./-]*[A-Za-z0-9_])/gmu,
       )) {
         if (match[1]) named.add(match[1]);
       }
     }
+    expect(named).toContain('tools/phase1-process-supervisor');
+    expect(checkCiFull(['vitest.heavy.config.ts', 'rust-toolchain.toml'], []).message).toContain(
+      'rust-toolchain.toml',
+    );
+    expect(checkCiFull(['vitest.heavy.config.ts'], []).status).toBe(1);
     expect(named.size).toBeGreaterThan(5);
     const flagged = new Set(pathsNeedingCiFull([...named], governed).map(({ path }) => path));
     expect([...named].filter((path) => !flagged.has(path))).toEqual([]);

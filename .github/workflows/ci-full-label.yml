@@ -7,7 +7,7 @@ name: ci:full label
 # this lives in its own file.
 on:
   pull_request:
-    types: [opened, synchronize, reopened, labeled, unlabeled]
+    types: [edited, opened, synchronize, reopened, labeled, unlabeled]
 permissions:
   contents: read
   pull-requests: read
@@ -28,13 +28,18 @@ jobs:
           node-version-file: '.node-version'
       - name: Check the label against the changed paths
         env:
+          CHANGED_FILES: ${{ github.event.pull_request.changed_files }}
           GH_TOKEN: ${{ github.token }}
           REPOSITORY: ${{ github.repository }}
           PULL_NUMBER: ${{ github.event.pull_request.number }}
           LABELS: ${{ join(github.event.pull_request.labels.*.name, ',') }}
         run: |
           set -euo pipefail
+          if (( CHANGED_FILES > 3000 )); then
+            echo "::error::The PR files API cannot verify more than 3000 changed files."
+            exit 1
+          fi
           # A renamed file counts under its old path too.
-          gh api "repos/${REPOSITORY}/pulls/${PULL_NUMBER}/files" --paginate \
+          gh api "repos/${REPOSITORY}/pulls/${PULL_NUMBER}/files?per_page=100" --paginate \
             --jq '.[] | .filename, (.previous_filename // empty)' > "${RUNNER_TEMP}/changed-paths"
           node scripts/ci-full-check.mjs --labels "${LABELS}" < "${RUNNER_TEMP}/changed-paths"
