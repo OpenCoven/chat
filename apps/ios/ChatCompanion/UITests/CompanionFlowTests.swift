@@ -107,7 +107,7 @@ final class CompanionFlowTests: XCTestCase {
     focus(link, in: app)
     link.typeText(fixture["pairingLink"]!)
     app.buttons["connect"].tap()
-    XCTAssertTrue(app.buttons["familiar-picker"].waitForExistence(timeout: 20))
+    XCTAssertTrue(app.buttons["familiar-picker"].waitForExistence(timeout: 20), app.debugDescription)
     let composer = app.textFields["composer"].exists ? app.textFields["composer"] : app.textViews["composer"]
     focus(composer, in: app)
     composer.typeText("Draft survives relaunch")
@@ -214,33 +214,34 @@ final class CompanionFlowTests: XCTestCase {
   /// (-1, -1). Use its observed on-screen centre; the following assertions must
   /// still prove that the actual privacy sheet, log or confirmation opened.
   ///
-  /// The menu animates in. A tap synthesized while the row is still moving was
-  /// dropped on CI, leaving the menu open (#665), and once crashed XCTest's own
-  /// touch synthesis (`XCPointerEventPath initForTouchAtPoint`). So tap only
-  /// once the row has stopped moving, and tap again only while the menu is
-  /// still open with the row where it was tapped.
+  /// A row's reported frame isn't stable either (#665). A tap relative to the
+  /// row makes XCTest look the row up again while it synthesizes the touch.
+  /// On CI that lookup once produced a point XCTest's own touch synthesis
+  /// asserted on (`XCPointerEventPath initForTouchAtPoint`), and twice the tap
+  /// left the menu open although the row had been on screen. So wait until the
+  /// row reports the same frame on two polls in a row, then tap that frame's
+  /// centre relative to the app, without looking the row up again.
   private func chooseConnectionAction(_ action: XCUIElement, in app: XCUIApplication) {
     app.buttons["Connection options"].tap()
     let row = action.firstMatch
     var previousFrame = CGRect.null
+    var settledFrame = CGRect.null
     let settled = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
       guard row.exists, row.isEnabled else { return false }
       let frame = row.frame
       defer { previousFrame = frame }
-      return !frame.isEmpty && app.frame.contains(frame) && frame == previousFrame
+      guard !frame.isEmpty, app.frame.contains(frame), frame == previousFrame else { return false }
+      settledFrame = frame
+      return true
     }, object: nil)
-    XCTAssertEqual(XCTWaiter.wait(for: [settled], timeout: 10), .completed, app.debugDescription)
-    let tappedFrame = row.frame
-    for _ in 0..<3 {
-      row.coordinate(withNormalizedOffset: .init(dx: 0.5, dy: 0.5)).tap()
-      // A confirmation that reuses the row's label (Forget Mac) appears elsewhere,
-      // so "still open" means the row is still at the frame that was tapped.
-      let menuClosed = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
-        !row.exists || row.frame != tappedFrame
-      }, object: nil)
-      if XCTWaiter.wait(for: [menuClosed], timeout: 3) == .completed { return }
-    }
-    XCTFail("The \(action.identifier) row ignored three taps\n\(app.debugDescription)")
+    // Each poll makes several accessibility queries, which have taken seconds
+    // apiece on hosted runners, and this needs two polls.
+    XCTAssertEqual(XCTWaiter.wait(for: [settled], timeout: 20), .completed, app.debugDescription)
+    guard !settledFrame.isNull else { return }
+    let origin = app.frame.origin
+    app.coordinate(withNormalizedOffset: .zero)
+      .withOffset(CGVector(dx: settledFrame.midX - origin.x, dy: settledFrame.midY - origin.y))
+      .tap()
   }
 
   /// Taps `field` until it holds keyboard focus, so `typeText` has somewhere to
