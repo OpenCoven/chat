@@ -57,7 +57,7 @@ describe('ci-full-check', () => {
     for (const id of ciFullJobs) {
       const body = jobs.get(id) ?? '';
       for (const match of body.matchAll(/node-version-file:\s*['"]?([.\w/-]+)/gu)) {
-        named.add(match[1]);
+        if (match[1]) named.add(match[1]);
       }
       for (const match of body.matchAll(
         /(?:^|[\s'"=.(/])((?:tools|scripts|src-tauri|src|\.github\/workflows)\/[A-Za-z0-9_./-]*[A-Za-z0-9_])/gmu,
