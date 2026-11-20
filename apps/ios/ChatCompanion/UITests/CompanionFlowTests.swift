@@ -157,6 +157,7 @@ final class CompanionFlowTests: XCTestCase {
     let recoveredEditor = app.textViews["recovered-draft-editor"]
     focus(recoveredEditor, in: app)
     recoveredEditor.typeText(" Edited recovery")
+    waitForValue(of: recoveredEditor, containing: "Edited recovery", in: app)
     let editedRecovery = try XCTUnwrap(recoveredEditor.value as? String)
     XCTAssertTrue(editedRecovery.contains("Edited recovery"))
     app.buttons["Done"].tap()
@@ -167,11 +168,8 @@ final class CompanionFlowTests: XCTestCase {
     XCTAssertTrue(recoveredEditor.waitForExistence(timeout: 5))
     XCTAssertEqual(recoveredEditor.value as? String, editedRecovery)
     app.buttons["Add to Current Draft"].tap()
-    // The sheet closes first and the composer updates after, so wait for the text
-    // rather than reading the value straight after the tap (#665).
-    let restored = XCTNSPredicateExpectation(
-      predicate: NSPredicate(format: "value CONTAINS %@", "Draft from the previous chat"), object: composer)
-    await fulfillment(of: [restored], timeout: 5)
+    // The sheet closes first and the composer updates after.
+    waitForValue(of: composer, containing: "Draft from the previous chat", in: app)
     let afterRecovery = try await control.change()
     XCTAssertEqual(afterRecovery.sendCount, 1)
     focus(composer, in: app)
@@ -242,6 +240,19 @@ final class CompanionFlowTests: XCTestCase {
     app.coordinate(withNormalizedOffset: .zero)
       .withOffset(CGVector(dx: settledFrame.midX - origin.x, dy: settledFrame.midY - origin.y))
       .tap()
+  }
+
+  /// Waits until `element`'s value contains `text`, rather than reading it straight
+  /// after the typing or tap that changes it: a read 0.3 s after `typeText` and
+  /// one straight after "Add to Current Draft" each failed once on CI (#665). If
+  /// the text never shows, the failure carries the hierarchy, which says what
+  /// the element held.
+  private func waitForValue(of element: XCUIElement, containing text: String, in app: XCUIApplication) {
+    let shows = XCTNSPredicateExpectation(
+      predicate: NSPredicate(format: "value CONTAINS %@", text), object: element)
+    XCTAssertEqual(
+      XCTWaiter.wait(for: [shows], timeout: 5), .completed,
+      "\(element.identifier) never showed \"\(text)\"\n\(app.debugDescription)")
   }
 
   /// Taps `field` until it holds keyboard focus, so `typeText` has somewhere to
