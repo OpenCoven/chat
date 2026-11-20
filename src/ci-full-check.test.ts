@@ -56,6 +56,9 @@ describe('ci-full-check', () => {
     const named = new Set<string>();
     for (const id of ciFullJobs) {
       const body = jobs.get(id) ?? '';
+      for (const match of body.matchAll(/node-version-file:\s*['"]?([.\w/-]+)/gu)) {
+        named.add(match[1]);
+      }
       for (const match of body.matchAll(
         /(?:^|[\s'"=.(/])((?:tools|scripts|src-tauri|src|\.github\/workflows)\/[A-Za-z0-9_./-]*[A-Za-z0-9_])/gmu,
       )) {
@@ -63,6 +66,10 @@ describe('ci-full-check', () => {
       }
     }
     expect(named).toContain('tools/phase1-process-supervisor');
+    expect(named).toContain('.node-version');
+    for (const path of ['vite.config.ts', 'src/test/setup.ts']) {
+      expect(checkCiFull([path], []).status).toBe(1);
+    }
     expect(checkCiFull(['vitest.heavy.config.ts', 'rust-toolchain.toml'], []).message).toContain(
       'rust-toolchain.toml',
     );
