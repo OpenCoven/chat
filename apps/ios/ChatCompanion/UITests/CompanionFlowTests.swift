@@ -187,8 +187,10 @@ final class CompanionFlowTests: XCTestCase {
       $0.frame.width < privacyToggle.frame.width && privacyToggle.frame.contains($0.frame)
     } ?? privacyToggle
     nativeSwitch.tap()
-    let enabled = XCTNSPredicateExpectation(predicate: NSPredicate(format: "value == %@", "1"), object: privacyToggle)
-    await fulfillment(of: [enabled], timeout: 5)
+    // A switch's value is "0" or "1". On CI this tap once landed on the switch's centre
+    // and the switch stayed off (#665); the hierarchy in the failure shows whether the
+    // app reported a storage error.
+    waitForValue(of: privacyToggle, containing: "1", in: app)
     app.buttons["Done"].tap()
     app.terminate()
     app.launch()
