@@ -46,14 +46,16 @@ tables and code blocks as they are.
 
 ### A green PR may not have run the Rust or Windows checks (verified 2026-11-12)
 
-On a pull request, `ci.yml` runs `Rust`, `Windows supervisor behavior`,
-`Packaged acceptance (Windows)` and `Windows profile residual cleanup` only when the PR carries the
-`ci:full` label. The macOS leg of `Unix producer supervisor` follows the same rule. Without the
+On a pull request, `ci.yml` runs `Rust`, `Phase 1 real-authority conformance`,
+`Windows supervisor behavior`, `Packaged acceptance (Windows)` and
+`Windows profile residual cleanup` only when the PR carries the `ci:full` label. The macOS leg of `Unix producer supervisor` follows the same rule. Without the
 label those jobs report `skipped`, branch protection accepts `skipped`, and the PR shows green
 with that code never built.
 
 - Add `ci:full` to any PR that touches `src-tauri/`, the supervisors, or Windows paths, before you
-  call it green.
+  call it green. The **ci:full when needed** check (`.github/workflows/ci-full-label.yml`) fails
+  on a PR that changes those paths, or any file the conformance lock governs, without the label,
+  and lists them. `scripts/ci-full-check.mjs` holds the rules.
 - Read `skipped` on `Rust` as "not tested".
 - Adding the label starts a new run (`labeled` is a trigger) and cancels the one in progress.
   Check-run lists keep entries from the cancelled run, so read the newest run's jobs.
