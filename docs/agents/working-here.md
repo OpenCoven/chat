@@ -94,8 +94,8 @@ gh api -X POST repos/OpenCoven/chat/actions/runs/<run-id>/rerun-failed-jobs
 
 Compare against an unchanged worktree before diagnosing a local failure. Check whether your branch includes the test-runner change from #674.
 
-- **PowerShell tests.** With the corrected #674 runner, off-CI macOS and Linux runs identify missing PowerShell and skip the tests that invoke it. CI and Windows require PowerShell. Install PowerShell 7 to exercise those tests locally.
-- **Both unit suites.** With #674, `corepack pnpm test` runs the normal and heavy suites and exits nonzero when either fails. On earlier revisions the normal suite can stop the command before the heavy suite starts. Run `corepack pnpm test:unit:heavy` separately on those revisions.
+- **PowerShell tests.** With the corrected #674 runner, off-CI macOS and Linux runs identify missing PowerShell and skip the tests that invoke it. CI and Windows require PowerShell. Install PowerShell 7 to exercise those tests locally. On earlier checkouts, look for `spawnSync pwsh ENOENT` in the client-v1 conformance workflow, native installed-executable, native link-protocol, and native link-guard tests.
+- **Both unit suites.** With #674, `corepack pnpm test` runs the normal and heavy suites and exits nonzero when either fails. On earlier revisions the normal suite can stop the command before the heavy suite starts. Run `corepack pnpm@10.34.0 --ignore-workspace test:unit:heavy` separately on those revisions.
 - **Release toolchain.** Use the Node version in `.node-version` and put rustup’s `~/.cargo/bin` first on PATH. With #674, a Node mismatch skips the exact-version observation locally. Missing rustup also skips the four Cargo-resolution cases. CI keeps the requirements.
 
 - **A single heavy file** needs the heavy config, because the default config excludes it:
