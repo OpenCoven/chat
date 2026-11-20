@@ -31,6 +31,15 @@ export const ciFullJobs = [
 // path they name in ci.yml matches one of these.
 export const ciFullRules = [
   {
+    pattern: /^tools\/phase1-process-supervisor(?:\/|$)/u,
+    why: 'Rust builds the Windows supervisor',
+  },
+  {
+    pattern:
+      /^(?:\.node-version|vite\.config\.ts|vitest\.heavy\.config\.ts|src\/test\/setup\.ts|rust-toolchain\.toml)$/u,
+    why: 'the gated jobs use this toolchain or test configuration',
+  },
+  {
     pattern: /^src-tauri\//u,
     why: 'Rust, Windows supervisor behavior and Packaged acceptance (Windows) build it',
   },
