@@ -104,7 +104,7 @@ try {
     120_000,
   );
   const engine = run(cli, ['engine', 'which'], { env });
-  assert.ok(engine.startsWith(home + '/'), 'Expected a managed engine in the disposable home');
+  assert.ok(engine.startsWith(`${home}/`), 'Expected a managed engine in the disposable home');
   const versions = run(cli, ['--version'], { env });
   const engineVersion = run(engine, ['--version'], { env });
   Object.assign(facts, { cli, versions, engine, engineVersion, asset, sha });
@@ -117,11 +117,18 @@ try {
   await until(
     'the streamed reply',
     async () => {
-      const rejected = await app.all(
-        'text',
-        /This Coven CLI cannot apply finite model-round budgets/,
-      );
-      if (rejected.length) throw new Error(rejected[0].name || rejected[0].value);
+      const rejection = (await app.all('text'))
+        .map((node) => node.value)
+        .find(
+          (value) =>
+            typeof value === 'string' &&
+            value.includes('This Coven CLI cannot apply finite model-round budgets'),
+        );
+      if (rejection) {
+        facts.outcome = 'run-budget capability rejected';
+        facts.message = rejection;
+        throw new Error(rejection);
+      }
       return app.count('link', 'Completion boundary');
     },
     90_000,
@@ -160,9 +167,6 @@ try {
     if (tree) {
       const transcript = outline(tree).join('\n');
       writeFileSync(join(out, 'last-tree.txt'), transcript);
-      if (transcript.includes('This Coven CLI cannot apply finite model-round budgets')) {
-        facts.outcome = 'run-budget capability rejected';
-      }
     }
     writeFileSync(join(out, 'result.json'), JSON.stringify(facts, null, 2));
     console.log(facts);
