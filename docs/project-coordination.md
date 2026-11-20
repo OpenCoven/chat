@@ -18,7 +18,7 @@ v0.1.3 is also the **first updater-enabled release**. Main configures `plugins.u
 
 ### Open pull requests
 
-None of these merge without Val. "Checks" are the head's check runs at the time of this snapshot.
+None of these merge without Val. #682, #683 and #684 target other PRs' branches, so each folds into its parent first. "Checks" are the head's check runs at the time of this snapshot.
 
 | PR | For | Head | Checks | Review state |
 | --- | --- | --- | --- | --- |
@@ -26,12 +26,12 @@ None of these merge without Val. "Checks" are the head's check runs at the time 
 | [#673](https://github.com/OpenCoven/chat/pull/673) | #666 repin script | `f8e6ed6` | green | One should-fix: `--ref` defaults to `HEAD`, not main |
 | [#668](https://github.com/OpenCoven/chat/pull/668) | #659 installer-pinned send | `b672fdb` | green | One should-fix: no test for the pin parser |
 | [#672](https://github.com/OpenCoven/chat/pull/672) | #664 scratch homes | `0052525` | green | One should-fix: Ctrl-C skips the after-check |
-| [#675](https://github.com/OpenCoven/chat/pull/675) | #667 `ci:full` check | `a6e6552` | green | Detector verified (23/23, scratch #676). **Blocking:** `tools/phase1-process-supervisor/`, built by the gated `rust` job, isn't flagged |
-| [#670](https://github.com/OpenCoven/chat/pull/670) / [#674](https://github.com/OpenCoven/chat/pull/674) | #663 local test skips | `97c9673` / `298a8e7` | green, `ci:full` | Duplicates. The independent comparison prefers #674 with its skip reasons moved to stderr |
-| [#679](https://github.com/OpenCoven/chat/pull/679) | #660 agent notes | `abdcf97` | green | Reconcile with whichever of #670/#674 is chosen |
+| [#675](https://github.com/OpenCoven/chat/pull/675) | #667 `ci:full` check | `a6e6552` | green | Detector verified (23/23, scratch #676). **Blocking:** `tools/phase1-process-supervisor/`, built by the gated `rust` job, isn't flagged. [#683](https://github.com/OpenCoven/chat/pull/683) fixes it against #675's branch (no new findings) |
+| [#670](https://github.com/OpenCoven/chat/pull/670) / [#674](https://github.com/OpenCoven/chat/pull/674) | #663 local test skips | `97c9673` / `298a8e7` | green, `ci:full` | Val chose #674, with visible skip reasons and the local Windows PowerShell requirement. [#682](https://github.com/OpenCoven/chat/pull/682) implements that against #674's branch (no findings). #670 closes once #674 lands |
+| [#679](https://github.com/OpenCoven/chat/pull/679) | #660 agent notes | `abdcf97` | green | [#684](https://github.com/OpenCoven/chat/pull/684) aligns it with #674, against #679's branch (two nits) |
 | [#678](https://github.com/OpenCoven/chat/pull/678) | #665 iOS relaunch test | `2ed5e38` | green | No code findings. Merging uploads a TestFlight build |
 | [#645](https://github.com/OpenCoven/chat/pull/645) | #640 iOS held send | `bbb29c5` | green | Waiting only on the TestFlight decision |
-| [#680](https://github.com/OpenCoven/chat/pull/680) | #573 unwritten supersede | `6bc820f` | running, `ci:full` | New. Asking stays off |
+| [#680](https://github.com/OpenCoven/chat/pull/680) | #573 unwritten supersede | `6bc820f` | green, `ci:full` | Ready for review. Asking stays off |
 | [#649](https://github.com/OpenCoven/chat/pull/649) | code-scanning alert 12 | draft | | Disposition owned by #661 |
 | [#575](https://github.com/OpenCoven/chat/pull/575) | persistent workspace write | draft | | On Val's hold since 2026-11-14 |
 
