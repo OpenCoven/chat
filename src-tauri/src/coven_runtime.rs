@@ -2238,15 +2238,14 @@ fn send_turn(
     }
     // A person who sends a message has moved on from whatever was waiting, even
     // if this turn never gets as far as the engine. An allowed turn has already
-    // answered its own request. If the log can't record this (busy or
-    // unwritable), `supersede` still leaves the older request unanswerable for
-    // as long as Chat runs, so that failure needn't stop the message (#573).
+    // answered its own request. While familiars can ask, a send the log can't
+    // record doesn't go ahead (#573); see `supersede_before_send`.
     if input.grant.is_none() {
-        let _ = crate::chat_approvals::supersede(
+        crate::chat_approvals::supersede_before_send(
             data,
             &selected_familiar,
             crate::chat_approvals::now_ms(),
-        );
+        )?;
     }
     let (harness, workspace, resumed) = if let Some(id) = &input.session_id {
         let session = get_session(id)?;
