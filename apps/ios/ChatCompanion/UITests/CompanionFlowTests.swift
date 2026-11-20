@@ -224,21 +224,23 @@ final class CompanionFlowTests: XCTestCase {
   private func chooseConnectionAction(_ action: XCUIElement, in app: XCUIApplication) {
     app.buttons["Connection options"].tap()
     let row = action.firstMatch
+    let appFrame = app.frame
     var previousFrame = CGRect.null
     var settledFrame = CGRect.null
     let settled = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
-      guard row.exists, row.isEnabled else { return false }
-      let frame = row.frame
+      // One snapshot per poll. An accessibility query has taken 2 to 3 s on hosted
+      // runners, and reading exists, isEnabled and frame separately once let only
+      // three polls fit in the timeout.
+      guard let snapshot = try? row.snapshot(), snapshot.isEnabled else { return false }
+      let frame = snapshot.frame
       defer { previousFrame = frame }
-      guard !frame.isEmpty, app.frame.contains(frame), frame == previousFrame else { return false }
+      guard !frame.isEmpty, appFrame.contains(frame), frame == previousFrame else { return false }
       settledFrame = frame
       return true
     }, object: nil)
-    // Each poll makes several accessibility queries, which have taken seconds
-    // apiece on hosted runners, and this needs two polls.
     XCTAssertEqual(XCTWaiter.wait(for: [settled], timeout: 20), .completed, app.debugDescription)
     guard !settledFrame.isNull else { return }
-    let origin = app.frame.origin
+    let origin = appFrame.origin
     app.coordinate(withNormalizedOffset: .zero)
       .withOffset(CGVector(dx: settledFrame.midX - origin.x, dy: settledFrame.midY - origin.y))
       .tap()
