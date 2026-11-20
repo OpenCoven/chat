@@ -57,6 +57,12 @@ with that code never built.
   on a PR that changes those paths, or any file the conformance lock governs, without the label,
   and lists them. `scripts/ci-full-check.mjs` holds the rules.
 - Read `skipped` on `Rust` as "not tested".
+- The **iPhone companion** workflow (`ios.yml`) has the same gap. On a pull request it runs the
+  simulator UI flow (`CompanionFlowTests`) only under `ci:full`, and otherwise only the native unit
+  tests, still green. For a change to the companion alone, dispatch it on your branch instead of
+  starting every Rust and Windows job:
+  `gh api -X POST repos/OpenCoven/chat/actions/workflows/ios.yml/dispatches -f ref=<branch> -f 'inputs[ui_flow]=true' -f 'inputs[testflight]=none'`.
+  It shares a concurrency group with the PR's run, so dispatch after that run finishes.
 - Adding the label starts a new run (`labeled` is a trigger) and cancels the one in progress.
   Check-run lists keep entries from the cancelled run, so read the newest run's jobs.
 
