@@ -98,6 +98,29 @@ import { createProcessOwnedArtifactRoot } from '../scripts/process-owned-artifac
 const { bindMacosKeychainSessionEnvironment, cloneExactCheckout: cloneSchemaV2ExactCheckout } =
   schemaV2Producer;
 const projectRoot = resolve(import.meta.dirname, '..');
+// A few tests need this machine's toolchain to match CI's: the exact Node in
+// .node-version, and rustup, which provides the Rust that rust-toolchain.toml
+// pins. On a machine without them those tests skip, with the reason printed
+// once, instead of failing deep inside the harness. CI always has both, so
+// there a mismatch still fails them.
+const pinnedNodeVersion = `v${readFileSync(resolve(projectRoot, '.node-version'), 'utf8').trim()}`;
+const rustupAvailable =
+  spawnSync('rustup', ['--version'], { stdio: 'ignore', timeout: 30_000 }).status === 0;
+const skipWithoutRustup = !rustupAvailable && !process.env.CI;
+const skipWithoutPinnedToolchain =
+  (process.version !== pinnedNodeVersion || !rustupAvailable) && !process.env.CI;
+if (skipWithoutPinnedToolchain) {
+  const gaps = [
+    ...(process.version === pinnedNodeVersion
+      ? []
+      : [`Node is ${process.version}, not ${pinnedNodeVersion} from .node-version`]),
+    ...(rustupAvailable ? [] : ['rustup is not on PATH']),
+  ];
+  console.warn(
+    `phase1-conformance.test.ts: ${gaps.join(' and ')}, so the tests that need CI's toolchain ` +
+      'are skipped. CI runs them.',
+  );
+}
 
 test.each([false, true])(
   'Windows Chat fetches retain frozen production for local clones (separate branch: %s)',
@@ -4273,35 +4296,39 @@ describe('Phase 1 real-authority conformance harness', () => {
     70_000,
   );
 
-  test('observes the exact Node, pnpm, and Rust release toolchain', () => {
-    const root = mkdtempSync(join(tmpdir(), 'phase1-pnpm-version-'));
-    const command = resolve(root, process.platform === 'win32' ? 'pnpm.cmd' : 'pnpm');
-    const originalPath = process.env.PATH;
-    try {
-      writeFileSync(
-        command,
-        process.platform === 'win32'
-          ? '@echo off\r\necho 10.34.0\r\n'
-          : '#!/bin/sh\nprintf "10.34.0\\n"\n',
-      );
-      if (process.platform !== 'win32') {
-        chmodSync(command, 0o700);
+  test.skipIf(skipWithoutPinnedToolchain)(
+    'observes the exact Node, pnpm, and Rust release toolchain',
+    () => {
+      const root = mkdtempSync(join(tmpdir(), 'phase1-pnpm-version-'));
+      const command = resolve(root, process.platform === 'win32' ? 'pnpm.cmd' : 'pnpm');
+      const originalPath = process.env.PATH;
+      try {
+        writeFileSync(
+          command,
+          process.platform === 'win32'
+            ? '@echo off\r\necho 10.34.0\r\n'
+            : '#!/bin/sh\nprintf "10.34.0\\n"\n',
+        );
+        if (process.platform !== 'win32') {
+          chmodSync(command, 0o700);
+        }
+        process.env.PATH = `${root}${delimiter}${originalPath ?? ''}`;
+        expect(observeReleaseToolVersions()).toEqual({
+          nodeVersion: 'v24.18.1',
+          packageManagerVersion: 'pnpm@10.34.0',
+          rustVersion: '1.95.0',
+        });
+      } finally {
+        if (originalPath === undefined) {
+          delete process.env.PATH;
+        } else {
+          process.env.PATH = originalPath;
+        }
+        rmSync(root, { recursive: true, force: true });
       }
-      process.env.PATH = `${root}${delimiter}${originalPath ?? ''}`;
-      expect(observeReleaseToolVersions()).toEqual({
-        nodeVersion: 'v24.18.1',
-        packageManagerVersion: 'pnpm@10.34.0',
-        rustVersion: '1.95.0',
-      });
-    } finally {
-      if (originalPath === undefined) {
-        delete process.env.PATH;
-      } else {
-        process.env.PATH = originalPath;
-      }
-      rmSync(root, { recursive: true, force: true });
-    }
-  }, 30_000);
+    },
+    30_000,
+  );
 
   test('rejects missing or digest-mismatched frozen Windows supervisors', () => {
     const root = mkdtempSync(join(tmpdir(), 'phase1-supervisor-preflight-'));
@@ -6350,7 +6377,7 @@ describe('Phase 1 real-authority conformance harness', () => {
     }
   });
 
-  test.each([
+  test.skipIf(skipWithoutRustup).each([
     ['schema-v1', 'supervisor'],
     ['schema-v1', 'empty'],
     ['schema-v2', 'supervisor'],
