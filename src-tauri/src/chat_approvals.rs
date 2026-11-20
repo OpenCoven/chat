@@ -33,8 +33,8 @@ pub(crate) const LOG_UNAVAILABLE: &str =
     "Chat can't reach its permission log. Check the disk, then try again.";
 /// A send refused because the log couldn't record that it replaces the
 /// familiar's open request (#573).
-pub(crate) const SEND_UNRECORDED: &str =
-    "Chat can't reach its permission log, so this message wasn't sent. Check the disk, then send it again.";
+/// The usual cause is another copy of Chat holding the log.
+pub(crate) const SEND_UNRECORDED: &str = "Chat couldn't update its permission log, so this message wasn't sent. Close any other copy of Chat that's open, then send it again.";
 /// The same keys, in the same order, as `SUMMARY_KEYS` in `src/coven/events.ts`.
 const DETAIL_KEYS: [&str; 7] = [
     "command",
@@ -814,7 +814,28 @@ pub(crate) fn decline(data: &Path, id: &str, device: Device, now: u64) -> Result
 /// the person had moved past (#573). So that send doesn't go ahead. With asking
 /// off nothing can be allowed, and the message goes ahead as before.
 pub(crate) fn supersede_before_send(data: &Path, familiar: &str, now: u64) -> Result<(), String> {
-    supersede_before_send_while(ASKING_ENABLED, data, familiar, now)
+    supersede_before_send_while(asking_for_sends(), data, familiar, now)
+}
+
+#[cfg(test)]
+thread_local! {
+    /// Lets a send-path test on this thread run as if asking were on, so the
+    /// call site in `coven_runtime` is pinned without switching asking on.
+    static SENDS_AS_IF_ASKING: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// For `coven_runtime`'s send-path test; see `SENDS_AS_IF_ASKING`.
+#[cfg(test)]
+pub(crate) fn send_as_if_asking_on_this_thread(on: bool) {
+    SENDS_AS_IF_ASKING.with(|cell| cell.set(on));
+}
+
+fn asking_for_sends() -> bool {
+    #[cfg(test)]
+    if SENDS_AS_IF_ASKING.with(std::cell::Cell::get) {
+        return true;
+    }
+    ASKING_ENABLED
 }
 
 fn supersede_before_send_while(
@@ -1793,7 +1814,9 @@ mod tests {
     }
 
     /// With asking off nothing can be allowed, so an unwritable log doesn't
-    /// stop anyone sending.
+    /// stop anyone sending. The `supersede_before_send` line is a deliberate
+    /// tripwire: it fails the day `ASKING_ENABLED` turns on, so that change has
+    /// to update this test and say what a refused send now shows.
     #[test]
     fn a_send_the_log_cannot_record_still_goes_ahead_with_asking_off() {
         let data = Data::new();
