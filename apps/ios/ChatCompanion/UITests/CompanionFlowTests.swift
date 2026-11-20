@@ -167,7 +167,11 @@ final class CompanionFlowTests: XCTestCase {
     XCTAssertTrue(recoveredEditor.waitForExistence(timeout: 5))
     XCTAssertEqual(recoveredEditor.value as? String, editedRecovery)
     app.buttons["Add to Current Draft"].tap()
-    XCTAssertTrue((composer.value as? String ?? "").contains("Draft from the previous chat"))
+    // The sheet closes first and the composer updates after, so wait for the text
+    // rather than reading the value straight after the tap (#665).
+    let restored = XCTNSPredicateExpectation(
+      predicate: NSPredicate(format: "value CONTAINS %@", "Draft from the previous chat"), object: composer)
+    await fulfillment(of: [restored], timeout: 5)
     let afterRecovery = try await control.change()
     XCTAssertEqual(afterRecovery.sendCount, 1)
     focus(composer, in: app)
@@ -209,15 +213,34 @@ final class CompanionFlowTests: XCTestCase {
   /// iOS 26.5 can expose a visible SwiftUI menu row with an invalid AX tap point
   /// (-1, -1). Use its observed on-screen centre; the following assertions must
   /// still prove that the actual privacy sheet, log or confirmation opened.
+  ///
+  /// The menu animates in. A tap synthesized while the row is still moving was
+  /// dropped on CI, leaving the menu open (#665), and once crashed XCTest's own
+  /// touch synthesis (`XCPointerEventPath initForTouchAtPoint`). So tap only
+  /// once the row has stopped moving, and tap again only while the menu is
+  /// still open with the row where it was tapped.
   private func chooseConnectionAction(_ action: XCUIElement, in app: XCUIApplication) {
     app.buttons["Connection options"].tap()
-    let visible = XCTNSPredicateExpectation(predicate: NSPredicate { element, _ in
-      guard let row = element as? XCUIElement, row.exists, row.isEnabled else { return false }
+    let row = action.firstMatch
+    var previousFrame = CGRect.null
+    let settled = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+      guard row.exists, row.isEnabled else { return false }
       let frame = row.frame
-      return !frame.isEmpty && app.frame.contains(frame)
-    }, object: action)
-    XCTAssertEqual(XCTWaiter.wait(for: [visible], timeout: 10), .completed, app.debugDescription)
-    action.coordinate(withNormalizedOffset: .init(dx: 0.5, dy: 0.5)).tap()
+      defer { previousFrame = frame }
+      return !frame.isEmpty && app.frame.contains(frame) && frame == previousFrame
+    }, object: nil)
+    XCTAssertEqual(XCTWaiter.wait(for: [settled], timeout: 10), .completed, app.debugDescription)
+    let tappedFrame = row.frame
+    for _ in 0..<3 {
+      row.coordinate(withNormalizedOffset: .init(dx: 0.5, dy: 0.5)).tap()
+      // A confirmation that reuses the row's label (Forget Mac) appears elsewhere,
+      // so "still open" means the row is still at the frame that was tapped.
+      let menuClosed = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+        !row.exists || row.frame != tappedFrame
+      }, object: nil)
+      if XCTWaiter.wait(for: [menuClosed], timeout: 3) == .completed { return }
+    }
+    XCTFail("The \(action.identifier) row ignored three taps\n\(app.debugDescription)")
   }
 
   /// Taps `field` until it holds keyboard focus, so `typeText` has somewhere to
