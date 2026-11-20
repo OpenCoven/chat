@@ -3,8 +3,12 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { expect, test } from 'vitest';
+import { pwshSkipReason, skipWithoutPwsh } from './test/pwsh';
 
-test('the actual native guard rejects a hit or foreground changed during receipt reads before sending input', () => {
+test('the actual native guard rejects a hit or foreground changed during receipt reads before sending input', ({
+  skip,
+}) => {
+  skip(skipWithoutPwsh, pwshSkipReason);
   const directory = mkdtempSync(join(tmpdir(), 'native-link-guard-'));
   try {
     const source = readFileSync(
