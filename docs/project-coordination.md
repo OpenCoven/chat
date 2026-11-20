@@ -48,7 +48,7 @@ No open issue is `agent-ready`.
 
 ### Worktrees
 
-`node scripts/agent-worktrees.mjs` reported **83 worktrees: 22 removable, 21 to check, 39 kept, 0 prunable**. It removes nothing, and a "removable" verdict doesn't authorize removing someone else's worktree: ask its owner, or record it under the claim that made it.
+`node scripts/agent-worktrees.mjs` reported **85 worktrees at 13:06Z: 22 removable, 20 to check, 42 kept, 0 prunable**. It removes nothing, and a "removable" verdict doesn't authorize removing someone else's worktree: ask its owner, or record it under the claim that made it.
 
 ---
 
