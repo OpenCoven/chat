@@ -102,7 +102,8 @@ const projectRoot = resolve(import.meta.dirname, '..');
 // .node-version, and rustup, which provides the Rust that rust-toolchain.toml
 // pins. On a machine without them those tests skip, with the reason printed
 // once, instead of failing deep inside the harness. CI always has both, so
-// there a mismatch still fails them.
+// there a mismatch still fails them. The reason goes straight to stderr:
+// Vitest drops console output from a file whose tests all skip.
 const pinnedNodeVersion = `v${readFileSync(resolve(projectRoot, '.node-version'), 'utf8').trim()}`;
 const rustupAvailable =
   spawnSync('rustup', ['--version'], { stdio: 'ignore', timeout: 30_000 }).status === 0;
@@ -116,9 +117,9 @@ if (skipWithoutPinnedToolchain) {
       : [`Node is ${process.version}, not ${pinnedNodeVersion} from .node-version`]),
     ...(rustupAvailable ? [] : ['rustup is not on PATH']),
   ];
-  console.warn(
+  process.stderr.write(
     `phase1-conformance.test.ts: ${gaps.join(' and ')}, so the tests that need CI's toolchain ` +
-      'are skipped. CI runs them.',
+      'are skipped. CI runs them.\n',
   );
 }
 
