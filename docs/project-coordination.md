@@ -1,5 +1,58 @@
 # Chat project coordination
 
+## Snapshot: 2026-11-20
+
+Taken at about 11:00 UTC on main `491eea0` by chat-c8 (Claude Code) under [#681](https://github.com/OpenCoven/chat/issues/681). It's an inventory, not a plan. Each issue's State block, and any owner comment newer than it, wins over this section. Next actions per issue are reconciled under [#661](https://github.com/OpenCoven/chat/issues/661), not here. Every older section below is history.
+
+### The v0.1.3 gate is upstream
+
+| What | Latest published | What Chat needs |
+| --- | --- | --- |
+| Chat | v0.1.2 (2026-11-14) | v0.1.3 is owned end to end by [#635](https://github.com/OpenCoven/chat/issues/635) |
+| Coven | v0.5.0 (2026-11-10), pins Coven Code 0.9.0 | v0.5.1, pinning Coven Code 0.9.2: candidate `c2db9f0` passed its preflight on 2026-11-17 and waits for Val's certification packet and tag ([coven#1768](https://github.com/OpenCoven/coven/issues/1768)). Chat still pins Coven 0.4.10 (`COVEN_VERSION`, `src-tauri/src/coven_install.rs`) |
+| Coven Code | v0.9.2 (2026-11-16) | Already published. It reaches Chat only through a Coven release |
+
+The order after Coven publishes: the Coven repin (staged by #635's owner on `chore/635-coven-0.5.1`), a dry run from main, a native candidate run on that exact commit, then Val's tag. [#573](https://github.com/OpenCoven/chat/issues/573), [#592](https://github.com/OpenCoven/chat/issues/592) and [#652](https://github.com/OpenCoven/chat/issues/652) all wait on that chain.
+
+v0.1.3 is also the **first updater-enabled release**. Main configures `plugins.updater`, but no published release carries a `latest.json`, and the `updater` pointer release doesn't exist yet. That makes v0.1.3 step 1 of [#539](https://github.com/OpenCoven/chat/issues/539), and the release needs `TAURI_SIGNING_*` in `release-signing`. The step-1 checklist is [on #539](https://github.com/OpenCoven/chat/issues/539#issuecomment-7037408579).
+
+### Open pull requests
+
+None of these merge without Val. "Checks" are the head's check runs at the time of this snapshot.
+
+| PR | For | Head | Checks | Review state |
+| --- | --- | --- | --- | --- |
+| [#669](https://github.com/OpenCoven/chat/pull/669) | #662 flaky table | `2430fb9` | green | No findings |
+| [#673](https://github.com/OpenCoven/chat/pull/673) | #666 repin script | `f8e6ed6` | green | One should-fix: `--ref` defaults to `HEAD`, not main |
+| [#668](https://github.com/OpenCoven/chat/pull/668) | #659 installer-pinned send | `b672fdb` | green | One should-fix: no test for the pin parser |
+| [#672](https://github.com/OpenCoven/chat/pull/672) | #664 scratch homes | `0052525` | green | One should-fix: Ctrl-C skips the after-check |
+| [#675](https://github.com/OpenCoven/chat/pull/675) | #667 `ci:full` check | `a6e6552` | green | Detector verified (23/23, scratch #676). **Blocking:** `tools/phase1-process-supervisor/`, built by the gated `rust` job, isn't flagged |
+| [#670](https://github.com/OpenCoven/chat/pull/670) / [#674](https://github.com/OpenCoven/chat/pull/674) | #663 local test skips | `97c9673` / `298a8e7` | green, `ci:full` | Duplicates. The independent comparison prefers #674 with its skip reasons moved to stderr |
+| [#679](https://github.com/OpenCoven/chat/pull/679) | #660 agent notes | `abdcf97` | green | Reconcile with whichever of #670/#674 is chosen |
+| [#678](https://github.com/OpenCoven/chat/pull/678) | #665 iOS relaunch test | `2ed5e38` | green | No code findings. Merging uploads a TestFlight build |
+| [#645](https://github.com/OpenCoven/chat/pull/645) | #640 iOS held send | `bbb29c5` | green | Waiting only on the TestFlight decision |
+| [#680](https://github.com/OpenCoven/chat/pull/680) | #573 unwritten supersede | `6bc820f` | running, `ci:full` | New. Asking stays off |
+| [#649](https://github.com/OpenCoven/chat/pull/649) | code-scanning alert 12 | draft | | Disposition owned by #661 |
+| [#575](https://github.com/OpenCoven/chat/pull/575) | persistent workspace write | draft | | On Val's hold since 2026-11-14 |
+
+#669, #672, #675 and #679 all edit `docs/agents/working-here.md`, so whichever lands later may need a rebase.
+
+### Issues by who acts next
+
+No open issue is `agent-ready`.
+
+- **In progress, claimed:** #635 (release), #659, #660, #661, #662, #663, #664, #665, #666, #667, #681. Most wait only on a PR review or merge.
+- **Val decides:** #640 (TestFlight scope), #573 (asking), #533 (design audit choices), #154 and #155 (missions containment and context binding), #575 (the hold).
+- **A person or device acts:** #411 (eSigner provisioning), #465 (physical iPhone matrix on TestFlight 0.3.0 (1910)), #515 and #520 (hand-run installs; #520 still needs its version confirmed), #539 (updater journey across v0.1.3 and the release after it), #612 (external dependency owners).
+- **Blocked on an engine or Coven release:** #652 (the run-budget reland needs a published Coven that declares run-budget v1), #573, #612.
+
+### Worktrees
+
+`node scripts/agent-worktrees.mjs` reported **83 worktrees: 22 removable, 21 to check, 39 kept, 0 prunable**. It removes nothing, and a "removable" verdict doesn't authorize removing someone else's worktree: ask its owner, or record it under the claim that made it.
+
+---
+
+
 ## Approved retirement outcome — 2026-11-14
 
 This is the current outcome for [#621](https://github.com/OpenCoven/chat/issues/621). The earlier dated sections below remain unchanged historical snapshots; their pending approvals, delivery queues and release observations are superseded by this section and by newer issue State blocks or owner comments. The frozen scope remains **43 worktrees, 38 local branches, 20 server heads, 13 PRs and 16 issues**; `initial-inventory.json` still has SHA-256 `498bceb6e039b310705c777c33800f9189ef3101db7c1dd4853129c45bb010fc`.
