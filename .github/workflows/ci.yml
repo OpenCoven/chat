@@ -29,6 +29,7 @@ jobs:
     outputs:
       docs_only: ${{ steps.classify.outputs.docs_only }}
       product_only: ${{ steps.classify.outputs.product_only }}
+      needs_full: ${{ steps.classify.outputs.needs_full }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
@@ -54,6 +55,7 @@ jobs:
             echo "No usable base commit; treating this as a code change."
             echo "docs_only=false" >> "$GITHUB_OUTPUT"
             echo "product_only=false" >> "$GITHUB_OUTPUT"
+            echo "needs_full=true" >> "$GITHUB_OUTPUT"
             exit 0
           fi
 
@@ -63,6 +65,7 @@ jobs:
             echo "No files changed; treating this as a code change."
             echo "docs_only=false" >> "$GITHUB_OUTPUT"
             echo "product_only=false" >> "$GITHUB_OUTPUT"
+            echo "needs_full=true" >> "$GITHUB_OUTPUT"
             exit 0
           fi
 
@@ -103,6 +106,60 @@ jobs:
 
           echo "product_only=${product_only}"
           echo "product_only=${product_only}" >> "$GITHUB_OUTPUT"
+
+          # On a pull request, Rust, Phase 1 conformance, the Windows jobs and
+          # the macOS supervisor wait for the `ci:full` label, and without it
+          # they report `skipped`, which branch protection accepts. These are
+          # the paths those jobs build and run; `Full checks requested` fails
+          # a pull request that changes one of them without the label.
+          needs_full=false
+          while IFS= read -r file; do
+            case "${file}" in
+              docs/*|*.md) ;;
+              src-tauri/*|tools/*|vendor/*|scripts/*|rust-toolchain.toml|phase1-conformance.lock.json|src/*windows*|src/phase1-*|.github/workflows/ci.yml)
+                echo "Reaches the ci:full jobs: ${file}"
+                needs_full=true
+                ;;
+            esac
+          done <<EOF
+          ${files}
+          EOF
+
+          echo "needs_full=${needs_full}"
+          echo "needs_full=${needs_full}" >> "$GITHUB_OUTPUT"
+
+  full-checks:
+    name: Full checks requested
+    runs-on: ubuntu-latest
+    needs: changes
+    if: github.event_name == 'pull_request'
+    timeout-minutes: 5
+    permissions: {}
+    steps:
+      - name: Require ci:full when the diff reaches the label-gated jobs
+        env:
+          NEEDS_FULL: ${{ needs.changes.outputs.needs_full }}
+          HAS_FULL_LABEL: ${{ contains(github.event.pull_request.labels.*.name, 'ci:full') }}
+        run: |
+          set -euo pipefail
+          summary="${GITHUB_STEP_SUMMARY:-/dev/null}"
+
+          if [ "${HAS_FULL_LABEL}" = "true" ]; then
+            echo "This pull request carries ci:full, so Rust, Phase 1 conformance and the Windows and macOS supervisor jobs run." | tee -a "${summary}"
+            exit 0
+          fi
+
+          # Only an explicit "false" passes: a missing classification fails
+          # towards asking for the label, like every other unknown here.
+          if [ "${NEEDS_FULL}" = "false" ]; then
+            echo "No ci:full label. Rust, Phase 1 conformance and the Windows and macOS supervisor jobs are skipped; none of the changed paths reaches them (the Changed paths job lists the files)." | tee -a "${summary}"
+            exit 0
+          fi
+
+          message="This pull request changes files that Rust, Phase 1 conformance and the Windows and macOS supervisor jobs test (the Changed paths job lists them), but those jobs were skipped because it has no ci:full label. A skipped job counts as passing, so this would look green untested. Add the ci:full label to run them."
+          echo "${message}" >> "${summary}"
+          echo "::error title=ci:full label missing::${message}"
+          exit 1
 
   web:
     name: Web checks

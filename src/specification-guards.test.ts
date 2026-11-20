@@ -1,4 +1,4 @@
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { runInNewContext } from 'node:vm';
@@ -1290,6 +1290,66 @@ describe('Phase 1 specification guards', () => {
     expect(block).toBeDefined();
     const script = `product_only=true\n${(block ?? '').replaceAll(/^ {10}/gmu, '')}\ndone <<EOF\n${files}\nEOF\necho "$product_only"`;
     expect(execFileSync('bash', ['-c', script], { encoding: 'utf8' }).trim()).toBe(expected);
+  });
+
+  it.each([
+    ['the native backend', 'src-tauri/src/lib.rs', 'true'],
+    ['the process supervisor tool', 'tools/phase1-process-supervisor/src/main.rs', 'true'],
+    ['a vendored crate', 'vendor/glib-0.18.5/src/collections/ptr_slice.rs', 'true'],
+    ['a supervisor script', 'scripts/unix-producer-supervisor.test.sh', 'true'],
+    ['the Rust toolchain pin', 'rust-toolchain.toml', 'true'],
+    ['the conformance lock', 'phase1-conformance.lock.json', 'true'],
+    ['a Windows test', 'src/windows-owned-profile.test.ts', 'true'],
+    ['a heavy suite file', 'src/phase1-conformance.test.ts', 'true'],
+    ['this workflow', '.github/workflows/ci.yml', 'true'],
+    ['a UI file alongside the backend', 'src/coven/chat-app.tsx\nsrc-tauri/src/lib.rs', 'true'],
+    [
+      'chat UI, browser suite and prose',
+      'src/coven/chat-app.tsx\ne2e/app.spec.ts\nREADME.md',
+      'false',
+    ],
+    ['prose inside the backend', 'src-tauri/README.md', 'false'],
+    ['another workflow', '.github/workflows/release.yml', 'false'],
+  ])('classifies a diff touching %s for the ci:full jobs', (_name, files, expected) => {
+    // A pull request without `ci:full` skips Rust, Phase 1 conformance and the
+    // Windows and macOS supervisor jobs, and a skipped required check counts as
+    // passing. This runs the workflow's own case statement, so a typo in the
+    // path list cannot let a backend change look green untested.
+    const workflow = readText('.github/workflows/ci.yml');
+    const block = workflow.match(/\n {10}needs_full=false\n(?<body>[\s\S]*?)\n {10}done <<EOF\n/u)
+      ?.groups?.body;
+    expect(block).toBeDefined();
+    const script = `needs_full=false\n${(block ?? '').replaceAll(/^ {10}/gmu, '')}\ndone <<EOF\n${files}\nEOF\necho "$needs_full"`;
+    const output = execFileSync('bash', ['-c', script], { encoding: 'utf8' }).trim().split('\n');
+    expect(output.at(-1)).toBe(expected);
+  });
+
+  it.each([
+    ['fails a pull request that reaches the gated jobs without the label', 'true', 'false', 1],
+    ['passes once the label is added', 'true', 'true', 0],
+    ['passes a pull request that does not reach the gated jobs', 'false', 'false', 0],
+    ['passes a labelled pull request that does not need it', 'false', 'true', 0],
+    ['fails when the classification is missing', '', 'false', 1],
+  ])('Full checks requested %s', (_name, needsFull, hasLabel, expectedStatus) => {
+    // The label gate is what makes an untested backend change look green, so
+    // the check that reports it is run here as CI runs it, not read as text.
+    const workflow = readText('.github/workflows/ci.yml');
+    const job = workflowJobs(workflow).get('full-checks') ?? '';
+    expect(job).toContain('name: Full checks requested');
+    expect(job).toContain("if: github.event_name == 'pull_request'");
+    expect(job).toContain('NEEDS_FULL: $' + '{{ needs.changes.outputs.needs_full }}');
+    expect(job).toContain(
+      'HAS_FULL_LABEL: $' + "{{ contains(github.event.pull_request.labels.*.name, 'ci:full') }}",
+    );
+    const run = job.match(/\n {8}run: \|\n(?<body>[\s\S]*)$/u)?.groups?.body;
+    expect(run).toBeDefined();
+    const script = (run ?? '').replaceAll(/^ {10}/gmu, '');
+    const result = spawnSync('bash', ['-c', script], {
+      encoding: 'utf8',
+      env: { PATH: process.env.PATH, NEEDS_FULL: needsFull, HAS_FULL_LABEL: hasLabel },
+    });
+    expect(result.status, result.stdout + result.stderr).toBe(expectedStatus);
+    if (expectedStatus === 1) expect(result.stdout).toContain('Add the ci:full label');
   });
 
   it('proposes an image bump only after running the suites inside the new image', () => {
