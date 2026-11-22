@@ -28,7 +28,7 @@ These are true as of their date. Refresh anything they say before you act on it.
 
 | Page | Date | What it records |
 | --- | --- | --- |
-| [project-coordination.md](project-coordination.md) | 2026-11-12 | Inventory of worktrees, branches, PRs and issue gates, with ownership |
+| [project-coordination.md](project-coordination.md) | 2026-11-20 | Inventory of worktrees, branches, PRs and issue gates, with ownership |
 | [mission-m0-integration-checkpoint.md](mission-m0-integration-checkpoint.md) | 2026-10-22 | Mission producer and release prerequisites for #155 |
 | [roadmap.md](roadmap.md) | 2026-09-07 to 2026-09-16 | Conformance and consolidation checkpoints |
 | [windows-supervisor-source.md](windows-supervisor-source.md) | 2026-10-18 | The bounded Windows supervisor and the gates it met |
