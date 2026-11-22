@@ -21,7 +21,10 @@
 // it already and a second copy could make it quit without finishing. The
 // wrapper waits for the command to stop, checks, cleans up, and then ends by
 // the same signal, so a calling script stops as it would without it. A
-// second signal while the command is still running stops it with SIGKILL.
+// second Ctrl-C while the command is still running stops it (the direct
+// child only) with SIGKILL. A repeated SIGTERM doesn't: `timeout` and similar
+// supervisors send one to the wrapper and another to its group, and the
+// command must be left to handle its own.
 import { spawn } from 'node:child_process';
 import {
   existsSync,
@@ -115,6 +118,7 @@ function runCommand(command, commandArgs, env) {
     let child;
     for (const signal of handledSignals) {
       const handler = () => {
+        const seenBefore = received.includes(signal);
         received.push(signal);
         if (!running) return;
         if (received.length === 1) {
@@ -122,8 +126,8 @@ function runCommand(command, commandArgs, env) {
             `coven-scratch-homes: got ${signal}; waiting for ${command} to stop, then checking ` +
               'the real engine. Press Ctrl-C again to stop it now.',
           );
-        } else {
-          console.error(`coven-scratch-homes: got ${signal} again; stopping ${command}`);
+        } else if (signal === 'SIGINT' && seenBefore) {
+          console.error(`coven-scratch-homes: got SIGINT again; stopping ${command}`);
           child.kill('SIGKILL');
         }
       };

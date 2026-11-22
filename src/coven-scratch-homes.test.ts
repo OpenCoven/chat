@@ -236,6 +236,30 @@ describe('coven-scratch-homes', () => {
         );
       }
 
+      // GNU timeout and similar supervisors send SIGTERM to the wrapper's pid
+      // and then to its group; the second must not stop the command early.
+      test(
+        'a SIGTERM to the wrapper and then to the group lets the command stop on its own',
+        async () => {
+          const countFile = join(realHome, 'signal-count');
+          const run = start(wrapper(finishesAfter('SIGTERM')), { COUNT_FILE: countFile });
+          await run.waitFor('stdout', 'ready\n');
+          if (!run.child.pid) throw new Error('no pid');
+          process.kill(run.child.pid, 'SIGTERM');
+          await run.waitFor('stderr', 'got SIGTERM');
+          run.signalGroup('SIGTERM');
+          const exit = await run.closed;
+          expect(run.output.stderr).not.toContain('SIGKILL');
+          expect(readFileSync(countFile, 'utf8')).toBe('1');
+          expect(readFileSync(currentPath, 'utf8')).toBe('0.9.2');
+          expect(exit.signal).toBe('SIGTERM');
+          expect(run.output.stderr).toContain('after:  current "0.9.2"');
+          expect(kept).toHaveLength(1);
+          expect(existsSync(kept[0] as string)).toBe(false);
+        },
+        signalTimeout,
+      );
+
       test(
         'Ctrl-C stops a shell loop that calls the wrapper',
         async () => {
