@@ -3,22 +3,28 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { expect, test } from 'vitest';
+import { skipWithoutPwsh } from './test/pwsh';
 
-test('the actual native guard rejects a hit or foreground changed during receipt reads before sending input', () => {
-  const directory = mkdtempSync(join(tmpdir(), 'native-link-guard-'));
-  try {
-    const source = readFileSync(
-      resolve('scripts/native-acceptance/windows/NativeDriver.ps1'),
-      'utf8',
-    );
-    const method = source.slice(
-      source.indexOf('  public static string ClickLink('),
-      source.indexOf('  public static void Drag('),
-    );
-    // Compile the actual method. Only Windows UIA and SendInput are replaced:
-    // a receipt read can move the hit or foreground, as a real UI update can.
-    const fixture =
-      `
+// Without PowerShell this skips locally, with the reason printed; in CI it still runs.
+const skipPowerShell = skipWithoutPwsh(import.meta.url);
+
+test.skipIf(skipPowerShell)(
+  'the actual native guard rejects a hit or foreground changed during receipt reads before sending input',
+  () => {
+    const directory = mkdtempSync(join(tmpdir(), 'native-link-guard-'));
+    try {
+      const source = readFileSync(
+        resolve('scripts/native-acceptance/windows/NativeDriver.ps1'),
+        'utf8',
+      );
+      const method = source.slice(
+        source.indexOf('  public static string ClickLink('),
+        source.indexOf('  public static void Drag('),
+      );
+      // Compile the actual method. Only Windows UIA and SendInput are replaced:
+      // a receipt read can move the hit or foreground, as a real UI update can.
+      const fixture =
+        `
 using System;
 using System.Collections.Generic;
 using System.Text.Json;
@@ -76,14 +82,14 @@ public static class NativeDriver {
   static uint Up(string button) { return 4; }
   static bool Mouse(uint flags) { Inputs.Add(flags); return !(scenario == "input-failure" && flags == 2); }
 ` +
-      method +
-      '\n}';
-    const cs = join(directory, 'guard.cs');
-    writeFileSync(cs, fixture);
-    const runner = join(directory, 'guard.ps1');
-    writeFileSync(
-      runner,
-      `param([string]$source)
+        method +
+        '\n}';
+      const cs = join(directory, 'guard.cs');
+      writeFileSync(cs, fixture);
+      const runner = join(directory, 'guard.ps1');
+      writeFileSync(
+        runner,
+        `param([string]$source)
 $ErrorActionPreference = 'Stop'
 Add-Type -TypeDefinition (Get-Content -LiteralPath $source -Raw)
 foreach ($scenario in @('stable', 'moving-point', 'moving-foreground', 'renamed', 'disabled', 'wrong-window', 'wrong-name', 'wrong-cursor', 'unavailable-cursor', 'input-failure')) {
@@ -92,35 +98,37 @@ foreach ($scenario in @('stable', 'moving-point', 'moving-foreground', 'renamed'
   @{ scenario = $scenario; receipt = $receipt; inputs = @([NativeDriver]::Inputs) } | ConvertTo-Json -Compress -Depth 20
 }
 `,
-    );
-    const result = spawnSync('pwsh', ['-NoProfile', '-NonInteractive', '-File', runner, cs], {
-      encoding: 'utf8',
-      timeout: 20_000,
-    });
-    expect(result.error).toBeUndefined();
-    expect(result.status, result.stderr).toBe(0);
-    const receipts = result.stdout
-      .trim()
-      .split(/\r?\n/)
-      .map((line) => JSON.parse(line));
-    expect(receipts).toHaveLength(10);
-    expect(receipts[0]).toMatchObject({
-      scenario: 'stable',
-      inputs: [2, 4],
-      receipt: { clicked: true, belongsToTargetWindow: true },
-    });
-    for (const receipt of receipts.slice(1, 9)) {
-      expect(receipt, receipt.scenario).toMatchObject({
-        inputs: [],
-        receipt: { clicked: false, downSent: false, upSent: false },
+      );
+      const result = spawnSync('pwsh', ['-NoProfile', '-NonInteractive', '-File', runner, cs], {
+        encoding: 'utf8',
+        timeout: 20_000,
       });
+      expect(result.error).toBeUndefined();
+      expect(result.status, result.stderr).toBe(0);
+      const receipts = result.stdout
+        .trim()
+        .split(/\r?\n/)
+        .map((line) => JSON.parse(line));
+      expect(receipts).toHaveLength(10);
+      expect(receipts[0]).toMatchObject({
+        scenario: 'stable',
+        inputs: [2, 4],
+        receipt: { clicked: true, belongsToTargetWindow: true },
+      });
+      for (const receipt of receipts.slice(1, 9)) {
+        expect(receipt, receipt.scenario).toMatchObject({
+          inputs: [],
+          receipt: { clicked: false, downSent: false, upSent: false },
+        });
+      }
+      expect(receipts[9]).toMatchObject({
+        scenario: 'input-failure',
+        inputs: [2, 4],
+        receipt: { clicked: false, downSent: false, upSent: true },
+      });
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
     }
-    expect(receipts[9]).toMatchObject({
-      scenario: 'input-failure',
-      inputs: [2, 4],
-      receipt: { clicked: false, downSent: false, upSent: true },
-    });
-  } finally {
-    rmSync(directory, { recursive: true, force: true });
-  }
-}, 25_000);
+  },
+  25_000,
+);
