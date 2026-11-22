@@ -53,9 +53,9 @@ label those jobs report `skipped`, branch protection accepts `skipped`, and the 
 with that code never built.
 
 - Add `ci:full` to any PR that touches `src-tauri/`, the supervisors, or Windows paths, before you
-  call it green. Once #671 lands, the `Full checks requested` job fails such a PR until the label
-  is on it; `Changed paths` lists the files that made it ask. It is not a required check, so read
-  its red X as "add the label", not as optional.
+  call it green. The **ci:full when needed** check (`.github/workflows/ci-full-label.yml`) fails
+  on a PR that changes those paths, or any file the conformance lock governs, without the label,
+  and lists them. `scripts/ci-full-check.mjs` holds the rules.
 - Read `skipped` on `Rust` as "not tested".
 - Adding the label starts a new run (`labeled` is a trigger) and cancels the one in progress.
   Check-run lists keep entries from the cancelled run, so read the newest run's jobs.
@@ -92,9 +92,9 @@ gh api -X POST repos/OpenCoven/chat/actions/runs/<run-id>/rerun-failed-jobs
 
 ## Local checks that fail without your change (verified 2026-11-20)
 
-Compare against an unchanged worktree before diagnosing a local failure. Check whether your branch includes the test-runner change from #674.
+Compare against an unchanged worktree before diagnosing a local failure.
 
-- **PowerShell tests.** With the corrected #674 runner, off-CI macOS and Linux runs identify missing PowerShell and skip the tests that invoke it. CI and Windows require PowerShell. Install PowerShell 7 to exercise those tests locally. On earlier checkouts, look for `spawnSync pwsh ENOENT` in the client-v1 conformance workflow, native installed-executable, native link-protocol, and native link-guard tests.
+- **PowerShell tests.** Off-CI macOS and Linux runs identify missing PowerShell and skip the tests that invoke it. CI and Windows require PowerShell. Install PowerShell 7 to exercise those tests locally. On earlier checkouts, look for `spawnSync pwsh ENOENT` in the client-v1 conformance workflow, native installed-executable, native link-protocol, and native link-guard tests.
 - **Both unit suites.** With #674, `corepack pnpm test` runs the normal and heavy suites and exits nonzero when either fails. On earlier revisions the normal suite can stop the command before the heavy suite starts. Run `corepack pnpm@10.34.0 --ignore-workspace test:unit:heavy` separately on those revisions.
 - **Release toolchain.** Use the Node version in `.node-version` and put rustup’s `~/.cargo/bin` first on PATH. With #674, a Node mismatch skips the exact-version observation locally. Missing rustup also skips the four Cargo-resolution cases. CI keeps the requirements.
 
@@ -108,7 +108,7 @@ Compare against an unchanged worktree before diagnosing a local failure. Check w
 - **Port 4173 may be taken.** `pnpm dev` and `app:dev` bind it with `strictPort`, and another
   worktree's dev server or an unrelated local server may hold it: on 2026-11-20 a week-old static
   server did. `lsof -nP -iTCP:4173 -sTCP:LISTEN` shows the holder; don't stop a process you
-  didn't start. After #677, `app:dev` says so before Tauri starts, and
+  didn't start. `app:dev` says so before Tauri starts, and
   `OPENCOVEN_CHAT_DEV_PORT=<port> corepack pnpm app:dev` moves the dev server and Tauri's devUrl
   for that run.
 - **A scratch `HOME` does not isolate the `app:dev` WebView on macOS.** WebKit uses the account's

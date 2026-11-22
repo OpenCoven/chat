@@ -36,7 +36,7 @@ retries work.
 - Vite preview server: `127.0.0.1:4174`
 - Tauri dev URL: `http://127.0.0.1:4173`
 
-After #677, `OPENCOVEN_CHAT_DEV_PORT` moves the dev server and the Tauri dev URL together for one
+`OPENCOVEN_CHAT_DEV_PORT` moves the dev server and the Tauri dev URL together for one
 `pnpm dev` or `pnpm app:dev` run, when another server holds 4173.
 
 ## Conformance boundary notes (Phase 1 harness)
