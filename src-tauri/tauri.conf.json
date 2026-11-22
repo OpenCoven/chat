@@ -67,13 +67,16 @@
       "deb": {
         "depends": [],
         "provides": [
-          "opencoven-chat"
+          "opencoven-chat",
+          "open-coven-chat"
         ],
         "conflicts": [
-          "opencoven-chat"
+          "opencoven-chat",
+          "open-coven-chat"
         ],
         "replaces": [
-          "opencoven-chat"
+          "opencoven-chat",
+          "open-coven-chat"
         ]
       }
     },
