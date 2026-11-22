@@ -44,6 +44,13 @@ function repin(commit: string, ref: string, filesRoot: string) {
 
 const zeros = (length: number) => '0'.repeat(length);
 
+// Git in a fixture, and the script run against one, must not inherit GIT_DIR,
+// GIT_WORK_TREE, GIT_INDEX_FILE or any other GIT_* variable: run from a git
+// hook, those would point `init`, `commit` and `update-ref` at the real repo.
+const fixtureEnv = Object.fromEntries(
+  Object.entries(process.env).filter(([name]) => !name.startsWith('GIT_')),
+);
+
 function fixtureLiteral(paths: string[]) {
   const entries = paths
     .map(
@@ -79,7 +86,7 @@ function fixtureRepo(literal = fixtureLiteral(['governed-a.txt', 'governed-b.txt
         'commit.gpgsign=false',
         ...args,
       ],
-      { encoding: 'utf8' },
+      { encoding: 'utf8', env: fixtureEnv },
     ).trim();
   const commit = (path: string, text: string, message: string) => {
     writeFileSync(join(repo, path), text);
@@ -120,7 +127,7 @@ function fixtureRepo(literal = fixtureLiteral(['governed-a.txt', 'governed-b.txt
 }
 
 function repinIn(cwd: string, ...args: string[]) {
-  return spawnSync(process.execPath, [script, ...args], { cwd, encoding: 'utf8' });
+  return spawnSync(process.execPath, [script, ...args], { cwd, encoding: 'utf8', env: fixtureEnv });
 }
 
 beforeAll(() => {
@@ -211,6 +218,17 @@ describe('repin-conformance-lock', { timeout: 30_000 }, () => {
       `${localMerge} isn't on the first-parent history of origin/main; pin a merge commit on main`,
     );
     expect(readFileSync(join(repo, lockFile), 'utf8')).toBe(before);
+  });
+
+  test('asks for a fetch when origin/main is behind a merge that exists locally', () => {
+    const { repo, run, mainMerge } = fixtureRepo();
+    run('update-ref', 'refs/remotes/origin/main', `${mainMerge}^1`);
+    const result = repinIn(repo, mainMerge);
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain(
+      `${mainMerge} isn't on the first-parent history of origin/main; pin a merge commit on main`,
+    );
+    expect(result.stderr).toContain('run `git fetch origin` if it merged recently');
   });
 
   test('asks for a fetch when origin/main is missing', () => {

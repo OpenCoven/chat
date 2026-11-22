@@ -92,7 +92,10 @@ if (parents.length < 2) {
   fail(`${commit} has ${parents.length} parent(s); the authority must be a merge commit`);
 }
 if (!gitText(['rev-list', '--first-parent', ref]).split('\n').includes(commit)) {
-  fail(`${commit} isn't on the first-parent history of ${options.ref}; pin a merge commit on main`);
+  fail(
+    `${commit} isn't on the first-parent history of ${options.ref}; pin a merge commit on main, ` +
+      'and run `git fetch origin` if it merged recently',
+  );
 }
 
 function digestAt(path) {
