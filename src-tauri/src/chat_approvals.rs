@@ -725,7 +725,8 @@ fn within_its_hour(at: u64, now: u64) -> bool {
     now < at.saturating_add(REQUEST_TTL_MS) && at <= now.saturating_add(REQUEST_CLOCK_STEP_MS)
 }
 
-fn open_request(data: &Path, id: &str, now: u64) -> Result<Entry, String> {
+/// A request that hasn't been answered yet, whatever its age.
+fn unanswered_request(data: &Path, id: &str) -> Result<Entry, String> {
     let entries = read_file(&data.join(LOG_FILE))?;
     let request = entries
         .iter()
@@ -737,10 +738,16 @@ fn open_request(data: &Path, id: &str, now: u64) -> Result<Entry, String> {
     {
         return Err("This request was already answered.".into());
     }
+    Ok(request.clone())
+}
+
+/// A request that can still be allowed: unanswered and within its hour.
+fn open_request(data: &Path, id: &str, now: u64) -> Result<Entry, String> {
+    let request = unanswered_request(data, id)?;
     if !within_its_hour(request.at, now) {
         return Err("This request expired. Ask the familiar again.".into());
     }
-    Ok(request.clone())
+    Ok(request)
 }
 
 /// Spends the request and returns the grant. The caller holds the run slot, so
@@ -793,7 +800,10 @@ fn allow(data: &Path, id: &str, device: Device, run_id: &str, now: u64) -> Resul
 pub(crate) fn decline(data: &Path, id: &str, device: Device, now: u64) -> Result<Entry, String> {
     crate::coven_runtime::validate_id(id)?;
     let _log = lock(data)?;
-    let request = open_request(data, id, now)?;
+    // A decline is recorded whatever the clock says. If a clock that had run
+    // ahead were refused here, putting it right would open the request again,
+    // and Allow could grant what the person declined (#693).
+    let request = unanswered_request(data, id)?;
     append(
         data,
         &Entry {
@@ -1234,6 +1244,28 @@ mod tests {
         let before = recent(&data.0, 10).unwrap().len();
         supersede(&data.0, "astra", corrected).unwrap();
         assert_eq!(recent(&data.0, 10).unwrap().len(), before);
+    }
+
+    /// A decline made while the clock reads past the request's hour is still
+    /// recorded, so correcting the clock can't bring the request back (#693).
+    #[test]
+    fn a_decline_after_a_forward_clock_jump_still_closes_the_request() {
+        let data = Data::new();
+        data.head("astra", "session-1");
+        let request = submit(&data.0, "astra", "session-1", "run-1", proposal(), 1_000).unwrap();
+        decline(
+            &data.0,
+            &request.id,
+            Device::Desktop,
+            1_000 + 2 * REQUEST_TTL_MS,
+        )
+        .unwrap();
+        let corrected = 2_000;
+        assert!(pending(&data.0, corrected).unwrap().is_empty());
+        assert_eq!(
+            allow(&data.0, &request.id, Device::Desktop, "run-2", corrected).unwrap_err(),
+            "This request was already answered."
+        );
     }
 
     #[test]
