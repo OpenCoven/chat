@@ -151,3 +151,31 @@ It must print `Good "git" signature`. Without the file, `git log --show-signatur
 `git show --show-signature` print "No signature" even for a signed commit. Don't use a `<(...)`
 process substitution for the file: it is read only once, so later checks fail. GitHub's
 **Verified** badge is the final word.
+
+## Running Coven without touching the real install (verified 2026-11-20)
+
+`COVEN_HOME` moves Coven's state (its database, sessions and daemon socket), but not its managed
+engine. That lives under `$HOME/.coven/engine` whatever `COVEN_HOME` says, and
+`coven engine install` writes there and rewrites `$HOME/.coven/engine/current`, the file that
+decides which engine the installed Chat starts. On 2026-11-17 a check that moved only
+`COVEN_HOME` and `COVEN_CODE_HOME` installed engine 0.9.2 into the real home and switched
+`current` from 0.9.1; it had to be put back by hand.
+
+Run anything that starts Coven through the helper instead:
+
+```bash
+node scripts/coven-scratch-homes.mjs -- coven engine status --json
+node scripts/coven-scratch-homes.mjs --keep -- <command> [args...]   # keep the scratch folder
+```
+
+It runs the command with scratch `HOME`, `COVEN_HOME`, `COVEN_CODE_HOME` and XDG folders in a new
+folder under the system temp directory (`/var/folders` on macOS, short enough for a daemon
+socket), and prints where they are. It records the real `~/.coven/engine/current` and the names
+in `~/.coven/engine` before and after. If either changed, it prints both and exits 3, and you
+must put them back before anything starts that engine. Otherwise it exits with the command's
+status and removes the scratch folder.
+
+It doesn't change `PATH`, so a `coven-code` installed globally (with npm, for example) is still
+found: `coven engine status --json` then reports `"source": "PATH"`. To test the managed engine,
+run with a `PATH` that doesn't contain one. A scratch `HOME` also has no Keychain, so a keyless
+`claude` can't sign in under it.
