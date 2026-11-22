@@ -171,9 +171,12 @@ node scripts/coven-scratch-homes.mjs --keep -- <command> [args...]   # keep the 
 It runs the command with scratch `HOME`, `COVEN_HOME`, `COVEN_CODE_HOME` and XDG folders in a new
 folder under the system temp directory (`/var/folders` on macOS, short enough for a daemon
 socket), and prints where they are. It records the real `~/.coven/engine/current` and the names
-in `~/.coven/engine` before and after. If either changed, it prints both and exits 3, and you
-must put them back before anything starts that engine. Otherwise it exits with the command's
-status and removes the scratch folder.
+in `~/.coven/engine` (ignoring dotfiles such as `.DS_Store`) before and after. If either changed,
+it prints both and exits 3, and you must put them back before anything starts that engine.
+Otherwise it exits with the command's status and removes the scratch folder. Ctrl-C and SIGTERM
+during the command don't skip that check: the helper waits for the command to stop, then checks
+and cleans up. Ctrl-C reaches the command from the terminal; a SIGTERM sent to the helper is
+passed on to it.
 
 It doesn't change `PATH`, so a `coven-code` installed globally (with npm, for example) is still
 found: `coven engine status --json` then reports `"source": "PATH"`. To test the managed engine,

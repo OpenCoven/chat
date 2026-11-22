@@ -11,11 +11,26 @@
 //
 // The real home is $HOME as this script sees it. Before and after the command
 // it records `<home>/.coven/engine/current` and the names in
-// `<home>/.coven/engine`; if either changed, it says so and exits 3.
-// Otherwise it exits with the command's status. The scratch folder is removed
-// afterwards unless you pass --keep.
-import { spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync } from 'node:fs';
+// `<home>/.coven/engine` (ignoring dotfiles such as .DS_Store); if either
+// changed, it says so and exits 3. Otherwise it exits with the command's
+// status. The scratch folder is removed afterwards unless you pass --keep.
+//
+// Ctrl-C and SIGTERM don't skip that check: while the command runs, the
+// wrapper waits for it to finish and then checks and cleans up. A terminal
+// sends Ctrl-C to the command as well, so the wrapper doesn't pass SIGINT on
+// (a second one could make the command quit without finishing). A SIGTERM is
+// usually meant for the wrapper alone, so it passes that one on.
+import { spawn } from 'node:child_process';
+import {
+  existsSync,
+  lstatSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  readlinkSync,
+  rmSync,
+} from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -32,22 +47,80 @@ function usage(message) {
   process.exit(2);
 }
 
+// `current` is a plain file today. A link, a folder or anything unreadable is
+// still recorded, so a change to it is reported rather than thrown.
+function readCurrent(currentPath) {
+  let stat;
+  try {
+    stat = lstatSync(currentPath);
+  } catch {
+    return null;
+  }
+  if (stat.isSymbolicLink()) {
+    let target;
+    try {
+      target = readlinkSync(currentPath);
+    } catch (error) {
+      target = `(unreadable: ${error.code ?? error.message})`;
+    }
+    return `(a link to ${JSON.stringify(target)})`;
+  }
+  if (stat.isDirectory()) return '(a folder)';
+  try {
+    return JSON.stringify(readFileSync(currentPath, 'utf8'));
+  } catch (error) {
+    return `(unreadable: ${error.code ?? error.message})`;
+  }
+}
+
+function readEntries(engineDir) {
+  if (!existsSync(engineDir)) return null;
+  try {
+    return readdirSync(engineDir)
+      .filter((name) => !name.startsWith('.'))
+      .sort();
+  } catch (error) {
+    return [`(unreadable: ${error.code ?? error.message})`];
+  }
+}
+
 function snapshotEngine(realHome) {
   const engineDir = join(realHome, '.coven', 'engine');
-  const currentPath = join(engineDir, 'current');
   return {
     engineDir,
-    current: existsSync(currentPath) ? readFileSync(currentPath, 'utf8') : null,
-    entries: existsSync(engineDir) ? readdirSync(engineDir).sort() : null,
+    current: readCurrent(join(engineDir, 'current')),
+    entries: readEntries(engineDir),
   };
 }
 
 function describe(snapshot) {
-  const current =
-    snapshot.current === null ? '(no current file)' : JSON.stringify(snapshot.current);
+  const current = snapshot.current ?? '(no current file)';
   const entries =
     snapshot.entries === null ? '(no engine folder)' : snapshot.entries.join(', ') || '(empty)';
   return `current ${current}; entries ${entries}`;
+}
+
+// Start the command and wait for it. From here on SIGINT and SIGTERM don't
+// stop this script, so the check and cleanup after the command still run.
+function runCommand(command, commandArgs, env) {
+  return new Promise((resolveRun) => {
+    const received = [];
+    const onSigint = () => received.push('SIGINT');
+    const onSigterm = () => {
+      received.push('SIGTERM');
+      child.kill('SIGTERM');
+    };
+    process.on('SIGINT', onSigint);
+    process.on('SIGTERM', onSigterm);
+    const child = spawn(command, commandArgs, { stdio: 'inherit', env });
+    let error = null;
+    child.on('error', (spawnError) => {
+      error = spawnError;
+    });
+    child.on('close', (status, signal) => {
+      resolveRun({ status, signal, error, received });
+    });
+  });
 }
 
 const args = process.argv.slice(2);
@@ -89,10 +162,9 @@ if (scratch.COVEN_HOME.length > socketPathBudget) {
 }
 
 const [command, ...commandArgs] = args;
-const result = spawnSync(command, commandArgs, {
-  stdio: 'inherit',
-  env: { ...process.env, ...scratch, ...xdg },
-});
+const result = await runCommand(command, commandArgs, { ...process.env, ...scratch, ...xdg });
+for (const signal of new Set(result.received))
+  console.error(`coven-scratch-homes: got ${signal} while ${command} ran; checking before exiting`);
 
 const after = snapshotEngine(realHome);
 const changed =
