@@ -144,10 +144,10 @@ PREVIOUS=v0.1.1   # the release before it
    corepack pnpm app:build   # local sanity build
    ```
 
-   `test:unit` runs the normal suite, then the heavy one. Without `pwsh`, or without the
-   exact pinned Node version, it stops at failures your change didn't cause.
-   **Local checks that fail without your change** in `docs/agents/working-here.md` lists
-   them. Hosted CI on the prep PR is the authority.
+   `test:unit` runs the normal suite, then the heavy one, and fails if either failed.
+   Without `pwsh`, the exact pinned Node version or `rustup`, the tests that need them skip
+   with a printed reason. **Local checks that skip or fail without your change** in
+   `docs/agents/working-here.md` lists them. Hosted CI on the prep PR is the authority.
 
 ### Land
 
