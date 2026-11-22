@@ -121,8 +121,10 @@ export function verifyPackage({ conf, capabilities, cargo, exists }) {
   )
     fail('Keep the legacy NSIS install identity: use the versioned migration template.');
   for (const field of ['provides', 'conflicts', 'replaces']) {
-    if (!conf.bundle?.linux?.deb?.[field]?.includes('opencoven-chat'))
-      fail(`Keep the legacy Debian install identity: ${field} must include opencoven-chat.`);
+    for (const predecessor of ['opencoven-chat', 'open-coven-chat']) {
+      if (!conf.bundle?.linux?.deb?.[field]?.includes(predecessor))
+        fail(`Keep the legacy Debian install identity: ${field} must include ${predecessor}.`);
+    }
   }
 
   const windows = conf.app?.windows ?? [];
