@@ -1,6 +1,6 @@
 // Run under private X11 and D-Bus sessions. See CONTRIBUTING.md for the two phases.
 import assert from 'node:assert/strict';
-import { execFileSync, spawn } from 'node:child_process';
+import { execFileSync, spawn, spawnSync } from 'node:child_process';
 import {
   closeSync,
   existsSync,
@@ -285,7 +285,9 @@ try {
     writeFileSync(join(work, phase + '-tree.txt'), await state());
     console.error(
       'Focused X11 window:',
-      execFileSync('xdotool', ['getactivewindow', 'getwindowname'], { encoding: 'utf8' }).trim(),
+      spawnSync('xdotool', ['getactivewindow', 'getwindowname'], {
+        encoding: 'utf8',
+      }).stdout?.trim() || 'unavailable',
     );
   }
   throw error;
