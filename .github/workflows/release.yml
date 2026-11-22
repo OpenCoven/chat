@@ -418,9 +418,10 @@ jobs:
     permissions:
       contents: read
     outputs:
-      # The same two secrets are read on every runner, so every matrix job
-      # writes the same value here. The publish job reads it to describe the
-      # Windows installers' signing state in the smoke report and the notes.
+      # The same Windows signing secrets are read on every runner, so every
+      # matrix job writes the same value here. The publish job reads it to
+      # describe the Windows installers' signing state in the smoke report
+      # and the notes.
       windows_signed: ${{ steps.signing.outputs.windows_signed }}
       # `on` when the tagged tree configures the updater and its signing key
       # is present, so this run's installers carry updater signatures; the
@@ -454,14 +455,15 @@ jobs:
             runner: macos-15-intel
             target: x86_64-apple-darwin
             bundles: app,dmg
-          # Windows ships UNSIGNED, by decision (2026-10-14): certificate
-          # authorities no longer issue the exportable .pfx that the signing
-          # steps below expect, and a signing route is still being chosen on
-          # #411. SmartScreen warns on first launch, and the release notes say
-          # so. The signing steps stay in place and run as soon as both
-          # WINDOWS_* secrets exist. windows-2025 is pinned by name, like
-          # ubuntu-22.04, so a runner-image rollover cannot change what a tag
-          # builds with.
+          # Windows ships UNSIGNED for now, by decision (2026-10-14).
+          # Certificate authorities no longer issue an exportable .pfx, so
+          # signing goes through SSL.com eSigner (chosen 2026-10-18, #411),
+          # and it starts once release-signing holds the four ES_* secrets
+          # and the WINDOWS_PUBLISHER variable. Until then SmartScreen warns
+          # on first launch, and the release notes say so. windows-2025 is
+          # pinned by name, like ubuntu-22.04, so a runner-image rollover
+          # cannot change what a tag builds with. The eSigner wrapper needs
+          # that image's Java 21.
           - platform: windows-x86_64
             runner: windows-2025
             target: x86_64-pc-windows-msvc
@@ -631,7 +633,7 @@ jobs:
               echo "::error::Only one of WINDOWS_CERTIFICATE and WINDOWS_CERTIFICATE_PASSWORD is set. Set both to sign the Windows installers, or neither to build them unsigned."
               exit 1
             fi
-            echo "::warning::Neither the eSigner secrets nor WINDOWS_CERTIFICATE are configured; the Windows installers in this release are UNSIGNED and Windows SmartScreen will warn before they run. #411 tracks a signing route."
+            echo "::warning::Neither the eSigner secrets nor WINDOWS_CERTIFICATE are configured; the Windows installers in this release are UNSIGNED and Windows SmartScreen will warn before they run. To sign them, add the four ES_* secrets and the WINDOWS_PUBLISHER variable to release-signing (docs/releasing.md § 3, #411)."
           fi
           if [ "${updater_configured}" != "true" ]; then
             echo "::notice::This tree configures no updater (no plugins.updater); no updater artifacts or latest.json are produced. See docs/releasing.md § 4."
@@ -1172,6 +1174,7 @@ jobs:
         run: |
           Set-StrictMode -Version Latest
           $ErrorActionPreference = 'Stop'
+          $caveat = 'A valid signature names the publisher. It does not clear SmartScreen, which builds reputation separately, and it is not a test of the installed app.'
           # A signed release says who signed it: the certificate's common name,
           # which is what the installer shows as its publisher.
           if ($env:WINDOWS_SIGNED -eq 'true' -and -not $env:WINDOWS_PUBLISHER) {
@@ -1180,6 +1183,28 @@ jobs:
           $installers = @(Get-ChildItem -Path "$env:STAGE_DIR/*" -File -Include *.msi,*.exe)
           if ($installers.Count -ne 2) {
             throw "Expected one .msi and one .exe in $env:STAGE_DIR, found $($installers.Count): $($installers.Name -join ', ')"
+          }
+          # One row per installer for the run summary, so a rehearsal's
+          # evidence (#411) is on the run page, tied to each file's SHA-256.
+          # This is the signature only. It says nothing about SmartScreen
+          # reputation or about how the installed app runs. Rows are written
+          # as each installer passes, and a failed check adds its reason, so
+          # a failing rehearsal leaves its evidence too.
+          @(
+            '### Windows installer signatures'
+            ''
+            '| Installer | SHA-256 | Authenticode | Signer | Signer thumbprint | Signer valid to | Timestamp authority | Chain | Chain result |'
+            '| --- | --- | --- | --- | --- | --- | --- | --- | --- |'
+          ) | Add-Content -Path $env:GITHUB_STEP_SUMMARY -Encoding utf8
+          function Add-EvidenceRow([string] $row) {
+            Add-Content -Path $env:GITHUB_STEP_SUMMARY -Encoding utf8 -Value $row
+          }
+          # A trap covers this whole script. `break` rethrows, so the step
+          # still fails after the reason is recorded.
+          trap {
+            @('', "**Stopped:** $($_.Exception.Message)", '', $caveat) |
+              Add-Content -Path $env:GITHUB_STEP_SUMMARY -Encoding utf8
+            break
           }
 
           # The Property table is what msiexec and Apps & features read.
@@ -1215,22 +1240,70 @@ jobs:
             Write-Host "  ok: $($installer.Name) is $name $version"
 
             $signature = Get-AuthenticodeSignature -FilePath $installer.FullName
+            $sha256 = (Get-FileHash -Algorithm SHA256 -LiteralPath $installer.FullName).Hash.ToLowerInvariant()
             if ($env:WINDOWS_SIGNED -eq 'true') {
               if ($signature.Status -ne 'Valid') {
                 throw "$($installer.Name) has invalid Authenticode status: $($signature.Status)"
               }
-              $publisher = $signature.SignerCertificate.GetNameInfo('SimpleName', $false)
+              $signer = $signature.SignerCertificate
+              $publisher = $signer.GetNameInfo('SimpleName', $false)
               if ($publisher -ne $env:WINDOWS_PUBLISHER) {
                 throw "$($installer.Name) is signed by '$publisher', expected '$env:WINDOWS_PUBLISHER'."
               }
-              Write-Host "  ok: $($installer.Name) is signed by $($signature.SignerCertificate.Subject)"
+              Write-Host "  ok: $($installer.Name) is signed by $($signer.Subject)"
+
+              # Without a timestamp the signature stops verifying the day the
+              # certificate expires, and code-signing certificates now last at
+              # most 460 days.
+              $stamper = $signature.TimeStamperCertificate
+              if ($null -eq $stamper) {
+                throw "$($installer.Name) is signed but has no timestamp, so its signature would stop verifying when the certificate expires."
+              }
+              Write-Host "  ok: $($installer.Name) is timestamped by $($stamper.Subject)"
+
+              # Valid already means Windows trusts the chain. Build it again
+              # here so the log names every certificate in it and reports the
+              # revocation check. The certificates embedded in the signature
+              # are offered first; without them the chain is completed from
+              # the runner's stores and the certificate's own download links.
+              $chain = [System.Security.Cryptography.X509Certificates.X509Chain]::new()
+              $chain.ChainPolicy.RevocationMode = [System.Security.Cryptography.X509Certificates.X509RevocationMode]::Online
+              $chain.ChainPolicy.RevocationFlag = [System.Security.Cryptography.X509Certificates.X509RevocationFlag]::ExcludeRoot
+              try {
+                $embedded = [System.Security.Cryptography.X509Certificates.X509Certificate2Collection]::new()
+                $embedded.Import($installer.FullName)
+                $chain.ChainPolicy.ExtraStore.AddRange($embedded)
+              } catch {
+                Write-Host "  note: could not read the certificates embedded in $($installer.Name): $($_.Exception.Message)"
+              }
+              $chain.Build($signer) | Out-Null
+              $chainNames = @($chain.ChainElements | ForEach-Object { $_.Certificate.GetNameInfo('SimpleName', $false) })
+              $chainStatus = @($chain.ChainStatus | ForEach-Object { $_.Status.ToString() } | Where-Object { $_ -ne 'NoError' } | Select-Object -Unique)
+              # A revocation server that can't be reached is reported, not
+              # refused: Windows accepted the signature, and a release should
+              # not depend on a CA's responder being up at that minute.
+              $unchecked = @($chainStatus | Where-Object { $_ -in 'RevocationStatusUnknown', 'OfflineRevocation' })
+              $broken = @($chainStatus | Where-Object { $_ -notin 'RevocationStatusUnknown', 'OfflineRevocation' })
+              if ($broken.Count -gt 0) {
+                throw "$($installer.Name) has Authenticode status Valid, but its certificate chain reports $($broken -join ', '): $($chainNames -join ' > ')"
+              }
+              if ($unchecked.Count -gt 0) {
+                Write-Host "::warning::$($installer.Name): revocation could not be checked ($($unchecked -join ', ')). The chain is otherwise trusted."
+              }
+              Write-Host "  ok: $($installer.Name) chains $($chainNames -join ' > ')"
+
+              $chainResult = if ($unchecked.Count -gt 0) { "trusted; revocation not checked ($($unchecked -join ', '))" } else { 'trusted; not revoked' }
+              Add-EvidenceRow "| ``$($installer.Name)`` | ``$sha256`` | $($signature.Status) | $($signer.Subject) | ``$($signer.Thumbprint)`` | $($signer.NotAfter.ToUniversalTime().ToString('yyyy-MM-dd')) | $($stamper.Subject) | $($chainNames -join ' > ') | $chainResult |"
             } else {
               if ($signature.Status -ne 'NotSigned') {
                 throw "$($installer.Name) has Authenticode status $($signature.Status), but this run built unsigned."
               }
               Write-Host "::warning::$($installer.Name) is NOT signed (Authenticode status NotSigned); SmartScreen will warn before it runs."
+              Add-EvidenceRow "| ``$($installer.Name)`` | ``$sha256`` | $($signature.Status) | none | none | none | none | none | none |"
             }
           }
+
+          @('', $caveat) | Add-Content -Path $env:GITHUB_STEP_SUMMARY -Encoding utf8
 
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:

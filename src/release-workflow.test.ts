@@ -747,7 +747,7 @@ describe('release workflow specification', () => {
     );
     for (const name of ['ES_USERNAME', 'ES_PASSWORD', 'ES_CREDENTIAL_ID', 'ES_TOTP_SECRET']) {
       expect(buildStep).toContain(`${name}: \${{ secrets.${name} }}`);
-      // Not required yet: the account doesn't exist, and Windows still ships unsigned.
+      // Not required by verify-tag yet; that follows the rehearsal (#411).
       expect(verify).not.toContain(`${name}: \${{ secrets.${name} }}`);
     }
     expect(cleanup).toContain(`"\${RUNNER_TEMP}/CodeSignTool" "\${RUNNER_TEMP}/esigner-sign.ps1"`);
@@ -763,6 +763,66 @@ describe('release workflow specification', () => {
     expect(releasingGuide).toContain('### Signing the Windows installers');
     expect(releasingGuide).toContain('`ES_TOTP_SECRET`');
     expect(releasingGuide).not.toContain('WINDOWS_SIGN_COMMAND');
+  });
+
+  test('holds a signed installer to a timestamp and a trusted chain, and records both', () => {
+    const build = job('build', 'publish');
+    const windowsCheck = build.slice(
+      build.indexOf('- name: Verify Windows installer metadata and signatures'),
+      build.indexOf('uses: actions/upload-artifact@'),
+    );
+    const at = (text: string) => {
+      const index = windowsCheck.indexOf(text);
+      expect(index, text).toBeGreaterThan(-1);
+      return index;
+    };
+
+    // Status, then publisher, then timestamp, then chain: all on the signed
+    // branch, before the unsigned one states NotSigned.
+    const order = [
+      at("if ($signature.Status -ne 'Valid')"),
+      at("expected '$env:WINDOWS_PUBLISHER'"),
+      at('$stamper = $signature.TimeStamperCertificate'),
+      at('is signed but has no timestamp'),
+      at('$chain.Build($signer)'),
+      at('but its certificate chain reports'),
+      at("if ($signature.Status -ne 'NotSigned')"),
+    ];
+    expect(order).toEqual([...order].sort((a, b) => a - b));
+
+    // Revocation is checked online. A responder that can't be reached warns;
+    // any other chain fault refuses the build.
+    expect(windowsCheck).toContain('X509RevocationMode]::Online');
+    expect(windowsCheck).toContain(
+      "$broken = @($chainStatus | Where-Object { $_ -notin 'RevocationStatusUnknown', 'OfflineRevocation' })",
+    );
+    expect(windowsCheck).toContain('if ($broken.Count -gt 0) {');
+    expect(windowsCheck).toContain(
+      '::warning::$($installer.Name): revocation could not be checked',
+    );
+
+    // The run summary carries the evidence for both installers, signed or
+    // not, and doesn't let a signature stand in for SmartScreen or a run of
+    // the installed app.
+    expect(windowsCheck).toContain('Add-Content -Path $env:GITHUB_STEP_SUMMARY');
+    expect(windowsCheck.match(/Add-EvidenceRow "/g)).toHaveLength(2);
+    // A failed check still leaves the table and its reason: the trap writes
+    // a Stopped line, then `break` rethrows so the step fails.
+    expect(windowsCheck.indexOf('$caveat = ')).toBeLessThan(windowsCheck.indexOf('trap {'));
+    expect(windowsCheck).toMatch(
+      /trap \{\n\s+@\('', "\*\*Stopped:\*\* \$\(\$_\.Exception\.Message\)", '', \$caveat\) \|\n\s+Add-Content -Path \$env:GITHUB_STEP_SUMMARY -Encoding utf8\n\s+break\n/,
+    );
+    expect(windowsCheck).toContain('Get-FileHash -Algorithm SHA256');
+    expect(windowsCheck).toContain('It does not clear SmartScreen');
+
+    // The runbook says how to check the credentials by name and how to
+    // rehearse from main, and keeps the same distinction.
+    expect(releasingGuide).toContain('environments/release-signing/secrets');
+    expect(releasingGuide).toContain('environments/release-signing/variables');
+    expect(releasingGuide).toContain("-f 'inputs[dry_run]=true' -f 'inputs[allow_unsigned]=false'");
+    expect(releasingGuide).toContain('A valid signature is not SmartScreen reputation');
+    expect(releasingGuide).not.toContain('three or more per');
+    expect(releasingGuide).toContain('**Stopped:**');
   });
 
   test('documents conditional updates and the current storage boundary', () => {

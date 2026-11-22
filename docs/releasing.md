@@ -9,21 +9,29 @@ then publishes a GitHub Release and moves the feed to it. This runbook covers th
 push. The iPhone companion ships through TestFlight instead
 ([iPhone companion › TestFlight](iphone-companion.md#testflight)).
 
-**Windows ships unsigned for now** (decided 2026-10-14). Windows was left out of
-v0.0.2 on #356, and v0.0.5 is the first release with Windows installers.
+**Windows installers are Authenticode-signed from the release after v0.1.3.**
+Every Windows installer through v0.1.3 shipped unsigned (decided 2026-10-14).
+Windows was left out of v0.0.2 on #356, and v0.0.5 is the first release with
+Windows installers.
 
 Certificate authorities have issued code-signing keys only on hardware tokens or
 cloud HSMs since June 2023, so the exportable `.pfx` that `WINDOWS_CERTIFICATE`
-expects is no longer obtainable. Choosing a hosted signing route is #411.
+expects is no longer obtainable. Val chose SSL.com eSigner on 2026-10-18 (#411),
+and since #470 the workflow signs through it whenever its credentials are
+present. They were added to `release-signing` on 2026-11-22, and a dry-run
+rehearsal signed both installers that day (§ 3).
 
-Until it is chosen, the `.msi` and `.exe` carry no Authenticode signature.
+An installer built without those credentials carries no Authenticode signature.
 Windows SmartScreen shows "Windows protected your PC" the first time one runs,
 and the person installing it chooses **More info**, then **Run anyway**. The
-generated release body and the release notes both say so.
+generated release body and the release notes both say so. A signed installer
+still gets that warning, naming the publisher, until SmartScreen has seen enough
+downloads (§ 3).
 
-The build job refuses nothing on Windows except a half-set of the two
-`WINDOWS_*` secrets. When both are present, it signs the installers and verifies
-the signature, with no other change. The app itself works on Windows: runs are
+On Windows the build job refuses a partial set of either signing route's
+secrets, and both routes set at once (§ 3). With neither route it builds
+unsigned. With one complete route it signs the installers and verifies the
+signatures, with no other change. The app itself works on Windows: runs are
 contained in a kill-on-close Job Object, so Stop ends the whole process tree.
 
 The first public release is **v0.0.2**.
@@ -446,7 +454,7 @@ environment too. It reads `APPLE_API_ISSUER`, `APPLE_API_KEY` and
 **A missing Apple signing secret fails the release.** The `verify-tag` job
 refuses to continue when the Apple signing material is incomplete, before the
 tag is checked out and long before the platform builds start. The secrets fall
-into three groups:
+into four groups:
 
 - **Signing (required):** `APPLE_CERTIFICATE`, `APPLE_CERTIFICATE_PASSWORD`,
   `APPLE_SIGNING_IDENTITY` and `APPLE_TEAM_ID`.
@@ -454,9 +462,10 @@ into three groups:
   API key (`APPLE_API_ISSUER`, `APPLE_API_KEY`, `APPLE_API_KEY_BASE64`), which
   is preferred and used when present, or an Apple ID with an app-specific
   password (`APPLE_ID`, `APPLE_PASSWORD`).
-- **Windows (optional):** the two `WINDOWS_*` secrets. Windows ships unsigned
-  by decision (see the top of this document), and the build job signs the
-  Windows installers only when both are set.
+- **Windows (optional for now):** the four `ES_*` secrets for eSigner, or the
+  two `WINDOWS_*` secrets for a `.pfx`, and the `WINDOWS_PUBLISHER` variable.
+  Windows ships unsigned by decision (see the top of this document) until one
+  complete route is set. See **Signing the Windows installers** below.
 - **Updater (required once the tree configures it):**
   `TAURI_SIGNING_PRIVATE_KEY` and `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`. Once
   `src-tauri/tauri.conf.json` has `plugins.updater`, `verify-tag` reads that
@@ -519,9 +528,9 @@ secrets.
 Certificate authorities stopped issuing code-signing certificates as exportable
 `.pfx` files in June 2023. The private key now stays in a hardware token or a
 cloud HSM, so Windows signing goes through a service (#411). Val chose **SSL.com
-eSigner** on 2026-10-18. The account is not set up yet, so the installers still
-ship unsigned. The build job supports two ways, and refuses a configuration that
-sets both:
+eSigner** on 2026-10-18, and its credentials have been in `release-signing`
+since 2026-11-22. The build job supports two ways, and refuses a configuration
+that sets both:
 
 1. **eSigner**: all four `ES_*` secrets. The build downloads SSL.com's
    CodeSignTool, pinned by version and SHA-256, and runs it on the runner's Java
@@ -534,10 +543,33 @@ sets both:
    through `signtool`.
 
 A partial set of either way's secrets fails the build rather than shipping
-unsigned. Either way, set `WINDOWS_PUBLISHER` to the name on the certificate,
-`Soul Protocol LLC` for eSigner. The build then checks that every installer has
-a `Valid` Authenticode signature from that publisher. With neither way
-configured, the installers ship unsigned and the release notes say so.
+unsigned. Either way, set the `WINDOWS_PUBLISHER` variable to the certificate's
+common name, exactly. The eSigner certificate is SSL.com's personal (IV+OV)
+code-signing certificate, so its common name, and the publisher Windows shows,
+is the individual it was issued to; Val chose on 2026-11-22 to keep it rather
+than order one for Soul Protocol LLC (#411). With neither way configured, the
+installers ship unsigned and the release notes say so.
+
+On a signed run, `Verify Windows installer metadata and signatures` holds the
+`.msi` and the `-setup.exe` to four things, and stops the build on the first
+one that fails:
+
+- `Get-AuthenticodeSignature` reports `Valid`;
+- the signer's name is exactly `WINDOWS_PUBLISHER`;
+- the signature has a timestamp, so it keeps verifying after the certificate
+  expires;
+- the signer's certificate chain builds to a trusted root with nothing revoked.
+  A revocation server that can't be reached is a warning, not a failure.
+
+The run summary gets a **Windows installer signatures** table with each
+installer's SHA-256, signer, thumbprint, timestamp authority and chain. When a
+check fails, the table keeps the installers that passed and ends with a
+**Stopped:** line giving the reason.
+
+A valid signature is not SmartScreen reputation. A new certificate still shows
+"Windows protected your PC", now naming the publisher, until Microsoft has seen
+enough downloads. It is not a test of the installed app either: that is native
+acceptance (§ 1, step 11) and the hand-run on #520.
 
 **Setting up eSigner (once the OV certificate is issued):**
 
@@ -548,16 +580,43 @@ configured, the installers ship unsigned and the release notes say so.
    CodeSignTool's `get_credential_ids`, and store it as `ES_CREDENTIAL_ID`.
 3. Store the account's username and password as `ES_USERNAME` and
    `ES_PASSWORD`, and set the `WINDOWS_PUBLISHER` variable.
-4. Rehearse: dispatch the workflow from `main` against an existing tag with
-   `dry_run=true`, and check the Windows job's log for `ok: … is signed by …`
-   on both installers.
-5. Then add the four `ES_*` names to `verify-tag`'s required list, so a missing
+4. Check that all five are there, by name. Neither command prints a value:
+
+   ```bash
+   gh api repos/OpenCoven/chat/environments/release-signing/secrets --jq '.secrets[].name'
+   gh api repos/OpenCoven/chat/environments/release-signing/variables --jq '.variables[].name'
+   ```
+
+   The first must list the four `ES_*` names and neither `WINDOWS_CERTIFICATE`
+   name. The second must list `WINDOWS_PUBLISHER`.
+5. Rehearse: dispatch the workflow from `main` against an existing tag, as a
+   dry run and without `allow_unsigned`. A branch can't reach the environment.
+
+   ```bash
+   TAG=v0.1.2   # any published tag
+   gh api -X POST repos/OpenCoven/chat/actions/workflows/release.yml/dispatches \
+     -f ref=main -f "inputs[tag]=$TAG" -f 'inputs[dry_run]=true' -f 'inputs[allow_unsigned]=false'
+   ```
+
+   In the `Build windows-x86_64` job, `Determine signing availability` must not
+   print the UNSIGNED warning, `Build installers` must show CodeSignTool's
+   output for each file Tauri signs, and the verification step must print
+   `is signed by`, `is timestamped by` and `chains` for both installers. Keep
+   the run's link and its signatures table as the record. Nothing is published.
+6. Then add the four `ES_*` names to `verify-tag`'s required list, so a missing
    one refuses a release instead of shipping unsigned.
 
-Each signing uses one of the account's eSigner signings: three or more per
-release (the app executable and both installers). Certificates now last at most
-460 days, so expect to renew yearly. eSigner keeps the same credential ID across
-a renewal, but check it.
+Every file Tauri signs uses one of the account's eSigner signings, and a
+Windows build signs 12, not only the two installers: the app executable once
+for each installer, NSIS's five plugin DLLs, two WiX extension DLLs, the
+`.msi` and the `-setup.exe`, and the uninstaller. The first rehearsal
+([run 45021936592](https://github.com/OpenCoven/chat/actions/runs/45021936592),
+2026-11-22) logged the first 11; `makensis` signs the uninstaller without
+logging it. A rehearsal spends as many as a release does, so size the eSigner
+plan for both.
+
+Certificates now last at most 460 days, so expect to renew yearly. eSigner keeps
+the same credential ID across a renewal, but check it.
 
 ---
 
@@ -659,10 +718,11 @@ Per release, the workflow publishes:
   target runs natively on GitHub's `macos-15-intel` runner rather than
   cross-compiling on Apple silicon.
 - **Windows**: `.msi` (WiX, `_x64_en-US`) and NSIS `.exe` (`_x64-setup`) for
-  `x86_64`, built on `windows-2025`. Unsigned until #411 is settled; the build
-  job reads the product name and version back from both installers and
-  records the Authenticode state (`NotSigned`, or `Valid` once a certificate
-  is configured).
+  `x86_64`, built on `windows-2025`. Signed through eSigner from the release
+  after v0.1.3, and unsigned through v0.1.3 (#411, § 3). The build job reads
+  the product name and version back from both installers and records the
+  Authenticode state: `Valid` with its signer, timestamp and chain, or
+  `NotSigned` for a build without the credentials.
 - **Linux**: `.AppImage` and `.deb` for `x86_64`.
 - **`SHA256SUMS`**: checksums for every asset. Verify with
   `shasum -a 256 -c --ignore-missing SHA256SUMS` (§ 1, step 9).
