@@ -182,7 +182,22 @@ async function send(i) {
     0,
     'published sent card unexpectedly has an action',
   );
-  console.log('Reproduced inert published card for ' + names[i]);
+  const list = await app.one(undefined, 'Message attachments');
+  const card = [...walk(list)].find(
+    (node) =>
+      node !== list &&
+      node.frame?.w > 0 &&
+      node.frame?.h > 0 &&
+      accessibleText(node).includes(filename),
+  );
+  assert.ok(card, 'published transcript did not expose the sent attachment');
+  await app.click(card);
+  assert.equal(
+    await app.count('dialog', filename),
+    0,
+    'published sent card unexpectedly opened a preview',
+  );
+  console.log('Clicked inert published card for ' + names[i]);
 }
 async function preview(i, keyboard = false, missing = false) {
   const card = await app.one('button', 'Preview ' + filename, { timeout: 60000 });
@@ -248,6 +263,18 @@ try {
     await preview(0, false, true);
     await select(1);
     await preview(1);
+    const survivingFile = files.find((path) => existsSync(path));
+    assert.ok(survivingFile && readFileSync(survivingFile, 'utf8') === contents[1]);
+    await press('button', 'Chat actions');
+    await press('menuitem', 'Delete chat');
+    await press('button', 'Delete from Chat');
+    await until('deleted chat removed its retained bytes', () => !existsSync(survivingFile));
+    await close();
+    await open();
+    await select(0);
+    await preview(0, false, true);
+    assert.ok(!existsSync(survivingFile), 'relaunch restored a deleted attachment');
+    console.log('Verified Delete from Chat removes the remaining retained file across relaunch.');
     await close();
     console.log(
       'Passed same-name isolation, upgrade, restart, mouse, keyboard, archive, restore, and missing saved copy.',

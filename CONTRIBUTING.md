@@ -63,7 +63,7 @@ node scripts/native-acceptance/retained-attachments.mjs seed "$published_chat" "
 node scripts/native-acceptance/retained-attachments.mjs verify "$candidate_chat" "$qa" "$coven_cli" "$coven_engine"
 ```
 
-The first phase sends two different files named `report.txt` through the file picker in separate conversations. The second opens both saved cards, restarts Chat, exercises archive and restore, then removes one staged copy from the test profile and checks the recovery message. The focused native storage test also covers deletion of an entire chat. Run it with `cargo test --manifest-path src-tauri/Cargo.toml --lib retained_slot_belongs`.
+The first phase sends two different files named `report.txt` through the file picker in separate conversations and clicks each published card. The second opens both saved cards, restarts Chat, exercises archive and restore, then removes one staged copy and checks the recovery message. It also uses Delete from Chat on the other conversation and verifies that its saved file stays deleted after relaunch. For a storage-only regression check, run `cargo test --manifest-path src-tauri/Cargo.toml --lib retained_slot_belongs`.
 
 ## Branching and pull requests
 
