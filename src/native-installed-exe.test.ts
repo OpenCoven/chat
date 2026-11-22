@@ -3,9 +3,12 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, normalize, resolve } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
+import { skipWithoutPwsh } from './test/pwsh';
 
 const roots: string[] = [];
 const shell = process.env.CHAT_TEST_PWSH ?? 'pwsh';
+// Without PowerShell these skip locally, with the reason printed; in CI they still run.
+const skipPowerShell = skipWithoutPwsh(import.meta.url, shell);
 const script = resolve('scripts/native-acceptance/windows/find-installed-exe.ps1');
 afterEach(() => {
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
@@ -38,7 +41,7 @@ function fixture() {
   };
 }
 
-describe('Windows lane executable discovery', () => {
+describe.skipIf(skipPowerShell)('Windows lane executable discovery', () => {
   it('finds the earlier name when only the old installation exists', () => {
     const f = fixture();
     const old = f.put(f.programs, 'OpenCoven Chat');

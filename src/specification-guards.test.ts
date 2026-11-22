@@ -1689,9 +1689,12 @@ describe('Phase 1 specification guards', () => {
     expect(packageManifest.scripts?.test).toBe(
       'corepack pnpm@10.34.0 --ignore-workspace test:unit',
     );
-    expect(packageManifest.scripts?.['test:unit']).toBe(
-      'corepack pnpm@10.34.0 --ignore-workspace test:unit:normal && corepack pnpm@10.34.0 --ignore-workspace test:unit:heavy',
-    );
+    expect(packageManifest.scripts?.['test:unit']).toBe('node ./scripts/test-unit.mjs');
+    // Both halves run, in order, and a failure in the first doesn't skip the second.
+    const testUnit = readText('scripts/test-unit.mjs');
+    expect(testUnit).toContain("const halves = ['test:unit:normal', 'test:unit:heavy'];");
+    expect(testUnit).toContain(`corepack pnpm@10.34.0 --ignore-workspace ${'$'}{half}`);
+    expect(testUnit).toContain('process.exit(1);');
     expect(packageManifest.scripts?.['test:unit:heavy']).toBe(
       'vitest run --config vitest.heavy.config.ts',
     );
