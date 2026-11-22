@@ -29,7 +29,7 @@ else
   curl --proto '=https' --tlsv1.2 --fail --location --retry 3 -o "$work/SHA256SUMS" "$base/SHA256SUMS" || exit 1
   asset="$(node "$here/../release-installer.mjs" "$work/SHA256SUMS" "$version" "${arch}.dmg")" || exit 1
   curl --proto '=https' --tlsv1.2 --fail --location --retry 3 -o "$work/$asset" "$base/$asset" || exit 1
-  checksum="$(cd "$work" && grep -F "  ${asset}" SHA256SUMS | shasum -a 256 -c - 2>&1)"
+  checksum="$(cd "$work" && awk -v name="$asset" '$2 == name' SHA256SUMS | shasum -a 256 -c - 2>&1)"
   log "checksum: $checksum"
   case "$checksum" in *": OK") ;; *) echo "::error::$asset does not match SHA256SUMS"; exit 1 ;; esac
   sums="$(shasum -a 256 "$work/SHA256SUMS" | cut -d' ' -f1)"
