@@ -92,7 +92,7 @@ gh api -X POST repos/OpenCoven/chat/actions/runs/<run-id>/rerun-failed-jobs
 
 ## Local checks that fail without your change (verified 2026-11-20)
 
-Compare against an unchanged worktree before diagnosing a local failure.
+Compare against an unchanged worktree before diagnosing a local failure. The runner writes prerequisite notices to stderr. For a detailed per-test report, pass `--reporter=default` to the single-file Vitest command below.
 
 - **PowerShell tests.** Off-CI macOS and Linux runs identify missing PowerShell and skip the tests that invoke it. CI and Windows require PowerShell. Install PowerShell 7 to exercise those tests locally. On earlier checkouts, look for `spawnSync pwsh ENOENT` in the client-v1 conformance workflow, native installed-executable, native link-protocol, and native link-guard tests.
 - **Both unit suites.** With #674, `corepack pnpm test` runs the normal and heavy suites and exits nonzero when either fails. On earlier revisions the normal suite can stop the command before the heavy suite starts. Run `corepack pnpm@10.34.0 --ignore-workspace test:unit:heavy` separately on those revisions.
