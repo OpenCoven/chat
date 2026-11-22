@@ -174,9 +174,10 @@ socket), and prints where they are. It records the real `~/.coven/engine/current
 in `~/.coven/engine` (ignoring dotfiles such as `.DS_Store`) before and after. If either changed,
 it prints both and exits 3, and you must put them back before anything starts that engine.
 Otherwise it exits with the command's status and removes the scratch folder. Ctrl-C and SIGTERM
-during the command don't skip that check: the helper waits for the command to stop, then checks
-and cleans up. Ctrl-C reaches the command from the terminal; a SIGTERM sent to the helper is
-passed on to it.
+during the command don't skip that check: the helper waits for the command to stop, checks,
+cleans up, and then ends by the same signal, so a calling script stops too. It doesn't pass the
+signal on, because Ctrl-C (and `timeout`) already reach the command. If the command doesn't stop,
+press Ctrl-C again: the helper stops it with SIGKILL and still checks and cleans up.
 
 It doesn't change `PATH`, so a `coven-code` installed globally (with npm, for example) is still
 found: `coven engine status --json` then reports `"source": "PATH"`. To test the managed engine,

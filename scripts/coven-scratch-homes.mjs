@@ -15,11 +15,13 @@
 // changed, it says so and exits 3. Otherwise it exits with the command's
 // status. The scratch folder is removed afterwards unless you pass --keep.
 //
-// Ctrl-C and SIGTERM don't skip that check: while the command runs, the
-// wrapper waits for it to finish and then checks and cleans up. A terminal
-// sends Ctrl-C to the command as well, so the wrapper doesn't pass SIGINT on
-// (a second one could make the command quit without finishing). A SIGTERM is
-// usually meant for the wrapper alone, so it passes that one on.
+// Ctrl-C and SIGTERM don't skip that check. The wrapper doesn't pass either
+// signal on: a terminal sends Ctrl-C to the whole foreground group, and
+// `timeout` or `kill -TERM -<pgid>` signal the group too, so the command gets
+// it already and a second copy could make it quit without finishing. The
+// wrapper waits for the command to stop, checks, cleans up, and then ends by
+// the same signal, so a calling script stops as it would without it. A
+// second signal while the command is still running stops it with SIGKILL.
 import { spawn } from 'node:child_process';
 import {
   existsSync,
@@ -31,7 +33,7 @@ import {
   readlinkSync,
   rmSync,
 } from 'node:fs';
-import { homedir, tmpdir } from 'node:os';
+import { constants, homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 const engineChangedExitCode = 3;
@@ -100,27 +102,52 @@ function describe(snapshot) {
   return `current ${current}; entries ${entries}`;
 }
 
-// Start the command and wait for it. From here on SIGINT and SIGTERM don't
-// stop this script, so the check and cleanup after the command still run.
+const handledSignals = ['SIGINT', 'SIGTERM'];
+const received = [];
+const signalHandlers = new Map();
+
+// Start the command and wait for it. From here until the script ends, SIGINT
+// and SIGTERM are recorded instead of stopping it, so the check and cleanup
+// after the command still run.
 function runCommand(command, commandArgs, env) {
   return new Promise((resolveRun) => {
-    const received = [];
-    const onSigint = () => received.push('SIGINT');
-    const onSigterm = () => {
-      received.push('SIGTERM');
-      child.kill('SIGTERM');
-    };
-    process.on('SIGINT', onSigint);
-    process.on('SIGTERM', onSigterm);
-    const child = spawn(command, commandArgs, { stdio: 'inherit', env });
+    let running = true;
+    let child;
+    for (const signal of handledSignals) {
+      const handler = () => {
+        received.push(signal);
+        if (!running) return;
+        if (received.length === 1) {
+          console.error(
+            `coven-scratch-homes: got ${signal}; waiting for ${command} to stop, then checking ` +
+              'the real engine. Press Ctrl-C again to stop it now.',
+          );
+        } else {
+          console.error(`coven-scratch-homes: got ${signal} again; stopping ${command}`);
+          child.kill('SIGKILL');
+        }
+      };
+      signalHandlers.set(signal, handler);
+      process.on(signal, handler);
+    }
+    child = spawn(command, commandArgs, { stdio: 'inherit', env });
     let error = null;
     child.on('error', (spawnError) => {
       error = spawnError;
     });
     child.on('close', (status, signal) => {
-      resolveRun({ status, signal, error, received });
+      running = false;
+      resolveRun({ status, signal, error });
     });
   });
+}
+
+// End by `signal`, as the script would have without its handlers, so a
+// calling shell sees it. If that doesn't end it, exit with `fallbackCode`.
+function endBySignal(signal, fallbackCode) {
+  for (const [name, handler] of signalHandlers) process.off(name, handler);
+  setTimeout(() => process.exit(fallbackCode), 1000);
+  process.kill(process.pid, signal);
 }
 
 const args = process.argv.slice(2);
@@ -163,8 +190,6 @@ if (scratch.COVEN_HOME.length > socketPathBudget) {
 
 const [command, ...commandArgs] = args;
 const result = await runCommand(command, commandArgs, { ...process.env, ...scratch, ...xdg });
-for (const signal of new Set(result.received))
-  console.error(`coven-scratch-homes: got ${signal} while ${command} ran; checking before exiting`);
 
 const after = snapshotEngine(realHome);
 const changed =
@@ -181,15 +206,23 @@ if (changed) {
   console.error(
     `coven-scratch-homes: Put ${before.engineDir} back as it was before anything starts that engine.`,
   );
-  process.exit(engineChangedExitCode);
 }
 
+let exitCode;
+if (changed) exitCode = engineChangedExitCode;
 if (result.error) {
   console.error(`coven-scratch-homes: couldn't run ${command}: ${result.error.message}`);
-  process.exit(127);
-}
-if (result.signal) {
+  exitCode ??= 127;
+} else if (result.signal) {
   console.error(`coven-scratch-homes: ${command} was stopped by ${result.signal}`);
-  process.exit(1);
+  exitCode ??= 1;
 }
-process.exit(result.status ?? 1);
+exitCode ??= result.status ?? 1;
+
+const [firstSignal] = received;
+if (firstSignal) {
+  if (!changed) console.error('coven-scratch-homes: the real engine selection is unchanged.');
+  endBySignal(firstSignal, changed ? exitCode : 128 + constants.signals[firstSignal]);
+} else {
+  process.exit(exitCode);
+}
