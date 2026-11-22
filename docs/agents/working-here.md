@@ -96,18 +96,31 @@ gh api -X POST repos/OpenCoven/chat/actions/runs/<run-id>/rerun-failed-jobs
 - Chromium drops focus as soon as a field is disabled; WebKit does it later. Focus logic that
   passes in one engine can fail in the other.
 
-## Local checks that skip or fail without your change (verified 2026-11-20)
+## Local checks that fail without your change (verified 2026-11-20)
 
-Compare against an unchanged worktree before chasing any of these as a regression:
+Compare against an unchanged worktree before diagnosing a local failure. The runner writes prerequisite notices to stderr. For a detailed per-test report, pass `--reporter=default` to the single-file Vitest command below.
 
-- **Tests that need CI's tools skip locally, with the reason printed.** Without PowerShell (`pwsh`),
-  the tests in `src/client-v1-conformance-workflow.test.ts` that run the workflow's PowerShell
-  skip. In `src/phase1-conformance.test.ts` (heavy), the tests that need the exact Node in
-  `.node-version` or `rustup` on `PATH` skip. The reason is a `stderr` line at the top of that
-  file's output; Vitest's agent reporter hides it, so pass `--reporter=default` to see it. Under
-  `CI=true` nothing skips, and a missing tool fails as before.
-- **`test:unit` runs both halves** (`scripts/test-unit.mjs`): the normal suite, then the heavy one,
-  even if the normal one failed. It exits non-zero if either failed.
+- **PowerShell tests.** Off-CI macOS and Linux runs identify missing PowerShell and skip the tests that invoke it. CI and Windows require PowerShell. Install PowerShell 7 to exercise those tests locally. On earlier checkouts, look for `spawnSync pwsh ENOENT` in the client-v1 conformance workflow, native installed-executable, native link-protocol, and native link-guard tests.
+- **Both unit suites.** With #674, `corepack pnpm test` runs the normal and heavy suites and exits nonzero when either fails. On earlier revisions the normal suite can stop the command before the heavy suite starts. Run `corepack pnpm@10.34.0 --ignore-workspace test:unit:heavy` separately on those revisions.
+- **Release toolchain.** Use the Node version in `.node-version` and put rustup’s `~/.cargo/bin` first on PATH. With #674, a Node mismatch skips the exact-version observation locally. Missing rustup also skips the four Cargo-resolution cases. CI keeps the requirements.
+
+- **A single heavy file** needs the heavy config, because the default config excludes it:
+  `corepack pnpm exec vitest run --config vitest.heavy.config.ts src/phase1-conformance.test.ts`.
+- **`cargo` may not be rustup's.** `rust-toolchain.toml` pins 1.95.0, but only rustup reads it.
+  On the Mac in use on 2026-11-20, `/opt/homebrew/bin/cargo` (1.99.1) comes before
+  `~/.cargo/bin` on PATH. The CLAUDE.md cargo commands then pass on 1.99.1 (374 tests, clippy
+  clean) while CI builds with 1.95.0. Check `cargo --version`; prefix
+  `PATH="$HOME/.cargo/bin:$PATH"` to get the pinned toolchain.
+- **Port 4173 may be taken.** `pnpm dev` and `app:dev` bind it with `strictPort`, and another
+  worktree's dev server or an unrelated local server may hold it: on 2026-11-20 a week-old static
+  server did. `lsof -nP -iTCP:4173 -sTCP:LISTEN` shows the holder; don't stop a process you
+  didn't start. `app:dev` says so before Tauri starts, and
+  `OPENCOVEN_CHAT_DEV_PORT=<port> corepack pnpm app:dev` moves the dev server and Tauri's devUrl
+  for that run.
+- **A scratch `HOME` does not isolate the `app:dev` WebView on macOS.** WebKit uses the account's
+  home directory, not `$HOME`, so a dev run writes `~/Library/WebKit/opencoven-chat` and
+  `~/Library/Caches/opencoven-chat` even when `HOME` and `COVEN_HOME` point at scratch. Coven state
+  does follow `COVEN_HOME`. Say so when your task requires a scratch home.
 - **Playwright WebKit** skips buttons on Tab (Safari's default keyboard setting), so the cross-browser suite uses Option+Tab in WebKit. Its clipboard permissions and RTL Range geometry checks remain Chromium-only, with explicit WebKit skips. The e2e suite runs Chromium and WebKit, and rendered captures provide the text-position check.
 - `e2e/design-review/` is a capture harness for rendered design checks. Run it with
   `--config e2e/design-review/playwright.config.ts`.
