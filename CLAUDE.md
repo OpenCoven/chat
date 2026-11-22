@@ -69,6 +69,7 @@ corepack pnpm app:dev            # THE desktop app — needed for any runtime wo
 corepack pnpm dev                # browser only: renders UI, cannot reach the CLI
 corepack pnpm typecheck
 corepack pnpm exec vitest run <file>   # single file; plain `test` runs the heavy suite too
+corepack pnpm exec vitest run --config vitest.heavy.config.ts <file>   # a heavy file (phase1-*)
 corepack pnpm lint               # biome; `format` to write
 cargo test --manifest-path src-tauri/Cargo.toml --lib
 cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets --all-features -- -D warnings
@@ -76,6 +77,12 @@ cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets --all-features -
 
 `pnpm dev` cannot execute commands or reach a daemon. Anything about runs,
 sessions, or attachments must be verified in `app:dev`.
+
+The cargo lines need rustup's cargo, which reads `rust-toolchain.toml` (1.95.0);
+a Homebrew `cargo` earlier on PATH ignores it. Check `cargo --version`. Local
+failures that aren't yours (PowerShell, the exact Node, a taken port 4173) are
+listed in `docs/agents/working-here.md` → **Local checks that fail without your
+change**.
 
 ## Conventions that bite
 
