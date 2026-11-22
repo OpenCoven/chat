@@ -120,6 +120,25 @@ function claudeCodeTooOld(error: string): boolean {
   return error.includes("unknown option '--permission-mode'");
 }
 
+/**
+ * The engine's HTTP client reports "error sending request for url (<url>)"
+ * when a request to the model's server got no response: no connection, a
+ * dropped one, or a timeout. Sending again is the fix once the connection is
+ * back. The same words as `unreachable_message` in `coven_runtime.rs`.
+ */
+function unreachableServer(error: string): string | undefined {
+  const at = error.indexOf('error sending request');
+  if (at < 0) return undefined;
+  const url = /^error sending request for url \(([^)]*)\)/.exec(error.slice(at))?.[1];
+  let host = '';
+  try {
+    host = url ? new URL(url).hostname : '';
+  } catch {
+    host = '';
+  }
+  return `Coven couldn't reach ${host || "the model's server"}, so this run stopped. Check your internet connection, then use Try again.`;
+}
+
 export function projectEvents(events: readonly CovenRunEvent[]): {
   sessionId: string;
   error: string;
@@ -214,7 +233,7 @@ export function projectEvents(events: readonly CovenRunEvent[]): {
         typeof event.error === 'string'
           ? claudeCodeTooOld(event.error)
             ? CLAUDE_CODE_TOO_OLD
-            : event.error
+            : (unreachableServer(event.error) ?? event.error)
           : "The run failed. Coven's report, when it gave one, is the last line of the chat. Try again resends your message.";
     }
     const importedSystem = event.type === 'system' && event.source === 'cave-import';
