@@ -14,7 +14,7 @@ import {
 } from 'node:fs';
 import { basename, dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { App, Native, outline, sleep, until } from './driver.mjs';
+import { App, Native, outline, sleep, until, walk } from './driver.mjs';
 import { startModelFixture } from './fixture.mjs';
 
 const [phase, binary, directory, cli, engine] = process.argv.slice(2);
@@ -67,6 +67,10 @@ const native = new Native('/usr/bin/python3', [helper]);
 let proc, app;
 const data = join(env.XDG_DATA_HOME, 'ai.opencoven.chat');
 const state = async () => outline(await app.snapshot()).join('\n');
+const accessibleText = (root) =>
+  [...walk(root)]
+    .map((node) => [node.name, node.value, node.raw.text].filter(Boolean).join(' '))
+    .join('\n');
 async function press(role, name) {
   const target = await app.one(role, name, { timeout: 45000 });
   await app.click(target);
@@ -131,19 +135,29 @@ async function send(i) {
   mkdirSync(folder);
   const file = join(folder, filename);
   writeFileSync(file, contents[i]);
+  const xdo = (...args) => execFileSync('xdotool', args, { encoding: 'utf8' }).trim();
+  const editor = xdo('getactivewindow');
   await press('button', 'Attach file');
-  await until(
-    'GTK file chooser',
-    () =>
-      /open|select|choose/i.test(
-        execFileSync('xdotool', ['getactivewindow', 'getwindowname'], { encoding: 'utf8' }),
-      ),
+  const chooser = await until(
+    'active GTK file chooser',
+    () => {
+      const id = xdo('getactivewindow');
+      return id !== editor && /open|select|choose/i.test(xdo('getwindowname', id)) && id;
+    },
     20000,
   );
-  execFileSync('xdotool', ['key', 'ctrl+l']);
-  await sleep(250);
-  execFileSync('xdotool', ['type', '--clearmodifiers', file]);
-  execFileSync('xdotool', ['key', 'Return']);
+  // GTK first maps its window and only then makes the location entry available.
+  await sleep(800);
+  xdo('key', '--clearmodifiers', 'ctrl+l');
+  await sleep(400);
+  xdo('key', '--clearmodifiers', 'ctrl+a');
+  xdo('type', '--clearmodifiers', '--delay', '4', file);
+  await sleep(700);
+  for (let attempt = 0; attempt < 3 && xdo('getactivewindow') === chooser; attempt++) {
+    xdo('key', '--clearmodifiers', 'Return');
+    await sleep(900);
+  }
+  assert.equal(xdo('getactivewindow'), editor, 'file chooser did not return to the chat window');
   await app.one('button', 'Preview ' + filename, { timeout: 35000 });
   await press('textbox', 'Message ' + names[i]);
   await app.type('Inspect the attached report.');
@@ -154,7 +168,7 @@ async function send(i) {
       return (
         savedInputs().length === i + 1 &&
         (await app.count('button', 'Stop run')) === 0 &&
-        (await state()).includes(filename)
+        accessibleText(await app.snapshot()).includes(filename)
       );
     },
     180000,
@@ -182,7 +196,7 @@ async function preview(i, keyboard = false, missing = false) {
   await until(
     'preview contents',
     async () => {
-      const text = outline(await app.one('dialog', filename)).join('\n');
+      const text = accessibleText(await app.one('dialog', filename));
       if (missing)
         return (
           text.includes('attach the original file again') && !text.includes(contents[i].trim())
@@ -240,7 +254,13 @@ try {
     );
   }
 } catch (error) {
-  if (app) writeFileSync(join(work, phase + '-tree.txt'), await state());
+  if (app) {
+    writeFileSync(join(work, phase + '-tree.txt'), await state());
+    console.error(
+      'Focused X11 window:',
+      execFileSync('xdotool', ['getactivewindow', 'getwindowname'], { encoding: 'utf8' }).trim(),
+    );
+  }
   throw error;
 } finally {
   if (proc && proc.exitCode === null && proc.signalCode === null) proc.kill();

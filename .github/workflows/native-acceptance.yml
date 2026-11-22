@@ -209,6 +209,7 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           persist-credentials: false
+          fetch-depth: 0
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
           node-version-file: .node-version
@@ -219,7 +220,12 @@ jobs:
         run: |
           set -euo pipefail
           [[ "$CI_RUN" =~ ^[0-9]+$ ]]
-          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$CI_RUN" | jq -e --arg sha "$GITHUB_SHA" '.head_sha == $sha and .path == ".github/workflows/ci.yml"'
+          build=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$CI_RUN" | jq -er 'select(.path == ".github/workflows/ci.yml") | .head_sha')
+          [[ "$build" =~ ^[0-9a-f]{40}$ ]]
+          git merge-base --is-ancestor "$build" "$GITHUB_SHA"
+          # An acceptance-only correction can exercise the same packaged application.
+          git diff --quiet "$build" "$GITHUB_SHA" -- . ':(exclude)scripts/native-acceptance/retained-attachments.mjs' ':(exclude)scripts/native-acceptance/linux/attachment-upgrade.sh' ':(exclude).github/workflows/native-acceptance.yml' ':(exclude)CONTRIBUTING.md'
+          echo "Bundle CI head $build (run $CI_RUN), acceptance driver $GITHUB_SHA"
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
         with:
           name: linux-bundle
