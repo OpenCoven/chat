@@ -8,6 +8,7 @@ import { fileURLToPath } from 'node:url';
 import * as ts from 'typescript';
 import { afterAll, describe, expect, test } from 'vitest';
 import { decodeWindowsSupervisorSource } from '../scripts/windows-supervisor-source.mjs';
+import { skipWithoutPwsh } from './test/pwsh';
 
 const projectRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const workflowPath = resolve(projectRoot, '.github', 'workflows', 'client-v1-conformance.yml');
@@ -31,6 +32,11 @@ const validatorRoot =
 const validatorAvailable = existsSync(
   resolve(validatorRoot, 'scripts', 'github-conformance-evidence.mjs'),
 );
+// Some tests run pieces of the workflow's PowerShell through `pwsh`. Without it
+// they skip locally, with the reason printed, instead of failing with
+// `spawnSync pwsh ENOENT`; in CI they still run.
+const skipPowerShell = skipWithoutPwsh(import.meta.url);
+const pwshTest = test.skipIf(skipPowerShell);
 const matrixPlatformExpression = '${' + '{ matrix.platform }}';
 const validatorInputExpression = '${' + '{ inputs.validator_revision }}';
 const protectedValidatorExpression = '${' + '{ vars.CLIENT_V1_CONFORMANCE_VALIDATOR_REVISION }}';
@@ -623,25 +629,29 @@ describe('client-v1 conformance workflow bootstrap', () => {
     );
   });
 
-  test('validates all frozen Chat source pins before fetching', () => {
-    const cases = [
-      { repository: 'OpenCoven/chat', revision: 'a'.repeat(40), result: 'accepted' },
-      { repository: 'OpenCoven/other', revision: 'a'.repeat(40), result: 'rejected' },
-      { repository: 'OpenCoven/chat', revision: '--upload-pack=unexpected', result: 'rejected' },
-      { repository: 'OpenCoven/chat', revision: 'A'.repeat(40), result: 'rejected' },
-    ];
-    const childBootstrap = embeddedWindowsChildBootstrapSource(readFileSync(workflowPath, 'utf8'));
-    const lockStart = childBootstrap.indexOf('$phase1Lock = Get-Content');
-    const validationStart = childBootstrap.indexOf('if (', lockStart);
-    const validationEnd = childBootstrap.indexOf('\nInvoke-Checked', validationStart);
-    expect(validationStart).toBeGreaterThan(lockStart);
-    expect(validationEnd).toBeGreaterThan(validationStart);
-    const encodedLock = readFileSync(resolve(projectRoot, 'phase1-conformance.lock.json')).toString(
-      'base64',
-    );
-    const encodedCases = Buffer.from(JSON.stringify(cases)).toString('base64');
-    // Share one bounded PowerShell startup across every case, including cold CI images.
-    const script = `
+  pwshTest(
+    'validates all frozen Chat source pins before fetching',
+    () => {
+      const cases = [
+        { repository: 'OpenCoven/chat', revision: 'a'.repeat(40), result: 'accepted' },
+        { repository: 'OpenCoven/other', revision: 'a'.repeat(40), result: 'rejected' },
+        { repository: 'OpenCoven/chat', revision: '--upload-pack=unexpected', result: 'rejected' },
+        { repository: 'OpenCoven/chat', revision: 'A'.repeat(40), result: 'rejected' },
+      ];
+      const childBootstrap = embeddedWindowsChildBootstrapSource(
+        readFileSync(workflowPath, 'utf8'),
+      );
+      const lockStart = childBootstrap.indexOf('$phase1Lock = Get-Content');
+      const validationStart = childBootstrap.indexOf('if (', lockStart);
+      const validationEnd = childBootstrap.indexOf('\nInvoke-Checked', validationStart);
+      expect(validationStart).toBeGreaterThan(lockStart);
+      expect(validationEnd).toBeGreaterThan(validationStart);
+      const encodedLock = readFileSync(
+        resolve(projectRoot, 'phase1-conformance.lock.json'),
+      ).toString('base64');
+      const encodedCases = Buffer.from(JSON.stringify(cases)).toString('base64');
+      // Share one bounded PowerShell startup across every case, including cold CI images.
+      const script = `
 $ErrorActionPreference = 'Stop'
 $phase1Lock = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('${encodedLock}')) | ConvertFrom-Json
 $cases = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('${encodedCases}')) | ConvertFrom-Json
@@ -656,16 +666,18 @@ ${childBootstrap.slice(validationStart, validationEnd)}
 })
 [Console]::Out.Write(($results | ConvertTo-Json -Compress))
 `;
-    const result = execFileSync(
-      'pwsh',
-      ['-NoLogo', '-NoProfile', '-NonInteractive', '-Command', script],
-      {
-        encoding: 'utf8',
-        timeout: 25_000,
-      },
-    );
-    expect(JSON.parse(result)).toEqual(cases.map((entry) => entry.result));
-  }, 30_000);
+      const result = execFileSync(
+        'pwsh',
+        ['-NoLogo', '-NoProfile', '-NonInteractive', '-Command', script],
+        {
+          encoding: 'utf8',
+          timeout: 25_000,
+        },
+      );
+      expect(JSON.parse(result)).toEqual(cases.map((entry) => entry.result));
+    },
+    30_000,
+  );
 
   test.each([
     ['harness', 'opencoven-phase1-harness'],
@@ -1019,7 +1031,7 @@ describe('Chat-local protected Windows conformance workflow', () => {
     ).replace(/^ {10}/gmu, '');
   }
 
-  test.each([
+  pwshTest.each([
     ['20261103.298.1', '18.11.12328.437|26100.33674|7.6.9|10.0.14'],
     ['20260922.246.2', '18.10.12210.168|26100.33438|7.6.6|10.0.12'],
     ['20260824.214.3', null],
@@ -1059,7 +1071,7 @@ $p = Get-ReviewedWindowsImageProfile
     30_000,
   );
 
-  test.each([
+  pwshTest.each([
     ['20261103.298.1', '18.11.12328.437', true],
     ['20260922.246.2', '18.10.12210.168', true],
     ['20261103.298.1', '18.10.12210.168', false],
@@ -3118,7 +3130,7 @@ ${source.slice(start, end)}
     );
   });
 
-  test.skipIf(process.platform === 'win32' || !existsSync('/bin/sh'))(
+  test.skipIf(skipPowerShell || process.platform === 'win32' || !existsSync('/bin/sh'))(
     'the extracted Invoke-Checked ignores a stale $LASTEXITCODE and reports the real process exit code',
     () => {
       const workflow = readFileSync(workflowPath, 'utf8');
@@ -3148,11 +3160,13 @@ try {
     30_000,
   );
 
-  test('the extracted Invoke-Checked does not fail closed on a stale nonzero $LASTEXITCODE after a real success', () => {
-    const workflow = readFileSync(workflowPath, 'utf8');
-    const childBootstrap = embeddedWindowsChildBootstrapSource(workflow);
-    const invokeChecked = extractPowerShellFunction(childBootstrap, 'Invoke-Checked');
-    const harness = `
+  pwshTest(
+    'the extracted Invoke-Checked does not fail closed on a stale nonzero $LASTEXITCODE after a real success',
+    () => {
+      const workflow = readFileSync(workflowPath, 'utf8');
+      const childBootstrap = embeddedWindowsChildBootstrapSource(workflow);
+      const invokeChecked = extractPowerShellFunction(childBootstrap, 'Invoke-Checked');
+      const harness = `
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 ${windowsDirectoryOwnershipGuardStub}
@@ -3162,13 +3176,15 @@ Invoke-Checked -FilePath '/bin/sh' -ArgumentList @('-c', 'exit 0') -Label 'Zero 
 [Console]::Out.Write('succeeded')
 `;
 
-    expect(
-      execFileSync('pwsh', ['-NoLogo', '-NoProfile', '-NonInteractive', '-Command', harness], {
-        encoding: 'utf8',
-        stdio: ['ignore', 'pipe', 'pipe'],
-      }),
-    ).toBe('succeeded');
-  }, 30_000);
+      expect(
+        execFileSync('pwsh', ['-NoLogo', '-NoProfile', '-NonInteractive', '-Command', harness], {
+          encoding: 'utf8',
+          stdio: ['ignore', 'pipe', 'pipe'],
+        }),
+      ).toBe('succeeded');
+    },
+    30_000,
+  );
 
   test('routes pinned npm and pnpm installs through Node directly instead of Windows .cmd shims', () => {
     const workflow = readFileSync(workflowPath, 'utf8');
@@ -3208,13 +3224,15 @@ Invoke-Checked -FilePath '/bin/sh' -ArgumentList @('-c', 'exit 0') -Label 'Zero 
     expect(childBootstrap).toContain('(& $node $pnpmCli exec tauri --version).Trim()');
   });
 
-  test('builds the parent environment without reading child-only tool variables', () => {
-    const workflow = readFileSync(workflowPath, 'utf8');
-    const environmentAssignment = workflow.match(
-      /\$childEnvironment = \[ordered\]@\{[\s\S]*?\n {12}\}/u,
-    )?.[0];
-    expect(environmentAssignment).toBeDefined();
-    const harness = `
+  pwshTest(
+    'builds the parent environment without reading child-only tool variables',
+    () => {
+      const workflow = readFileSync(workflowPath, 'utf8');
+      const environmentAssignment = workflow.match(
+        /\$childEnvironment = \[ordered\]@\{[\s\S]*?\n {12}\}/u,
+      )?.[0];
+      expect(environmentAssignment).toBeDefined();
+      const harness = `
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 $bootstrapRoot = $PWD.Path
@@ -3239,15 +3257,17 @@ ${environmentAssignment}
 [Console]::Out.Write($childEnvironment.Contains('OPENCOVEN_WINDOWS_PNPM_CLI'))
 `;
 
-    expect(
-      execFileSync('pwsh', ['-NoLogo', '-NoProfile', '-NonInteractive', '-Command', harness], {
-        encoding: 'utf8',
-        stdio: ['ignore', 'pipe', 'pipe'],
-      }),
-    ).toBe('False');
-  }, 30_000);
+      expect(
+        execFileSync('pwsh', ['-NoLogo', '-NoProfile', '-NonInteractive', '-Command', harness], {
+          encoding: 'utf8',
+          stdio: ['ignore', 'pipe', 'pipe'],
+        }),
+      ).toBe('False');
+    },
+    30_000,
+  );
 
-  test('keeps every reviewed Windows tool directory as a distinct PATH entry', () => {
+  pwshTest('keeps every reviewed Windows tool directory as a distinct PATH entry', () => {
     const workflow = readFileSync(workflowPath, 'utf8');
     const childBootstrap = embeddedWindowsChildBootstrapSource(workflow);
     const pathStart = childBootstrap.indexOf('$env:PATH = @(');
@@ -3430,7 +3450,7 @@ ${pathAssignment}
     }
   });
 
-  test.each([
+  pwshTest.each([
     {
       name: 'quota exceeded',
       overrides: { ResourceQuotaExceeded: true, ResourceQuotaLabel: 'bootstrap aggregate' },
@@ -3536,16 +3556,18 @@ ${bootstrap.slice(start, end)}
     30_000,
   );
 
-  test('fits the measured Cave working tree without raising aggregate disk limits', () => {
-    const workflow = readFileSync(workflowPath, 'utf8');
-    const supervisor = embeddedWindowsSupervisorSource(workflow);
-    const quotaClass = supervisor.slice(
-      supervisor.indexOf('public sealed class WindowsDirectoryQuota'),
-      supervisor.indexOf('public sealed class WindowsJobSupervisor'),
-    );
-    const quotaAssignment = workflow.match(/\$directoryQuotas = @\([\s\S]*?\n {12}\)/u)?.[0];
-    expect(quotaAssignment).toBeDefined();
-    const harness = `
+  pwshTest(
+    'fits the measured Cave working tree without raising aggregate disk limits',
+    () => {
+      const workflow = readFileSync(workflowPath, 'utf8');
+      const supervisor = embeddedWindowsSupervisorSource(workflow);
+      const quotaClass = supervisor.slice(
+        supervisor.indexOf('public sealed class WindowsDirectoryQuota'),
+        supervisor.indexOf('public sealed class WindowsJobSupervisor'),
+      );
+      const quotaAssignment = workflow.match(/\$directoryQuotas = @\([\s\S]*?\n {12}\)/u)?.[0];
+      expect(quotaAssignment).toBeDefined();
+      const harness = `
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 Add-Type -TypeDefinition @'
@@ -3565,28 +3587,30 @@ $isolatedUser = [pscustomobject]@{
 ${quotaAssignment}
 [Console]::Out.Write(($directoryQuotas | ConvertTo-Json -Compress))
 `;
-    const quotas: { Label: string; MaxBytes: number; IncludeOwnedProfileApplication: boolean }[] =
-      JSON.parse(
-        execFileSync('pwsh', ['-NoLogo', '-NoProfile', '-NonInteractive', '-Command', harness], {
-          encoding: 'utf8',
-          timeout: 15_000,
-          stdio: ['ignore', 'pipe', 'pipe'],
-        }),
-      );
-    const limits = new Map(quotas.map((quota) => [quota.Label, quota.MaxBytes]));
-    expect(
-      quotas
-        .filter((quota) => quota.IncludeOwnedProfileApplication)
-        .map((quota) => quota.Label)
-        .sort(),
-    ).toEqual(['bootstrap aggregate', 'harness execution aggregate']);
-    // The exact d20d83c build measured this many bytes in node_modules plus .next.
-    expect(limits.get('Cave checkout')).toBeGreaterThan(3_405_969_113);
-    expect(limits.get('bootstrap aggregate')).toBe(12 * 1024 ** 3);
-    expect(limits.get('Cave conformance temp')).toBe(64 * 1024 ** 2);
-    expect(limits.get('harness execution aggregate')).toBe(10 * 1024 ** 3);
-    expect(limits.get('harness build roots')).toBe(4 * 1024 ** 3);
-  }, 30_000);
+      const quotas: { Label: string; MaxBytes: number; IncludeOwnedProfileApplication: boolean }[] =
+        JSON.parse(
+          execFileSync('pwsh', ['-NoLogo', '-NoProfile', '-NonInteractive', '-Command', harness], {
+            encoding: 'utf8',
+            timeout: 15_000,
+            stdio: ['ignore', 'pipe', 'pipe'],
+          }),
+        );
+      const limits = new Map(quotas.map((quota) => [quota.Label, quota.MaxBytes]));
+      expect(
+        quotas
+          .filter((quota) => quota.IncludeOwnedProfileApplication)
+          .map((quota) => quota.Label)
+          .sort(),
+      ).toEqual(['bootstrap aggregate', 'harness execution aggregate']);
+      // The exact d20d83c build measured this many bytes in node_modules plus .next.
+      expect(limits.get('Cave checkout')).toBeGreaterThan(3_405_969_113);
+      expect(limits.get('bootstrap aggregate')).toBe(12 * 1024 ** 3);
+      expect(limits.get('Cave conformance temp')).toBe(64 * 1024 ** 2);
+      expect(limits.get('harness execution aggregate')).toBe(10 * 1024 ** 3);
+      expect(limits.get('harness build roots')).toBe(4 * 1024 ** 3);
+    },
+    30_000,
+  );
 
   test('guards each Windows network and bootstrap phase with reviewed quotas', () => {
     const bootstrap = workflowRunBody(
