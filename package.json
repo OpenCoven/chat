@@ -18,7 +18,7 @@
     "format": "biome format --write package.json contract-canary.lock.json phase1-conformance.lock.json biome.json tsconfig.json vite.config.ts vitest.config.ts vitest.heavy.config.ts playwright.config.ts index.html README.md docs/developer-toolchains.md docs/phase1-conformance.md src e2e scripts",
     "format:check": "biome check --formatter-enabled=true --linter-enabled=false --assist-enabled=false package.json contract-canary.lock.json phase1-conformance.lock.json biome.json tsconfig.json vite.config.ts vitest.config.ts vitest.heavy.config.ts playwright.config.ts index.html README.md docs/developer-toolchains.md docs/phase1-conformance.md src e2e scripts",
     "test": "corepack pnpm@10.34.0 --ignore-workspace test:unit",
-    "test:unit": "corepack pnpm@10.34.0 --ignore-workspace test:unit:normal && corepack pnpm@10.34.0 --ignore-workspace test:unit:heavy",
+    "test:unit": "node ./scripts/test-unit.mjs",
     "test:unit:normal": "vitest run",
     "test:unit:heavy": "vitest run --config vitest.heavy.config.ts",
     "test:phase1-conformance": "node ./scripts/phase1-conformance.mjs --lock ./phase1-conformance.lock.json --scenario all",
