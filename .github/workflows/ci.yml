@@ -8,6 +8,9 @@ on:
     branches:
       - main
 
+permissions:
+  contents: read
+
 # Validate feature branches through pull requests and retain main-push verification.
 # Creating and cancelling a second run for the same commit leaves cancelled
 # required checks that can prevent a fully passing pull request from merging.
