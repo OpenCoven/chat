@@ -215,6 +215,7 @@ fn companion_run(
                 model: None,
                 think: false,
                 speed: None,
+                max_turns: None,
                 attachments: Vec::new(),
                 grant,
             };
@@ -226,7 +227,13 @@ fn companion_run(
         })();
         worker_record.finish(&result);
         let value = worker_record.value();
-        emit(value["status"].as_str().unwrap_or("failed"), None);
+        let mut terminal = json!({"runId":request.request_id,"familiarId":request.familiar_id,"status":value["status"]});
+        for key in ["outcome", "error"] {
+            if let Some(value) = value.get(key) {
+                terminal[key] = value.clone();
+            }
+        }
+        let _ = app.emit("companion-run", terminal);
     });
     Ok(record)
 }
