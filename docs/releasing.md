@@ -21,6 +21,11 @@ and since #470 the workflow signs through it whenever its credentials are
 present. They were added to `release-signing` on 2026-11-22, and a dry-run
 rehearsal signed both installers that day (§ 3).
 
+A release now requires them: `verify-tag` refuses a release without a complete
+Windows signing route and `WINDOWS_PUBLISHER`, and the build job refuses again
+on a re-run (§ 3). Only an `allow_unsigned` rehearsal, which never publishes,
+can still build an unsigned installer.
+
 An installer built without those credentials carries no Authenticode signature.
 Windows SmartScreen shows "Windows protected your PC" the first time one runs,
 and the person installing it chooses **More info**, then **Run anyway**. The
@@ -29,9 +34,9 @@ still gets that warning, naming the publisher, until SmartScreen has seen enough
 downloads (§ 3).
 
 On Windows the build job refuses a partial set of either signing route's
-secrets, and both routes set at once (§ 3). With neither route it builds
-unsigned. With one complete route it signs the installers and verifies the
-signatures, with no other change. The app itself works on Windows: runs are
+secrets, both routes set at once, and, outside an `allow_unsigned` rehearsal,
+neither route (§ 3). With one complete route it signs the installers and
+verifies the signatures, with no other change. The app itself works on Windows: runs are
 contained in a kill-on-close Job Object, so Stop ends the whole process tree.
 
 The first public release is **v0.0.2**.
@@ -399,9 +404,10 @@ again. To publish, dispatch without the switch or push the tag.
 
 The production path never builds unsigned either. `verify-tag`'s secrets gate
 runs once per workflow run, so a re-run of failed jobs re-reads the secrets in
-the build job instead. That job refuses to continue when the Apple material is
-incomplete and the run was not dispatched with `allow_unsigned`, and its
-artifact check runs `codesign` and `spctl` whatever the signing step reported.
+the build job instead. That job refuses to continue when the Apple material, or
+a Windows signing route, is incomplete and the run was not dispatched with
+`allow_unsigned`, and its artifact checks run `codesign`, `spctl` and
+`Get-AuthenticodeSignature` whatever the signing step reported.
 This closed a real gap: on 2026-10-07 an `APPLE_ID` saved as an empty value
 let a re-run of v0.0.2 build unsigned and publish (#356).
 
@@ -455,10 +461,10 @@ environment too. It reads `APPLE_API_ISSUER`, `APPLE_API_KEY` and
 `APPLE_API_KEY_BASE64`, so rotating that key affects both pipelines. See
 [iPhone companion › TestFlight](iphone-companion.md#testflight).
 
-**A missing Apple signing secret fails the release.** The `verify-tag` job
-refuses to continue when the Apple signing material is incomplete, before the
-tag is checked out and long before the platform builds start. The secrets fall
-into four groups:
+**A missing signing secret fails the release.** The `verify-tag` job refuses
+to continue when the Apple or Windows signing material is incomplete, before the
+tag is checked out and long before the platform builds start. It names what is
+missing and never prints a value. The secrets fall into four groups:
 
 - **Signing (required):** `APPLE_CERTIFICATE`, `APPLE_CERTIFICATE_PASSWORD`,
   `APPLE_SIGNING_IDENTITY` and `APPLE_TEAM_ID`.
@@ -466,10 +472,11 @@ into four groups:
   API key (`APPLE_API_ISSUER`, `APPLE_API_KEY`, `APPLE_API_KEY_BASE64`), which
   is preferred and used when present, or an Apple ID with an app-specific
   password (`APPLE_ID`, `APPLE_PASSWORD`).
-- **Windows (optional for now):** the four `ES_*` secrets for eSigner, or the
-  two `WINDOWS_*` secrets for a `.pfx`, and the `WINDOWS_PUBLISHER` variable.
-  Windows ships unsigned by decision (see the top of this document) until one
-  complete route is set. See **Signing the Windows installers** below.
+- **Windows (required, one complete route):** the four `ES_*` secrets for
+  eSigner, or the two `WINDOWS_*` secrets for a `.pfx`, and the
+  `WINDOWS_PUBLISHER` variable. Required since the 2026-11-22 rehearsals; the
+  releases through v0.1.3 shipped unsigned by decision (see the top of this
+  document). See **Signing the Windows installers** below.
 - **Updater (required once the tree configures it):**
   `TAURI_SIGNING_PRIVATE_KEY` and `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`. Once
   `src-tauri/tauri.conf.json` has `plugins.updater`, `verify-tag` reads that
@@ -481,7 +488,7 @@ The API key is preferred because it's a team credential. On 2026-10-06, four
 app-specific passwords in a row were rejected with `401 Invalid credentials`
 because the Apple ID was not on the team.
 
-For the Apple secrets this used to be a warning, and a warning is the wrong
+For the Apple secrets this used to be a warning, and Windows was optional, and a warning is the wrong
 shape for it: the default outcome of a missing secret was a *published* unsigned
 release and a yellow annotation nobody reads. An unsigned `.app` won't open past
 Gatekeeper, and the tag can't be reused to correct it: `verify-tag` refuses to
@@ -512,9 +519,9 @@ secrets.
 | `APPLE_ID` | Apple ID used for notarization (alternative to the API key) | `release-signing` |
 | `APPLE_PASSWORD` | app-specific password for that Apple ID (alternative to the API key) | `release-signing` |
 | `APPLE_TEAM_ID` | Apple Developer Team ID | `release-signing` |
-| `WINDOWS_CERTIFICATE` | base64 of an Authenticode code-signing `.pfx` (optional: with its password set, the Windows installers are signed; otherwise they ship unsigned, see #411) | `release-signing` |
+| `WINDOWS_CERTIFICATE` | base64 of an Authenticode code-signing `.pfx` (the alternative to eSigner: with its password set, the Windows installers are signed through `signtool`; see #411) | `release-signing` |
 | `WINDOWS_CERTIFICATE_PASSWORD` | password for the `.pfx` (optional; set both or neither) | `release-signing` |
-| `ES_USERNAME` | SSL.com account username for eSigner (optional: with all four `ES_*` set, the Windows installers are signed through eSigner; see below) | `release-signing` |
+| `ES_USERNAME` | SSL.com account username for eSigner (with all four `ES_*` set, the Windows installers are signed through eSigner; see below) | `release-signing` |
 | `ES_PASSWORD` | SSL.com account password | `release-signing` |
 | `ES_CREDENTIAL_ID` | the eSigner credential ID of the OV code-signing certificate | `release-signing` |
 | `ES_TOTP_SECRET` | the base32 secret from eSigner's automated-signing enrollment, from which CodeSignTool makes each one-time code | `release-signing` |
@@ -551,8 +558,9 @@ unsigned. Either way, set the `WINDOWS_PUBLISHER` variable to the certificate's
 common name, exactly. The eSigner certificate is SSL.com's personal (IV+OV)
 code-signing certificate, so its common name, and the publisher Windows shows,
 is the individual it was issued to; Val chose on 2026-11-22 to keep it rather
-than order one for Soul Protocol LLC (#411). With neither way configured, the
-installers ship unsigned and the release notes say so.
+than order one for Soul Protocol LLC (#411). With neither way configured, a
+release is refused; only an `allow_unsigned` rehearsal builds the installers
+unsigned, and its notes say so.
 
 On a signed run, `Verify Windows installer metadata and signatures` holds the
 `.msi` and the `-setup.exe` to four things, and stops the build on the first
@@ -607,8 +615,10 @@ acceptance (§ 1, step 11) and the hand-run on #520.
    output for each file Tauri signs, and the verification step must print
    `is signed by`, `is timestamped by` and `chains` for both installers. Keep
    the run's link and its signatures table as the record. Nothing is published.
-6. Then add the four `ES_*` names to `verify-tag`'s required list, so a missing
-   one refuses a release instead of shipping unsigned.
+6. `verify-tag` requires a complete route and `WINDOWS_PUBLISHER` since the
+   2026-11-22 rehearsals, so a missing one refuses a release instead of
+   shipping unsigned. A rehearsal with `allow_unsigned` still goes on, with a
+   warning naming what is missing.
 
 Every file Tauri signs uses one of the account's eSigner signings, and a
 Windows build signs 12, not only the two installers: the app executable once

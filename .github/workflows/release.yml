@@ -171,14 +171,12 @@ jobs:
       # see yet: the tag is not checked out. `Require updater signing` below
       # reads the verified commit's config and refuses there instead.
       #
-      # WINDOWS_CERTIFICATE and its password are absent too, by decision rather
-      # than omission: Windows ships unsigned (decided 2026-10-14; #411 tracks
-      # a signing route, since certificate authorities no longer issue the
-      # exportable .pfx this path expects). The build job signs the Windows
-      # installers whenever both secrets are present and says plainly when
-      # they are not. The eSigner route was chosen on 2026-10-18; add its four
-      # ES_* secrets to this list once the account exists, so a missing one
-      # refuses the release instead of shipping unsigned.
+      # Windows needs one complete signing route, and WINDOWS_PUBLISHER to
+      # check the result against (#411). The route is SSL.com eSigner (all
+      # four ES_* secrets, chosen 2026-10-18 and rehearsed 2026-11-22), or a
+      # .pfx (WINDOWS_CERTIFICATE and its password). The build job refuses
+      # both at once and a partial set of either. Windows shipped unsigned by
+      # decision through v0.1.3; this gate ends that for the production path.
       - name: Require signing material
         shell: bash
         env:
@@ -194,6 +192,13 @@ jobs:
           APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
           APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
           APPLE_API_KEY_BASE64: ${{ secrets.APPLE_API_KEY_BASE64 }}
+          ES_USERNAME: ${{ secrets.ES_USERNAME }}
+          ES_PASSWORD: ${{ secrets.ES_PASSWORD }}
+          ES_CREDENTIAL_ID: ${{ secrets.ES_CREDENTIAL_ID }}
+          ES_TOTP_SECRET: ${{ secrets.ES_TOTP_SECRET }}
+          WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}
+          WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
+          WINDOWS_PUBLISHER: ${{ vars.WINDOWS_PUBLISHER }}
         run: |
           set -euo pipefail
 
@@ -214,6 +219,15 @@ jobs:
              ! { [ -n "${APPLE_ID:-}" ] && [ -n "${APPLE_PASSWORD:-}" ]; }; then
             missing+=("notarization credentials (APPLE_API_ISSUER+APPLE_API_KEY+APPLE_API_KEY_BASE64, or APPLE_ID+APPLE_PASSWORD)")
           fi
+          # Windows takes one complete route. Which one, and whether both are
+          # set, is the build job's to decide; here only absence is refused.
+          if ! { [ -n "${ES_USERNAME:-}" ] && [ -n "${ES_PASSWORD:-}" ] && [ -n "${ES_CREDENTIAL_ID:-}" ] && [ -n "${ES_TOTP_SECRET:-}" ]; } &&
+             ! { [ -n "${WINDOWS_CERTIFICATE:-}" ] && [ -n "${WINDOWS_CERTIFICATE_PASSWORD:-}" ]; }; then
+            missing+=("Windows signing credentials (ES_USERNAME+ES_PASSWORD+ES_CREDENTIAL_ID+ES_TOTP_SECRET, or WINDOWS_CERTIFICATE+WINDOWS_CERTIFICATE_PASSWORD)")
+          fi
+          if [ -z "${WINDOWS_PUBLISHER:-}" ]; then
+            missing+=("the WINDOWS_PUBLISHER variable")
+          fi
 
           if [ "${#missing[@]}" -eq 0 ]; then
             echo "All platform signing secrets are present; this release will be signed and notarized."
@@ -225,7 +239,7 @@ jobs:
             exit 0
           fi
 
-          echo "::error::Missing signing secrets in the release-signing environment: ${missing[*]}"
+          echo "::error::Missing signing material in the release-signing environment: ${missing[*]}"
           echo "Configure them under Settings -> Environments -> release-signing (docs/releasing.md § 3)."
           echo "To build deliberately unsigned artifacts, dispatch this workflow with allow_unsigned=true."
           exit 1
@@ -455,15 +469,14 @@ jobs:
             runner: macos-15-intel
             target: x86_64-apple-darwin
             bundles: app,dmg
-          # Windows ships UNSIGNED for now, by decision (2026-10-14).
-          # Certificate authorities no longer issue an exportable .pfx, so
-          # signing goes through SSL.com eSigner (chosen 2026-10-18, #411),
-          # and it starts once release-signing holds the four ES_* secrets
-          # and the WINDOWS_PUBLISHER variable. Until then SmartScreen warns
-          # on first launch, and the release notes say so. windows-2025 is
-          # pinned by name, like ubuntu-22.04, so a runner-image rollover
-          # cannot change what a tag builds with. The eSigner wrapper needs
-          # that image's Java 21.
+          # Windows is signed through SSL.com eSigner (chosen 2026-10-18,
+          # rehearsed 2026-11-22, #411): certificate authorities no longer
+          # issue an exportable .pfx. Releases through v0.1.3 shipped
+          # unsigned by decision. A signed installer can still meet a
+          # SmartScreen prompt until the certificate has reputation.
+          # windows-2025 is pinned by name, like ubuntu-22.04, so a
+          # runner-image rollover cannot change what a tag builds with. The
+          # eSigner wrapper needs that image's Java 21.
           - platform: windows-x86_64
             runner: windows-2025
             target: x86_64-pc-windows-msvc
@@ -618,22 +631,27 @@ jobs:
             fi
             echo "::warning::Apple signing material is absent or incomplete; producing an UNSIGNED, un-notarized macOS build. This is only reachable via allow_unsigned; do not publish these artifacts."
           fi
-          # Windows is the one platform that may build unsigned on the
-          # production path (decided 2026-10-14; see the matrix comment and
-          # #411). A half-set of either route's secrets is still refused there:
-          # that is not a decision, it is a typo.
+          # Windows refuses to build unsigned on the production path, as macOS
+          # does: verify-tag requires a signing route, but a re-run of failed
+          # jobs skips that gate and re-reads the secrets here (#411; Windows
+          # shipped unsigned by decision through v0.1.3). A half-set of either
+          # route is named precisely. allow_unsigned rehearsals still build
+          # unsigned, with a warning.
           if [ "${{ runner.os }}" = "Windows" ] && [ "${es_set}" -gt 0 ] && [ "${es_set}" -lt 4 ] &&
              [ "${ALLOW_UNSIGNED:-false}" != "true" ]; then
-            echo "::error::Only ${es_set} of the four eSigner secrets (ES_USERNAME, ES_PASSWORD, ES_CREDENTIAL_ID, ES_TOTP_SECRET) are set. Set all four to sign through eSigner, or none to build unsigned."
+            echo "::error::Only ${es_set} of the four eSigner secrets (ES_USERNAME, ES_PASSWORD, ES_CREDENTIAL_ID, ES_TOTP_SECRET) are set. Set all four to sign through eSigner."
             exit 1
           fi
           if [ "${{ runner.os }}" = "Windows" ] && [ "${windows_signed}" = "false" ]; then
-            if { [ -n "${WINDOWS_CERTIFICATE:-}" ] || [ -n "${WINDOWS_CERTIFICATE_PASSWORD:-}" ]; } &&
-               [ "${ALLOW_UNSIGNED:-false}" != "true" ]; then
-              echo "::error::Only one of WINDOWS_CERTIFICATE and WINDOWS_CERTIFICATE_PASSWORD is set. Set both to sign the Windows installers, or neither to build them unsigned."
+            if [ "${ALLOW_UNSIGNED:-false}" != "true" ]; then
+              if [ -n "${WINDOWS_CERTIFICATE:-}" ] || [ -n "${WINDOWS_CERTIFICATE_PASSWORD:-}" ]; then
+                echo "::error::Only one of WINDOWS_CERTIFICATE and WINDOWS_CERTIFICATE_PASSWORD is set. Set both to sign the Windows installers with a .pfx."
+              else
+                echo "::error::No Windows signing route is configured on the production path; refusing to build unsigned installers. Add the four ES_* secrets (or WINDOWS_CERTIFICATE and its password) and the WINDOWS_PUBLISHER variable to release-signing (docs/releasing.md § 3), then re-run."
+              fi
               exit 1
             fi
-            echo "::warning::Neither the eSigner secrets nor WINDOWS_CERTIFICATE are configured; the Windows installers in this release are UNSIGNED and Windows SmartScreen will warn before they run. To sign them, add the four ES_* secrets and the WINDOWS_PUBLISHER variable to release-signing (docs/releasing.md § 3, #411)."
+            echo "::warning::Neither the eSigner secrets nor WINDOWS_CERTIFICATE are configured; the Windows installers in this release are UNSIGNED and Windows SmartScreen will warn before they run. This is only reachable via allow_unsigned; do not publish these artifacts."
           fi
           if [ "${updater_configured}" != "true" ]; then
             echo "::notice::This tree configures no updater (no plugins.updater); no updater artifacts or latest.json are produced. See docs/releasing.md § 4."
