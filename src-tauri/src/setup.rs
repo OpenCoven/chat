@@ -359,6 +359,21 @@ fn engine_path() -> Option<PathBuf> {
     engine_status().path
 }
 
+pub(crate) fn require_task_recovery() -> Result<(), String> {
+    let supported = engine_path()
+        .and_then(|path| probe(&path, &["--task-recovery-capabilities"]).ok())
+        .filter(|(code, _)| *code == 0)
+        .and_then(|(_, s)| serde_json::from_str::<Value>(&s).ok())
+        .is_some_and(|v| {
+            v["provider_task_recovery"] == 1 && v["profile"] == "claude-local-research"
+        });
+    if supported {
+        Ok(())
+    } else {
+        Err(crate::chat_recovery::UNSUPPORTED.into())
+    }
+}
+
 /// The model-provider step is satisfied by any route that is signed in: the
 /// engine's own sign-in, a Claude subscription through Claude Code, or
 /// ChatGPT through the engine's Codex sign-in.

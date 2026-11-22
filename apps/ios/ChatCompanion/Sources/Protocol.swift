@@ -13,10 +13,20 @@ struct ChatSession: Codable, Identifiable, Equatable {
   let title: String
   let archived: Bool
 }
+struct ResearchAction: Codable, Identifiable, Equatable {
+  let id: String
+  let name: String
+  var resetAt: Double?
+  var requested: Bool?
+  var outcome: String?
+}
 struct Message: Codable, Identifiable, Equatable {
   let id: String
   let role: String
   let text: String
+  var progressStart: String? = nil
+  var workProgress: [String]? = nil
+  var researchActions: [ResearchAction]? = nil
 }
 struct Run: Codable, Identifiable, Equatable {
   let id: String
@@ -53,13 +63,15 @@ struct SendRequest: Codable, Equatable {
   let familiarId: String
   let sessionId: String?
   let prompt: String
-  enum CodingKeys: String, CodingKey { case requestId, familiarId, sessionId, prompt }
+  var recoveryId: String? = nil
+  enum CodingKeys: String, CodingKey { case requestId, familiarId, sessionId, prompt, recoveryId }
   func encode(to encoder: Encoder) throws {
     var c = encoder.container(keyedBy: CodingKeys.self)
     try c.encode(requestId, forKey: .requestId)
     try c.encode(familiarId, forKey: .familiarId)
     try c.encode(sessionId, forKey: .sessionId)
     try c.encode(prompt, forKey: .prompt)
+    try c.encodeIfPresent(recoveryId, forKey: .recoveryId)
   }
 }
 /// The phone names the request and the answer. The chat, the permission and the

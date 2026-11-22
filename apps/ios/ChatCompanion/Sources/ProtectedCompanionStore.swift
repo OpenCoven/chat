@@ -42,7 +42,10 @@ import Foundation
     try directory(root)
     // Reinstall/restore must not revive a previous installation's text or pending operations.
     for item in try manager.contentsOfDirectory(at: root, includingPropertiesForKeys: nil) {
-      guard Pairing.hexSecret(item.lastPathComponent), item != installDirectory else { continue }
+      // Enumeration can return an absolute URL with a different directory or
+      // file-reference representation on iOS. The child name is the stored ID.
+      guard Pairing.hexSecret(item.lastPathComponent),
+        item.lastPathComponent != installDirectory.lastPathComponent else { continue }
       guard try attributes(item)?[.type] as? FileAttributeType == .typeDirectory else { throw failure }
       try manager.removeItem(at: item)
     }

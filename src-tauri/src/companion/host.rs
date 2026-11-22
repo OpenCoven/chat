@@ -342,13 +342,13 @@ impl Host {
                         gate.runs.insert(run.id.clone(), run);
                         (200, value)
                     }
-                    Err(_) => {
+                    Err(reason) => {
                         let run = RunRecord::new(
                             failed_id,
                             failed_familiar,
                             Arc::new(std::sync::atomic::AtomicBool::new(false)),
                         );
-                        run.finish(&Err("Cannot start this run.".into()));
+                        run.finish(&Err(reason));
                         let value = run.value();
                         if gate.runs.len() >= 16 {
                             gate.runs.retain(|_, r| r.running());

@@ -63,3 +63,26 @@ fn the_phone_reads_replies_without_the_block_and_sees_chats_own_line() {
         ]
     );
 }
+
+#[test]
+fn provider_limit_preserves_the_saved_reply_and_only_one_reset_on_the_phone() {
+    let events: Vec<Value> =
+        serde_json::from_str(include_str!("../../../tests/fixtures/provider-limit.json")).unwrap();
+    let messages = project_messages(&events);
+    assert_eq!(
+        messages
+            .iter()
+            .filter(|m| m["role"] == "interruption")
+            .count(),
+        1
+    );
+    let wire = serde_json::to_string(&messages).unwrap();
+    assert!(wire.contains("Saved the first result."));
+    assert_eq!(wire.matches("1:10am").count(), 1);
+    assert!(!wire.contains("coven-code exited"));
+    assert!(project_messages(&events[..events.len() - 2])
+        .iter()
+        .any(|m| m["text"]
+            .as_str()
+            .is_some_and(|s| s.contains("You've hit your 5-hour limit"))));
+}

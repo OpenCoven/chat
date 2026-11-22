@@ -1,5 +1,6 @@
 import type { CovenRunEvent } from '../lib/coven-runtime';
 import type { AttachmentMetadata } from './attachments';
+import { providerInterruptions } from './provider-interruption';
 
 /**
  * A tool call the runtime reported as data rather than prose. `args` is the
@@ -16,12 +17,24 @@ export type ToolCall = {
   isError?: boolean;
 };
 
+export type ResearchAction = {
+  id: string;
+  name: string;
+  resetAt: number | null;
+  requested?: boolean;
+  outcome?: 'completed' | 'stopped' | 'unconfirmed';
+};
+
 export type ChatMessage = {
   id: string;
   role: string;
   text: string;
   /** Set on `role: 'notice'`: which of Chat's own disclosures this line is. */
-  notice?: 'replay' | 'diagnostic' | 'approval';
+  notice?: 'replay' | 'diagnostic' | 'approval' | 'interruption';
+  report?: string;
+  progressStart?: string;
+  workProgress?: readonly string[];
+  researchActions?: ResearchAction[];
   attachments?: AttachmentMetadata[];
   tool?: ToolCall;
 };
@@ -149,6 +162,9 @@ export function projectEvents(events: readonly CovenRunEvent[]): {
   let sessionId = '';
   let error = '';
   let model = '';
+  const interruptions = providerInterruptions(events);
+  const submitted = new Map<string, string>();
+  const recoveryCards = new Map<string, ChatMessage>();
   const messages: ChatMessage[] = [];
   let deltaMessage: (typeof messages)[number] | undefined;
   let deltaSession: unknown;
@@ -177,6 +193,104 @@ export function projectEvents(events: readonly CovenRunEvent[]): {
     }
   };
   for (const [index, event] of events.entries()) {
+    const session = typeof event.session_id === 'string' ? event.session_id : '';
+    if (
+      session &&
+      event.type === 'user' &&
+      record(event.message) &&
+      contentText(event.message.content, '\n')
+    )
+      submitted.set(session, String(index));
+    if (
+      event.type === 'system' &&
+      event.source === 'chat-recovery' &&
+      (event.subtype === 'admitted' || event.subtype === 'outcome')
+    ) {
+      const action = recoveryCards
+        .get(session)
+        ?.researchActions?.find((item) => item.id === event.recoveryId);
+      if (action) {
+        action.requested = true;
+        if (
+          event.subtype === 'outcome' &&
+          (event.state === 'completed' ||
+            event.state === 'stopped' ||
+            event.state === 'unconfirmed')
+        )
+          action.outcome = event.state;
+      }
+    }
+    const interruption = interruptions.get(session);
+    if (
+      interruption &&
+      event.type === 'text_delta' &&
+      typeof event.text === 'string' &&
+      interruption.notices.has(event.text)
+    )
+      continue;
+    if (interruption && index === interruption.first) {
+      const card: ChatMessage = {
+        id: String(index),
+        role: 'notice',
+        notice: 'interruption',
+
+        text: interruption.reset
+          ? `Provider limit resets at ${interruption.reset}.`
+          : 'Provider limit reached. The provider has not given a reset time.',
+      };
+      const start = submitted.get(session);
+      if (start) card.progressStart = start;
+      recoveryCards.set(session, card);
+      messages.push(card);
+    }
+    const summary =
+      event.type === 'system' &&
+      ((event.subtype === 'progress' && event.source === 'chat-recovery') ||
+        (event.subtype === 'notice' && event.source === 'chat-diagnostic'));
+    if (summary && session) {
+      let card = recoveryCards.get(session);
+      if (
+        !card &&
+        (event.interruptionKind === 'stopped' || event.interruptionKind === 'research')
+      ) {
+        card = {
+          id: String(index),
+          role: 'notice',
+          notice: 'interruption',
+          text:
+            event.interruptionKind === 'stopped'
+              ? 'The host stopped this run.'
+              : 'The research run ended before all results were available.',
+        };
+        const start = submitted.get(session);
+        if (start) card.progressStart = start;
+        recoveryCards.set(session, card);
+        messages.push(card);
+      }
+      if (card) {
+        if (Array.isArray(event.recoverableTasks)) {
+          card.researchActions = event.recoverableTasks.flatMap((item) =>
+            record(item) &&
+            typeof item.id === 'string' &&
+            /^[0-9a-f]{64}$/.test(item.id) &&
+            typeof item.name === 'string'
+              ? [
+                  {
+                    id: item.id,
+                    name: item.name,
+                    resetAt: typeof item.resetAt === 'number' ? item.resetAt : null,
+                  },
+                ]
+              : [],
+          );
+        }
+        if (
+          Array.isArray(event.workProgress) &&
+          event.workProgress.every((line) => typeof line === 'string')
+        )
+          card.workProgress = event.workProgress;
+      }
+    }
     if (event.type === 'text_delta' && typeof event.text === 'string') {
       if (!event.text) continue;
       if (!deltaMessage || deltaSession !== event.session_id) {
@@ -307,6 +421,12 @@ export function projectEvents(events: readonly CovenRunEvent[]): {
       }
     }
     const text = contentText(content, '\n');
+    const card = recoveryCards.get(session);
+    if (card && chatNotice === 'diagnostic') {
+      card.report = text;
+
+      continue;
+    }
     const attachments =
       event.type === 'user' && Array.isArray(event.attachments)
         ? event.attachments

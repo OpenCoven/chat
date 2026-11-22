@@ -14,11 +14,12 @@ enum TranscriptItem: Identifiable, Equatable {
   case user(id: String, text: String)
   case reply(id: String, text: String)
   case tools(id: String, calls: [ToolCall])
+  case interruption(id: String, text: String, progressStart: String?, workProgress: [String] = [], actions: [ResearchAction] = [])
   case notice(id: String, text: String)
 
   var id: String {
     switch self {
-    case .user(let id, _), .reply(let id, _), .tools(let id, _), .notice(let id, _): id
+    case .user(let id, _), .reply(let id, _), .tools(let id, _), .notice(let id, _), .interruption(let id, _, _, _, _): id
     }
   }
 
@@ -36,6 +37,8 @@ enum TranscriptItem: Identifiable, Equatable {
     }
     for message in messages {
       switch message.role {
+      case "interruption":
+        items.append(.interruption(id: message.id, text: message.text, progressStart: message.progressStart, workProgress: message.workProgress ?? [], actions: message.researchActions ?? []))
       case "user":
         items.append(.user(id: message.id, text: message.text))
       case "assistant":

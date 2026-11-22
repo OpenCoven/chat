@@ -41,6 +41,8 @@ const OUTPUT_LIMIT: usize = 4 * 1024 * 1024;
 pub(crate) const TRANSCRIPT_LIMIT: usize = OUTPUT_LIMIT + 256 * 1024;
 const LEDGER_METADATA_LIMIT: usize = 16 * 1024 * 1024;
 const ERROR_LIMIT: usize = 8192;
+pub(crate) const RUN_ACTIVE: &str =
+    "A Coven run is already active. Cancel it or wait for completion.";
 pub(crate) const RUN_CANCELLED: &str = "Coven run cancelled.";
 pub(crate) const READ_TIMEOUT: Duration = Duration::from_secs(20);
 const RUN_TIMEOUT: Duration = Duration::from_secs(600);
@@ -155,7 +157,7 @@ impl CovenRuntimeState {
             return Err("Coven is shutting down; new runs are disabled.".into());
         }
         if !runs.is_empty() {
-            return Err("A Coven run is already active. Cancel it or wait for completion.".into());
+            return Err(RUN_ACTIVE.into());
         }
         let cancel = Arc::new(AtomicBool::new(false));
         runs.insert(id.to_owned(), cancel.clone());
@@ -277,6 +279,7 @@ impl Drop for CovenRuntimeState {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct SendInput {
     run_id: String,
+    recovery_id: Option<String>,
     prompt: String,
     session_id: Option<String>,
     familiar_id: Option<String>,
@@ -1036,7 +1039,7 @@ fn run_arguments(
     if let Some(speed) = &input.speed {
         args.extend(["--speed".into(), speed.clone()]);
     }
-    if input.attachments.is_empty() {
+    if input.attachments.is_empty() && input.recovery_id.is_none() {
         args.extend(["--".into(), prompt.to_owned()]);
     } else {
         if harness != "coven-code" {
@@ -2044,6 +2047,7 @@ fn granted_input(
         think,
         speed,
         attachments: Vec::new(),
+        recovery_id: None,
         grant: Some(grant),
     }
 }
@@ -2329,7 +2333,35 @@ fn send_turn(
             &input.attachments,
         )?)
     };
-    let input_file = if let Some((directory, path, _)) = &staged {
+    let mut admission = None;
+    let input_file = if let Some(id) = &input.recovery_id {
+        if harness != "coven-code"
+            || !input.attachments.is_empty()
+            || input.grant.is_some()
+            || id.len() != 64
+            || !id.bytes().all(|b| b.is_ascii_hexdigit())
+        {
+            return Err("Reopen the interrupted research task and choose Resume there.".into());
+        }
+        crate::setup::require_task_recovery()?;
+        let selected = resumed
+            .as_ref()
+            .ok_or("Open the saved conversation to resume this task.")?;
+        let (history, _) = read_captured_history(data, selected, Budget::BASE, get_session)?
+            .ok_or(
+                "The saved task is unavailable. Review the remaining work in this conversation.",
+            )?;
+        args.extend(["--".into(), "Continue one unfinished research task.".into()]);
+        let (file, ticket) = crate::chat_recovery::reserve(
+            data,
+            &history,
+            id,
+            &input.run_id,
+            (crate::chat_approvals::now_ms() / 1000) as i64,
+        )?;
+        admission = Some(ticket);
+        Some(file)
+    } else if let Some((directory, path, _)) = &staged {
         args.extend([
             "--add-dir".into(),
             directory
@@ -2375,7 +2407,11 @@ fn send_turn(
         }
         Ok(())
     };
-    let mut observe = |event: Value| -> Result<(), String> {
+    let mut observe = |mut event: Value| -> Result<(), String> {
+        crate::chat_recovery::capture_clock(
+            &mut event,
+            (crate::chat_approvals::now_ms() / 1000) as i64,
+        );
         // Text holding Chat's note can only be the echo, whatever session it names.
         if is_cli_input_echo(&event, &sent_prompt)
             || (staged.is_some() && is_cli_input_echo(&event, echo_prompt))
@@ -2489,6 +2525,59 @@ fn send_turn(
         Some(&mut stderr_report),
     );
     record_actions(action_reader.finish())?;
+    let run = if let Some(ticket) = admission {
+        let confirmed = run.is_ok()
+            && input_session
+                .as_deref()
+                .is_some_and(|s| ticket.completed(&events, s))
+            && events.iter().any(|event| {
+                event["type"] == "result"
+                    && event["is_error"] == false
+                    && event["provider_task_recovered"] == true
+            })
+            && !events
+                .iter()
+                .any(|event| event["type"] == "result" && event["is_error"] == true);
+        let stopped = matches!(&run, Err(e) if e == RUN_CANCELLED);
+        ticket.finish(if confirmed {
+            "completed"
+        } else if stopped {
+            "stopped"
+        } else {
+            "unconfirmed"
+        })?;
+        if !confirmed && run.is_ok() {
+            Err("The provider did not confirm this research result. Review the saved work or draft a follow-up.".to_owned())
+        } else {
+            run
+        }
+    } else {
+        run
+    };
+    let stopped = matches!(&run, Err(e) if e == RUN_CANCELLED)
+        && events
+            .iter()
+            .any(|e| e["type"] == "provider_task" && e["version"] == 1);
+    let limited = events
+        .iter()
+        .any(|e| e["type"] == "provider_limit" && e["version"] == 1);
+    if let Some((file, session)) = transcript
+        .as_mut()
+        .zip(input_session.as_deref())
+        .filter(|_| stopped || limited)
+    {
+        let progress = crate::chat_recovery::progress(&events, session);
+        let actions = crate::chat_recovery::actions(&events, session);
+        let summary = json!({"type":"system","subtype":"progress","source":"chat-recovery","session_id":session,
+            "interruptionKind":if stopped {"stopped"}else{"provider"},"workProgress":progress,"recoverableTasks":actions});
+        serde_json::to_writer(&mut *file, &summary)
+            .map_err(|_| "Cannot save research progress.")?;
+        file.write_all(b"\n")
+            .and_then(|()| file.flush())
+            .map_err(|_| "Cannot save research progress.")?;
+        events.push(summary.clone());
+        on_event(summary)?;
+    }
     // Stopping a run is the user's own action; it leaves no report behind.
     if matches!(&run, Err(error) if error == RUN_CANCELLED) {
         return Err(RUN_CANCELLED.into());
@@ -2534,7 +2623,7 @@ fn send_turn(
     let Some((file, id)) = transcript.as_mut().zip(input_session.as_deref()) else {
         return Err(run.err().unwrap_or_else(|| NO_TERMINAL_RESULT.into()));
     };
-    let (notice, message) = record_run_failure(file, id, &failure, &stderr_report)?;
+    let (notice, message) = record_run_failure(file, id, &failure, &stderr_report, &events)?;
     events.push(notice.clone());
     on_event(notice)?;
     Err(message)
@@ -2718,12 +2807,22 @@ fn record_run_failure(
     session_id: &str,
     failure: &RunFailure,
     stderr: &str,
+    events: &[Value],
 ) -> Result<(Value, String), String> {
     let report = run_failure_report(failure, stderr);
-    let notice = json!({
+    let mut notice = json!({
         "type": "system", "subtype": "notice", "source": RUN_FAILURE_SOURCE, "session_id": session_id,
         "message": {"role": "system", "content": [{"type": "text", "text": run_failure_notice(report.as_deref())}]},
     });
+    let progress = crate::chat_recovery::progress(events, session_id);
+    let actions = crate::chat_recovery::actions(events, session_id);
+    if !actions.is_empty() {
+        notice["recoverableTasks"] = json!(actions);
+    }
+    if !progress.is_empty() {
+        notice["interruptionKind"] = json!("research");
+        notice["workProgress"] = json!(progress);
+    }
     serde_json::to_writer(&mut *file, &notice).map_err(|_| "Cannot save Coven transcript.")?;
     file.write_all(b"\n")
         .map_err(|_| "Cannot save Coven transcript.")?;
@@ -3084,6 +3183,7 @@ mod tests {
                 name: "notes.txt".into(),
                 bytes: b"secret".to_vec(),
             }],
+            recovery_id: None,
             grant: None,
         };
         let record = input_record("child", &attached);
@@ -3483,6 +3583,7 @@ mod tests {
             think: false,
             speed: None,
             attachments: vec![],
+            recovery_id: None,
             grant: None,
         };
         let cancel = AtomicBool::new(false);
@@ -3564,6 +3665,7 @@ mod tests {
             think: false,
             speed: None,
             attachments: vec![],
+            recovery_id: None,
             grant: None,
         };
         let args = run_arguments(
@@ -3635,6 +3737,7 @@ mod tests {
             think: false,
             speed: None,
             attachments: vec![],
+            recovery_id: None,
             grant: None,
         };
         assert!(run_arguments(
@@ -4037,7 +4140,8 @@ mod tests {
             ),
         ];
         for (failure, stderr, text, has_report) in &cases {
-            let (notice, message) = record_run_failure(&mut file, "run", failure, stderr).unwrap();
+            let (notice, message) =
+                record_run_failure(&mut file, "run", failure, stderr, &[]).unwrap();
             assert_eq!(notice["type"], "system");
             assert_eq!(notice["subtype"], "notice");
             assert_eq!(notice["source"], RUN_FAILURE_SOURCE);
@@ -4249,6 +4353,7 @@ mod tests {
             think: false,
             speed: None,
             attachments: vec![],
+            recovery_id: None,
             grant: None,
         };
         let args =
@@ -4274,6 +4379,7 @@ mod tests {
             think: false,
             speed: None,
             attachments: vec![],
+            recovery_id: None,
             grant: None,
         };
         let args =
@@ -4339,6 +4445,7 @@ mod tests {
                 think: false,
                 speed: None,
                 attachments: vec![],
+                recovery_id: None,
                 grant: None,
             },
             &cancel,
@@ -4399,6 +4506,7 @@ mod tests {
                 think: false,
                 speed: None,
                 attachments: vec![],
+                recovery_id: None,
                 grant: None,
             },
             &cancel,
@@ -4654,6 +4762,7 @@ mod tests {
                 think: false,
                 speed: None,
                 attachments: vec![],
+                recovery_id: None,
                 grant: None,
             };
             let mut observed = Vec::new();
@@ -4800,6 +4909,7 @@ mod tests {
                 name: "marker.txt".into(),
                 bytes: format!("{marker}\n").into_bytes(),
             }],
+            recovery_id: None,
             grant: None,
         };
         let mut observed = Vec::new();

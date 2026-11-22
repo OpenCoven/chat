@@ -56,6 +56,7 @@ export type CovenSessionRead = {
   hasMore?: boolean;
 };
 export type CovenSendInput = {
+  recoveryId?: string;
   runId: string;
   prompt: string;
   sessionId?: string;

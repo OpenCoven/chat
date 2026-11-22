@@ -51,6 +51,14 @@ import XCTest
     XCTAssertEqual(restored.drafts.first?.binding.sessionID, "head-1")
     XCTAssertEqual(restored.conversations.first?.history.messages.first?.text, "saved answer")
   }
+  func testEnumeratingTheInstallDirectoryPreservesItsOwnHistory() throws {
+    let relativeRoot = URL(fileURLWithPath: root.lastPathComponent, isDirectory: true,
+      relativeTo: root.deletingLastPathComponent())
+    let writer = ProtectedCompanionStore(root: relativeRoot, installationID: install, now: { self.now })
+    try writer.save(state())
+    XCTAssertEqual(try writer.load(for: namespace())?.conversations.first?.history.messages.first?.text, "saved answer")
+    XCTAssertEqual(try store().load(for: namespace())?.conversations.first?.history.messages.first?.text, "saved answer")
+  }
   func testDifferentInstallHostOrAuthorizationCannotLoadState() throws {
     try store().save(state())
     var wrongHost = namespace()

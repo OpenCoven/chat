@@ -64,6 +64,16 @@ final class RunOnSentenceTests: XCTestCase {
 }
 
 final class TranscriptTests: XCTestCase {
+  func testInterruptedTurnPreservesTheSavedReplyAndReviewTarget() throws {
+    let data = Data(#"[{"id":"1","role":"user","text":"Research"},{"id":"2","role":"assistant","text":"Saved result"},{"id":"3","role":"interruption","text":"Provider limit resets at 1:10am (America/Chicago).","progressStart":"1"}]"#.utf8)
+    let messages = try JSONDecoder().decode([Message].self, from: data)
+    XCTAssertEqual(TranscriptItem.build(messages), [
+      .user(id: "1", text: "Research"),
+      .reply(id: "2.0", text: "Saved result"),
+      .interruption(id: "3", text: "Provider limit resets at 1:10am (America/Chicago).", progressStart: "1")
+    ])
+  }
+
   func testGroupsToolCallsAcrossMessagesAndWorkingLines() {
     let items = TranscriptItem.build([
       Message(id: "0", role: "user", text: "Fix it"),

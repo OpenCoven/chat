@@ -148,6 +148,14 @@ function CompanionDialog({ client, close }: { client: Companion; close: () => vo
             <input aria-label="Private pairing link" value={link} readOnly spellCheck={false} />
           </label>
           <CopyButton text={link} label="Copy pairing link" />
+          <details>
+            <summary>My iPhone can’t connect</summary>
+            <p>
+              Connect both devices to the same Wi-Fi. If macOS asks, allow incoming connections for
+              Coven Chat. On the iPhone, check Chat’s Local Network access in Settings.
+            </p>
+            <p>In a paired conversation, choose Reconnect to Mac.</p>
+          </details>
           <p className="coven-companion-note">
             This link lets your phone read conversations and start full-access runs on this
             computer. Share it only with your own phone.

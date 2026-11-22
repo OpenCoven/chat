@@ -38,9 +38,13 @@ coven-client = { git = "https://github.com/OpenCoven/coven.git", rev = "721437b8
 fs2 = "=0.4.3"
 getrandom = "=0.4.3"
 httparse = "=1.10.1"
+regex = "=1.13.1"
 rcgen = { version = "=0.14.10", default-features = false, features = ["crypto", "aws_lc_rs"] }
 rustls = "=0.23.46"
 subtle = "=2.6.1"
+jiff = "=0.2.35"
+tempfile = "=3.27.0"
+time = { version = "=0.3.55", features = ["formatting"] }
 tokio-rustls = "=0.26.5"
 hmac = "=0.12.1"
 hpke = { version = "=0.14.0", default-features = false, features = ["aes", "alloc", "x25519"] }

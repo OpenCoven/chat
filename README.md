@@ -451,6 +451,12 @@ line leaves out the engine's own log lines below ERROR, which are never the reas
 When Coven couldn't reach the model's server, the notice names the server and says to check your
 internet connection, then use **Try again**.
 
+When a run ends with Claude’s five-hour usage limit, Chat groups matching provider notices from that run into one **Run interrupted** card. The card shows the reset time and time zone from the provider. **Review this turn from the beginning** takes you to the submitted message when it is in the loaded history. Open **View diagnostic report** on desktop to inspect or copy the original failure. The card also appears in the iPhone conversation.
+
+With a compatible Coven Code engine and Claude Code provider, the card lists each researcher's last recorded state. A finished researcher keeps its saved result. After the provider's reset, **Resume** continues a specific unfinished researcher when the provider has supplied a checkpoint. Chat records the request on the Mac so that a second device can check its outcome. For older runs or a researcher whose outcome is unknown, use **Review this turn from the beginning** and **Draft a follow-up** to choose what to do next. **Stop run** remains available while the familiar is working.
+
+On a disconnected iPhone, previously downloaded results remain readable when local history is enabled. **Reconnect to Mac** restores access to live actions once the host is reachable. With local draft saving enabled, a follow-up can be written offline and reopened later.
+
 Assistant replies render Markdown headings, lists, emphasis, quotes, code, tables, and task lists.
 Wide code and tables scroll inside the message. Raw HTML is disabled, and remote Markdown images
 aren't fetched automatically. Only web (`http` and `https`) links and in-page `#` links stay links;
