@@ -9,20 +9,24 @@ then publishes a GitHub Release and moves the feed to it. This runbook covers th
 push. The iPhone companion ships through TestFlight instead
 ([iPhone companion › TestFlight](iphone-companion.md#testflight)).
 
-**Windows ships unsigned for now** (decided 2026-10-14). Windows was left out of
-v0.0.2 on #356, and v0.0.5 is the first release with Windows installers.
+**Windows installers are Authenticode-signed from the release after v0.1.3.**
+Every Windows installer through v0.1.3 shipped unsigned (decided 2026-10-14).
+Windows was left out of v0.0.2 on #356, and v0.0.5 is the first release with
+Windows installers.
 
 Certificate authorities have issued code-signing keys only on hardware tokens or
 cloud HSMs since June 2023, so the exportable `.pfx` that `WINDOWS_CERTIFICATE`
 expects is no longer obtainable. Val chose SSL.com eSigner on 2026-10-18 (#411),
 and since #470 the workflow signs through it whenever its credentials are
-present. They are not yet: on 2026-11-22 the `release-signing` environment held
-no `ES_*` secret and no `WINDOWS_PUBLISHER` variable (§ 3).
+present. They were added to `release-signing` on 2026-11-22, and a dry-run
+rehearsal signed both installers that day (§ 3).
 
-Until they are, the `.msi` and `.exe` carry no Authenticode signature.
+An installer built without those credentials carries no Authenticode signature.
 Windows SmartScreen shows "Windows protected your PC" the first time one runs,
 and the person installing it chooses **More info**, then **Run anyway**. The
-generated release body and the release notes both say so.
+generated release body and the release notes both say so. A signed installer
+still gets that warning, naming the publisher, until SmartScreen has seen enough
+downloads (§ 3).
 
 On Windows the build job refuses a partial set of either signing route's
 secrets, and both routes set at once (§ 3). With neither route it builds
@@ -524,9 +528,9 @@ secrets.
 Certificate authorities stopped issuing code-signing certificates as exportable
 `.pfx` files in June 2023. The private key now stays in a hardware token or a
 cloud HSM, so Windows signing goes through a service (#411). Val chose **SSL.com
-eSigner** on 2026-10-18. Its credentials are not in `release-signing` yet
-(checked 2026-11-22), so the installers still ship unsigned. The build job
-supports two ways, and refuses a configuration that sets both:
+eSigner** on 2026-10-18, and its credentials have been in `release-signing`
+since 2026-11-22. The build job supports two ways, and refuses a configuration
+that sets both:
 
 1. **eSigner**: all four `ES_*` secrets. The build downloads SSL.com's
    CodeSignTool, pinned by version and SHA-256, and runs it on the runner's Java
@@ -539,9 +543,12 @@ supports two ways, and refuses a configuration that sets both:
    through `signtool`.
 
 A partial set of either way's secrets fails the build rather than shipping
-unsigned. Either way, set `WINDOWS_PUBLISHER` to the name on the certificate,
-`Soul Protocol LLC` for eSigner. With neither way configured, the installers
-ship unsigned and the release notes say so.
+unsigned. Either way, set the `WINDOWS_PUBLISHER` variable to the certificate's
+common name, exactly. The eSigner certificate is SSL.com's personal (IV+OV)
+code-signing certificate, so its common name, and the publisher Windows shows,
+is the individual it was issued to; Val chose on 2026-11-22 to keep it rather
+than order one for Soul Protocol LLC (#411). With neither way configured, the
+installers ship unsigned and the release notes say so.
 
 On a signed run, `Verify Windows installer metadata and signatures` holds the
 `.msi` and the `-setup.exe` to four things, and stops the build on the first
@@ -555,7 +562,9 @@ one that fails:
   A revocation server that can't be reached is a warning, not a failure.
 
 The run summary gets a **Windows installer signatures** table with each
-installer's SHA-256, signer, thumbprint, timestamp authority and chain.
+installer's SHA-256, signer, thumbprint, timestamp authority and chain. When a
+check fails, the table keeps the installers that passed and ends with a
+**Stopped:** line giving the reason.
 
 A valid signature is not SmartScreen reputation. A new certificate still shows
 "Windows protected your PC", now naming the publisher, until Microsoft has seen
@@ -598,12 +607,13 @@ acceptance (§ 1, step 11) and the hand-run on #520.
    one refuses a release instead of shipping unsigned.
 
 Every file Tauri signs uses one of the account's eSigner signings, and a
-Windows build signs about a dozen, not only the two installers: the app
-executable once for each installer, the uninstaller, NSIS's five plugin DLLs,
-two WiX extension DLLs, and then the `.msi` and the `-setup.exe` themselves.
-That count is read from Tauri 2.11.4's bundler source; the rehearsal's log
-gives the exact number. A rehearsal spends as many as a release does, so size
-the eSigner plan for both.
+Windows build signs 12, not only the two installers: the app executable once
+for each installer, NSIS's five plugin DLLs, two WiX extension DLLs, the
+`.msi` and the `-setup.exe`, and the uninstaller. The first rehearsal
+([run 45021936592](https://github.com/OpenCoven/chat/actions/runs/45021936592),
+2026-11-22) logged the first 11; `makensis` signs the uninstaller without
+logging it. A rehearsal spends as many as a release does, so size the eSigner
+plan for both.
 
 Certificates now last at most 460 days, so expect to renew yearly. eSigner keeps
 the same credential ID across a renewal, but check it.
@@ -708,10 +718,11 @@ Per release, the workflow publishes:
   target runs natively on GitHub's `macos-15-intel` runner rather than
   cross-compiling on Apple silicon.
 - **Windows**: `.msi` (WiX, `_x64_en-US`) and NSIS `.exe` (`_x64-setup`) for
-  `x86_64`, built on `windows-2025`. Unsigned until the eSigner credentials are
-  in `release-signing` (#411, § 3); the build job reads the product name and
-  version back from both installers and records the Authenticode state
-  (`NotSigned`, or `Valid` with its signer, timestamp and chain once they are).
+  `x86_64`, built on `windows-2025`. Signed through eSigner from the release
+  after v0.1.3, and unsigned through v0.1.3 (#411, § 3). The build job reads
+  the product name and version back from both installers and records the
+  Authenticode state: `Valid` with its signer, timestamp and chain, or
+  `NotSigned` for a build without the credentials.
 - **Linux**: `.AppImage` and `.deb` for `x86_64`.
 - **`SHA256SUMS`**: checksums for every asset. Verify with
   `shasum -a 256 -c --ignore-missing SHA256SUMS` (§ 1, step 9).
