@@ -49,9 +49,10 @@ test('the script downloads the archive the parser names for this Mac', () => {
 test('a reformatted release table fails loudly instead of returning part of the pin', () => {
   const { version, macos } = installerPin(source);
   // Struct fields instead of positional arguments: the digest no longer follows the name.
+  // Matched across any whitespace, so a reindent of the table doesn't break this case.
   const named = source.replace(
-    `"${macos.x64.asset}",\n            "${macos.x64.sha256}",`,
-    `asset: "${macos.x64.asset}",\n            sha256: "${macos.x64.sha256}",`,
+    new RegExp(`"${macos.x64.asset.replace(/[.]/g, '\\.')}",(\\s+)"${macos.x64.sha256}",`),
+    `asset: "${macos.x64.asset}",$1sha256: "${macos.x64.sha256}",`,
   );
   expect(named).not.toBe(source);
   expect(() => installerPin(named)).toThrow(
