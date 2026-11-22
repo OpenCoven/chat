@@ -519,10 +519,12 @@ describe('production Familiars layout', () => {
     expect(container.querySelector('.coven-compact-composer')).toBeInTheDocument();
     expect(screen.getByRole('textbox')).toHaveAttribute('rows', '1');
     expect(screen.getByRole('button', { name: 'Attach file' })).toBeEnabled();
-    // A sent file keeps its name and size only, so its card has no preview.
-    const sent = screen.getByText('sent.md').closest('.coven-attachment-card');
-    expect(sent).toBeInTheDocument();
-    expect(sent).not.toHaveAttribute('data-preview');
+    fireEvent.click(screen.getByRole('button', { name: 'Preview sent.md' }));
+    const unavailable = screen.getByRole('dialog', { name: 'sent.md' });
+    expect(within(unavailable).getByRole('status')).toHaveTextContent(
+      'attach the original file again',
+    );
+    fireEvent.click(within(unavailable).getByRole('button', { name: 'Close preview' }));
     // A draft's card previews its text and opens it whole.
     const draft = screen.getByRole('button', { name: 'Preview notes.md' });
     expect(draft).toHaveTextContent('1 byte · 1 line');
@@ -531,6 +533,45 @@ describe('production Familiars layout', () => {
     expect(within(peek).getByRole('listitem')).toHaveTextContent('A');
     fireEvent.click(within(peek).getByRole('button', { name: 'Close preview' }));
     expect(screen.queryByRole('dialog', { name: 'notes.md' })).toBeNull();
+  });
+
+  it('opens each saved card using its original turn and attachment position, and reads again after closing', async () => {
+    const read = vi
+      .fn()
+      .mockResolvedValueOnce('first contents')
+      .mockResolvedValueOnce('second contents')
+      .mockRejectedValueOnce(new Error('missing'));
+    render(
+      <ChatLayout
+        {...layoutProps()}
+        readOnly
+        onReadAttachment={read}
+        messages={['first', 'second'].map((session) => ({
+          id: session,
+          role: 'user',
+          text: session,
+          attachments: [{ name: 'notes.txt', size: 12, source: { session, index: 1 } }],
+        }))}
+      />,
+    );
+    const cards = screen.getAllByRole('button', { name: 'Preview notes.txt' });
+    expect(cards).toHaveLength(2);
+    for (const [index, card] of cards.entries()) {
+      const contents = index === 0 ? 'first contents' : 'second contents';
+      fireEvent.click(card);
+      const dialog = screen.getByRole('dialog', { name: 'notes.txt' });
+      expect(await within(dialog).findByText(contents)).toBeInTheDocument();
+      expect(read).toHaveBeenLastCalledWith({
+        session: index === 0 ? 'first' : 'second',
+        index: 1,
+      });
+      fireEvent.click(within(dialog).getByRole('button', { name: 'Close preview' }));
+    }
+    const first = cards[0];
+    if (!first) throw new Error('The first attachment is missing');
+    fireEvent.click(first);
+    expect(await screen.findByText(/attach the original file again/)).toBeInTheDocument();
+    expect(screen.queryByText('first contents')).toBeNull();
   });
 
   it('keeps cancellation available while viewing an archived chat during a run', () => {

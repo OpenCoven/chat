@@ -436,9 +436,7 @@ files, each at most 64 KiB. Chat validates the selected bytes and passes them to
 file contents, not just filenames. You can send files with or without a message. The `coven-code`
 engine doesn't accept image or PDF input through this transport, so Chat rejects binary files.
 
-Unsent attachments stay in the current window. Failed or cancelled sends keep them available to
-retry or remove; successful sends keep filename and size metadata in history. Native staging is
-private and bounded to 64 MiB of retained files, and your originals are never modified.
+Unsent attachments stay in the current window. Failed or cancelled sends keep them available to retry or remove. After you send, click the file’s card in history or focus it and press Enter or Space to read Chat’s saved copy. This also works in archived chats. If the saved copy is unavailable, the preview explains how to attach the original again. Native staging is private and bounded to 64 MiB of retained files, and your originals are never modified.
 
 Sending clears the submitted text and attachment cards immediately, so you can compose the next
 message while the familiar responds. A failed or cancelled send restores its attachments, and

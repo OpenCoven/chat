@@ -3,7 +3,7 @@ use serde_json::{json, Value};
 use std::{
     collections::HashSet,
     fs::{self, OpenOptions},
-    io::Write,
+    io::{Read, Write},
     path::{Path, PathBuf},
 };
 
@@ -20,48 +20,47 @@ pub(crate) struct Attachment {
     pub bytes: Vec<u8>,
 }
 
+fn validate_name(name: &str) -> Result<(), String> {
+    let extension = name.rsplit('.').next().unwrap_or("").to_ascii_lowercase();
+    if name.is_empty()
+        || name.len() > 180
+        || name
+            .chars()
+            .any(|c| c.is_control() || matches!(c, '/' | '\\' | ':'))
+        || !matches!(
+            extension.as_str(),
+            "txt"
+                | "md"
+                | "csv"
+                | "json"
+                | "yaml"
+                | "yml"
+                | "xml"
+                | "html"
+                | "css"
+                | "js"
+                | "ts"
+                | "tsx"
+                | "jsx"
+                | "py"
+                | "rs"
+                | "go"
+                | "sh"
+                | "log"
+                | "toml"
+        )
+    {
+        return Err("Only named UTF-8 text/code attachments are supported; images and PDFs are not supported by this engine.".into());
+    }
+    Ok(())
+}
+
 pub(crate) fn validate(files: &[Attachment]) -> Result<(), String> {
     if files.len() > MAX_FILES {
         return Err("Attach at most 4 files per message.".into());
     }
     for file in files {
-        let extension = file
-            .name
-            .rsplit('.')
-            .next()
-            .unwrap_or("")
-            .to_ascii_lowercase();
-        if file.name.is_empty()
-            || file.name.len() > 180
-            || file
-                .name
-                .chars()
-                .any(|c| c.is_control() || matches!(c, '/' | '\\' | ':'))
-            || !matches!(
-                extension.as_str(),
-                "txt"
-                    | "md"
-                    | "csv"
-                    | "json"
-                    | "yaml"
-                    | "yml"
-                    | "xml"
-                    | "html"
-                    | "css"
-                    | "js"
-                    | "ts"
-                    | "tsx"
-                    | "jsx"
-                    | "py"
-                    | "rs"
-                    | "go"
-                    | "sh"
-                    | "log"
-                    | "toml"
-            )
-        {
-            return Err("Only named UTF-8 text/code attachments are supported; images and PDFs are not supported by this engine.".into());
-        }
+        validate_name(&file.name)?;
         if file.bytes.len() > MAX_FILE {
             return Err("Maximum attachment size is 64 KiB.".into());
         }
@@ -77,6 +76,69 @@ pub(crate) fn metadata(files: &[Attachment]) -> Vec<Value> {
         .iter()
         .map(|f| json!({"name": f.name, "size": f.bytes.len()}))
         .collect()
+}
+
+const UNAVAILABLE: &str = "Chat could not open this attachment’s saved copy.";
+
+pub(crate) fn read_retained(
+    data: &Path,
+    familiar: &str,
+    source: &str,
+    index: usize,
+) -> Result<String, String> {
+    super::validate_id(source)?;
+    let mut id = crate::chat_canonical::head(data, familiar)?.ok_or(UNAVAILABLE)?;
+    let lifecycle = crate::chat_lifecycle::load(data)?;
+    let mut seen = HashSet::new();
+    // Only follow the app-authored input at the start of each turn. Refuse
+    // deleted ancestors even if cleanup left a transcript or staged file.
+    let input = loop {
+        if !seen.insert(id.clone())
+            || lifecycle.get(&id) == Some(&crate::chat_lifecycle::Lifecycle::Deleted)
+        {
+            return Err(UNAVAILABLE.into());
+        }
+        let input = crate::chat_origin::captured_input(data, &id)?.ok_or(UNAVAILABLE)?;
+        if id == source {
+            break input;
+        }
+        id = input["parent_session_id"]
+            .as_str()
+            .ok_or(UNAVAILABLE)?
+            .to_owned();
+    };
+    let run = input["attachment_run_id"].as_str().ok_or(UNAVAILABLE)?;
+    super::validate_id(run)?;
+    let metadata = input["attachments"]
+        .as_array()
+        .filter(|files| files.len() <= MAX_FILES)
+        .and_then(|files| files.get(index))
+        .ok_or(UNAVAILABLE)?;
+    let name = metadata["name"].as_str().ok_or(UNAVAILABLE)?;
+    validate_name(name)?;
+    let expected = metadata["size"]
+        .as_u64()
+        .filter(|n| *n <= MAX_FILE as u64)
+        .ok_or(UNAVAILABLE)?;
+    let root = data.join("coven-attachments");
+    let dir = root.join(run);
+    for directory in [&root, &dir] {
+        if !fs::symlink_metadata(directory).is_ok_and(|m| m.is_dir()) {
+            return Err(UNAVAILABLE.into());
+        }
+    }
+    let path = dir.join(format!("{index}-{name}"));
+    if !fs::symlink_metadata(&path).is_ok_and(|m| m.is_file() && m.len() == expected) {
+        return Err(UNAVAILABLE.into());
+    }
+    let mut text = String::new();
+    fs::File::open(path)
+        .and_then(|f| f.take(expected + 1).read_to_string(&mut text))
+        .map_err(|_| UNAVAILABLE)?;
+    if text.len() as u64 != expected || text.contains('\0') {
+        return Err(UNAVAILABLE.into());
+    }
+    Ok(text)
 }
 
 fn stored_bytes(root: &Path) -> Result<u64, String> {
@@ -234,6 +296,67 @@ mod tests {
             name: name.into(),
             bytes: bytes.to_vec(),
         }
+    }
+
+    #[test]
+    fn retained_slot_belongs_to_visible_turn_and_uses_only_the_staged_copy() {
+        let data = std::env::temp_dir().join(format!("retained-{}", uuid::Uuid::new_v4()));
+        let transcripts = super::super::transcripts_dir(&data, true).unwrap();
+        let make_turn = |familiar: &str,
+                         id: &str,
+                         parent: Option<&str>,
+                         run: &str,
+                         files: &[Attachment]| {
+            if !files.is_empty() {
+                stage(&data, run, "inspect", files).unwrap();
+            }
+            let input = json!({"type":"user","source":"chat-input","session_id":id,"parent_session_id":parent,"attachment_run_id":run,"attachments":metadata(files)});
+            fs::write(
+                transcripts.join(format!("{id}.jsonl")),
+                format!("{input}\n"),
+            )
+            .unwrap();
+            crate::chat_canonical::advance(&data, familiar, parent, id).unwrap();
+        };
+        make_turn(
+            "one",
+            "old",
+            None,
+            "run-one",
+            &[file("notes.txt", b"A"), file("notes.txt", b"B")],
+        );
+        make_turn("one", "new", Some("old"), "unused", &[]);
+        make_turn("two", "other", None, "run-two", &[file("notes.txt", b"C")]);
+        let read = |familiar, source, slot| read_retained(&data, familiar, source, slot);
+        assert_eq!(read("one", "old", 1).unwrap(), "B");
+        assert_eq!(read("two", "other", 0).unwrap(), "C");
+        assert!(read("two", "old", 0).is_err());
+        assert!(read("one", "old", 2).is_err());
+        for state in [
+            crate::chat_lifecycle::Lifecycle::Archived,
+            crate::chat_lifecycle::Lifecycle::Active,
+        ] {
+            crate::chat_lifecycle::change(&data, "new", state).unwrap();
+            assert_eq!(read("one", "old", 0).unwrap(), "A");
+        }
+        let old_input = transcripts.join("old.jsonl");
+        let saved = fs::read_to_string(&old_input).unwrap();
+        let mut legacy: Value = serde_json::from_str(&saved).unwrap();
+        legacy.as_object_mut().unwrap().remove("attachment_run_id");
+        fs::write(&old_input, legacy.to_string()).unwrap();
+        assert!(
+            read("one", "old", 0).is_err(),
+            "an unrecorded folder cannot be guessed"
+        );
+        fs::write(&old_input, saved).unwrap();
+        fs::remove_file(data.join("coven-attachments/run-one/0-notes.txt")).unwrap();
+        assert!(read("one", "old", 0).is_err());
+        assert_eq!(read("one", "old", 1).unwrap(), "B");
+        crate::chat_lifecycle::change(&data, "new", crate::chat_lifecycle::Lifecycle::Deleted)
+            .unwrap();
+        assert!(read("one", "old", 1).is_err());
+        assert_eq!(read("two", "other", 0).unwrap(), "C");
+        fs::remove_dir_all(data).unwrap();
     }
 
     #[test]
