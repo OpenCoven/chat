@@ -167,7 +167,8 @@ PREVIOUS=v0.1.1   # the release before it
      `src/phase1-conformance-lock.test.ts`, and adds a `## $VERSION package-version authority`
      entry to `docs/phase1-conformance.md`. **The repin PR** in `docs/phase1-conformance.md`
      has the rules, and #596 (v0.1.1) is a complete example. Merge it with a merge commit
-     too.
+     too. `node scripts/repin-conformance-lock.mjs <prep-merge-commit>` makes the lock and
+     test changes for you; write the `docs/phase1-conformance.md` entry yourself.
    - The repin PR's merge commit is the commit you tag. **Web checks** on it must pass, which
      includes **Phase 1 authority is current**. `main` cancels a push run when a newer push
      arrives, so a cancelled run is common. Only **Web checks** on this commit matters, and

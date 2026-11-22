@@ -2170,6 +2170,10 @@ Landing a change to a governed file therefore takes two pull requests:
    pin tables belong in the content PR; editing a governed workflow during
    the repin would create fresh drift. Digests and the revision move together,
    against a commit that already exists, so there is no ordering to get wrong.
+   `node scripts/repin-conformance-lock.mjs <merge-commit>`, run on the repin
+   branch, rewrites the lock and the test's literal copy from that commit and
+   refuses one that isn't a merge on the branch's first-parent history. It
+   reproduces #657 byte for byte. The prose record is still yours to write.
 
 Because only the repin PR writes the lock, and it runs serially on `main`,
 two content branches can no longer conflict over it.
