@@ -38,6 +38,18 @@ daemon. Only the desktop app spawns your installed Coven CLI (see
 `src-tauri/src/coven_runtime.rs`), so verify anything about runs, sessions, or
 attachments in `pnpm app:dev`.
 
+### Verify a runtime change against the published installer pin
+
+On macOS, from the checkout you want to test, run the following after installing the development dependencies above. Use a logged-in desktop with Xcode command-line tools, Accessibility and input permissions for the terminal, and network access to GitHub release assets. Give the test window keyboard focus while it runs.
+
+```bash
+node scripts/native-acceptance/installer-pin.mjs
+```
+
+The command builds a separately identified desktop app, verifies the published CLI archive against this checkout’s installer digest, and asks Chat’s setup screen to install the engine in a disposable home. It sends a default familiar message to the loopback fixture and checks the running CLI and engine paths while the reply is streaming. A pass requires the completed reply in the transcript after the composer becomes idle. Use this alongside candidate-runtime tests when changing the Chat-to-Coven contract.
+
+Each invocation prints its directory under `.artifacts/installer-pin/`. Inspect `result.json` for versions, process paths, outcome and request count, `last-tree.txt` for the window state, and `app.log` and `requests.jsonl` for host and fixture evidence. A capability rejection before dispatch leaves the model request count at zero. To compare an older Chat revision, run the same script by absolute path from that revision’s clean checkout after installing its dependencies.
+
 ## Branching and pull requests
 
 `main` is the integration branch; release tags are cut only from `main`. Base

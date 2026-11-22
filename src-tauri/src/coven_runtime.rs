@@ -2238,14 +2238,14 @@ fn send_turn(
     }
     // A person who sends a message has moved on from whatever was waiting, even
     // if this turn never gets as far as the engine. An allowed turn has already
-    // answered its own request. A log that can't be written can't spend a request
-    // either, so that failure leaves nothing to allow and needn't stop the message.
+    // answered its own request. While familiars can ask, a send the log can't
+    // record doesn't go ahead (#573); see `supersede_before_send`.
     if input.grant.is_none() {
-        let _ = crate::chat_approvals::supersede(
+        crate::chat_approvals::supersede_before_send(
             data,
             &selected_familiar,
             crate::chat_approvals::now_ms(),
-        );
+        )?;
     }
     let (harness, workspace, resumed) = if let Some(id) = &input.session_id {
         let session = get_session(id)?;
@@ -4293,6 +4293,71 @@ mod tests {
         );
         assert_eq!(turn_text("Read this", true, None), "Read this");
         assert_eq!(turn_text("Hi", false, Some("replayed")), "replayed");
+    }
+
+    /// While asking is on, a send whose supersede the log can't record must
+    /// stop here, before anything runs, and leave the request to its person (#573).
+    #[test]
+    fn a_send_the_permission_log_cannot_record_stops_while_asking() {
+        let data = std::env::temp_dir().join(uuid::Uuid::new_v4().to_string());
+        let transcripts = data.join("coven-transcripts");
+        std::fs::create_dir_all(&transcripts).unwrap();
+        std::fs::write(
+            transcripts.join("owned.jsonl"),
+            json!({"type":"user","source":"chat-input","session_id":"owned"}).to_string(),
+        )
+        .unwrap();
+        crate::chat_canonical::advance(&data, "f", None, "owned").unwrap();
+        let request = crate::chat_approvals::submit(
+            &data,
+            "f",
+            "owned",
+            "run-1",
+            crate::chat_approvals::Proposal {
+                summary: "Create probe.txt".into(),
+                reason: None,
+            },
+            crate::chat_approvals::now_ms(),
+        )
+        .unwrap();
+        // The log's lock can't be opened, so the supersede can't be recorded.
+        let lock = data.join("permission-log.lock");
+        let _ = std::fs::remove_file(&lock);
+        std::fs::create_dir(&lock).unwrap();
+        crate::chat_approvals::send_as_if_asking_on_this_thread(true);
+        let cancel = AtomicBool::new(false);
+        let mut no_events = |_| panic!("A send the log can't record must not run");
+        let error = send_local(
+            &data,
+            SendInput {
+                run_id: "after-the-request".into(),
+                prompt: "Actually, don't".into(),
+                session_id: Some("owned".into()),
+                familiar_id: Some("f".into()),
+                harness: None,
+                model: None,
+                think: false,
+                speed: None,
+                attachments: vec![],
+                grant: None,
+            },
+            &cancel,
+            &mut no_events,
+        );
+        crate::chat_approvals::send_as_if_asking_on_this_thread(false);
+        std::fs::remove_dir(&lock).unwrap();
+        let open =
+            crate::chat_approvals::pending_behind_switch(&data, crate::chat_approvals::now_ms())
+                .unwrap();
+        std::fs::remove_dir_all(&data).unwrap();
+        assert_eq!(
+            error.err().as_deref(),
+            Some(crate::chat_approvals::SEND_UNRECORDED)
+        );
+        assert!(
+            open.iter().any(|approval| approval.id == request.id),
+            "nothing was sent, so the request is still the person's to answer"
+        );
     }
 
     /// A person who sent a message has moved on, whether or not the message
