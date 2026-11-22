@@ -172,7 +172,7 @@ jobs:
           curl --proto '=https' --tlsv1.2 --fail --location --retry 3 -o SHA256SUMS "$base/SHA256SUMS"
           asset="$(node "$GITHUB_WORKSPACE/scripts/release-installer.mjs" SHA256SUMS "$version" "$suffix")"
           curl --proto '=https' --tlsv1.2 --fail --location --retry 3 -o "$asset" "$base/$asset"
-          grep -F "  ${asset}" SHA256SUMS | sha256sum -c -
+          awk -v name="$asset" '$2 == name' SHA256SUMS | sha256sum -c -
       - name: Install the package
         id: install
         shell: bash
@@ -288,7 +288,7 @@ jobs:
           curl --proto '=https' --tlsv1.2 --fail --location --retry 3 -o SHA256SUMS "$base/SHA256SUMS"
           asset="$(node "$GITHUB_WORKSPACE/scripts/release-installer.mjs" SHA256SUMS "$version" "$suffix")"
           curl --proto '=https' --tlsv1.2 --fail --location --retry 3 -o "$asset" "$base/$asset"
-          grep -F "  ${asset}" SHA256SUMS | sha256sum -c -
+          awk -v name="$asset" '$2 == name' SHA256SUMS | sha256sum -c -
       - name: Install tauri-driver
         shell: bash
         run: cargo install tauri-driver --locked --version "${TAURI_DRIVER_VERSION}"

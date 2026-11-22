@@ -45,6 +45,18 @@ describe('verify-package', () => {
     },
   );
 
+  it.each(['conflicts', 'replaces', 'provides'])(
+    'requires the published v0.1.1 name in %s',
+    (field) => {
+      const input = mutated(({ conf }) => {
+        conf.bundle.linux.deb[field] = ['opencoven-chat'];
+      });
+      expect(verifyPackage(input).failures).toContain(
+        `Keep the legacy Debian install identity: ${field} must include open-coven-chat.`,
+      );
+    },
+  );
+
   it('passes the package as declared', () => {
     expect(verifyPackage(actual()).failures).toEqual([]);
   });
