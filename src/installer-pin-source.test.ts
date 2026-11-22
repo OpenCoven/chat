@@ -46,12 +46,14 @@ test('the script downloads the archive the parser names for this Mac', () => {
   expect(script).not.toMatch(/COVEN_VERSION|\[0-9a-f\]\{64\}/);
 });
 
+const escapeRegExp = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
 test('a reformatted release table fails loudly instead of returning part of the pin', () => {
   const { version, macos } = installerPin(source);
   // Struct fields instead of positional arguments: the digest no longer follows the name.
   // Matched across any whitespace, so a reindent of the table doesn't break this case.
   const named = source.replace(
-    new RegExp(`"${macos.x64.asset.replace(/[.]/g, '\\.')}",(\\s+)"${macos.x64.sha256}",`),
+    new RegExp(`"${escapeRegExp(macos.x64.asset)}",(\\s+)"${escapeRegExp(macos.x64.sha256)}",`),
     `asset: "${macos.x64.asset}",$1sha256: "${macos.x64.sha256}",`,
   );
   expect(named).not.toBe(source);
