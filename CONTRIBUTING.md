@@ -50,6 +50,19 @@ The command builds a separately identified desktop app, verifies the published C
 
 Each invocation prints its directory under `.artifacts/installer-pin/`. Inspect `result.json` for versions, process paths, outcome and request count, `last-tree.txt` for the window state, and `app.log` and `requests.jsonl` for host and fixture evidence. A capability rejection before dispatch leaves the model request count at zero. To compare an older Chat revision, run the same script by absolute path from that revision’s clean checkout after installing its dependencies.
 
+### Verify retained attachments on packaged Linux
+
+Run the two phases on a disposable Linux desktop with X11, AT-SPI, xdotool, and the repository’s Node version. Use an installed v0.1.2 binary for the first phase and upgrade the package before the second. Supply the absolute paths to the Coven CLI and engine that Chat should use. Each phase uses a private Chat home under the same test directory and an HTTP model fixture on loopback.
+
+```sh
+qa=$(mktemp -d)
+node scripts/native-acceptance/retained-attachments.mjs seed "$published_chat" "$qa" "$coven_cli" "$coven_engine"
+# Upgrade the package in the disposable environment.
+node scripts/native-acceptance/retained-attachments.mjs verify "$candidate_chat" "$qa" "$coven_cli" "$coven_engine"
+```
+
+The first phase sends two different files named `report.txt` through the file picker in separate conversations. The second opens both saved cards, restarts Chat, exercises archive and restore, then removes one staged copy from the test profile and checks the recovery message. The focused native storage test also covers deletion of an entire chat. Run it with `cargo test --manifest-path src-tauri/Cargo.toml --lib retained_slot_belongs`.
+
 ## Branching and pull requests
 
 `main` is the integration branch; release tags are cut only from `main`. Base
