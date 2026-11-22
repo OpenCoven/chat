@@ -56,12 +56,24 @@ describe('ci-full-check', () => {
     const named = new Set<string>();
     for (const id of ciFullJobs) {
       const body = jobs.get(id) ?? '';
+      for (const match of body.matchAll(/node-version-file:\s*['"]?([.\w/-]+)/gu)) {
+        if (match[1]) named.add(match[1]);
+      }
       for (const match of body.matchAll(
-        /(?:^|[\s'"=.(/])((?:scripts|src-tauri|src|\.github\/workflows)\/[A-Za-z0-9_./-]*[A-Za-z0-9_])/gmu,
+        /(?:^|[\s'"=.(/])((?:tools|scripts|src-tauri|src|\.github\/workflows)\/[A-Za-z0-9_./-]*[A-Za-z0-9_])/gmu,
       )) {
         if (match[1]) named.add(match[1]);
       }
     }
+    expect(named).toContain('tools/phase1-process-supervisor');
+    expect(named).toContain('.node-version');
+    for (const path of ['vite.config.ts', 'src/test/setup.ts']) {
+      expect(checkCiFull([path], []).status).toBe(1);
+    }
+    expect(checkCiFull(['vitest.heavy.config.ts', 'rust-toolchain.toml'], []).message).toContain(
+      'rust-toolchain.toml',
+    );
+    expect(checkCiFull(['vitest.heavy.config.ts'], []).status).toBe(1);
     expect(named.size).toBeGreaterThan(5);
     const flagged = new Set(pathsNeedingCiFull([...named], governed).map(({ path }) => path));
     expect([...named].filter((path) => !flagged.has(path))).toEqual([]);
