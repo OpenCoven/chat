@@ -88,17 +88,18 @@ gh api -X POST repos/OpenCoven/chat/actions/runs/<run-id>/rerun-failed-jobs
 - Chromium drops focus as soon as a field is disabled; WebKit does it later. Focus logic that
   passes in one engine can fail in the other.
 
-## Local checks that fail without your change (verified 2026-11-12)
+## Local checks that skip or fail without your change (verified 2026-11-20)
 
 Compare against an unchanged worktree before chasing any of these as a regression:
 
-- **`src/client-v1-conformance-workflow.test.ts`** fails with `spawnSync pwsh ENOENT` on a machine
-  without PowerShell. CI has it.
-- **`test:unit` stops early.** It runs the normal suite `&&` the heavy suite, so the failures above
-  stop it before the heavy half. Run
-  `corepack pnpm@10.34.0 --ignore-workspace test:unit:heavy` on its own.
-- **`src/phase1-conformance.test.ts`** (heavy) needs the exact Node version in `.node-version`
-  and `rustup` on `PATH`. A newer Node or a toolchain without rustup fails it.
+- **Tests that need CI's tools skip locally, with the reason printed.** Without PowerShell (`pwsh`),
+  the tests in `src/client-v1-conformance-workflow.test.ts` that run the workflow's PowerShell
+  skip. In `src/phase1-conformance.test.ts` (heavy), the tests that need the exact Node in
+  `.node-version` or `rustup` on `PATH` skip. The reason is a `stderr` line at the top of that
+  file's output; Vitest's agent reporter hides it, so pass `--reporter=default` to see it. Under
+  `CI=true` nothing skips, and a missing tool fails as before.
+- **`test:unit` runs both halves** (`scripts/test-unit.mjs`): the normal suite, then the heavy one,
+  even if the normal one failed. It exits non-zero if either failed.
 - **Playwright WebKit** skips buttons on Tab (Safari's default keyboard setting), so the cross-browser suite uses Option+Tab in WebKit. Its clipboard permissions and RTL Range geometry checks remain Chromium-only, with explicit WebKit skips. The e2e suite runs Chromium and WebKit, and rendered captures provide the text-position check.
 - `e2e/design-review/` is a capture harness for rendered design checks. Run it with
   `--config e2e/design-review/playwright.config.ts`.
