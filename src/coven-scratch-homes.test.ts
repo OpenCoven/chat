@@ -263,8 +263,16 @@ describe('coven-scratch-homes', () => {
       test(
         'Ctrl-C stops a shell loop that calls the wrapper',
         async () => {
-          const loop = `for i in 1 2 3; do "$NODE" "$SCRIPT" -- "$NODE" -e "$CODE"; echo "iteration $i done"; done`;
-          const run = start(['/bin/bash', '-c', loop], {
+          // The loop is a script file rather than `bash -c`, and every path
+          // reaches it as an environment variable, so no command line is
+          // built from a path.
+          const loop = join(realHome, 'loop.sh');
+          writeFileSync(
+            loop,
+            '#!/bin/bash\nfor i in 1 2 3; do "$NODE" "$SCRIPT" -- "$NODE" -e "$CODE"; echo "iteration $i done"; done\n',
+            { mode: 0o755 },
+          );
+          const run = start([loop], {
             NODE: process.execPath,
             SCRIPT: script,
             CODE: `process.on('SIGINT', () => setTimeout(() => process.exit(0), 200));
