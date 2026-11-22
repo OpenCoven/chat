@@ -852,7 +852,11 @@ fn supersede_before_send_while(
     }
 }
 
-/// A new turn replaces whatever the familiar was still waiting on.
+/// A new turn replaces whatever the familiar was still waiting on. Every
+/// unanswered request is closed, whatever its age: one that looks expired now
+/// would open again if the clock were put back (#693), and closing a request
+/// that has already expired, or one dated ahead of the clock, is harmless.
+/// A superseded request counts as answered, so each is closed once.
 pub(crate) fn supersede(data: &Path, familiar: &str, now: u64) -> Result<(), String> {
     let _log = lock(data)?;
     let entries = read_file(&data.join(LOG_FILE))?;
@@ -861,7 +865,6 @@ pub(crate) fn supersede(data: &Path, familiar: &str, now: u64) -> Result<(), Str
         .filter(|entry| {
             entry.event == "requested"
                 && entry.familiar_id == familiar
-                && now < entry.at.saturating_add(REQUEST_TTL_MS)
                 && !entries.iter().any(|answer| {
                     answer.approval_id == entry.approval_id && is_answer(&answer.event)
                 })
@@ -1209,6 +1212,28 @@ mod tests {
         assert!(allow(&data.0, &request.id, Device::Desktop, "run-2", corrected).is_err());
         // Ordinary clock adjustment doesn't lose a request someone is reading.
         assert_eq!(pending(&data.0, made - 1_000).unwrap().len(), 1);
+    }
+
+    /// A send closes the request whatever the clock said, so correcting the
+    /// clock afterwards can't bring it back (#693).
+    #[test]
+    fn a_send_after_a_forward_clock_jump_still_closes_the_request() {
+        let data = Data::new();
+        data.head("astra", "session-1");
+        let request = submit(&data.0, "astra", "session-1", "run-1", proposal(), 1_000).unwrap();
+        // The clock jumps forward past the request's hour, and the person sends.
+        supersede(&data.0, "astra", 1_000 + 2 * REQUEST_TTL_MS).unwrap();
+        // The clock is put right again.
+        let corrected = 2_000;
+        assert!(pending(&data.0, corrected).unwrap().is_empty());
+        assert_eq!(
+            allow(&data.0, &request.id, Device::Desktop, "run-2", corrected).unwrap_err(),
+            "This request was already answered."
+        );
+        // Closed once: another send writes nothing more for it.
+        let before = recent(&data.0, 10).unwrap().len();
+        supersede(&data.0, "astra", corrected).unwrap();
+        assert_eq!(recent(&data.0, 10).unwrap().len(), before);
     }
 
     #[test]
