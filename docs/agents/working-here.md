@@ -171,9 +171,16 @@ node scripts/coven-scratch-homes.mjs --keep -- <command> [args...]   # keep the 
 It runs the command with scratch `HOME`, `COVEN_HOME`, `COVEN_CODE_HOME` and XDG folders in a new
 folder under the system temp directory (`/var/folders` on macOS, short enough for a daemon
 socket), and prints where they are. It records the real `~/.coven/engine/current` and the names
-in `~/.coven/engine` before and after. If either changed, it prints both and exits 3, and you
-must put them back before anything starts that engine. Otherwise it exits with the command's
-status and removes the scratch folder.
+in `~/.coven/engine` (ignoring dotfiles such as `.DS_Store`) before and after. If either changed,
+it prints both and exits 3, and you must put them back before anything starts that engine.
+Otherwise it exits with the command's status and removes the scratch folder. Ctrl-C and SIGTERM
+during the command don't skip that check: the helper waits for the command to stop, checks,
+cleans up, prints what it found, and then ends by that signal rather than exiting 3 or with the
+command's status, so a calling script stops too. It doesn't pass the signal on, because Ctrl-C
+and `timeout` signal the whole process group and so already reach the command. A
+`kill <helper pid>` on its own therefore leaves the command running until it exits. If the
+command doesn't stop, press Ctrl-C again: the helper stops its direct child (not anything that
+child started) with SIGKILL and still checks and cleans up. A repeated SIGTERM never does that.
 
 It doesn't change `PATH`, so a `coven-code` installed globally (with npm, for example) is still
 found: `coven engine status --json` then reports `"source": "PATH"`. To test the managed engine,
