@@ -144,8 +144,8 @@ describe('release smoke test', () => {
   });
 
   it('reports the Windows installers as unsigned unless the build job signed them', () => {
-    // Windows ships unsigned by decision (#411), so the default is the truth
-    // and `signed` has to be stated by the publish job from the build job's
+    // Releases through v0.1.3 shipped Windows unsigned (#411), so `signed`
+    // is never assumed: the publish job has to state it from the build job's
     // output. An allow_unsigned rehearsal is unsigned whatever it claims.
     expect(smoke(release()).signing.windows).toMatchObject({ state: 'unsigned' });
     expect(smoke(release(), { windowsSigning: 'unsigned' }).signing.windows.reason).toContain(

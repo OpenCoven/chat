@@ -19,7 +19,7 @@ jobs:
       - name: Retrieve the single approved input and verify its digest
         shell: bash
         env:
-          DOWNLOAD: ${{ secrets.HOST_NOTARY_DOWNLOAD_011 }}
+          DOWNLOAD: ${{ secrets.HOST_NOTARY_DOWNLOAD_012 }}
         run: |
           set -euo pipefail
           umask 077
@@ -29,7 +29,7 @@ jobs:
           esac
           curl --fail --silent --proto '=https' --output "$RUNNER_TEMP/host.zip" --url "$DOWNLOAD"
           cd "$RUNNER_TEMP"
-          printf '%s  %s\n' 'c72e7cb19ffdf1a7b4e73d7b65407e64e147643ebf4da913944618e914f3c762' host.zip | shasum -a 256 -c -
+          printf '%s  %s\n' 'e5af1d815a2a48b86b81b4055edba2b2e6ca23ea8adc6e3f303ed4dd7fa3d282' host.zip | shasum -a 256 -c -
       - name: Submit verified bytes to Apple
         shell: bash
         env:
