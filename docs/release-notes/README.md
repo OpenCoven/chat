@@ -15,6 +15,7 @@ Newest first. Every release so far is a pre-release, because the major version i
 
 | Release | Published | What changed | Verification record |
 | --- | --- | --- | --- |
+| [v0.1.4](v0.1.4.md) | TODO (publication date) | Signed Windows installers; TODO (chat-b1: Coven 0.5.1 and run budgets) | TODO (record) |
 | [v0.1.3](v0.1.3.md) | 2026-11-22 | Updates itself; full access for chats signed in with a Claude subscription (Coven engine 0.9.1) | [2026-11-22](../verification/2026-11-22-release-v0.1.3.md) |
 | [v0.1.2](v0.1.2.md) | 2026-11-14 | Coven Chat branding; functional, scrollable Settings; composer and saved-chat fixes; Windows clears old autofill entries | [2026-11-14](../verification/2026-11-14-release-v0.1.2.md) |
 | [v0.1.1](v0.1.1.md) | 2026-11-11 | Aligns the released source with its conformance authority; carries v0.1.0's full-access chats | none |
