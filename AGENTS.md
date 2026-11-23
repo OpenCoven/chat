@@ -67,8 +67,10 @@ there, not here. `CLAUDE.md` lists the other sibling checkouts that share this v
   you last looked, and older issues and plans name versions that have since been renumbered.
   Check before acting on any version number.
 - **Dated snapshots, not plans:** `docs/project-coordination.md` (an inventory of worktrees, PRs
-  and issue gates taken on 2026-11-12) and `docs/roadmap.md` (a conformance log from September
-  2026). Refresh what they say before acting on it.
+  and issue gates taken on 2026-11-20) and `docs/archive/2026-09-conformance-log.md` (a
+  conformance log from September 2026). Refresh what they say before acting on it.
+- **The plan:** `docs/roadmap.md` lists the next release's chain and what each open issue waits
+  on. Issue State blocks are newer, so they win when the two disagree.
 - **What each doc is for:** `docs/README.md` sorts every page in `docs/` into current reference
   and dated history. `docs/superpowers/README.md` does the same for the old plans and specs.
   Don't follow a plan as a work order unless its status says current.
