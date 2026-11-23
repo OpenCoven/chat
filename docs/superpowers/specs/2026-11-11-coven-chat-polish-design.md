@@ -1,5 +1,10 @@
 # Coven Chat desktop refinement
 
+> **Status (2026-11-23):** Delivered. Implemented in `0be8482d` (2026-11-12), merged to `main` by
+> PR #614 (`b06aae75`), and shipped in v0.1.2. The delivery record is
+> [`docs/design-audits/2026-11-11-coven-chat-polish.md`](../../design-audits/2026-11-11-coven-chat-polish.md).
+> Historical record; do not execute.
+
 The user authorized implementation using the agent's judgment. Rename the desktop product to Coven Chat and refine its existing interface into a quiet, minimal desktop application. Keep the familiar list, conversation, composer, inspector, and Settings structure.
 
 Use a coherent thin-stroke icon set, flat surfaces, restrained borders, generous click targets, clear hover and focus states, and a single strong primary action. Retain the approved crown path and outlined speech bubble; refine the desktop icon's outline and regenerate desktop exports. Preserve light and dark appearances, reduced motion, readable assistant text, Send/Stop behavior, keyboard access, and the app identifier `ai.opencoven.chat`.

@@ -2,7 +2,8 @@
 
 > **Status (2026-10-18):** Paused. Tasks 1-3 landed in #322 (2026-09-18), leaving the WorkOS keyring
 > record unused; first-run setup later shipped without WorkOS in #445, #448 and #455, so Tasks 10-19
-> would overwrite it. A decision on the WorkOS gate is pending. Historical record; do not execute.
+> would overwrite it. A decision on the WorkOS gate is pending, and no
+> open issue tracks it (checked 2026-11-23). Historical record; do not execute.
 
 **Goal:** Gate OpenCoven Chat behind a WorkOS AuthKit sign-in and replace the dead-end empty states with an assisted, auditable prerequisite setup, per `docs/superpowers/specs/2026-09-16-workos-onboarding-design.md`.
 

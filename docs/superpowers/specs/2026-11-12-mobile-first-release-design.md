@@ -1,5 +1,12 @@
 # Coven mobile experience upgrade
 
+> **Status (2026-11-23):** Current. Progress: milestone 1, native persistence, merged in #624
+> (2026-11-14). TestFlight 0.3.0 (1910) carries it, for internal testers only. The implementation
+> claim on #612 was released on 2026-11-14. The rest waits on coven#1744, an operator for the
+> relay and APNs, and a physical-iPhone check. v0.1.4 (#704) leaves the iPhone out of scope.
+> The "Owner: this Codex session" line and the worktree path below are stale; #612 says who
+> acts next.
+
 Status: approved by Val in this session on 2026-11-12, including the recommended Mac-hosted architecture and native persistence choices. Service operator/deployment/APNs provisioning remain release dependencies. This document is not a claim that the features below exist or that a mobile build has shipped.
 
 Owner: this Codex session. Baseline: Chat `f7649d94f5b077acdd8ab95876532b49e472ef5f`, inspected 2026-11-12. Worktree: `/Users/buns/.codex/worktrees/9d79/chat`, created by the task's managed worktree tool. The primary checkout contains unrelated changes and a runtime merge conflict and remains untouched.
