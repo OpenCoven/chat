@@ -21,6 +21,7 @@ to the history table.
 | [packaged-acceptance.md](packaged-acceptance.md) | The installed-app acceptance workflow and its rows |
 | [phase1-conformance.md](phase1-conformance.md) | The protected Phase 1 conformance lane and lock (long; read its status block first) |
 | [releasing.md](releasing.md) | How to cut, verify and roll back a release: the whole path from prep PR to verification record |
+| [v0.1.3 operator plan](verification/v0.1.3-operator-plan.md) | Hand-run the published installers, link review and updater check on each desktop |
 
 ## Dated snapshots and history
 
