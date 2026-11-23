@@ -139,6 +139,13 @@ describe('verify-package', () => {
       /repeats connect-src/,
     ],
     [
+      'a permissive directive in other letter case ahead of the strict one',
+      (i: Input) => {
+        i.conf.app.security.csp = `Connect-Src https://example.com; ${i.conf.app.security.csp}`;
+      },
+      /repeats connect-src/,
+    ],
+    [
       'a look-alike in place of the IPC origin',
       (i: Input) => {
         i.conf.app.security.csp = i.conf.app.security.csp.replace(

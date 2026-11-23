@@ -94,8 +94,11 @@ function directives(csp) {
   const map = new Map();
   const duplicates = [];
   for (const part of csp.split(';')) {
-    const [name, ...sources] = part.trim().split(/\s+/);
-    if (!name) continue;
+    const [rawName, ...sources] = part.trim().split(/\s+/);
+    if (!rawName) continue;
+    // Browsers read directive names without regard to case, so Connect-Src
+    // ahead of connect-src is the copy in force.
+    const name = rawName.toLowerCase();
     // A repeated directive is not replaced by the later one; the first stays
     // in force, so checking only one copy could pass a permissive policy.
     if (map.has(name)) duplicates.push(name);
