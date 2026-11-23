@@ -10,10 +10,15 @@
 > `CLIENT_V1_CONFORMANCE_VALIDATOR_REVISION` have both selected SDK
 > `67fd5d8af73283348782de185efe77f24af6e391` since 2026-09-26.
 >
-> The current harness is not yet re-validated. The lock has been repinned since that run,
-> most recently to harness authority `b293d5f6` on 2026-10-14, and the Windows supervisor
-> source changed on 2026-10-13 and 2026-10-14. No protected run has happened since
-> 2026-09-26.
+> **Update (2026-11-23):** The latest protected run,
+> [42558538262](https://github.com/OpenCoven/chat/actions/runs/42558538262) on 2026-11-09
+> (`main` at `f34022ac`), passed all eight jobs, after 42550212128 failed earlier that day.
+> It ran the current harness: every harness file in `phase1-conformance.lock.json`, the
+> workflows and the Windows supervisor C# (last changed 2026-10-14) are unchanged since.
+> The lock has been repinned since, most recently to harness revision `fecb22bb` on
+> 2026-11-18. Of the files it pins, only the Chat authority files `src-tauri/Cargo.toml`,
+> `src-tauri/Cargo.lock` and `src-tauri/src/lib.rs` have changed since that run. No
+> protected run has used the current lock.
 >
 > The sections from "Exact inputs" through "Non-cyclic SDK handoff" are the reference for
 > the current harness. The sections before and after them are a dated historical log.
