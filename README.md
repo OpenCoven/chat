@@ -268,7 +268,7 @@ Chat looks for updates in one place: the `updater` release on [GitHub](https://g
 Before the chat opens, Chat checks what it needs:
 
 - **Coven:** the Coven CLI is installed.
-- **Engine:** the Coven engine is installed and is version 0.9.1 or newer. An older engine, or one
+- **Engine:** the Coven engine is installed and is version 0.9.3 or newer. An older engine, or one
   whose version Chat can't read, counts as not ready.
 - **Sign-in:** a model provider is signed in, through the engine's own sign-in, a Claude
   subscription in Claude Code, or ChatGPT.
@@ -287,14 +287,15 @@ When everything is in place, you see no setup screen and the chat opens as usual
 
 **Install the engine:** Chat runs `coven engine install`, which downloads and verifies the engine
 itself, and shows its output as it goes. When the installed Coven would choose an engine older than
-0.9.1, Chat asks it for 0.9.1 by version, with a SHA-256 built into Chat that Coven checks the
+0.9.3, Chat asks it for 0.9.3 by version, with a SHA-256 built into Chat that Coven checks the
 download against.
 
 **Update the engine:** Coven keeps the engine it already has when Coven itself is updated, so a
-computer that had Coven before Chat can still be on an older engine. On an engine older than 0.9.1,
-a familiar that is signed in with Claude does not get the full access Chat asks for: it is refused
-shell loops, folders outside its workspace and most commands. Older engines also lack 0.9.1's
-security fixes. So no chat runs on an older engine: Chat opens on setup, which names the engine
+computer that had Coven before Chat can still be on an older engine. An engine older than 0.9.3
+can't take the model-round budget Chat sends with every Coven Code message, so Coven refuses the
+message. On an engine older than 0.9.1, a familiar that is signed in with Claude also doesn't get
+the full access Chat asks for: it is refused shell loops, folders outside its workspace and most
+commands, and those engines lack 0.9.1's security fixes. So no chat runs on an older engine: Chat opens on setup, which names the engine
 version it found and offers **Update the engine**. That runs the same install. Chat never replaces
 an engine that is already new enough. When the install finishes, Chat asks Coven again which engine
 it starts. If that is still an older one, the step fails and says which engine Coven starts.

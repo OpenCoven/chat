@@ -3484,14 +3484,15 @@ mod tests {
         let status = |version: &str, source: &str| json!({ "installed": true, "path": here, "pin": "0.9.0", "source": source, "version": version });
         let managed = "managed (~/.coven/engine)";
         assert_eq!(
-            engine_readiness(&status("0.9.1", managed)),
+            engine_readiness(&status("0.9.3", managed)),
             Ok((true, None))
         );
         assert_eq!(
             engine_readiness(&status("0.10.0", managed)),
             Ok((true, None))
         );
-        for version in ["0.9.0", "0.8.0", "unknown"] {
+        // 0.9.2 and 0.9.1 can't take a run budget, so they're too old too.
+        for version in ["0.9.2", "0.9.1", "0.9.0", "0.8.0", "unknown"] {
             let (installed, error) = engine_readiness(&status(version, managed)).unwrap();
             assert!(installed);
             let error = error.unwrap();

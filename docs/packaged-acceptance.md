@@ -61,7 +61,7 @@ The engine candidate keeps its default voice feature. Linux qualification stages
 
 Published-release runs start with an empty profile, and first-run setup is done through the window:
 **Install Coven** runs Chat's pinned installer (Coven 0.4.10, checked against its SHA-256),
-**Install the engine** runs `coven engine install` for engine 0.9.1, by version and checked
+**Install the engine** runs `coven engine install` for engine 0.9.3, by version and checked
 against its SHA-256, because Coven 0.4.10 alone would choose 0.8.0. **Create familiar** names the
 first familiar. Every reply in the suite comes from a real run: Chat starts the installed Coven CLI,
 which starts coven-code, and the reply streams back through Chat's own capture.
