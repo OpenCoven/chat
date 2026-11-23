@@ -86,12 +86,19 @@ const FORBIDDEN_PERMISSION =
   /^(shell|fs|filesystem|opener|http|https|network|process|os|dialog)(:|-)/;
 const FORBIDDEN_PLUGIN = /tauri-plugin-(shell|fs|http|opener|process)\b/;
 
+// The only sources connect-src may name: the page itself and the two IPC
+// origins Tauri uses to reach the host.
+const CONNECT_SOURCES = new Set(["'self'", 'ipc:', 'http://ipc.localhost']);
+
 function directives(csp) {
   const map = new Map();
   const duplicates = [];
   for (const part of csp.split(';')) {
-    const [name, ...sources] = part.trim().split(/\s+/);
-    if (!name) continue;
+    const [rawName, ...sources] = part.trim().split(/\s+/);
+    if (!rawName) continue;
+    // Browsers read directive names without regard to case, so Connect-Src
+    // ahead of connect-src is the copy in force.
+    const name = rawName.toLowerCase();
     // A repeated directive is not replaced by the later one; the first stays
     // in force, so checking only one copy could pass a permissive policy.
     if (map.has(name)) duplicates.push(name);
@@ -180,13 +187,17 @@ export function verifyPackage({ conf, capabilities, cargo, exists }) {
         fail(`CSP ${name} allows ${sources.join(' ')}.`);
     }
     const connect = policy.get('connect-src');
+    // Each source is compared whole, never as a substring, so a look-alike
+    // such as http://ipc.localhost.example.com is neither the IPC origin nor
+    // allowed.
+    const connectSources = new Set(connect ?? []);
     // Without it, default-src 'self' leaves the webview unable to reach the
     // host over IPC, so the built app could not run its own commands.
     if (!connect) fail('CSP must declare connect-src with the IPC origins.');
-    else if (!connect.includes('ipc:') || !connect.includes('http://ipc.localhost'))
+    else if (!connectSources.has('ipc:') || !connectSources.has('http://ipc.localhost'))
       fail('CSP connect-src must allow ipc: and http://ipc.localhost.');
-    for (const source of connect ?? [])
-      if (!["'self'", 'ipc:', 'http://ipc.localhost'].includes(source))
+    for (const source of connectSources)
+      if (!CONNECT_SOURCES.has(source))
         fail(
           `CSP connect-src allows ${source}; the webview reaches the network only through the host.`,
         );
