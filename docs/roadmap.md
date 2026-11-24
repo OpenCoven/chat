@@ -60,7 +60,8 @@ Out of v0.1.4: the iPhone, missions, asking for permission.
 
 ## Waiting on a decision from Val
 
-Each issue has a decision ask with options and a recommendation.
+Each issue here has a decision ask with options and a recommendation. The rows without an
+issue (alert 5, #716 and #575) say what is being decided.
 
 | Issue | The decision |
 | --- | --- |
@@ -87,7 +88,7 @@ These need someone at an installed app or a phone. Each issue has a current chec
 
 ## Open pull requests
 
-The PRs not named elsewhere on this page.
+Every open PR not listed above, plus #718, #707, #645 and #678, which the rows above name.
 
 | PR | Draft | For | Waiting on |
 | --- | --- | --- | --- |
