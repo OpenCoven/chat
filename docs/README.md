@@ -67,7 +67,7 @@ Dated design reviews and the records of design changes. Open design decisions li
 | [2026-11-11-coven-chat-polish.md](design-audits/2026-11-11-coven-chat-polish.md) | 2026-11-11 | The Coven Chat rename and desktop refinement, shipped in v0.1.2 |
 | [2026-11-10-unpublished-v0.0.10-draft.md](design-audits/2026-11-10-unpublished-v0.0.10-draft.md) | 2026-11-10 | A v0.0.10 notes draft, never published (renumbered to v0.1.0) |
 | [2026-11-05-rendered-pass.md](design-audits/2026-11-05-rendered-pass.md) | 2026-11-05 | Rendered measurements for the 2026-10-24 audit's findings 2, 4 and 5 (#541) |
-| [2026-10-24-lucian-chat-design-language-audit.md](design-audits/2026-10-24-lucian-chat-design-language-audit.md) | 2026-10-24 | The design language audit: five findings, tracked on #533 |
+| [2026-10-24-lucian-chat-design-language-audit.md](design-audits/2026-10-24-lucian-chat-design-language-audit.md) | 2026-10-24 | The design language audit: five findings; 1 and 3 delivered in #534, the rest on #533 |
 
 ## Folders
 

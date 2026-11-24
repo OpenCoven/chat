@@ -70,7 +70,8 @@ there, not here. `CLAUDE.md` lists the other sibling checkouts that share this v
   and issue gates taken on 2026-11-12) and `docs/roadmap.md` (a conformance log from September
   2026). Refresh what they say before acting on it.
 - **What each doc is for:** `docs/README.md` sorts every page in `docs/` into current reference
-  and dated history. `docs/superpowers/README.md` does the same for its plans and specs, old and current.
+  and dated history, and lists each verification record and design audit.
+  `docs/superpowers/README.md` does the same for its plans and specs, old and current.
   Don't follow a plan as a work order unless its status says current.
 
 ## Working alongside other agents
