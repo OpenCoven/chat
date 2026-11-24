@@ -18,7 +18,7 @@
 > The lock has been repinned since, most recently to harness revision `fecb22bb` on
 > 2026-11-18. Of the harness files and production deltas it pins, only three production
 > deltas, `src-tauri/Cargo.toml`, `src-tauri/Cargo.lock` and `src-tauri/src/lib.rs`, have
-> changed since that run. No protected run has used the current lock. Minutes before
+> changed since that run. No protected run has used the current lock. Seconds before
 > 42558538262 started, both scopes of `CLIENT_V1_CONFORMANCE_VALIDATOR_REVISION` were moved
 > to SDK `6e816c59d3a288b04362ae40cac7f98279768f7e`, and they still select it.
 >
