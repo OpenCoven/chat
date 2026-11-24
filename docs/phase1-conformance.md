@@ -13,14 +13,14 @@
 > **Update (2026-11-23):** The latest protected run,
 > [42558538262](https://github.com/OpenCoven/chat/actions/runs/42558538262) on 2026-11-09
 > (`main` at `f34022ac`), passed all eight jobs, after 42550212128 failed earlier that day.
-> Just before that run, both scopes of `CLIENT_V1_CONFORMANCE_VALIDATOR_REVISION` were moved
-> to SDK `6e816c59d3a288b04362ae40cac7f98279768f7e` (2026-11-09), and they still select it.
-> It ran the current harness: every harness file in `phase1-conformance.lock.json`, the
+> 42558538262 ran the current harness: every harness file in `phase1-conformance.lock.json`, the
 > workflows and the Windows supervisor C# (last changed 2026-10-14) are unchanged since.
 > The lock has been repinned since, most recently to harness revision `fecb22bb` on
 > 2026-11-18. Of the harness files and production deltas it pins, only three production
 > deltas, `src-tauri/Cargo.toml`, `src-tauri/Cargo.lock` and `src-tauri/src/lib.rs`, have
-> changed since that run. No protected run has used the current lock.
+> changed since that run. No protected run has used the current lock. Minutes before
+> 42558538262 started, both scopes of `CLIENT_V1_CONFORMANCE_VALIDATOR_REVISION` were moved
+> to SDK `6e816c59d3a288b04362ae40cac7f98279768f7e`, and they still select it.
 >
 > The sections from "Exact inputs" through "Non-cyclic SDK handoff" are the reference for
 > the current harness. The sections before and after them are a dated historical log.
