@@ -18,7 +18,7 @@ The published **[v0.1.3 prerelease](https://github.com/OpenCoven/chat/releases/t
 | --- | --- | --- |
 | macOS, Apple silicon or Intel | `.dmg` for your processor | Signed and notarized |
 | Windows, x64 | `.exe` or `.msi` | Unsigned; read the release's installation notes |
-| Linux, x64 | `.deb` or `.AppImage` | Unsigned. Needs glibc 2.39 or newer (Ubuntu 24.04 or later, for example) and the ALSA library; on older systems such as Ubuntu 22.04, setup can't finish |
+| Linux, x64 | `.deb` or `.AppImage` | Unsigned. Needs glibc 2.39 or newer (Ubuntu 24.04 or later, for example) and the ALSA library (`libasound2t64` on Ubuntu); on older systems such as Ubuntu 22.04 or Debian 12, setup can't finish |
 | iPhone companion | Distributed separately through TestFlight | Requires a paired, awake Mac on the same local network; [companion guide](docs/iphone-companion.md) |
 | Browser preview | Developer UI preview only | Cannot reach Coven or run chats; use the desktop app |
 
