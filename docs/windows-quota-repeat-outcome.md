@@ -117,8 +117,9 @@ PowerShell 7.6.6 on .NET 10, and the `windows-supervisor-behavior` job passed on
 Which cause fired in protected run 35146928092 was never proven: that record
 says only `persistent`, and this change did not repair the underlying denial.
 The protected lane first passed on Windows in run 36033589858 on 2026-09-24, and
-36222464391 on 2026-09-26 also passed. Run 42550212128 on 2026-11-09 failed on Windows
-and macOS; the latest protected run, 42558538262 later that day, passed. A later protected
+36222464391 on 2026-09-26 also passed. Run 42550212128 on 2026-11-09 failed on Windows at
+the runner-image check, not this quota path, and on macOS; the latest protected run,
+42558538262 later that day, passed. A later protected
 failure here would report `persistent-entry-bound`, `persistent-access-denied`, or
 a `persistent-io-*` label. This diagnostic did not change the reviewed frozen-source
 binding or SDK rebinding. It tracked Chat #219, which closed on 2026-09-24, and

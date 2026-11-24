@@ -7,18 +7,20 @@
 > [36033589858](https://github.com/OpenCoven/chat/actions/runs/36033589858) on 2026-09-24
 > (`359933db`). One run between them, 36213255383 (`f6e99b49`), failed on Windows.
 > Issues #219 and #188 closed on 2026-09-24. The repository and environment scopes of
-> `CLIENT_V1_CONFORMANCE_VALIDATOR_REVISION` have both selected SDK
-> `67fd5d8af73283348782de185efe77f24af6e391` since 2026-09-26.
+> `CLIENT_V1_CONFORMANCE_VALIDATOR_REVISION` both selected SDK
+> `67fd5d8af73283348782de185efe77f24af6e391` from 2026-09-26 until 2026-11-09.
 >
 > **Update (2026-11-23):** The latest protected run,
 > [42558538262](https://github.com/OpenCoven/chat/actions/runs/42558538262) on 2026-11-09
 > (`main` at `f34022ac`), passed all eight jobs, after 42550212128 failed earlier that day.
+> Just before that run, both scopes of `CLIENT_V1_CONFORMANCE_VALIDATOR_REVISION` were moved
+> to SDK `6e816c59d3a288b04362ae40cac7f98279768f7e` (2026-11-09), and they still select it.
 > It ran the current harness: every harness file in `phase1-conformance.lock.json`, the
 > workflows and the Windows supervisor C# (last changed 2026-10-14) are unchanged since.
 > The lock has been repinned since, most recently to harness revision `fecb22bb` on
-> 2026-11-18. Of the files it pins, only the Chat authority files `src-tauri/Cargo.toml`,
-> `src-tauri/Cargo.lock` and `src-tauri/src/lib.rs` have changed since that run. No
-> protected run has used the current lock.
+> 2026-11-18. Of the harness files and production deltas it pins, only three production
+> deltas, `src-tauri/Cargo.toml`, `src-tauri/Cargo.lock` and `src-tauri/src/lib.rs`, have
+> changed since that run. No protected run has used the current lock.
 >
 > The sections from "Exact inputs" through "Non-cyclic SDK handoff" are the reference for
 > the current harness. The sections before and after them are a dated historical log.

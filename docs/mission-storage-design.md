@@ -3,7 +3,8 @@
 Status (2026-11-23): **approved by Val, as written, on 2026-10-19, and implemented** in
 `914765fe`, `d5a385ee` and `1fa0bd6f`. Chat persists mission records only as this document
 describes. Missions need a Coven newer than 0.4.10 (`LAST_RELEASE_WITHOUT_MISSIONS` in
-`src-tauri/src/chat_missions.rs`), and Chat still installs 0.4.10. Issue: #155. Contract:
+`src-tauri/src/chat_missions.rs`), Chat still installs 0.4.10, and no released Coven launches
+a mission yet ([coven#1676](https://github.com/OpenCoven/coven/pull/1676)). Issue: #155. Contract:
 [OpenCoven/coven#1313](https://github.com/OpenCoven/coven/issues/1313), as built on
 Coven `main` at `1450f97f`.
 
