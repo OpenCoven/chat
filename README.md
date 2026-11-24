@@ -692,8 +692,7 @@ described in its guide.
 
 For open work, see [GitHub issues](https://github.com/OpenCoven/chat/issues).
 For shipped changes, see [`docs/release-notes/`](docs/release-notes/).
-[`docs/roadmap.md`](docs/roadmap.md) is a dated log of September 2026
-conformance and consolidation checkpoints, not a current plan.
+For maintainers, [`docs/roadmap.md`](docs/roadmap.md) lists what's next and what each open item waits on.
 
 CI runs frontend, browser, Rust, packed-artifact, and native lifecycle coverage. The heavy Phase 1
 Vitest suites test the conformance scripts rather than the app, so a pull request runs them only

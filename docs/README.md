@@ -21,6 +21,7 @@ to the history table.
 | [packaged-acceptance.md](packaged-acceptance.md) | The installed-app acceptance workflow and its rows |
 | [phase1-conformance.md](phase1-conformance.md) | The protected Phase 1 conformance lane and lock (long; read its status block first) |
 | [releasing.md](releasing.md) | How to cut, verify and roll back a release: the whole path from prep PR to verification record |
+| [roadmap.md](roadmap.md) | The plan: the next release and what each open issue waits on |
 
 ## Dated snapshots and history
 
@@ -30,7 +31,7 @@ These are true as of their date. Refresh anything they say before you act on it.
 | --- | --- | --- |
 | [project-coordination.md](project-coordination.md) | 2026-11-20 | Inventory of worktrees, branches, PRs and issue gates, with ownership |
 | [mission-m0-integration-checkpoint.md](mission-m0-integration-checkpoint.md) | 2026-10-22 | Mission producer and release prerequisites for #155 |
-| [roadmap.md](roadmap.md) | 2026-09-07 to 2026-09-16 | Conformance and consolidation checkpoints |
+| [archive/2026-09-conformance-log.md](archive/2026-09-conformance-log.md) | 2026-09-07 to 2026-09-16 | Conformance and consolidation checkpoints (was `roadmap.md`) |
 | [windows-supervisor-source.md](windows-supervisor-source.md) | 2026-10-18 | The bounded Windows supervisor and the gates it met |
 | [windows-quota-repeat-outcome.md](windows-quota-repeat-outcome.md) | 2026-09 | A Windows quota failure diagnostic |
 | [windows-quota-reproduction.md](windows-quota-reproduction.md) | 2026-09-11 to 2026-09-14 | Windows quota reproduction work (#219) |
