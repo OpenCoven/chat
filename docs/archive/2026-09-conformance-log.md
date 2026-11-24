@@ -1,6 +1,6 @@
 # Conformance and consolidation log, September 2026
 
-> **Archived (2026-11-24):** This was `docs/roadmap.md` until 2026-11-24. The current plan is
+> **Archived (2026-11-23):** This was `docs/roadmap.md` until 2026-11-23. The current plan is
 > [`docs/roadmap.md`](../roadmap.md). Nothing below has been updated since its own date.
 
 > **Status (2026-10-18):** This file is a dated log of protected-conformance and

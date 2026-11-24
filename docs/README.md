@@ -20,8 +20,8 @@ to the history table.
 | [mission-storage-design.md](mission-storage-design.md) | How Chat stores mission records (approved 2026-10-19, #155) |
 | [packaged-acceptance.md](packaged-acceptance.md) | The installed-app acceptance workflow and its rows |
 | [phase1-conformance.md](phase1-conformance.md) | The protected Phase 1 conformance lane and lock (long; read its status block first) |
-| [roadmap.md](roadmap.md) | The plan: the next release and what each open issue waits on |
 | [releasing.md](releasing.md) | How to cut, verify and roll back a release: the whole path from prep PR to verification record |
+| [roadmap.md](roadmap.md) | The plan: the next release and what each open issue waits on |
 
 ## Dated snapshots and history
 

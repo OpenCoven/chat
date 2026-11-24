@@ -1,13 +1,12 @@
 # Roadmap
 
-> **Status (2026-11-24):** Current. Checked against the open issues, open PRs and
-> releases on 2026-11-24. Each issue's State block is newer than this page, so when they
-> disagree, the issue is right. Refresh this page when a release ships or an item below
-> changes owner, blocker or next step.
+> **Status (2026-11-23):** Current. Checked against the open issues, open PRs and
+> releases on 2026-11-23. When this page and an issue disagree, the issue is right. Refresh
+> this page when a release ships or an item below changes owner, blocker or next step.
 
-This page is the plan: what has shipped, what the next release is, and what each open
-item is waiting on. It links each issue instead of copying it. The September 2026
-conformance log that used to live here is archived in
+This page is for maintainers and agents. It is the plan: what has shipped, what the next
+release is, and what each open item is waiting on. It links each issue instead of copying
+it. The September 2026 conformance log that used to live here is archived in
 [`archive/2026-09-conformance-log.md`](archive/2026-09-conformance-log.md).
 
 ## Shipped
@@ -25,25 +24,37 @@ coven-cave-c9 (Claude Code), handed over by Val on 2026-11-23. Val tags both rel
 
 The chain, in order:
 
-1. Coven pins engine 0.9.3, which carries run-budget v1 (coven#1816), and Val tags Coven
-   v0.5.1 ([coven#1768](https://github.com/OpenCoven/coven/issues/1768)).
-2. Chat repins to Coven 0.5.1 and relands run budgets from `chore/704-coven-051`
-   ([#652](https://github.com/OpenCoven/chat/issues/652)). The reland must not merge
-   before the repin.
+1. Coven pins engine 0.9.3, which carries run-budget v1
+   ([coven#1816](https://github.com/OpenCoven/coven/pull/1816)), and Val tags Coven v0.5.1
+   ([coven#1768](https://github.com/OpenCoven/coven/issues/1768)).
+2. Chat repins to Coven 0.5.1, moves its own engine requirement (`ENGINE_VERSION` in
+   `src-tauri/src/setup.rs`) from 0.9.1 to 0.9.3, and relands run budgets from
+   `chore/704-coven-051` ([#652](https://github.com/OpenCoven/chat/issues/652)). The
+   reland must not merge before the repin.
 3. The release gates in [`releasing.md`](releasing.md), then Val's v0.1.4 tag.
 
-What else v0.1.4 brings:
+What else reaches people in v0.1.4. Neither is #704's own work, but both apply to its
+build:
 
 - **Signed Windows installers.** The first eSigner-signed release; a release now refuses
   to build unsigned ([#411](https://github.com/OpenCoven/chat/issues/411)).
-- **The first update.** People on v0.1.3 are offered v0.1.4 in **Settings › About**.
-  That is step 2 of [#539](https://github.com/OpenCoven/chat/issues/539), checked by a
-  person at each installed window.
-- **Possibly:** four CodeQL workflow-permission alerts in `ci.yml` (PRs
+- **The first update.** v0.1.3 should offer v0.1.4 under **Settings › About**. Proving that
+  is step 2 of [#539](https://github.com/OpenCoven/chat/issues/539), checked by a person at
+  each installed window.
+
+Possibly, at the call of v0.1.4's owner:
+
+- [#702](https://github.com/OpenCoven/chat/pull/702) (draft, for
+  [#700](https://github.com/OpenCoven/chat/issues/700)): open attachments saved in earlier
+  messages. Cave asked for it in v0.1.4, and Val approved qualifying Cave against a
+  published Chat build that has it. A
+  [review on #704](https://github.com/OpenCoven/chat/issues/704#issuecomment-7117117329)
+  asks for tests of its refusal paths first.
+- Four CodeQL workflow-permission alerts in `ci.yml` (PRs
   [#710](https://github.com/OpenCoven/chat/pull/710),
   [#711](https://github.com/OpenCoven/chat/pull/711),
-  [#712](https://github.com/OpenCoven/chat/pull/712)). `ci.yml` is governed by the
-  conformance lock, so they can only land with a repin. v0.1.4's owner decides.
+  [#712](https://github.com/OpenCoven/chat/pull/712); alert 4 has none). `ci.yml` is
+  governed by the conformance lock, so they can only land with a repin.
 
 Out of v0.1.4: the iPhone, missions, asking for permission.
 
@@ -60,6 +71,9 @@ Each issue has a decision ask with options and a recommendation.
 | [#592](https://github.com/OpenCoven/chat/issues/592) | Whether the published v0.1.3 Orca evidence closes it |
 | [#661](https://github.com/OpenCoven/chat/issues/661) | Whether an agent preflight is still wanted (its claim lapsed) |
 | [#720](https://github.com/OpenCoven/chat/pull/720) | Turn off CodeQL default setup so the upstream glib copy can be skipped, or dismiss its seven alerts |
+| CodeQL alert 5 | Dismiss it as a false positive: `scripts/windows-job-supervisor.cs` writes an already-verified artifact record byte for byte, and the file is lock-governed |
+| [#716](https://github.com/OpenCoven/chat/pull/716) (draft, no changes) | Close it: it asks how packaged acceptance drives the Windows MSI, which #532 decided |
+| [#575](https://github.com/OpenCoven/chat/pull/575) (draft) | Held by Val since 2026-11-14; keep holding or close |
 
 ## Waiting on a person
 
@@ -71,13 +85,15 @@ These need someone at an installed app or a phone. Each issue has a current chec
 | [#465](https://github.com/OpenCoven/chat/issues/465) | Pairing and Local Network on a physical iPhone, TestFlight 0.3.0 (1910) |
 | [#692](https://github.com/OpenCoven/chat/issues/692) | Recovering interrupted research on the paired iPhone (draft PRs #707 and coven-code#613) |
 
-## Ready for review
+## Open pull requests
 
-| PR | Issue | Note |
-| --- | --- | --- |
-| [#702](https://github.com/OpenCoven/chat/pull/702) (draft) | [#700](https://github.com/OpenCoven/chat/issues/700) | Open attachments saved in earlier messages. A review asks for tests of the refusal paths |
-| [#707](https://github.com/OpenCoven/chat/pull/707) (draft) | [#692](https://github.com/OpenCoven/chat/issues/692) | Needs an engine release with coven-code#613 |
-| [#716](https://github.com/OpenCoven/chat/pull/716) (draft) | [#532](https://github.com/OpenCoven/chat/issues/532) (closed) | Why packaged acceptance can't drive the Windows MSI |
+The PRs not named elsewhere on this page.
+
+| PR | Draft | For | Waiting on |
+| --- | --- | --- | --- |
+| [#718](https://github.com/OpenCoven/chat/pull/718) | no | [#520](https://github.com/OpenCoven/chat/issues/520), [#515](https://github.com/OpenCoven/chat/issues/515), [#539](https://github.com/OpenCoven/chat/issues/539) | Review and merge: the v0.1.3 operator plan |
+| [#707](https://github.com/OpenCoven/chat/pull/707) | yes | [#692](https://github.com/OpenCoven/chat/issues/692) | An engine release with coven-code#613 (also a draft) |
+| [#645](https://github.com/OpenCoven/chat/pull/645), [#678](https://github.com/OpenCoven/chat/pull/678) | no | [#640](https://github.com/OpenCoven/chat/issues/640), [#665](https://github.com/OpenCoven/chat/issues/665) | Val's TestFlight decision |
 
 ## Later
 
