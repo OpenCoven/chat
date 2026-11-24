@@ -1,6 +1,6 @@
 # WorkOS Onboarding Implementation Plan
 
-> **Status (2026-10-18):** Paused. Tasks 1-3 landed in #322 (2026-09-18), leaving the WorkOS keyring
+> **Status (2026-11-23):** Paused. Tasks 1-3 landed in #322 (2026-09-18), leaving the WorkOS keyring
 > record unused; first-run setup later shipped without WorkOS in #445, #448 and #455, so Tasks 10-19
 > would overwrite it. A decision on the WorkOS gate is pending, and no
 > open issue tracks it (checked 2026-11-23). Historical record; do not execute.

@@ -4,9 +4,11 @@
 > v0.0.2 through v0.0.5 shipped by 2026-10-14 with macOS signed and notarized, Windows unsigned
 > from v0.0.5, and no Cave compatibility ranges. The updater shipped in v0.1.3 (2026-11-22);
 > proving it across two releases is #539. Windows signing is #411, still open, and v0.1.3's
-> Windows installers are unsigned. [`docs/releasing.md`](../../releasing.md) is the live runbook.
-> The release owner's amendments below this header win where they conflict with the plan. Don't
-> execute the plan's Cave-only steps; they don't apply to this app.
+> Windows installers are unsigned. Two amendments below are out of date: amendment 3 (the
+> updater is on, `scripts/verify-package.mjs` requires its config, and #539 tracks it) and
+> amendment 5 (since #713, a release refuses to publish without a complete Windows signing
+> route; the route is #411). So are the plan lines that cite them. Historical record; do not
+> execute. [`docs/releasing.md`](../../releasing.md) is the runbook.
 
 **Goal:** Publish signed OpenCoven Chat installers and public SDK/CLI packages with proven Cave/Coven compatibility ranges, staged rollout, diagnostics, and rollback.
 

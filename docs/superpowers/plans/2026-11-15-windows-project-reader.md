@@ -1,7 +1,7 @@
 # Windows Project Metadata Reader Implementation Plan
 
 > **Status (2026-11-23):** Delivered. PR #648 (`2b15a698`, merged 2026-11-16 UTC) implemented
-> this and closed #587. It shipped in v0.1.3. This plan is not a
+> this and delivered #587, closed by hand after the merge. It shipped in v0.1.3. This plan is not a
 > work order. Historical record; do not execute.
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.

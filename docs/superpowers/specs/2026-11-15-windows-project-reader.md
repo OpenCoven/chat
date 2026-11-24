@@ -1,7 +1,7 @@
 # Windows project metadata reader (#587)
 
 > **Status (2026-11-23):** Delivered. PR #648 (`2b15a698`, merged 2026-11-16 UTC) implemented
-> this and closed #587. It shipped in v0.1.3. Historical record; do not execute.
+> this and delivered #587, closed by hand after the merge. It shipped in v0.1.3. Historical record; do not execute.
 
 Original status (2026-11-15): current implementation specification for the user-authorized #587 goal. Implementation details are delegated to this session.
 

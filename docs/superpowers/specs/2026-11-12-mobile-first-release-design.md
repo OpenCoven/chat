@@ -5,7 +5,8 @@
 > claim on #612 was released on 2026-11-14. The rest waits on coven#1744, an operator for the
 > relay and APNs, and a physical-iPhone check. v0.1.4 (#704) leaves the iPhone out of scope.
 > The "Owner: this Codex session" line and the worktree path below are stale; #612 says who
-> acts next.
+> acts next. "Current behavior and constraints" describes the 2026-11-12 baseline: drafts and
+> recent history now persist on the phone (#624).
 
 Status: approved by Val in this session on 2026-11-12, including the recommended Mac-hosted architecture and native persistence choices. Service operator/deployment/APNs provisioning remain release dependencies. This document is not a claim that the features below exist or that a mobile build has shipped.
 

@@ -1,7 +1,7 @@
 # Coven Chat refinement implementation plan
 
-> **Status (2026-11-23):** Delivered. Implemented in `0be8482d` (2026-11-12), merged to `main` by
-> PR #614 (`b06aae75`), and shipped in v0.1.2. The delivery record is
+> **Status (2026-11-23):** Delivered. Implemented in `0be8482d` (2026-11-12) plus four follow-up
+> fixes, merged to `main` by PR #614 (`b06aae75`), and shipped in v0.1.2. The delivery record is
 > [`docs/design-audits/2026-11-11-coven-chat-polish.md`](../../design-audits/2026-11-11-coven-chat-polish.md).
 > This plan is not a work order. Historical record; do not execute.
 
