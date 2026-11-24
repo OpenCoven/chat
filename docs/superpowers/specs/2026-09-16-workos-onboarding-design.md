@@ -1,8 +1,9 @@
 # OpenCoven Chat WorkOS Onboarding Design
 
-> **Status (2026-10-18):** Paused. Approved in design review 2026-09-16; the plan landed in #303 and
+> **Status (2026-11-23):** Paused. Approved in design review 2026-09-16; the plan landed in #303 and
 > Tasks 1-3 in #322, then first-run setup shipped without a WorkOS gate in #445, #448 and #455. A
-> decision on the WorkOS gate is pending. Historical record; do not execute.
+> decision on the WorkOS gate is pending, and no open issue tracks it (checked 2026-11-23).
+> Historical record; do not execute.
 
 Related: `docs/superpowers/specs/2026-08-20-phase-1-discovery-pairing-design.md`
 (the dormant Cave pairing stack this design deliberately does not touch),

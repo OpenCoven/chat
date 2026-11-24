@@ -1,10 +1,16 @@
 # Chat iPhone companion
 
-> **Status (2026-10-18):** Implemented, current. Protocol v1 shipped in #405 (merged 2026-10-09)
-> and still matches `src-tauri/src/companion/`. Later PRs through #467 built on it without
-> changing the wire contract. The operating doc is
-> [`docs/iphone-companion.md`](../../iphone-companion.md): read it for setup, signing, TestFlight
-> and device acceptance.
+> **Status (2026-11-23):** Historical record. Implemented 2026-10-09 in #405.
+> [`docs/iphone-companion.md`](../../iphone-companion.md) supersedes this spec as the reference:
+> read it for how the companion works today. Changed since this spec:
+>
+> - `src-tauri/src/companion/host.rs` also serves `GET /v1/permission-log` and
+>   `POST /v1/approval` (#542).
+> - The phone keeps drafts and recent history in protected storage (#624), not only in memory.
+> - Chat runs familiars with full access, including sends from the phone. It no longer runs
+>   read-only.
+>
+> Do not execute.
 
 Authorized by Val's request to complete a Modex-style mobile companion on 2026-10-07.
 This supersedes the August Cave-dependent iOS design for the current Chat product.
