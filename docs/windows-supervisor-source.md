@@ -1,11 +1,13 @@
 # Bounded Windows supervisor source
 
-> **Status (2026-10-18):** The deployment gates this page lists were met.
+> **Status (2026-11-23):** The deployment gates this page lists were met.
 > Protected runs 36033589858 (2026-09-24) and 36222464391 (2026-09-26) passed
 > native Windows and three-platform acceptance with the bounded block. The
-> supervisor C# has changed since then (`24eed8f3` on 2026-10-13, `01332b0c` on
-> 2026-10-14), and no protected run has used the current source. Today the C#
-> is 402,329 bytes and the workflow is 183,220 bytes. Where the text below says
+> supervisor C# changed after them (`24eed8f3` on 2026-10-13, `01332b0c` on
+> 2026-10-14, its last change). Protected run 42558538262 (2026-11-09, `main` at
+> `f34022ac`, which contains both) passed all eight jobs on that source. Today the
+> C# is 402,329 bytes and `.github/workflows/client-v1-conformance.yml` is 183,221
+> bytes, both unchanged since that run. Where the text below says
 > a gate "remains" or verification is "required", it describes the page's last
 > edit on 2026-09-12.
 

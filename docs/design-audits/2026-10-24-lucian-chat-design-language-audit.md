@@ -1,5 +1,9 @@
 # OpenCoven Chat design language audit
 
+> **Status (2026-11-23):** Findings 1 and 3 were delivered in #534. The rendered pass for
+> findings 2, 4 and 5 is [2026-11-05-rendered-pass.md](2026-11-05-rendered-pass.md) (#541).
+> The remaining choices are on #533.
+
 Author: Lucian, Visual Design / Brand Steward. Date: 2026-10-24.
 
 ## Scope and evidence

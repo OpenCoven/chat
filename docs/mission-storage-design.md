@@ -1,7 +1,10 @@
 # Mission records: storage design
 
-Status (2026-10-19): **approved by Val, as written.** Chat persists mission records
-only as this document describes. Issue: #155. Contract:
+Status (2026-11-23): **approved by Val, as written, on 2026-10-19, and implemented** in
+`914765fe`, `d5a385ee` and `1fa0bd6f`. Chat persists mission records only as this document
+describes. Missions need a Coven newer than 0.4.10 (`LAST_RELEASE_WITHOUT_MISSIONS` in
+`src-tauri/src/chat_missions.rs`), Chat still installs 0.4.10, and no released Coven launches
+a mission yet ([coven#1676](https://github.com/OpenCoven/coven/pull/1676)). Issue: #155. Contract:
 [OpenCoven/coven#1313](https://github.com/OpenCoven/coven/issues/1313), as built on
 Coven `main` at `1450f97f`.
 
@@ -12,8 +15,8 @@ establish that the producer can launch a mission.
 `SECURITY.md` lists everything Chat keeps on disk, and says conversation bodies
 never reach browser storage. A mission adds one more thing Chat has to keep across
 restarts: the keys that let it learn what happened to a mission it sent. This
-document proposes what that record holds, where it lives, and when it goes away.
-The implementation PR adds the matching entry to `SECURITY.md`.
+document describes what that record holds, where it lives, and when it goes away.
+`d5a385ee` added the matching **Missions** entry to `SECURITY.md`.
 
 ## Why Chat has to keep anything
 
