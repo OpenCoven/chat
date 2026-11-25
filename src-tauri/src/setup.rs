@@ -387,6 +387,28 @@ fn shown_version(output: &str) -> String {
         .to_owned()
 }
 
+/// The Coven step for an installed Coven. It is ready only when it can give
+/// Coven Code a run budget, since every Coven Code send asks for one; an
+/// older Coven (0.4.10, from Chat v0.1.3, say) is offered the update.
+/// `shadow` is a copy that Chat's install would not replace: then the person
+/// has to update that copy, so the report names it.
+fn coven_report(takes_budgets: bool, shadow: Option<&Path>) -> Value {
+    let mut coven = json!({
+        "ok": takes_budgets,
+        "installed": true,
+        "required": crate::coven_install::COVEN_VERSION,
+    });
+    if !takes_budgets {
+        if let Some(path) = shadow
+            .and_then(Path::to_str)
+            .filter(|path| path.len() <= 1024)
+        {
+            coven["path"] = Value::String(path.to_owned());
+        }
+    }
+    coven
+}
+
 fn check() -> Result<Value, String> {
     if !supported_platform() {
         return Ok(json!({
@@ -426,7 +448,10 @@ fn check() -> Result<Value, String> {
     let familiars = cli_json(&["familiars", "--json"])
         .ok()
         .and_then(|value| value.as_array().map(Vec::len));
-    let mut coven = json!({ "ok": true });
+    let mut coven = coven_report(
+        crate::coven_runtime::cli_takes_run_budgets(),
+        crate::coven_runtime::cli_shadowing_install().as_deref(),
+    );
     if let Some(version) = version {
         coven["version"] = Value::String(version);
     }
@@ -761,6 +786,26 @@ pub(crate) fn setup_cancel(run_id: String) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_coven_without_run_budgets_is_offered_the_update() {
+        let ready = coven_report(true, Some(Path::new("/elsewhere/coven")));
+        assert_eq!(ready["ok"], true);
+        assert_eq!(ready["required"], crate::coven_install::COVEN_VERSION);
+        assert!(ready.get("path").is_none(), "a ready Coven needs no path");
+
+        let ours = coven_report(false, None);
+        assert_eq!(ours["ok"], false);
+        assert_eq!(ours["installed"], true);
+        assert!(ours.get("path").is_none());
+
+        let shadowed = coven_report(
+            false,
+            Some(Path::new("/home/val/.local/lib/node_modules/coven")),
+        );
+        assert_eq!(shadowed["ok"], false);
+        assert_eq!(shadowed["path"], "/home/val/.local/lib/node_modules/coven");
+    }
 
     #[test]
     fn setup_steps_are_a_fixed_set() {

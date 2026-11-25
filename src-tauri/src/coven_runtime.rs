@@ -464,7 +464,8 @@ fn cli_candidates(
     candidates
 }
 
-pub(crate) fn resolve_cli() -> Result<PathBuf, String> {
+/// Every place Chat looks for the Coven CLI, in the order it looks.
+fn cli_search_list() -> Vec<PathBuf> {
     let app_data = std::env::var_os("APPDATA")
         .map(PathBuf::from)
         .filter(|path| path.is_absolute());
@@ -480,9 +481,48 @@ pub(crate) fn resolve_cli() -> Result<PathBuf, String> {
         local_app_data.as_deref(),
         path.as_deref(),
     )
-    .into_iter()
-    .find(|path| executable(path))
-    .ok_or_else(|| "Coven CLI is not installed. Install Coven CLI, then retry.".into())
+}
+
+pub(crate) fn resolve_cli() -> Result<PathBuf, String> {
+    cli_search_list()
+        .into_iter()
+        .find(|path| executable(path))
+        .ok_or_else(|| "Coven CLI is not installed. Install Coven CLI, then retry.".into())
+}
+
+/// Whether the Coven CLI Chat uses can give Coven Code a run budget, which
+/// every Coven Code send asks for. A Coven that will not answer counts as
+/// unable: the send would fail the same way.
+pub(crate) fn cli_takes_run_budgets() -> bool {
+    cli_json(&["adapter", "list", "--json"])
+        .is_ok_and(|adapters| run_budget::takes_budgets(&adapters))
+}
+
+/// The Coven CLI that would still be used after Chat installs Coven, when it
+/// is not Chat's copy: an earlier entry on the search list wins. `None` when
+/// installing Coven puts Chat's copy in use.
+pub(crate) fn cli_shadowing_install() -> Option<PathBuf> {
+    let local_app_data = std::env::var_os("LOCALAPPDATA")
+        .map(PathBuf::from)
+        .filter(|path| path.is_absolute());
+    let name = if cfg!(windows) { "coven.exe" } else { "coven" };
+    let ours =
+        crate::coven_install::install_dir(cfg!(windows), &home().ok()?, local_app_data.as_deref())
+            .ok()?
+            .join(name);
+    first_ahead_of(&cli_search_list(), &ours, executable)
+}
+
+/// The first usable entry of `list` that comes before `ours`, if any.
+fn first_ahead_of(
+    list: &[PathBuf],
+    ours: &Path,
+    usable: impl Fn(&Path) -> bool,
+) -> Option<PathBuf> {
+    list.iter()
+        .take_while(|path| path.as_path() != ours)
+        .find(|path| usable(path))
+        .cloned()
 }
 
 /// The Coven CLI process together with whatever it started. On Unix that is
@@ -2644,6 +2684,43 @@ pub(crate) fn coven_runtime_cancel(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn only_an_earlier_usable_coven_shadows_chats_install() {
+        let list: Vec<PathBuf> = [
+            "/home/val/.local/lib/node_modules/coven",
+            "/home/val/.local/bin/coven",
+            "/opt/homebrew/bin/coven",
+        ]
+        .map(PathBuf::from)
+        .to_vec();
+        let ours = Path::new("/home/val/.local/bin/coven");
+        let usable = |names: &'static [&'static str]| {
+            move |path: &Path| names.iter().any(|name| path == Path::new(name))
+        };
+        // An npm copy under ~/.local comes first and would still win.
+        assert_eq!(
+            first_ahead_of(
+                &list,
+                ours,
+                usable(&[
+                    "/home/val/.local/lib/node_modules/coven",
+                    "/opt/homebrew/bin/coven"
+                ])
+            ),
+            Some(list[0].clone())
+        );
+        // Homebrew comes after Chat's folder, so installing replaces it in use.
+        assert_eq!(
+            first_ahead_of(&list, ours, usable(&["/opt/homebrew/bin/coven"])),
+            None
+        );
+        // Chat's own older copy is replaced by the install.
+        assert_eq!(
+            first_ahead_of(&list, ours, usable(&["/home/val/.local/bin/coven"])),
+            None
+        );
+    }
 
     #[test]
     fn coven_code_runs_use_covens_managed_engine_home() {

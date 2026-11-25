@@ -309,13 +309,43 @@ pub(crate) async fn install(
     result?;
     let installed = crate::coven_runtime::resolve_cli()
         .map_err(|_| "Coven was installed but Chat cannot find it. Choose Check again.")?;
+    if !crate::coven_runtime::cli_takes_run_budgets() {
+        return Err(still_outdated(
+            crate::coven_runtime::cli_shadowing_install().as_deref(),
+        ));
+    }
     Ok(json!({ "version": COVEN_VERSION, "installed": installed.is_file() }))
+}
+
+/// The install finished, but the Coven Chat uses still can't take a run
+/// budget. Usually another copy comes first on Chat's search list.
+fn still_outdated(shadow: Option<&Path>) -> String {
+    match shadow {
+        Some(path) => format!(
+            "Coven {COVEN_VERSION} was installed, but Chat still uses the older Coven at {}. Update that copy, or remove it, then choose Check again.",
+            path.display()
+        ),
+        None => format!(
+            "Coven {COVEN_VERSION} was installed, but Coven still can't give Coven Code chats a model-round allowance. Run coven adapter list --json in a terminal to see what it reports."
+        ),
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::process::Command;
+
+    #[test]
+    fn an_install_that_leaves_an_older_coven_in_use_says_which() {
+        let shadowed = still_outdated(Some(Path::new("/home/val/.local/lib/node_modules/coven")));
+        assert!(shadowed.contains(COVEN_VERSION), "{shadowed}");
+        assert!(
+            shadowed.contains("/home/val/.local/lib/node_modules/coven"),
+            "{shadowed}"
+        );
+        assert!(still_outdated(None).contains("coven adapter list --json"));
+    }
 
     fn temp(name: &str) -> PathBuf {
         let path = std::env::temp_dir().join(format!("opencoven-{name}-{}", uuid::Uuid::new_v4()));

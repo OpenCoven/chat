@@ -3,17 +3,25 @@
 use serde::Deserialize;
 use serde_json::{json, Value};
 
-pub(super) fn require_adapter(adapters: &Value) -> Result<(), String> {
-    let supported = adapters
+/// Shown where a Coven too old for run budgets stops a Coven Code send.
+pub(super) const COVEN_OUTDATED: &str = "This version of Coven can't give Coven Code chats a model-round allowance, so no message was started. Quit and reopen Coven Chat, then choose Update Coven.";
+
+/// Whether `coven adapter list --json` declares run-budget v1 for Coven Code.
+/// Coven 0.4.10, which Chat v0.1.3 installed, lists Coven Code without it.
+pub(super) fn takes_budgets(adapters: &Value) -> bool {
+    adapters
         .as_array()
         .and_then(|rows| rows.iter().find(|row| row["id"] == "coven-code"))
         .is_some_and(|row| {
             row["run_budget"]["version"] == 1 && row["run_budget"]["flag"] == "--max-turns"
-        });
-    if supported {
+        })
+}
+
+pub(super) fn require_adapter(adapters: &Value) -> Result<(), String> {
+    if takes_budgets(adapters) {
         Ok(())
     } else {
-        Err("This Coven CLI cannot apply finite model-round budgets. Update Coven before sending; no message was started.".into())
+        Err(COVEN_OUTDATED.into())
     }
 }
 
@@ -126,5 +134,26 @@ mod tests {
             &json!([{"id":"claude","run_budget":{"version":1,"flag":"--max-turns"}}])
         )
         .is_err());
+    }
+    #[test]
+    fn coven_from_chat_v013_cannot_take_budgets() {
+        // `coven adapter list --json` from the published Coven 0.4.10, trimmed.
+        let v0_4_10 = json!([
+            {"id":"codex","label":"Codex","available":true,"source":"bundled"},
+            {"id":"coven-code","label":"Coven Code","executable":"coven-code","available":true,
+             "capabilities":{"stream":true,"preassigned_session_id":true,"think":true,"speed":true},
+             "source":"bundled"}
+        ]);
+        assert!(!takes_budgets(&v0_4_10));
+        assert_eq!(require_adapter(&v0_4_10), Err(COVEN_OUTDATED.to_owned()));
+        assert!(COVEN_OUTDATED.contains("choose Update Coven"));
+        // What a Coven with run budgets (coven#1797) declares.
+        assert!(takes_budgets(&json!([
+            {"id":"coven-code","run_budget":{"version":1,"flag":"--max-turns"}}
+        ])));
+        assert!(!takes_budgets(&json!({"id":"coven-code"})));
+        assert!(!takes_budgets(&json!([
+            {"id":"coven-code","run_budget":{"version":2,"flag":"--max-turns"}}
+        ])));
     }
 }

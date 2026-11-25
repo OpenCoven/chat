@@ -5,6 +5,7 @@ import { FamButton } from '../design/familiars-ui';
 import { Icon } from '../design/minimal-icons';
 import {
   chatReachable,
+  covenOutdated,
   createSetup,
   engineOutdated,
   type Setup,
@@ -297,6 +298,48 @@ function CovenStep({ report, runner }: { report: SetupReport; runner: Runner }) 
       </Step>
     );
   }
+  if (covenOutdated(report)) {
+    const { version, required, path } = report.coven;
+    const found = version
+      ? `This computer has ${version}.`
+      : 'The Coven on this computer is older.';
+    const need = required ? ` Chat needs Coven ${required} or newer.` : ' Chat needs a newer one.';
+    return (
+      <Step title="Coven" done={false}>
+        <p>
+          {found}
+          {need}
+        </p>
+        <p>
+          Chats with Coven Code cannot start until Coven is updated, because an older Coven cannot
+          give them a model-round allowance.
+        </p>
+        {path ? (
+          <>
+            <p>
+              Chat uses the copy at <code>{path}</code>, which comes before the one Chat installs.
+              Update that copy, or remove it, then choose Check again.
+            </p>
+            <Command command="npm install -g @opencoven/cli" />
+          </>
+        ) : runner.available ? (
+          <>
+            <RunControls step="install_coven" label="Update Coven" runner={runner} />
+            <details className="coven-onboarding-manual">
+              <summary>Update it in a terminal instead</summary>
+              <p>This way needs Node.js.</p>
+              <Command command="npm install -g @opencoven/cli" />
+            </details>
+          </>
+        ) : (
+          <>
+            <p>To update it, run this in a terminal (it needs Node.js):</p>
+            <Command command="npm install -g @opencoven/cli" />
+          </>
+        )}
+      </Step>
+    );
+  }
   return (
     <Step title="Coven" done={report.coven.ok}>
       {report.coven.ok ? (
@@ -388,7 +431,7 @@ function EngineStep({ report, runner }: { report: SetupReport; runner: Runner })
           <Command command={command} />
         </>
       ) : (
-        <p>Install Coven first.</p>
+        <p>{covenOutdated(report) ? 'Update Coven first.' : 'Install Coven first.'}</p>
       )}
     </Step>
   );
