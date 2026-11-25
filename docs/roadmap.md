@@ -1,7 +1,7 @@
 # Roadmap
 
-> **Status (2026-11-23):** Current. Checked against the open issues, open PRs and
-> releases on 2026-11-23. When this page and an issue disagree, the issue is right. Refresh
+> **Status (2026-11-25):** Current. Checked against the open issues, open PRs and
+> releases on 2026-11-25. When this page and an issue disagree, the issue is right. Refresh
 > this page when a release ships or an item below changes owner, blocker or next step.
 
 This page is for maintainers and agents. It is the plan: what has shipped, what the next
@@ -25,8 +25,9 @@ coven-cave-c9 (Claude Code), handed over by Val on 2026-11-23. Val tags both rel
 The chain, in order:
 
 1. Coven pins engine 0.9.3, which carries run-budget v1
-   ([coven#1816](https://github.com/OpenCoven/coven/pull/1816)), and Val tags Coven v0.5.1
-   ([coven#1768](https://github.com/OpenCoven/coven/issues/1768)).
+   ([coven#1816](https://github.com/OpenCoven/coven/pull/1816), merged 2026-11-24). The
+   v0.5.1 candidate `9415c309` passed certification on 2026-11-25, and Val tags Coven
+   v0.5.1 ([coven#1768](https://github.com/OpenCoven/coven/issues/1768)).
 2. Chat repins to Coven 0.5.1, moves its own engine requirement (`ENGINE_VERSION` in
    `src-tauri/src/setup.rs`) from 0.9.1 to 0.9.3, and relands run budgets from
    `chore/704-coven-051` ([#652](https://github.com/OpenCoven/chat/issues/652)). The
@@ -82,17 +83,16 @@ These need someone at an installed app or a phone. Each issue has a current chec
 
 | Issue | What to run |
 | --- | --- |
-| [#520](https://github.com/OpenCoven/chat/issues/520), [#515](https://github.com/OpenCoven/chat/issues/515), [#539](https://github.com/OpenCoven/chat/issues/539) | The published installers, link review and update check on each desktop, from the v0.1.3 operator plan ([#718](https://github.com/OpenCoven/chat/pull/718)) |
+| [#520](https://github.com/OpenCoven/chat/issues/520), [#515](https://github.com/OpenCoven/chat/issues/515), [#539](https://github.com/OpenCoven/chat/issues/539) | The published installers, link review and update check on each desktop, from the [v0.1.3 operator plan](verification/v0.1.3-operator-plan.md) |
 | [#465](https://github.com/OpenCoven/chat/issues/465) | Pairing and Local Network on a physical iPhone, TestFlight 0.3.0 (1910) |
 | [#692](https://github.com/OpenCoven/chat/issues/692) | Recovering interrupted research on the paired iPhone (draft PRs #707 and coven-code#613) |
 
 ## Open pull requests
 
-Every open PR not listed above, plus #718, #707, #645 and #678, which the rows above name.
+Every open PR not listed above, plus #707, #645 and #678, which the rows above name.
 
 | PR | Draft | For | Waiting on |
 | --- | --- | --- | --- |
-| [#718](https://github.com/OpenCoven/chat/pull/718) | no | [#520](https://github.com/OpenCoven/chat/issues/520), [#515](https://github.com/OpenCoven/chat/issues/515), [#539](https://github.com/OpenCoven/chat/issues/539) | Review and merge: the v0.1.3 operator plan |
 | [#707](https://github.com/OpenCoven/chat/pull/707) | yes | [#692](https://github.com/OpenCoven/chat/issues/692) | An engine release with coven-code#613 (also a draft) |
 | [#645](https://github.com/OpenCoven/chat/pull/645), [#678](https://github.com/OpenCoven/chat/pull/678) | no | [#640](https://github.com/OpenCoven/chat/issues/640), [#665](https://github.com/OpenCoven/chat/issues/665) | Val's TestFlight decision |
 
