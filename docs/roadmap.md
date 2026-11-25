@@ -62,7 +62,7 @@ Out of v0.1.4: the iPhone, missions, asking for permission.
 ## Waiting on a decision from Val
 
 Each issue here has a decision ask with options and a recommendation. The rows without an
-issue (alert 5, #716 and #575) say what is being decided.
+issue (alert 5 and #575) say what is being decided.
 
 | Issue | The decision |
 | --- | --- |
@@ -72,9 +72,8 @@ issue (alert 5, #716 and #575) say what is being decided.
 | [#154](https://github.com/OpenCoven/chat/issues/154), [#155](https://github.com/OpenCoven/chat/issues/155) | Missions: a remote-execution staging window or local-first; the context-binding proposal |
 | [#592](https://github.com/OpenCoven/chat/issues/592) | Whether the published v0.1.3 Orca evidence closes it |
 | [#661](https://github.com/OpenCoven/chat/issues/661) | Whether an agent preflight is still wanted (its claim lapsed) |
-| [#720](https://github.com/OpenCoven/chat/pull/720) | Turn off CodeQL default setup so the upstream glib copy can be skipped, or dismiss its seven alerts |
+| [#720](https://github.com/OpenCoven/chat/pull/720) (draft) | Turn off CodeQL default setup so the upstream glib copy can be skipped, or dismiss its seven alerts |
 | CodeQL alert 5 | Dismiss it as a false positive: `scripts/windows-job-supervisor.cs` writes an already-verified artifact record byte for byte, and the file is lock-governed |
-| [#716](https://github.com/OpenCoven/chat/pull/716) (draft, no changes) | Close it: it asks how packaged acceptance drives the Windows MSI, which #532 decided |
 | [#575](https://github.com/OpenCoven/chat/pull/575) (draft) | Held by Val since 2026-11-14; keep holding or close |
 
 ## Waiting on a person
