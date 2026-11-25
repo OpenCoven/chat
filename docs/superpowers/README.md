@@ -1,26 +1,32 @@
 # Plans and specs
 
 This folder holds dated design specs and implementation plans. They're a record of how Chat got
-here, not a list of current work. Only one doc is current: the iPhone companion design.
+here, not a list of current work. The mobile first release spec and plan are the only current
+docs; they track [#612](https://github.com/OpenCoven/chat/issues/612).
 
 - For how Chat behaves today, read [`README.md`](../../README.md). It's the product contract.
 - For current work, use [GitHub issues](https://github.com/OpenCoven/chat/issues).
 - For how the iPhone companion works, read [`docs/iphone-companion.md`](../iphone-companion.md).
 
-Each doc carries a dated `**Status (YYYY-MM-DD):**` line under its title that says what happened
-to it and cites the evidence. A doc marked anything other than current says _do not execute_ or
-_historical record_: don't hand it to an agent as a work order.
+Each Markdown doc carries a dated `**Status (YYYY-MM-DD):**` line under its title that says what
+happened to it and cites the evidence. A doc marked anything other than current says _do not
+execute_ or _historical record_: don't hand it to an agent as a work order.
 
 When you add a plan or spec, put a status line under its title and add a row below. When its
 status changes, update both.
 
 ## Specs
 
-| Spec | Status (2026-10-18) |
+| Spec | Status (2026-11-23) |
 | --- | --- |
-| [iPhone companion](specs/2026-10-07-iphone-companion-design.md) | Implemented, current |
-| [WorkOS onboarding](specs/2026-09-16-workos-onboarding-design.md) | Paused, decision pending |
+| [Windows project reader](specs/2026-11-15-windows-project-reader.md) | Delivered in v0.1.3 |
+| [Mobile first release](specs/2026-11-12-mobile-first-release-design.md) | Current, milestone 1 delivered |
+| [Coven Chat polish](specs/2026-11-11-coven-chat-polish-design.md) | Delivered in v0.1.2 |
+| [iPhone companion](specs/2026-10-07-iphone-companion-design.md) | Implemented, superseded by [`docs/iphone-companion.md`](../iphone-companion.md) |
+| [WorkOS onboarding](specs/2026-09-16-workos-onboarding-design.md) | Paused, decision pending, no issue tracks it |
 | [Familiars surface integration](specs/2026-09-02-familiars-integration-design.md) | Superseded |
+| [Familiars Redesign v2 mockup](specs/2026-09-01-familiars-redesign-v2/Familiars%20Redesign%20v2.dc.html) | Superseded mockup; its assets aren't in the repo, so it doesn't render |
+| [ReasoningCard v2 mockup](specs/2026-09-01-familiars-redesign-v2/ReasoningCard%20v2.dc.html) | Superseded mockup; its assets aren't in the repo, so it doesn't render |
 | [Grok-inspired agent inspector](specs/2026-08-30-grok-inspired-agent-inspector-design.md) | Abandoned |
 | [Contextual inspector](specs/2026-08-21-chat-contextual-inspector-design.md) | Delivered, later removed |
 | [Phase 1 discovery and pairing](specs/2026-08-20-phase-1-discovery-pairing-design.md) | Delivered |
@@ -30,10 +36,13 @@ status changes, update both.
 
 ## Plans
 
-| Plan | Status (2026-10-18) |
+| Plan | Status (2026-11-23) |
 | --- | --- |
+| [Windows project reader](plans/2026-11-15-windows-project-reader.md) | Delivered in v0.1.3 |
+| [Mobile first release](plans/2026-11-12-mobile-first-release.md) | Current, milestone 1 delivered |
+| [Coven Chat polish](plans/2026-11-11-coven-chat-polish.md) | Delivered in v0.1.2 |
 | [iPhone companion](plans/2026-10-07-iphone-companion.md) | Delivered |
-| [WorkOS onboarding](plans/2026-09-16-workos-onboarding.md) | Paused, decision pending |
+| [WorkOS onboarding](plans/2026-09-16-workos-onboarding.md) | Paused, decision pending, no issue tracks it |
 | [Frozen GLib native validation](plans/2026-09-10-frozen-glib-native-validation.md) | Delivered |
 | [Familiars surface integration](plans/2026-09-02-familiars-integration.md) | Superseded |
 | [Grok-inspired agent inspector](plans/2026-08-30-grok-inspired-agent-inspector.md) | Abandoned |
@@ -54,7 +63,7 @@ status changes, update both.
 | [iOS phase C: enrollment authority](plans/2026-08-16-ios-phase-c-enrollment-authority.md) | Superseded, never implemented |
 | [iOS phase B: cave-core foundation](plans/2026-08-16-ios-phase-b-cave-core-foundation.md) | Superseded, never implemented |
 | [iOS phase A: transport extraction](plans/2026-08-16-ios-phase-a-transport-extraction.md) | Superseded, never implemented |
-| [Phase 7 release rollout](plans/2026-08-15-phase-7-release-rollout.md) | Partially delivered, amended on #356 |
+| [Phase 7 release rollout](plans/2026-08-15-phase-7-release-rollout.md) | Partially delivered, amended on #356; see [`docs/releasing.md`](../releasing.md) |
 | [Phase 6 production hardening](plans/2026-08-15-phase-6-production-hardening.md) | Abandoned |
 | [Phase 5 lifecycle, offline, tooling](plans/2026-08-15-phase-5-native-lifecycle-offline-sdk-tooling.md) | Abandoned |
 | [Phase 4 rich content and attachments](plans/2026-08-15-phase-4-rich-content-attachments-actions.md) | Superseded |

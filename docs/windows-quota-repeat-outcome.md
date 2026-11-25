@@ -1,5 +1,9 @@
 # Windows quota repeat outcomes
 
+> **Historical (2026-11-23):** This page records a Windows quota diagnostic from September
+> 2026. #219 closed on 2026-09-24. Its last paragraph gives the outcome; the latest protected
+> run, 42558538262 on 2026-11-09, passed.
+
 Protected run [34720763619](https://github.com/OpenCoven/chat/actions/runs/34720763619)
 failed Windows before native launch with access denial at `bootstrap-npm-cache`,
 `directory-enumeration-depth-3-plus`, and `repeat=transient`. That historical
@@ -113,7 +117,9 @@ PowerShell 7.6.6 on .NET 10, and the `windows-supervisor-behavior` job passed on
 Which cause fired in protected run 35146928092 was never proven: that record
 says only `persistent`, and this change did not repair the underlying denial.
 The protected lane first passed on Windows in run 36033589858 on 2026-09-24, and
-the latest protected run, 36222464391 on 2026-09-26, also passed. A later protected
+36222464391 on 2026-09-26 also passed. Run 42550212128 on 2026-11-09 failed on Windows at
+the runner-image check, not this quota path, and on macOS; the latest protected run,
+42558538262 later that day, passed. A later protected
 failure here would report `persistent-entry-bound`, `persistent-access-denied`, or
 a `persistent-io-*` label. This diagnostic did not change the reviewed frozen-source
 binding or SDK rebinding. It tracked Chat #219, which closed on 2026-09-24, and
