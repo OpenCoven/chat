@@ -21,6 +21,7 @@ to the history table.
 | [packaged-acceptance.md](packaged-acceptance.md) | The installed-app acceptance workflow and its rows |
 | [phase1-conformance.md](phase1-conformance.md) | The protected Phase 1 conformance lane and lock (long; read its status block first) |
 | [releasing.md](releasing.md) | How to cut, verify and roll back a release: the whole path from prep PR to verification record |
+| [v0.1.3 operator plan](verification/v0.1.3-operator-plan.md) | Hand-run installer, link review and updater checks on each desktop |
 | [roadmap.md](roadmap.md) | The plan: the next release and what each open issue waits on |
 
 ## Dated snapshots and history
@@ -57,6 +58,8 @@ row in [release-notes/README.md](release-notes/README.md) links its record.
 | [2026-10-22-updater-356.md](verification/2026-10-22-updater-356.md) | 2026-10-22 | The updater's state before #476 merged; superseded |
 | [2026-10-20-release-v0.0.6.md](verification/2026-10-20-release-v0.0.6.md) | 2026-10-20 | v0.0.6 release evidence |
 | [2026-10-18-rakazo-chat-ux.md](verification/2026-10-18-rakazo-chat-ux.md) | 2026-10-18 | #485: the Rakazo-inspired chat UX slice |
+
+The [v0.1.3 operator plan](verification/v0.1.3-operator-plan.md) is listed under Current reference.
 
 ## Design audits
 
