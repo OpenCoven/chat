@@ -17,7 +17,9 @@ permissions:
   contents: read
 
 concurrency:
-  group: codeql-${{ github.head_ref || github.ref_name }}
+  # Keyed by PR number or full ref, so a fork branch named main can't
+  # cancel a scan of main.
+  group: codeql-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 jobs:
@@ -43,6 +45,7 @@ jobs:
         with:
           languages: ${{ matrix.language }}
           build-mode: none
+          dependency-caching: true
           config-file: ./.github/codeql/codeql-config.yml
       - uses: github/codeql-action/analyze@1bd86f2fdb4b86187fa4059f16f31a3202acc9ea # v4.39.4
         with:
