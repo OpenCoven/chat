@@ -38,7 +38,9 @@ describe('agent doctor delivery gates', () => {
           return { ok: true, value: 'a'.repeat(40) };
         return { ok: true, value: '' };
       };
-      const report = collectDoctor({ root, run });
+      const report = collectDoctor({ root, run, prNumber: 4 });
+      expect(report.ci.head).toBeNull();
+      expect(report.deployment.status).toBe('unknown');
       expect(report.checkout.dirty).toBeNull();
       expect(report.tracking.status).toBe('unknown');
       expect(report.ci.status).toBe('unknown');
@@ -78,6 +80,7 @@ describe('agent doctor delivery gates', () => {
     const report = assessRuntime({
       chatSha: 'a'.repeat(40),
       installerPin: '0.4.10',
+      engineSetupPin: '0.8.0',
       required: ['run_budget_v1'],
       releases: [{ tag_name: 'v0.4.10', draft: false, prerelease: false }],
       receipts: [
@@ -108,6 +111,40 @@ describe('agent doctor delivery gates', () => {
     expect(report.installer.detail).toContain('run_budget_v1');
   });
 
+  test('a different engine cannot attest installer compatibility', () => {
+    const sha = 'a'.repeat(40);
+    const result = assessRuntime({
+      chatSha: sha,
+      installerPin: '1',
+      engineSetupPin: '2',
+      releases: [{ tag_name: 'v1' }],
+      receipts: [
+        {
+          scope: 'installer',
+          chatSha: sha,
+          covenVersion: '1',
+          engineVersion: '3',
+          outcome: 'passed',
+          evidence: 'fixture',
+          capabilities: ['feature'],
+        },
+      ],
+    });
+    expect(result.installer.status).toBe('unknown');
+  });
+
+  test('an older owner releasing cannot clear the newest claimant', () => {
+    const row = assessIssue(
+      { number: 1, body: '> **State (2026-11-19):** Next: wait. Who: Alice.' },
+      [
+        { created_at: '2026-11-20', body: '**Claimed** by Bob (Codex)' },
+        { created_at: '2026-11-21', body: '**Released** by Alice (Codex)' },
+      ],
+      [],
+    );
+    expect(row.owner).toBe('bob');
+    expect(row.claim).toContain('Bob');
+  });
   test('missing releases and mismatched receipts stay unknown', () => {
     const report = assessRuntime({
       chatSha: 'a'.repeat(40),

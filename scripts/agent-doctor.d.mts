@@ -3,6 +3,7 @@ type RecordRow = Record<string, unknown>;
 export function assessRuntime(input: {
   chatSha: string;
   installerPin: string | null;
+  engineSetupPin?: string | null;
   required?: string[];
   releases: RecordRow[] | null;
   receipts?: RecordRow[];
@@ -25,7 +26,7 @@ export function assessIssue(
   comments: RecordRow[] | null,
   prs: RecordRow[],
   now?: number,
-): { warnings: string[]; claim: string | null; nextAction: string };
+): { owner?: string; warnings: string[]; claim: string | null; nextAction: string };
 export function collectDoctor(options?: {
   root?: string;
   offline?: boolean;
@@ -36,7 +37,8 @@ export function collectDoctor(options?: {
 }): {
   checkout: { dirty: boolean | null };
   tracking: { status: string };
-  ci: { status: string };
+  ci: { status: string; head: string | null };
+  deployment: Assessment;
   runtime: { installer: Assessment };
 };
 export function formatDoctor(report: RecordRow): string;

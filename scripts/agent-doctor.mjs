@@ -9,7 +9,14 @@ import { governedPaths, pathsNeedingCiFull } from './ci-full-check.mjs';
 const result = (status, detail) => ({ status, detail });
 
 /** Receipts are user-selected attestations, never a substitute for running the canary. */
-export function assessRuntime({ chatSha, installerPin, required = [], releases, receipts = [] }) {
+export function assessRuntime({
+  chatSha,
+  installerPin,
+  engineSetupPin,
+  required = [],
+  releases,
+  receipts = [],
+}) {
   const published =
     releases === null
       ? result('unknown', 'Published releases unavailable')
@@ -71,7 +78,12 @@ export function assessRuntime({ chatSha, installerPin, required = [], releases, 
     };
   };
   const installerReceipt = receipts.findLast(
-    (r) => r.scope === 'installer' && r.chatSha === chatSha && r.covenVersion === installerPin,
+    (r) =>
+      r.scope === 'installer' &&
+      r.chatSha === chatSha &&
+      r.covenVersion === installerPin &&
+      engineSetupPin &&
+      r.engineVersion === engineSetupPin,
   );
   const installer = assess(installerReceipt, 'installer');
   if (published.status !== 'available' && installer.status === 'attested') {
@@ -196,14 +208,22 @@ export function assessIssue(issue, comments, prs, now = Date.now()) {
       warnings: ['Comments unavailable; ownership unknown'],
       linkedPRs: linked.map((pr) => pr.number),
       nextAction: 'Read current issue comments before claiming',
+      source: issue.html_url,
       claim: null,
     };
   const ordered = [...comments].sort((a, b) => a.created_at.localeCompare(b.created_at));
-  let claim = null;
+  const claims = new Map();
   for (const comment of ordered) {
-    if (/\*\*Claimed\*\*/i.test(comment.body)) claim = comment;
-    if (/\*\*Released\*\*/i.test(comment.body)) claim = null;
+    const marker = /^\*\*(Claimed|Released)\*\* by ([^ (]+?)(?:\s|[.,]?$)/i.exec(
+      comment.body ?? '',
+    );
+    if (!marker) continue;
+    const actor = marker[2].replace(/[.,]$/, '').toLowerCase();
+    if (marker[1].toLowerCase() === 'claimed') claims.set(actor, comment);
+    else claims.delete(actor);
   }
+  if (claims.size > 1) warnings.push('Overlapping claims; confirm the current owner on the issue');
+  const claim = claims.size === 1 ? [...claims.values()][0] : null;
   if (!state) warnings.push('Missing dated State block');
   if (!labels.some((l) => l.startsWith('area:'))) warnings.push('Missing area label');
   if (
@@ -230,6 +250,12 @@ export function assessIssue(issue, comments, prs, now = Date.now()) {
   const latest = ordered.at(-1);
   const recent = latest && (!stateDate || latest.created_at.slice(0, 10) >= stateDate);
   const source = recent ? (latest.html_url ?? issue.html_url) : issue.html_url;
+  const recordedOwner = state.replaceAll('**', '').match(/Who:\s*(.*?)(?:\. |$)/i)?.[1];
+  const owner = claims.size
+    ? [...claims.keys()].join(', ')
+    : recent
+      ? 'confirm against latest comment'
+      : (recordedOwner ?? 'see State block');
   const nextAction = warnings.some((w) => /contradict/.test(w))
     ? 'Read latest comment and reconcile the State block; do not follow stale completion'
     : recent
@@ -239,7 +265,8 @@ export function assessIssue(issue, comments, prs, now = Date.now()) {
           .replaceAll('**', '')
           .match(/Next(?: action| step)?:\s*([\s\S]*?)(?:\s+Who:|$)/i)?.[1]
           ?.trim() ??
-        'Read acceptance criteria and latest owner comment to establish the next action');
+        (state ||
+          'Read acceptance criteria and latest owner comment to establish the next action'));
   return {
     number: issue.number,
     status: warnings.length ? 'attention' : 'observed',
@@ -247,8 +274,18 @@ export function assessIssue(issue, comments, prs, now = Date.now()) {
     state,
     warnings,
     source,
-    owner: state.replaceAll('**', '').match(/Who:\s*(.*)/i)?.[1] ?? 'unknown',
+    owner,
+    recordedOwner,
     claim: claim?.body.split('\n')[0] ?? null,
+    availability: claims.size
+      ? 'claimed'
+      : !labels.includes('agent-ready') ||
+          labels.some((label) =>
+            ['needs-human', 'needs-decision', 'blocked:engine', 'in-progress'].includes(label),
+          ) ||
+          linked.length
+        ? 'read gates'
+        : 'check latest comments to claim',
     latestCommentAt: ordered.at(-1)?.created_at ?? null,
     linkedPRs: linked.map((pr) => pr.number),
     nextAction,
@@ -414,11 +451,13 @@ export function collectDoctor({
     : null;
   if (prNumber && !currentPr)
     unknowns.push('Selected PR unavailable; local-head checks are not PR qualification');
-  const checkSha = currentPr?.head?.sha ?? head;
+  const checkSha = currentPr?.head?.sha ?? (prNumber ? null : head);
   // --slurp retains each response page; check-run pages wrap their collection.
-  const checkPages = api(`repos/OpenCoven/chat/commits/${checkSha}/check-runs?per_page=100`, true);
+  const checkPages =
+    checkSha && api(`repos/OpenCoven/chat/commits/${checkSha}/check-runs?per_page=100`, true);
   const checks = checkPages?.flatMap((page) => page.check_runs ?? []);
-  const statuses = api(`repos/OpenCoven/chat/commits/${checkSha}/statuses?per_page=100`, true);
+  const statuses =
+    checkSha && api(`repos/OpenCoven/chat/commits/${checkSha}/statuses?per_page=100`, true);
   const releases = api('repos/OpenCoven/coven/releases?per_page=100', true);
   const engineReleases = api('repos/OpenCoven/coven-code/releases?per_page=100', true);
   const installerPin =
@@ -426,7 +465,14 @@ export function collectDoctor({
     null;
   const engineSetupPin =
     read('src-tauri/src/setup.rs').match(/const ENGINE_VERSION: &str = "([^"]+)"/)?.[1] ?? null;
-  const runtime = assessRuntime({ chatSha: head, installerPin, required, releases, receipts });
+  const runtime = assessRuntime({
+    chatSha: head,
+    installerPin,
+    engineSetupPin,
+    required,
+    releases,
+    receipts,
+  });
   const releaseList = (rows) =>
     rows === null
       ? null
@@ -440,10 +486,21 @@ export function collectDoctor({
     ? api(`repos/OpenCoven/chat/pulls/${currentPr.number}/files?per_page=100`, true)
     : null;
   const deploymentPaths = currentPr
-    ? prFiles?.map((file) => file.filename)
-    : pathsKnown
+    ? prFiles?.flatMap((file) => [file.filename, file.previous_filename].filter(Boolean))
+    : !prNumber && pathsKnown
       ? paths
       : null;
+  const localWorkflow = read('.github/workflows/ios.yml');
+  let deploymentWorkflow = localWorkflow;
+  if (currentPr && (currentPr.head.sha !== head || paths.includes('.github/workflows/ios.yml'))) {
+    const remoteWorkflow = api(
+      `repos/OpenCoven/chat/contents/.github/workflows/ios.yml?ref=${currentPr.head.sha}`,
+    );
+    deploymentWorkflow =
+      remoteWorkflow?.encoding === 'base64'
+        ? Buffer.from(remoteWorkflow.content, 'base64').toString('utf8')
+        : '';
+  }
   const ci = assessChecks(
     requiredContexts,
     checks,
@@ -481,6 +538,20 @@ export function collectDoctor({
   };
   return {
     schemaVersion: 1,
+    sources: {
+      checkout: 'git rev-parse, status, diff, ls-files, worktree list; local origin/main',
+      toolchains: '.node-version, package.json, rust-toolchain.toml and local version commands',
+      signing: 'git config user.signingkey, gpg.format and commit.gpgsign',
+      ci: checkSha ? `https://github.com/OpenCoven/chat/commit/${checkSha}/checks` : null,
+      protection: 'https://api.github.com/repos/OpenCoven/chat/branches/main/protection',
+      runtime: [
+        'src-tauri/src/coven_install.rs',
+        'src-tauri/src/setup.rs',
+        'https://github.com/OpenCoven/coven/releases',
+        'https://github.com/OpenCoven/coven-code/releases',
+      ],
+      deployment: '.github/workflows/ios.yml and the changed paths for the selected revision',
+    },
     observedAt: new Date().toISOString(),
     readOnly: true,
     checkout: {
@@ -516,8 +587,11 @@ export function collectDoctor({
     })),
     ci,
     runtime,
+    localDeployment: pathsKnown
+      ? assessDeployment(paths, localWorkflow)
+      : result('unknown', 'Inspect checkout changes'),
     deployment: deploymentPaths
-      ? assessDeployment(deploymentPaths, read('.github/workflows/ios.yml'))
+      ? assessDeployment(deploymentPaths, deploymentWorkflow)
       : result('unknown', 'Changed paths unavailable; inspect deployment manually'),
     unknowns,
   };
@@ -554,7 +628,7 @@ export function formatDoctor(report) {
   lines.push(`Tracking: ${report.tracking.status}`);
   for (const issue of report.tracking.issues)
     lines.push(
-      `  #${issue.number} ${issue.status}; owner ${issue.owner ?? 'unknown'}; next ${issue.nextAction} ${issue.source ?? ''}${issue.warnings.length ? `; ${issue.warnings.join('; ')}` : ''}`,
+      `  #${issue.number} ${issue.status}; ${issue.availability ?? 'unknown'}; owner ${issue.owner ?? 'unknown'}; next ${issue.nextAction} ${issue.source ?? ''}${issue.warnings.length ? `; ${issue.warnings.join('; ')}` : ''}`,
     );
   for (const pr of report.pullRequests)
     lines.push(
@@ -581,7 +655,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1]
       }
       if (arg === '--help') {
         console.log(
-          'pnpm agent:doctor [--json] [--offline] [--pr NUMBER] [--require-capability NAME] [--runtime-evidence FILE]\nRead-only; does not run providers, install dependencies, sign, fetch Git refs or mutate GitHub. Runtime evidence is an explicit JSON array of receipts; see docs/agents/preflight.md.',
+          'pnpm --silent agent:doctor [--json] [--offline] [--pr NUMBER] [--require-capability NAME] [--runtime-evidence FILE]\nRead-only; does not run providers, install dependencies, sign, fetch Git refs or mutate GitHub. Runtime evidence is an explicit JSON array of receipts; see docs/agents/preflight.md.',
         );
         process.exit(0);
       }
