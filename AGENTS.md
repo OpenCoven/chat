@@ -4,6 +4,8 @@ The entry point for every agent working in this repo: Claude Code, Codex, Copilo
 driven through Chat itself. It says what to read next, where current work lives, and how to work
 next to the other agents that are usually running here at the same time.
 
+Run `pnpm agent:doctor` for a read-only preflight. See the [agent preflight guide](docs/agents/preflight.md) for evidence sources and JSON output.
+
 ## Read in this order
 
 1. **This file.**
