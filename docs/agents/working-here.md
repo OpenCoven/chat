@@ -5,6 +5,10 @@ matters, and what to do. Read `AGENTS.md` first; this page assumes it. When you 
 every agent here needs, add it with the date you verified it. When an entry stops being true, fix
 or delete it in the same PR as the change that made it false.
 
+## Preflight
+
+Run `pnpm agent:doctor --pr NUMBER` before delivery. Follow the linked issue comment when it supersedes the dated State block. [Command and receipt guide](preflight.md)
+
 ## GitHub
 
 ### Use REST, not GraphQL (verified 2026-11-12)
