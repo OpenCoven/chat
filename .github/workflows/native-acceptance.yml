@@ -28,7 +28,7 @@ on:
         default: ''
         type: string
       attachment_upgrade_run:
-        description: Optional CI run ID for this ref’s linux-bundle. Runs only the retained attachment upgrade test against v0.1.2.
+        description: Optional CI run ID for this ref’s linux-bundle. Runs only the retained attachment upgrade test from v0.1.3.
         required: false
         type: string
       asking:

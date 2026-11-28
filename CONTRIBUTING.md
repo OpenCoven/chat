@@ -54,7 +54,7 @@ Each invocation prints its directory under `.artifacts/installer-pin/`. Inspect 
 
 To run the complete Debian install and upgrade on a fresh Ubuntu runner, dispatch **Native acceptance** on the candidate branch with `attachment_upgrade_run` set to the CI run ID that produced its `linux-bundle` artifact. The workflow checks the source revision and records both installed package versions, the candidate digest and the UI observations. You can also run `bash scripts/native-acceptance/linux/attachment-upgrade.sh "$bundle_directory" "$new_output_directory"` on a disposable Ubuntu machine.
 
-Run the two phases on a disposable Linux desktop with X11, AT-SPI, xdotool, and the repository’s Node version. Use an installed v0.1.2 binary for the first phase and upgrade the package before the second. Supply the absolute paths to the Coven CLI and engine that Chat should use. Each phase uses a private Chat home under the same test directory and an HTTP model fixture on loopback.
+Run the two phases on a disposable Linux desktop with X11, AT-SPI, xdotool, and the repository’s Node version. Use an installed v0.1.3 binary for the first phase and upgrade the package before the second. Supply the absolute paths to the Coven CLI and engine that Chat should use. Each phase uses a private Chat home under the same test directory and an HTTP model fixture on loopback.
 
 ```sh
 qa=$(mktemp -d)

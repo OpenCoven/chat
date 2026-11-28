@@ -10,11 +10,11 @@ cd "$out"
 mapfile -t candidates < <(find "$bundle" -type f -name '*.deb')
 test "${#candidates[@]}" = 1
 candidate=${candidates[0]}
-curl -fsSL --retry 3 -o published.deb https://github.com/OpenCoven/chat/releases/download/v0.1.2/Coven.Chat_0.1.2_amd64.deb
+curl -fsSL --retry 3 -o published.deb https://github.com/OpenCoven/chat/releases/download/v0.1.3/Coven.Chat_0.1.3_amd64.deb
 curl -fsSL --retry 3 -o cli.tar.gz https://github.com/OpenCoven/coven/releases/download/v0.4.10/coven-v0.4.10-linux-x64.tar.gz
 curl -fsSL --retry 3 -o engine.tar.gz https://github.com/OpenCoven/coven-code/releases/download/v0.9.1/coven-code-linux-x86_64.tar.gz
 sha256sum -c <<'SUMS'
-69468a02784846a57682f28beb6c3bcf864efb8b1a76966f9283efb2f9d71f47  published.deb
+a827ce8f319443bda773d4b4de8fcc842b0f1313fb2b50ce2c7cd53b4ddf8f07  published.deb
 01589044d05f1dd40823c218531386c6cdc89648a5a3ca4056a0b672c80db7cc  cli.tar.gz
 f9e426e7fecc01696ff40a0cc2702cd4069b27daad53ff57fe49db49330e1b9f  engine.tar.gz
 SUMS

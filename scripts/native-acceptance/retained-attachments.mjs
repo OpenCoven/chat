@@ -199,13 +199,14 @@ async function send(i) {
   );
   console.log('Clicked inert published card for ' + names[i]);
 }
-async function preview(i, keyboard = false, missing = false) {
+// `key` is false for a click, or the key that opens the focused card.
+async function preview(i, key = false, missing = false) {
   const card = await app.one('button', 'Preview ' + filename, { timeout: 60000 });
-  if (keyboard) {
+  if (key) {
     await app.click(card);
     await press('button', 'Close preview');
     assert.equal(await app.focusedName(), 'Preview ' + filename);
-    await app.key('space');
+    await app.key(key);
   } else await app.click(card);
   await app.one('dialog', filename, { timeout: 30000 });
   await until(
@@ -222,7 +223,7 @@ async function preview(i, keyboard = false, missing = false) {
   );
   await press('button', 'Close preview');
   console.log(
-    `Verified ${names[i]} with ${keyboard ? 'Space' : 'click'}: ${missing ? 'unavailable' : 'exact saved contents'}`,
+    `Verified ${names[i]} with ${key || 'click'}: ${missing ? 'unavailable' : 'exact saved contents'}`,
   );
 }
 async function toggleArchived() {
@@ -242,7 +243,7 @@ try {
       if (launch) await open();
       for (let i = 0; i < 2; i++) {
         await select(i);
-        await preview(i, i === 1);
+        await preview(i, i === 1 && 'space');
       }
       if (!launch) await close();
     }
@@ -251,7 +252,7 @@ try {
     await press('menuitem', 'Archive chat');
     await toggleArchived();
     await select(0);
-    await preview(0, true);
+    await preview(0, 'Return');
     await press('button', 'Restore chat');
     await toggleArchived();
     await select(0);
@@ -277,7 +278,7 @@ try {
     console.log('Verified Delete from Chat removes the remaining retained file across relaunch.');
     await close();
     console.log(
-      'Passed same-name isolation, upgrade, restart, mouse, keyboard, archive, restore, and missing saved copy.',
+      'Passed same-name isolation, upgrade, restart, mouse, Space, Enter, archive, restore, and missing saved copy.',
     );
   }
 } catch (error) {
