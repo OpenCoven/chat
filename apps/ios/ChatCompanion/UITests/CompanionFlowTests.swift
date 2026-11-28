@@ -107,7 +107,7 @@ final class CompanionFlowTests: XCTestCase {
     focus(link, in: app)
     link.typeText(fixture["pairingLink"]!)
     app.buttons["connect"].tap()
-    XCTAssertTrue(app.buttons["familiar-picker"].waitForExistence(timeout: 20))
+    XCTAssertTrue(app.buttons["familiar-picker"].waitForExistence(timeout: 20), app.debugDescription)
     let composer = app.textFields["composer"].exists ? app.textFields["composer"] : app.textViews["composer"]
     focus(composer, in: app)
     composer.typeText("Draft survives relaunch")
@@ -157,6 +157,7 @@ final class CompanionFlowTests: XCTestCase {
     let recoveredEditor = app.textViews["recovered-draft-editor"]
     focus(recoveredEditor, in: app)
     recoveredEditor.typeText(" Edited recovery")
+    waitForValue(of: recoveredEditor, containing: "Edited recovery", in: app)
     let editedRecovery = try XCTUnwrap(recoveredEditor.value as? String)
     XCTAssertTrue(editedRecovery.contains("Edited recovery"))
     app.buttons["Done"].tap()
@@ -167,7 +168,8 @@ final class CompanionFlowTests: XCTestCase {
     XCTAssertTrue(recoveredEditor.waitForExistence(timeout: 5))
     XCTAssertEqual(recoveredEditor.value as? String, editedRecovery)
     app.buttons["Add to Current Draft"].tap()
-    XCTAssertTrue((composer.value as? String ?? "").contains("Draft from the previous chat"))
+    // The sheet closes first and the composer updates after.
+    waitForValue(of: composer, containing: "Draft from the previous chat", in: app)
     let afterRecovery = try await control.change()
     XCTAssertEqual(afterRecovery.sendCount, 1)
     focus(composer, in: app)
@@ -185,8 +187,10 @@ final class CompanionFlowTests: XCTestCase {
       $0.frame.width < privacyToggle.frame.width && privacyToggle.frame.contains($0.frame)
     } ?? privacyToggle
     nativeSwitch.tap()
-    let enabled = XCTNSPredicateExpectation(predicate: NSPredicate(format: "value == %@", "1"), object: privacyToggle)
-    await fulfillment(of: [enabled], timeout: 5)
+    // A switch's value is "0" or "1". On CI this tap once landed on the switch's centre
+    // and the switch stayed off (#665); the hierarchy in the failure shows whether the
+    // app reported a storage error.
+    waitForValue(of: privacyToggle, containing: "1", in: app)
     app.buttons["Done"].tap()
     app.terminate()
     app.launch()
@@ -209,15 +213,50 @@ final class CompanionFlowTests: XCTestCase {
   /// iOS 26.5 can expose a visible SwiftUI menu row with an invalid AX tap point
   /// (-1, -1). Use its observed on-screen centre; the following assertions must
   /// still prove that the actual privacy sheet, log or confirmation opened.
+  ///
+  /// A row's reported frame isn't stable either (#665). A tap relative to the
+  /// row makes XCTest look the row up again while it synthesizes the touch.
+  /// On CI that lookup once produced a point XCTest's own touch synthesis
+  /// asserted on (`XCPointerEventPath initForTouchAtPoint`), and twice the tap
+  /// left the menu open although the row had been on screen. So wait until the
+  /// row reports the same frame on two polls in a row, then tap that frame's
+  /// centre relative to the app, without looking the row up again.
   private func chooseConnectionAction(_ action: XCUIElement, in app: XCUIApplication) {
     app.buttons["Connection options"].tap()
-    let visible = XCTNSPredicateExpectation(predicate: NSPredicate { element, _ in
-      guard let row = element as? XCUIElement, row.exists, row.isEnabled else { return false }
-      let frame = row.frame
-      return !frame.isEmpty && app.frame.contains(frame)
-    }, object: action)
-    XCTAssertEqual(XCTWaiter.wait(for: [visible], timeout: 10), .completed, app.debugDescription)
-    action.coordinate(withNormalizedOffset: .init(dx: 0.5, dy: 0.5)).tap()
+    let row = action.firstMatch
+    let appFrame = app.frame
+    var previousFrame = CGRect.null
+    var settledFrame = CGRect.null
+    let settled = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+      // One snapshot per poll. An accessibility query has taken 2 to 3 s on hosted
+      // runners, and reading exists, isEnabled and frame separately once let only
+      // three polls fit in the timeout.
+      guard let snapshot = try? row.snapshot(), snapshot.isEnabled else { return false }
+      let frame = snapshot.frame
+      defer { previousFrame = frame }
+      guard !frame.isEmpty, appFrame.contains(frame), frame == previousFrame else { return false }
+      settledFrame = frame
+      return true
+    }, object: nil)
+    XCTAssertEqual(XCTWaiter.wait(for: [settled], timeout: 20), .completed, app.debugDescription)
+    guard !settledFrame.isNull else { return }
+    let origin = appFrame.origin
+    app.coordinate(withNormalizedOffset: .zero)
+      .withOffset(CGVector(dx: settledFrame.midX - origin.x, dy: settledFrame.midY - origin.y))
+      .tap()
+  }
+
+  /// Waits until `element`'s value contains `text`, rather than reading it straight
+  /// after the typing or tap that changes it: a read 0.3 s after `typeText` and
+  /// one straight after "Add to Current Draft" each failed once on CI (#665). If
+  /// the text never shows, the failure carries the hierarchy, which says what
+  /// the element held.
+  private func waitForValue(of element: XCUIElement, containing text: String, in app: XCUIApplication) {
+    let shows = XCTNSPredicateExpectation(
+      predicate: NSPredicate(format: "value CONTAINS %@", text), object: element)
+    XCTAssertEqual(
+      XCTWaiter.wait(for: [shows], timeout: 5), .completed,
+      "\(element.identifier) never showed \"\(text)\"\n\(app.debugDescription)")
   }
 
   /// Taps `field` until it holds keyboard focus, so `typeText` has somewhere to
