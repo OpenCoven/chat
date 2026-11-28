@@ -6,6 +6,7 @@ import { closeSync, mkdirSync, mkdtempSync, openSync, readFileSync, writeFileSyn
 import { join, resolve } from 'node:path';
 import { App, Native, outline, until } from './driver.mjs';
 import { startModelFixture } from './fixture.mjs';
+import { pinFor, pinSource } from './installer-pin-source.mjs';
 import { Lane } from './rows.mjs';
 
 assert.equal(process.platform, 'darwin', 'This command uses the macOS native driver.');
@@ -35,12 +36,7 @@ const home = join(out, 'home');
 const bin = join(home, '.local/bin');
 mkdirSync(bin, { recursive: true });
 const env = { HOME: home, COVEN_HOME: join(home, '.coven'), PATH: '/usr/bin:/bin' };
-const source = readFileSync('src-tauri/src/coven_install.rs', 'utf8');
-const version = source.match(/const COVEN_VERSION: &str = "([^"]+)"/)[1];
-const arch = process.arch === 'arm64' ? 'aarch64' : 'x64';
-const asset = `coven-v${version}-macos-${arch}.tar.gz`;
-const sha = source.split(`"${asset}",`)[1]?.match(/^\s*"([0-9a-f]{64})"/)?.[1];
-assert.ok(sha, 'Cannot identify the installer digest');
+const { version, asset, sha256: sha } = pinFor(readFileSync(pinSource, 'utf8'), process.arch);
 run('curl', [
   '-fsSL',
   '--retry',
