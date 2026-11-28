@@ -17,7 +17,7 @@ use sha2::{Digest, Sha256};
 
 /// The Coven release Chat installs. Moving it means updating every digest
 /// below from that release's `SHA256SUMS`.
-pub(crate) const COVEN_VERSION: &str = "0.4.10";
+pub(crate) const COVEN_VERSION: &str = "0.5.1";
 /// Larger than any Coven release asset; a bigger response is refused.
 const MAX_ARCHIVE_BYTES: u64 = 64 * 1024 * 1024;
 const DOWNLOAD_TIMEOUT: Duration = Duration::from_secs(15 * 60);
@@ -41,27 +41,27 @@ pub(crate) fn release_for(os: &str, arch: &str) -> Option<Release> {
     };
     match (os, arch) {
         ("macos", "aarch64") => Some(release(
-            "coven-v0.4.10-macos-aarch64.tar.gz",
-            "3d7fb297aa772e6405afa3e1bfb9fd8f4d99b19dd7339625b83ccbca3bbd624b",
-            12_072_707,
+            "coven-v0.5.1-macos-aarch64.tar.gz",
+            "a8b4306a0b67450ef43b7e5a47efc1754e9cf31976a8cec91b32e513c6e69ec5",
+            18_696_801,
             &["coven", "coven-afs-serve"],
         )),
         ("macos", "x86_64") => Some(release(
-            "coven-v0.4.10-macos-x64.tar.gz",
-            "b194819055c6922ba4e2e5aa6ac10b0e67f76158da8c6669f18b3025a1c67119",
-            12_505_542,
+            "coven-v0.5.1-macos-x64.tar.gz",
+            "f104f8085bb201b8fd31435babc8db353c0829a5b5e74f903bcac8ef2a0698df",
+            19_405_855,
             &["coven", "coven-afs-serve"],
         )),
         ("linux", "x86_64") => Some(release(
-            "coven-v0.4.10-linux-x64.tar.gz",
-            "01589044d05f1dd40823c218531386c6cdc89648a5a3ca4056a0b672c80db7cc",
-            11_233_844,
+            "coven-v0.5.1-linux-x64.tar.gz",
+            "5bfdc020ee8590204fb3e6427e13918118ff847a555f3d25670a1b627a0d50fb",
+            18_385_511,
             &["coven"],
         )),
         ("windows", "x86_64") => Some(release(
-            "coven-v0.4.10-windows-x64.zip",
-            "bd6749dd3e2e248827d498d990589c2c6e2dce5853194b1dc9fb025c933c06fc",
-            29_110_900,
+            "coven-v0.5.1-windows-x64.zip",
+            "5f8d9e66825af8da43af83434fd8af164d07a5c7fbd5ffbd096c653c6bcf1242",
+            47_895_156,
             &["coven.exe"],
         )),
         _ => None,
@@ -309,13 +309,43 @@ pub(crate) async fn install(
     result?;
     let installed = crate::coven_runtime::resolve_cli()
         .map_err(|_| "Coven was installed but Chat cannot find it. Choose Check again.")?;
+    if !crate::coven_runtime::cli_takes_run_budgets() {
+        return Err(still_outdated(
+            crate::coven_runtime::cli_shadowing_install().as_deref(),
+        ));
+    }
     Ok(json!({ "version": COVEN_VERSION, "installed": installed.is_file() }))
+}
+
+/// The install finished, but the Coven Chat uses still can't take a run
+/// budget. Usually another copy comes first on Chat's search list.
+fn still_outdated(shadow: Option<&Path>) -> String {
+    match shadow {
+        Some(path) => format!(
+            "Coven {COVEN_VERSION} was installed, but Chat still uses the older Coven at {}. Update that copy, or remove it, then choose Check again.",
+            path.display()
+        ),
+        None => format!(
+            "Coven {COVEN_VERSION} was installed, but Coven still can't give Coven Code chats a model-round allowance. Run coven adapter list --json in a terminal to see what it reports."
+        ),
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::process::Command;
+
+    #[test]
+    fn an_install_that_leaves_an_older_coven_in_use_says_which() {
+        let shadowed = still_outdated(Some(Path::new("/home/val/.local/lib/node_modules/coven")));
+        assert!(shadowed.contains(COVEN_VERSION), "{shadowed}");
+        assert!(
+            shadowed.contains("/home/val/.local/lib/node_modules/coven"),
+            "{shadowed}"
+        );
+        assert!(still_outdated(None).contains("coven adapter list --json"));
+    }
 
     fn temp(name: &str) -> PathBuf {
         let path = std::env::temp_dir().join(format!("opencoven-{name}-{}", uuid::Uuid::new_v4()));

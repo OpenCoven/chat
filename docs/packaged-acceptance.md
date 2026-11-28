@@ -56,14 +56,15 @@ the bug is fixed. Currently listed:
 ## What is real, and the one stand-in
 
 Packaged Chat starts with an empty profile, and first-run setup is done through the window:
-**Install Coven** runs Chat's pinned installer (Coven 0.4.10, checked against its SHA-256),
-**Install the engine** runs `coven engine install` for engine 0.9.1, by version and checked
-against its SHA-256, because Coven 0.4.10 alone would choose 0.8.0. **Create familiar** names the
+**Install Coven** runs Chat's pinned installer (Coven 0.5.1, checked against its SHA-256),
+**Install the engine** runs `coven engine install` for engine 0.9.3, by version and checked
+against its SHA-256. That is the engine Coven 0.5.1 pins, and the oldest one Chat accepts,
+because **Model rounds** needs it. **Create familiar** names the
 first familiar. Every reply in the suite comes from a real run: Chat starts the installed Coven CLI,
 which starts coven-code, and the reply streams back through Chat's own capture.
 
 The stand-in is the model. The engine is pointed at a local, deterministic Anthropic-compatible
-endpoint (`scripts/packaged-acceptance/model-fixture.mjs`) through `ANTHROPIC_BASE_URL`, with a
+endpoint (`scripts/packaged-acceptance/model-fixture.mjs`) through `ANTHROPIC_BASE_URL` and the engine's own `COVEN_CODE_API_BASE`, with a
 placeholder key. No account or key is used. Model-provider behaviour is not covered.
 
 The system clipboard is read by a separate process (`xclip`, `Get-Clipboard`), never by the page.
@@ -94,6 +95,7 @@ what its window does. CI's `.deb` is built in the CI image (Ubuntu 24.04) and it
 | 9 IPv6 | `https://[::1]:8080/x` shows site `[::1]:8080`; Copy and Open use exactly that address | |
 | #515 handoff | **Open** hands the operating system exactly the reviewed address, once, for a query string, a plain address and IPv6 | The browser's own address bar, with the browser closed and with it running |
 | Asking stays off (v0.0.9) | Chat's note about asking doesn't reach the engine; on an API-key engine turn the real engine's write is refused and the file isn't created; nothing offers **Allow once** or **Decline**, the sidebar doesn't say a familiar is asking, and Settings › Access has no permission log. A reply that carries a request block anyway files nothing in the host's log and shows nothing. When asking returns, `approvalRow` replaces this row | The first run with a real model, other sign-in paths, and the iPhone |
+| #654 run budgets | With **Settings › Model › Model rounds** at 1, a reply whose first round runs a real `Read` stops as **Unfinished** with the allowance shown as 1/1, and no second round reaches the model. **Continue saved work** then finishes the reply, and the model endpoint sees the saved tool result in the continued turn. The row sets the allowance back to 50 | A real model choosing tools; the iPhone, whose sends use 50 rounds |
 | #525 launch environment (Linux) | The browser **Open** started received none of the AppImage runtime's variables (`APPDIR`, `APPIMAGE`, `ARGV0`, `OWD`), no variable pointing into the image, and `LD_LIBRARY_PATH`, `GDK_BACKEND` and `GTK_THEME` as Chat was launched with them | |
 
 macOS stays entirely hand-run: WKWebView has no WebDriver.

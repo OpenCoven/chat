@@ -12,13 +12,14 @@ import {
 describe('stored run preferences', () => {
   beforeEach(() => localStorage.clear());
 
-  it('starts every chat on Coven Code with the engine choosing the rest', () => {
+  it('starts every chat on Coven Code with a finite round allowance', () => {
     expect(readPreferences()).toEqual(DEFAULT_PREFERENCES);
     expect(runOptions(DEFAULT_PREFERENCES)).toEqual({
       harness: 'coven-code',
       model: '',
       think: false,
       speed: 'default',
+      maxTurns: 50,
     });
   });
 
@@ -79,9 +80,9 @@ describe('what a send carries', () => {
     speed: 'fast',
   } as const;
 
-  it('sends nothing extra for the defaults, so the engine decides', () => {
-    expect(sendOptions(runOptions(DEFAULT_PREFERENCES))).toEqual({});
-    expect(sendOptions(runOptions(DEFAULT_PREFERENCES), 'coven-code')).toEqual({});
+  it('requests the finite default while leaving the engine to choose its model', () => {
+    expect(sendOptions(runOptions(DEFAULT_PREFERENCES))).toEqual({ maxTurns: 50 });
+    expect(sendOptions(runOptions(DEFAULT_PREFERENCES), 'coven-code')).toEqual({ maxTurns: 50 });
   });
 
   it('names the harness only when a chat starts, and never sends Codex what it ignores', () => {
@@ -98,6 +99,7 @@ describe('what a send carries', () => {
     expect(sendOptions(chosen, 'coven-code')).toEqual({
       think: true,
       speed: 'fast',
+      maxTurns: 50,
     });
     expect(sendOptions({ ...chosen, harness: 'claude' }, 'codex')).toEqual({});
     expect(sendOptions({ ...chosen, model: '' }, 'claude')).toEqual({ think: true, speed: 'fast' });
@@ -122,7 +124,10 @@ describe('what a send carries', () => {
     expect(sendOptions(runOptions(preferences, 'codex'), 'codex')).toEqual({
       model: 'gpt-6.1-sol',
     });
-    expect(sendOptions(runOptions(preferences))).toEqual({ model: 'claude-opus-5-5' });
+    expect(sendOptions(runOptions(preferences))).toEqual({
+      model: 'claude-opus-5-5',
+      maxTurns: 50,
+    });
     expect(sendOptions(runOptions(preferences, 'claude'), 'claude')).toEqual({});
   });
 
@@ -135,6 +140,7 @@ describe('what a send carries', () => {
     expect(sendOptions(runOptions(preferences))).toEqual({ harness: 'codex' });
     expect(sendOptions(runOptions(preferences, 'coven-code'), 'coven-code')).toEqual({
       model: 'claude-opus-5-5',
+      maxTurns: 50,
     });
     expect(preferences.model).toBe('claude-opus-5-5');
   });

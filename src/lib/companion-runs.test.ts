@@ -44,3 +44,28 @@ it('accepts native terminal events with a null event payload', async () => {
   expect(received).toHaveBeenCalledOnce();
   stop();
 });
+
+it('accepts additive unfinished outcomes only with the existing failed terminal status', async () => {
+  let deliver: (event: { payload: unknown }) => void = () => {};
+  const received = vi.fn();
+  const stop = await observeCompanionRuns(received, {
+    available: () => true,
+    invoke: async () => null,
+    listen: async (_name, callback) => {
+      deliver = callback;
+      return () => {};
+    },
+  });
+  const terminal = {
+    runId: 'r',
+    familiarId: 'f',
+    status: 'failed',
+    outcome: 'turn_budget_exhausted',
+  };
+  deliver({ payload: terminal });
+  expect(received).toHaveBeenCalledExactlyOnceWith(terminal);
+  deliver({ payload: { ...terminal, status: 'completed' } });
+  deliver({ payload: { ...terminal, outcome: 'guessed' } });
+  expect(received).toHaveBeenCalledTimes(1);
+  stop();
+});

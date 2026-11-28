@@ -159,6 +159,48 @@ describe('first-run setup', () => {
     expect(screen.getByText('The chat')).toBeInTheDocument();
   });
 
+  it('updates a Coven too old for run budgets, as Chat v0.1.3 left it, and holds the chat back until then', async () => {
+    const outdated = report({
+      coven: { ok: false, installed: true, version: 'coven v0.4.10', required: '0.5.1' },
+    });
+    const run = vi.fn(async () => {});
+    const setup = { ...setupReturning(outdated, report()), run };
+    await renderWith(setup);
+    const coven = step('Coven');
+    expect(coven).toHaveTextContent(
+      'This computer has coven v0.4.10. Chat needs Coven 0.5.1 or newer.',
+    );
+    expect(coven).toHaveTextContent('Chats with Coven Code cannot start until Coven is updated');
+    expect(within(coven).queryByRole('button', { name: 'Install Coven' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Continue to Chat' })).toBeNull();
+    expect(screen.queryByText('The chat')).not.toBeInTheDocument();
+    await act(async () => {
+      fireEvent.click(within(coven).getByRole('button', { name: 'Update Coven' }));
+    });
+    expect(run).toHaveBeenCalledWith(expect.any(String), 'install_coven', expect.any(Function));
+    expect(screen.getByText('The chat')).toBeInTheDocument();
+  });
+
+  it("names an older Coven that Chat's install would not replace, and offers no install", async () => {
+    const path = '/Users/val/.local/lib/node_modules/@opencoven/cli/bin/coven';
+    const run = vi.fn(async () => {});
+    await renderWith({
+      ...setupReturning(
+        report({
+          coven: { ok: false, installed: true, version: 'coven v0.5.0', required: '0.5.1', path },
+          engine: { ok: false, installed: false },
+        }),
+      ),
+      run,
+    });
+    const coven = step('Coven');
+    expect(within(coven).getByText(path)).toBeInTheDocument();
+    expect(coven).toHaveTextContent('Update that copy, or remove it, then choose Check again.');
+    // Whatever Chat installed would come after this copy and not be used.
+    expect(within(coven).queryByRole('button', { name: /Install Coven|Update Coven/ })).toBeNull();
+    expect(step('Coven engine')).toHaveTextContent('Update Coven first.');
+  });
+
   it('shows the update command when Chat cannot run the step itself', async () => {
     const command = `coven engine install --version 0.9.1 --sha256 ${'d'.repeat(64)}`;
     await renderWith(

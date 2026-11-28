@@ -2,6 +2,7 @@ import { Channel } from '@tauri-apps/api/core';
 import { describe, expect, it, vi } from 'vitest';
 import {
   chatReachable,
+  covenOutdated,
   createSetup,
   engineOutdated,
   type SetupReport,
@@ -101,6 +102,18 @@ describe('setup bridge', () => {
     expect(engineOutdated(missing)).toBe(false);
     expect(chatReachable(missing)).toBe(false);
     expect(engineOutdated(complete)).toBe(false);
+  });
+
+  it('holds the chat back on a Coven that cannot take run budgets, such as 0.4.10', () => {
+    const outdated = {
+      ...complete,
+      coven: { ok: false, installed: true, version: 'coven v0.4.10', required: '0.5.1' },
+    };
+    expect(covenOutdated(outdated)).toBe(true);
+    expect(setupComplete(outdated)).toBe(false);
+    expect(chatReachable(outdated)).toBe(false);
+    expect(covenOutdated({ ...complete, coven: { ok: false } })).toBe(false);
+    expect(covenOutdated(complete)).toBe(false);
   });
 
   it('requires Coven and the engine before the chat is reachable', () => {

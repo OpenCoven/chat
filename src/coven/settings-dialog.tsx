@@ -9,8 +9,10 @@ import { FamiliarAvatar } from './familiar-avatar';
 import { INSPECTOR_DEFAULT_WIDTH } from './inspector-width';
 import { closeModal, openModal } from './modal';
 import {
+  DEFAULT_MAX_TURNS,
   HARNESS_LABEL,
   HARNESSES,
+  isValidMaxTurns,
   isValidModel,
   MODEL_MAX,
   modelsByHarness,
@@ -433,6 +435,11 @@ function ModelSection({ preferences, onPreferences, chatHarness }: SettingsDialo
   const customId = useId();
   const modelErrorId = useId();
   const thinkId = useId();
+  const budgetId = useId();
+  const budgetErrorId = useId();
+  const maxTurns = preferences.maxTurns ?? DEFAULT_MAX_TURNS;
+  const [budgetText, setBudgetText] = useState(String(maxTurns));
+  const validBudget = isValidMaxTurns(maxTurns);
   const [editingCustom, setEditingCustom] = useState(false);
   const { harness, model } = runOptions(preferences, chatHarness);
   const validModel = isValidModel(model);
@@ -527,6 +534,38 @@ function ModelSection({ preferences, onPreferences, chatHarness }: SettingsDialo
             </div>
           }
         />
+        {harness === 'coven-code' ? (
+          <Row
+            label="Model rounds"
+            htmlFor={budgetId}
+            hint={
+              validBudget ? (
+                'A finite allowance for each message or continuation. Default: 50. A round may run tools; this is separate from time, tokens and cost.'
+              ) : (
+                <span id={budgetErrorId} className="coven-settings-row-error">
+                  Choose a whole number from 1 to 4294967295 before sending.
+                </span>
+              )
+            }
+            control={
+              <input
+                id={budgetId}
+                className="coven-model-select"
+                type="text"
+                inputMode="numeric"
+                maxLength={10}
+                value={budgetText}
+                aria-invalid={validBudget ? undefined : true}
+                aria-describedby={validBudget ? undefined : budgetErrorId}
+                onChange={(event) => {
+                  const text = event.target.value;
+                  setBudgetText(text);
+                  onPreferences({ maxTurns: /^\d+$/.test(text) ? Number(text) : Number.NaN });
+                }}
+              />
+            }
+          />
+        ) : null}
         <Row
           label="Think longer"
           htmlFor={thinkId}
@@ -556,7 +595,8 @@ function ModelSection({ preferences, onPreferences, chatHarness }: SettingsDialo
       </Group>
       <p className="coven-settings-footnote">
         These apply to messages you send from this window. Messages sent from your iPhone use the
-        engine's defaults.
+        engine's defaults for model, reasoning and speed. Coven Code messages from the iPhone use 50
+        model rounds.
       </p>
     </>
   );

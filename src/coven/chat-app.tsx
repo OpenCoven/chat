@@ -25,7 +25,13 @@ import {
 } from './attachments';
 import { ChatLayout } from './chat-layout';
 import { projectEvents } from './events';
-import { isValidModel, type RunOptions, sendOptions } from './preferences';
+import {
+  DEFAULT_MAX_TURNS,
+  isValidMaxTurns,
+  isValidModel,
+  type RunOptions,
+  sendOptions,
+} from './preferences';
 
 const defaultRuntime = createCovenRuntime();
 const STORAGE_KEY = 'opencoven.chat.navigation.v1';
@@ -36,7 +42,7 @@ const MAX_HISTORY_DEPTH = 4;
 /** An open request can be answered on the phone, or expire, while this window watches. */
 const APPROVAL_POLL_MS = 5000;
 type Navigation = { familiarId: string; sessionId: string; drafts: Record<string, string> };
-type LastRun = { ms: number; outcome: 'reply' | 'error' | 'stopped' };
+type LastRun = { ms: number; outcome: 'reply' | 'error' | 'stopped' | 'unfinished' };
 function errorText(error: unknown) {
   return error instanceof Error ? error.message : String(error);
 }
@@ -175,7 +181,7 @@ export function ChatApp({
   const [lastRuns, setLastRuns] = useState<Record<string, LastRun>>({});
   // Runs that ended while another familiar was shown, until that familiar is
   // opened again: the sidebar row says a reply arrived or the run failed.
-  const [finished, setFinished] = useState<Record<string, 'reply' | 'error'>>({});
+  const [finished, setFinished] = useState<Record<string, 'reply' | 'error' | 'unfinished'>>({});
   // The draft key whose failed run's input is exactly what the composer holds
   // again, so Try again resends that input and nothing else. Any edit clears it.
   const [retryKey, setRetryKey] = useState('');
@@ -359,11 +365,17 @@ export function ChatApp({
     void observePhoneRuns((value) => {
       if (!alive) return;
       if (value.status !== 'running') {
-        if (value.status === 'failed') setError(value.error || 'The iPhone run failed.');
+        const unfinished = value.outcome === 'turn_budget_exhausted';
+        if (value.status === 'failed' && !unfinished)
+          setError(value.error || 'The iPhone run failed.');
         if (navigationRef.current.familiarId !== value.familiarId && value.status !== 'stopped')
           setFinished((old) => ({
             ...old,
-            [value.familiarId]: value.status === 'failed' ? 'error' : 'reply',
+            [value.familiarId]: unfinished
+              ? 'unfinished'
+              : value.status === 'failed'
+                ? 'error'
+                : 'reply',
           }));
       }
       if (value.status === 'running') {
@@ -537,6 +549,13 @@ export function ChatApp({
       );
       return;
     }
+    if (
+      (session?.harness ?? options.harness) === 'coven-code' &&
+      !isValidMaxTurns(options.maxTurns ?? DEFAULT_MAX_TURNS)
+    ) {
+      setError('Choose a whole number of model rounds from 1 to 4294967295 in Settings › Model.');
+      return;
+    }
     const key = draftKey(current);
     const prompt = current.drafts[key] ?? '';
     const selectedFiles = attachmentRef.current[key] ?? [];
@@ -597,6 +616,13 @@ export function ChatApp({
       setError(
         "The model in Settings › Model isn't a model id. Correct it, or clear it to use the engine's default.",
       );
+      return;
+    }
+    if (
+      (session?.harness ?? options.harness) === 'coven-code' &&
+      !isValidMaxTurns(options.maxTurns ?? DEFAULT_MAX_TURNS)
+    ) {
+      setError('Choose a whole number of model rounds from 1 to 4294967295 in Settings › Model.');
       return;
     }
     const { harness: _chatKeepsItsHarness, ...runOptions } = sendOptions(options, session?.harness);
@@ -683,7 +709,7 @@ export function ChatApp({
     let streamedSession = '';
     let flush: ReturnType<typeof setTimeout> | null = null;
     let completed = false;
-    let outcome: 'reply' | 'error' | '' = '';
+    let outcome: 'reply' | 'error' | 'unfinished' | '' = '';
     function publish(nextEvents: CovenRunEvent[], runError = '', sessionId = streamedSession) {
       if (flush) {
         clearTimeout(flush);
@@ -724,8 +750,8 @@ export function ChatApp({
       }
       publish(streamed.slice(), projected.error);
       if (projected.error) throw new Error(projected.error);
-      completed = !run.cancelRequested;
-      if (completed) outcome = 'reply';
+      completed = !run.cancelRequested && !projected.budget?.unfinished;
+      if (!run.cancelRequested) outcome = projected.budget?.unfinished ? 'unfinished' : 'reply';
     } catch (failure) {
       publish(streamed.slice(), errorText(failure));
       if (!run.cancelRequested) outcome = 'error';
@@ -733,7 +759,7 @@ export function ChatApp({
       // The run is over here; the session reload below is not part of it.
       const finishedAt = Date.now();
       if (lifetime.current === life) {
-        if (!completed && !turn.keepsDraft) {
+        if (!completed && outcome !== 'unfinished' && !turn.keepsDraft) {
           const latest = navigationRef.current;
           const untouched = (draftVersions.current[key] ?? 0) === draftVersion;
           if (untouched && latest.drafts[key] === '')
@@ -917,6 +943,42 @@ export function ChatApp({
     [events, liveEvents],
   );
   const messages = projection.messages;
+  async function continueSavedWork(options: RunOptions) {
+    const current = navigationRef.current;
+    const budget = projection.budget;
+    if (
+      !budget?.canContinue ||
+      budget.sessionId !== current.sessionId ||
+      activeRun.current ||
+      phoneRunRef.current ||
+      loading ||
+      !available ||
+      selectedSession?.archived
+    )
+      return;
+    if (!isValidMaxTurns(options.maxTurns ?? DEFAULT_MAX_TURNS)) {
+      setError('Choose a whole number of model rounds from 1 to 4294967295 in Settings › Model.');
+      return;
+    }
+    const prompt =
+      'Continue the unfinished work from the saved tool results without repeating completed operations.';
+    await runTurn({
+      keepsDraft: true,
+      prompt,
+      selectedFiles: [],
+      start: (runId, onEvent) =>
+        runtime.send(
+          {
+            runId,
+            prompt,
+            sessionId: current.sessionId,
+            familiarId: current.familiarId,
+            ...sendOptions(options, selectedSession?.harness),
+          },
+          onEvent,
+        ),
+    });
+  }
   const unavailableError =
     available && chatUnavailable
       ? "Coven couldn't load this chat. Refresh Coven to try again."
@@ -968,6 +1030,15 @@ export function ChatApp({
       screen={screen}
       onWindowTitle={onWindowTitle}
       messages={messages}
+      {...(projection.budget ? { budget: projection.budget } : {})}
+      {...(projection.budget?.canContinue &&
+      !busy &&
+      !loading &&
+      available &&
+      !chatUnavailable &&
+      !selectedSession?.archived
+        ? { onContinue: (options: RunOptions) => void continueSavedWork(options) }
+        : {})}
       onReadAttachment={readAttachment}
       familiarId={navigation.familiarId}
       sessionId={navigation.sessionId}

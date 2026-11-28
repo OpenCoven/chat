@@ -253,6 +253,7 @@ Settings content scrolls inside its panel. Tab past **Close settings** to focus 
   use them. Codex ignores them, so Chat doesn't send them to a Codex chat.
 - Model choices apply to messages sent from this window on the same engine, in new and existing chats. Thinking and speed remain window preferences. Messages sent from the iPhone companion use the engine's defaults.
 - When a run reports its model, the inspector's **Activity** tab shows it under **Model**.
+- **Model rounds** sets a positive whole-number allowance from 1 to 4294967295 for each Coven Code message or continuation, with a default of 50. Other engines keep their own behavior. The inspector shows the applied value, consumed rounds and source reported by the runtime; a saved preference alone does not prove application. This allowance is separate from token, cost and time limits. Paired iPhone sends use Chat's default of 50 for Coven Code.
 
 The presets include GPT-6 Astra, GPT-6.1 Sol, GPT-6.1 Terra and GPT-6 Luna, plus Claude Fable 5.2 and Opus, Sonnet and Haiku 5.5. Coven Code's GPT choices use Codex sign-in; standalone Codex receives bare model IDs. Older saved IDs remain editable under **Custom model** for their engine and are sent unchanged. A legacy Claude choice paired with Codex is retained for Coven Code, leaving Codex on its own default. A legacy bare GPT or OpenAI reasoning-model choice paired with Claude Code is retained for Codex. Legacy provider-qualified OpenAI/Codex IDs remain with Coven Code; other legacy custom IDs stay with the previously selected engine. Custom IDs are not checked against a preset allowlist, so their availability still depends on that engine and your provider account.
 
@@ -267,7 +268,7 @@ Chat looks for updates in one place: the `updater` release on [GitHub](https://g
 Before the chat opens, Chat checks what it needs:
 
 - **Coven:** the Coven CLI is installed.
-- **Engine:** the Coven engine is installed and is version 0.9.1 or newer. An older engine, or one
+- **Engine:** the Coven engine is installed and is version 0.9.3 or newer. An older engine, or one
   whose version Chat can't read, counts as not ready.
 - **Sign-in:** a model provider is signed in, through the engine's own sign-in, a Claude
   subscription in Claude Code, or ChatGPT.
@@ -286,14 +287,15 @@ When everything is in place, you see no setup screen and the chat opens as usual
 
 **Install the engine:** Chat runs `coven engine install`, which downloads and verifies the engine
 itself, and shows its output as it goes. When the installed Coven would choose an engine older than
-0.9.1, Chat asks it for 0.9.1 by version, with a SHA-256 built into Chat that Coven checks the
+0.9.3, Chat asks it for 0.9.3 by version, with a SHA-256 built into Chat that Coven checks the
 download against.
 
 **Update the engine:** Coven keeps the engine it already has when Coven itself is updated, so a
-computer that had Coven before Chat can still be on an older engine. On an engine older than 0.9.1,
-a familiar that is signed in with Claude does not get the full access Chat asks for: it is refused
-shell loops, folders outside its workspace and most commands. Older engines also lack 0.9.1's
-security fixes. So no chat runs on an older engine: Chat opens on setup, which names the engine
+computer that had Coven before Chat can still be on an older engine. An engine older than 0.9.3
+can't take the model-round budget Chat sends with every Coven Code message, so Coven refuses the
+message. On an engine older than 0.9.1, a familiar that is signed in with Claude also doesn't get
+the full access Chat asks for: it is refused shell loops, folders outside its workspace and most
+commands, and those engines lack 0.9.1's security fixes. So no chat runs on an older engine: Chat opens on setup, which names the engine
 version it found and offers **Update the engine**. That runs the same install. Chat never replaces
 an engine that is already new enough. When the install finishes, Chat asks Coven again which engine
 it starts. If that is still an older one, the step fails and says which engine Coven starts.
@@ -391,13 +393,9 @@ Chat and Cave are separate applications. There's no Cave import action or runtim
 and Cave history doesn't appear in Chat. Chat doesn't automatically delete previously saved import
 files or submit them to a model. Only app-owned history can become a familiar's one Chat thread.
 
-Claude Code and Codex threads continue from the harness's own session store. The bundled Coven
-Code engine can't reopen a thread's earlier turns that way. So when you continue a Coven Code chat,
-Chat replays the most recent turns from its saved transcript into the new run: newest turns first,
-up to 24 KiB, with each message capped at 4 KiB. It also adds a notice to the thread saying how many
-turns were replayed and whether older ones were left out. That notice is a quiet line between
-messages, not a reply from anyone. The saved transcript keeps only your original message, not the
-replayed prompt.
+Claude Code and Codex threads continue from the harness's own session store. Coven Code messages require a Coven adapter and engine that declare run-budget v1 support. They resume the actual saved engine transcript, including tool results. Chat never substitutes text-only replay or starts a fresh conversation when that history is missing, stale or mismatched. A failed or unconfirmed save disables saved continuation.
+
+When a Coven Code message exhausts its model-round allowance, Chat keeps partial output and marks the work unfinished. **Continue saved work** appears only after the native runtime settles and confirms saved backing history; it starts another finite allowance on the same engine conversation. Stop, provider and authentication failures remain separate outcomes.
 
 The chat's actions live behind the **Chat actions** control, the ⋯ in the thread header. Focus
 returns there after the delete dialog closes. **Archive chat** keeps the saved history and removes
@@ -532,10 +530,10 @@ through your installed Coven (`coven missions`) and shows only what Coven report
    *Finished* or *Couldn't run*, with the reason in plain words. **Cancel mission** stops one
    that hasn't finished.
 
-The Coven that Chat installs today (0.4.10) can't take missions, so the tab says **Missions need
-a newer version of Coven**. A Coven that records missions but can't run them yet ends each one as
-*Couldn't run* with "Nothing ran". Either way, Chat says so instead of showing progress that
-didn't happen.
+The Coven that Chat installs today (0.5.1) records missions but can't run them yet, so each one
+ends as *Couldn't run* with "Nothing ran". An older Coven, such as the 0.4.10 that earlier Chat
+releases installed, can't take missions at all, and the tab says **Missions need a newer version
+of Coven**. Either way, Chat says so instead of showing progress that didn't happen.
 
 When Chat can't confirm that Coven received a mission, the mission shows *Checking whether Coven
 received this mission* and Chat keeps asking with the same request. It never reports that nothing

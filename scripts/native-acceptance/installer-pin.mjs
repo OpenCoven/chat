@@ -118,7 +118,9 @@ try {
         .find(
           (value) =>
             typeof value === 'string' &&
-            value.includes('This Coven CLI cannot apply finite model-round budgets'),
+            value.includes(
+              "This version of Coven can't give Coven Code chats a model-round allowance",
+            ),
         );
       if (rejection) {
         facts.outcome = 'run-budget capability rejected';

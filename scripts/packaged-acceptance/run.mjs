@@ -23,6 +23,7 @@ import {
   onFailure,
   quoteRow,
   rightClickRow,
+  runBudgetRow,
   storageRow,
   switchRow,
   tableRow,
@@ -447,6 +448,8 @@ const env = {
   ...opened.env,
   ANTHROPIC_BASE_URL: `http://127.0.0.1:${fixture.port}`,
   ANTHROPIC_API_KEY: 'sk-ant-packaged-acceptance-fixture',
+  // The engine's own name for its model endpoint, beside the provider's.
+  COVEN_CODE_API_BASE: `http://127.0.0.1:${fixture.port}`,
 };
 const rows = [];
 let driver;
@@ -496,6 +499,7 @@ try {
   rows.push(await storageRow(session));
   const fullAccess = !/^v0\.0\.[0-9](?:[-+]|$)/.test(process.env.RELEASE ?? '');
   rows.push(await defaultAccessRow(session, FIRST, fullAccess));
+  rows.push(await runBudgetRow(session, FIRST));
   rows.push(await rightClickRow(session, FIRST, opened));
 } catch (error) {
   setupRow.error = error.message;

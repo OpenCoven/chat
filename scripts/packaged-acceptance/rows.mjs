@@ -2,7 +2,7 @@
 // records what it observed. A failed expectation throws, and the row is
 // reported as failed with everything observed up to that point.
 
-import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 
@@ -13,6 +13,10 @@ import {
   APPROVAL_REFUSED,
   APPROVAL_SUMMARY,
   APPROVAL_UNASKED,
+  LOOP_DONE,
+  LOOP_NOTHING_SAVED,
+  LOOP_SECOND_ROUND,
+  loopPrompt,
   TABLE,
   writeProofPrompt,
 } from './model-fixture.mjs';
@@ -1205,6 +1209,79 @@ export async function defaultAccessRow(s, familiar, fullAccess) {
     if (open.length) await closeSettings(s).catch(() => {});
   } finally {
     if (proofDirectory) rmSync(proofDirectory, { recursive: true, force: true });
+  }
+  return row;
+}
+
+/** Sets Settings › Model › Model rounds as a person would. */
+async function setModelRounds(s, row, value) {
+  await (await s.one('button', 'Open settings')).click();
+  const settings = await s.one('dialog', 'Settings');
+  await (await s.one('button', 'Model', { within: settings })).click();
+  const field = await s.one('textbox', 'Model rounds', { within: settings });
+  await field.click();
+  await s.press([Key.Control, 'a'], Key.Backspace);
+  await field.type(value);
+  row.expect(`Model rounds reads ${value}`, await field.property('value'), value);
+  await closeSettings(s);
+}
+
+/**
+ * Run budgets (#654): with one model round allowed, a reply that needs a second
+ * stops as Unfinished, keeps its saved tool result, and Continue saved work
+ * finishes it from that result.
+ */
+export async function runBudgetRow(s, familiar) {
+  const row = new Row(
+    'run-budget',
+    'A reply stops at its model-round allowance and continues from saved work',
+  );
+  const bodyHas = (text) =>
+    s.execute('return document.body.innerText.includes(arguments[0]);', text);
+  let folder;
+  let narrowed = false;
+  try {
+    await s.click(await s.one('button', familiar));
+    await composerOf(s, familiar);
+    folder = mkdtempSync(join(tmpdir(), 'chat-run-budget-'));
+    const proof = resolve(join(folder, 'one-round.txt'));
+    writeFileSync(proof, 'one round\n');
+    await setModelRounds(s, row, '1');
+    narrowed = true;
+    await send(s, familiar, loopPrompt(proof), 'button', 'Continue saved work');
+    row.check(
+      'the notice names the exhausted allowance',
+      await bodyHas('Unfinished: model-round allowance exhausted (1/1)'),
+    );
+    row.expect('a second round ran', await bodyHas(LOOP_SECOND_ROUND), false);
+    await (await s.one('button', 'Continue saved work')).click();
+    await until(
+      'the continuation to finish from the saved result',
+      async () => {
+        const errors = await s.css('.coven-error-text');
+        if (errors.length) throw new Stop(`The continuation failed: ${await errors[0].text()}`);
+        if (await bodyHas(LOOP_NOTHING_SAVED)) throw new Stop(LOOP_NOTHING_SAVED);
+        return (
+          (await bodyHas(LOOP_DONE)) && (await s.css('.oc-composer[data-running]')).length === 0
+        );
+      },
+      120_000,
+      250,
+    );
+    row.expect(
+      'Continue saved work is still offered',
+      (await s.all('button', 'Continue saved work')).length,
+      0,
+    );
+    row.expect('the Unfinished notice remains', await bodyHas('Unfinished: model-round'), false);
+  } catch (error) {
+    row.error = error.message;
+    await snapshot(row.id);
+    const open = await s.all('dialog', 'Settings').catch(() => []);
+    if (open.length) await closeSettings(s).catch(() => {});
+  } finally {
+    if (narrowed) await setModelRounds(s, row, '50').catch(() => {});
+    if (folder) rmSync(folder, { recursive: true, force: true });
   }
   return row;
 }

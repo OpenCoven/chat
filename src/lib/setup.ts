@@ -6,7 +6,13 @@ export type SignInState = 'signed-in' | 'signed-out' | 'missing' | 'unknown';
 /** What a person still needs before Chat can hold a conversation. */
 export type SetupReport = {
   platform: { ok: boolean; os: string };
-  coven: { ok: boolean; version?: string };
+  /**
+   * `ok` means installed and able to give Coven Code a model-round allowance.
+   * `installed` without `ok` is an older Coven, such as 0.4.10 from Chat
+   * v0.1.3; `required` is the version Chat installs. `path` is a copy that
+   * Chat's install would not replace, so the person has to update it.
+   */
+  coven: { ok: boolean; installed?: boolean; version?: string; required?: string; path?: string };
   /**
    * `ok` means installed and new enough. `installed` without `ok` is an
    * engine older than `required`, or one whose version could not be read
@@ -79,6 +85,9 @@ function report(value: unknown): value is SetupReport {
     step(coven) &&
     (coven.version === undefined ||
       (typeof coven.version === 'string' && coven.version.length <= 256)) &&
+    (coven.installed === undefined || typeof coven.installed === 'boolean') &&
+    shortText(coven.required, 64) &&
+    shortText(coven.path, 1024) &&
     step(engine) &&
     (engine.installed === undefined || typeof engine.installed === 'boolean') &&
     (engine.override === undefined || typeof engine.override === 'boolean') &&
@@ -127,6 +136,11 @@ export function setupComplete(value: SetupReport): boolean {
   );
 }
 
+/** Coven is installed, but too old to give Coven Code a model-round allowance. */
+export function covenOutdated(value: SetupReport): boolean {
+  return !value.coven.ok && value.coven.installed === true;
+}
+
 /** An engine is installed, but it is older than Chat needs. */
 export function engineOutdated(value: SetupReport): boolean {
   return !value.engine.ok && value.engine.installed === true;
@@ -136,8 +150,8 @@ export function engineOutdated(value: SetupReport): boolean {
  * Coven and its engine are the hard requirements: without them Chat cannot
  * reach anything. Sign-in and familiars can be finished from inside Chat, and
  * a sign-in this check cannot see (an API key in the environment, say) must
- * not lock a working setup out. An engine older than Chat needs is as hard a
- * stop as a missing one: no chat runs until it is updated.
+ * not lock a working setup out. A Coven or engine older than Chat needs is as
+ * hard a stop as a missing one: no chat runs until it is updated.
  */
 export function chatReachable(value: SetupReport): boolean {
   return value.platform.ok && value.coven.ok && value.engine.ok;

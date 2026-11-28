@@ -55,6 +55,11 @@ function MockLayout(props: ChatLayoutProps) {
       <output data-testid="drafts">{JSON.stringify(props.drafts ?? {})}</output>
       <output data-testid="finished">{JSON.stringify(props.finished ?? {})}</output>
       <output data-testid="last-run">{props.lastRun ? props.lastRun.outcome : 'none'}</output>
+      {props.onContinue ? (
+        <button type="button" onClick={() => props.onContinue?.(choice.value)}>
+          Continue saved work
+        </button>
+      ) : null}
       <output data-testid="partial">{String(props.partialHistory ?? false)}</output>
       {props.onLoadEarlier && (
         <button type="button" onClick={props.onLoadEarlier}>
@@ -360,6 +365,65 @@ describe('canonical familiar controller', () => {
       sessionId: 'one-next',
       prompt: 'newer unsent',
     });
+  });
+
+  it('continues only settled unfinished work through the saved head and preserves the newer draft', async () => {
+    const api = runtime();
+    const pending = deferred<CovenRunResult>();
+    const next = { ...first, id: 'unfinished-head', status: 'failed' };
+    choice.value = { ...choice.value, maxTurns: 10 };
+    const exhausted = {
+      type: 'result',
+      session_id: next.id,
+      harness_session_id: 'engine-1',
+      run_budget_version: 1,
+      num_turns: 10,
+      is_error: true,
+      outcome: 'turn_budget_exhausted',
+      turn_budget: { max_turns: 10, consumed: 10, source: 'explicit' },
+      continuation: { session_id: 'engine-1', resumable: true },
+    };
+    const events = [
+      { type: 'system', subtype: 'init', session_id: next.id },
+      { type: 'text_delta', session_id: next.id, text: 'Partial work retained' },
+      exhausted,
+      {
+        ...exhausted,
+        type: 'system',
+        subtype: 'run_budget',
+        source: 'chat-run-budget',
+        settled: true,
+      },
+    ];
+    vi.mocked(api.listSessions)
+      .mockResolvedValueOnce([first, second])
+      .mockResolvedValue([next, second]);
+    vi.mocked(api.readSession).mockImplementation(async (id) => ({
+      session: id === next.id ? next : first,
+      events: id === next.id ? events : [],
+    }));
+    vi.mocked(api.send).mockImplementationOnce((_input, onEvent) => {
+      for (const event of events) onEvent?.(event);
+      return pending.promise;
+    });
+    await ready(api);
+    draft('original work');
+    click('Send');
+    draft('newer unsent work');
+    expect(screen.queryByRole('button', { name: 'Continue saved work' })).toBeNull();
+    await act(async () => pending.resolve({ runId: 'run', events }));
+    await waitFor(() => expect(screen.getByTestId('head')).toHaveTextContent(next.id));
+    await waitFor(() => expect(screen.getByTestId('last-run')).toHaveTextContent('unfinished'));
+    click('Continue saved work');
+    await waitFor(() => expect(api.send).toHaveBeenCalledTimes(2));
+    expect(vi.mocked(api.send).mock.calls[1]?.[0]).toMatchObject({
+      sessionId: next.id,
+      familiarId: 'f',
+      maxTurns: 10,
+      prompt:
+        'Continue the unfinished work from the saved tool results without repeating completed operations.',
+    });
+    expect(screen.getByRole('textbox')).toHaveValue('newer unsent work');
   });
 
   it('does not clear a newly retyped identical message when the previous send finishes', async () => {
@@ -969,6 +1033,36 @@ describe('canonical familiar controller', () => {
 });
 
 describe('phone run synchronization', () => {
+  it('marks exhausted phone work unfinished without announcing a reply or provider failure', async () => {
+    const api = runtime();
+    let receive: (value: import('../lib/companion-runs').CompanionRunEvent) => void = () => {};
+    await act(async () => {
+      render(
+        <ChatApp
+          runtime={api}
+          observePhoneRuns={async (callback) => {
+            receive = callback;
+            return () => {};
+          }}
+        />,
+      );
+    });
+    await waitFor(() => expect(screen.getByRole('textbox')).toBeEnabled());
+    await act(async () =>
+      receive({
+        runId: 'phone-budget',
+        familiarId: 'g',
+        status: 'failed',
+        outcome: 'turn_budget_exhausted',
+        error: 'Work is unfinished.',
+      }),
+    );
+    await waitFor(() =>
+      expect(screen.getByTestId('finished')).toHaveTextContent('"g":"unfinished"'),
+    );
+    expect(screen.queryByRole('alert')).toBeNull();
+  });
+
   it('coalesces phone events while an authoritative history read is slow', async () => {
     localStorage.clear();
     const api = runtime();
@@ -1298,7 +1392,7 @@ describe('answering a familiar that asks for permission', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'Allow Create probe.txt' }));
     await waitFor(() => expect(api.allow).toHaveBeenCalledOnce());
     const input = vi.mocked(api.allow).mock.calls[0]?.[0];
-    expect(input).toEqual({ approvalId: 'request-1', runId: expect.any(String) });
+    expect(input).toEqual({ approvalId: 'request-1', runId: expect.any(String), maxTurns: 50 });
     expect(api.send).not.toHaveBeenCalled();
     await waitFor(() => expect(screen.getByTestId('run-familiar')).toHaveTextContent('idle'));
     expect(screen.getByRole('textbox')).toHaveValue('still typing');

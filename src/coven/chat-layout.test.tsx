@@ -2836,6 +2836,22 @@ describe('screen toggle', () => {
 describe('settings', () => {
   afterEach(() => localStorage.clear());
 
+  it('edits finite model rounds and preserves the chosen allowance for the next window', () => {
+    const view = render(<ChatLayout {...layoutProps()} />);
+    const model = openSettingsAt('Model');
+    const rounds = within(model).getByRole('textbox', { name: 'Model rounds' });
+    expect(rounds).toHaveValue('50');
+    fireEvent.change(rounds, { target: { value: '0' } });
+    expect(rounds).toHaveAttribute('aria-invalid', 'true');
+    fireEvent.change(rounds, { target: { value: '12' } });
+    expect(rounds).not.toHaveAttribute('aria-invalid');
+    view.unmount();
+    render(<ChatLayout {...layoutProps()} />);
+    expect(
+      within(openSettingsAt('Model')).getByRole('textbox', { name: 'Model rounds' }),
+    ).toHaveValue('12');
+  });
+
   it('opens with Cmd/Ctrl+, and lists the rail shortcuts', () => {
     render(<ChatLayout {...layoutProps()} />);
     fireEvent.keyDown(window, { key: ',', code: 'Comma', metaKey: true });
@@ -2886,6 +2902,29 @@ describe('settings', () => {
     render(<ChatLayout {...layoutProps()} />);
     expect(localStorage.getItem('opencoven.chat.preferences.v1')).toBeNull();
   });
+});
+
+it('places saved continuation after the partial reply so it remains at the end of the thread', () => {
+  render(
+    <ChatLayout
+      {...layoutProps()}
+      ready
+      connected
+      messages={[{ id: 'partial', role: 'assistant', text: 'Last partial output' }]}
+      budget={{
+        limit: 10,
+        consumed: 10,
+        source: 'explicit',
+        unfinished: true,
+        canContinue: true,
+        sessionId: 's',
+      }}
+      onContinue={vi.fn()}
+    />,
+  );
+  const partial = screen.getByText('Last partial output');
+  const button = screen.getByRole('button', { name: 'Continue saved work' });
+  expect(partial.compareDocumentPosition(button) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
 });
 
 describe('external link review in the transcript', () => {
@@ -3136,6 +3175,7 @@ describe('inspector resizing', () => {
     expect(inspectorWidth(container)).toBe('280px');
     expect(separator).toHaveFocus();
     expect(stored()).toEqual({
+      maxTurns: 50,
       textSize: 'default',
       groupTools: true,
       inspectorWidth: 280,
@@ -3314,6 +3354,7 @@ describe('model settings', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Close settings' }));
     fireEvent.click(screen.getByRole('button', { name: 'Send' }));
     expect(props.onSend).toHaveBeenCalledExactlyOnceWith({
+      maxTurns: 50,
       harness: 'coven-code',
       model: 'claude-opus-5-5',
       think: false,
@@ -3458,6 +3499,7 @@ describe('model settings', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Close settings' }));
     fireEvent.click(screen.getByRole('button', { name: 'Send' }));
     expect(props.onSend).toHaveBeenCalledExactlyOnceWith({
+      ...(harness === 'coven-code' ? { maxTurns: 50 } : {}),
       harness,
       model: id,
       think: false,
@@ -3488,6 +3530,7 @@ describe('model settings', () => {
       fireEvent.click(screen.getByRole('button', { name: 'Close settings' }));
       fireEvent.click(screen.getByRole('button', { name: 'Send' }));
       expect(props.onSend).toHaveBeenCalledExactlyOnceWith({
+        maxTurns: 50,
         harness: 'coven-code',
         model: id,
         think: false,
@@ -3517,6 +3560,7 @@ describe('model settings', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Close settings' }));
     fireEvent.click(screen.getByRole('button', { name: 'Send' }));
     expect(props.onSend).toHaveBeenCalledExactlyOnceWith({
+      maxTurns: 50,
       harness: 'coven-code',
       model: '',
       think: false,

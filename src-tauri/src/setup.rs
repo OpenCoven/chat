@@ -41,28 +41,29 @@ const CLAUDE_INSTALLER: &str = if cfg!(windows) {
 };
 
 /// The oldest engine Chat runs familiars on, and the one it installs when
-/// Coven's own choice is older. Engines before 0.9.1 start a familiar that is
-/// signed in with Claude without the access Chat asked for, so it is refused
-/// shell loops, folders outside its workspace and most commands, and they
-/// lack 0.9.1's security fixes. Moving this means updating every digest in
-/// [`engine_archive_sha256`] from that engine release's `SHA256SUMS`.
-const ENGINE_VERSION: &str = "0.9.1";
+/// Coven's own choice is older. Engines before 0.9.3 cannot take a finite
+/// model-round budget: Coven checks the engine before every Coven Code send,
+/// and refuses the send when it can't. Engines before 0.9.1 also start a
+/// familiar that is signed in with Claude without the access Chat asked for,
+/// and lack 0.9.1's security fixes. Moving this means updating every digest
+/// in [`engine_archive_sha256`] from that engine release's `SHA256SUMS`.
+const ENGINE_VERSION: &str = "0.9.3";
 
 /// SHA-256 of the [`ENGINE_VERSION`] release archive `coven engine install`
 /// downloads for a platform. Coven refuses an archive that does not match.
 fn engine_archive_sha256(os: &str, arch: &str) -> Option<&'static str> {
     match (os, arch) {
         ("macos", "aarch64") => {
-            Some("a5769daf76c09e9162323f91614e1c4759de03efeb8946689fdfaafaee31d2e2")
+            Some("a433f3e5766c328c4e57699166fee9043e8d59aba5671797e0906f6cac3b1a5f")
         }
         ("macos", "x86_64") => {
-            Some("f9711a3d270ea9402d464d9504ad542846c155959aded8f5cc6504b22fc2e96f")
+            Some("5977f2ef4eb151bb99f1e1ec690d65a8955b4cdc4c8ac2b31cccf8f513ce0b65")
         }
         ("linux", "x86_64") => {
-            Some("f9e426e7fecc01696ff40a0cc2702cd4069b27daad53ff57fe49db49330e1b9f")
+            Some("e559d79685b60fb84dc4cbc3e75166f15c7301867eeb69306867bbd3ae306db0")
         }
         ("windows", "x86_64") => {
-            Some("37fc50242e79f30e15389813d512972ac542770330cdde447780c364d1e02306")
+            Some("4ee43d3d2f53437b5ba81a481f4a2781329ec57368789be603a96edcd79ddaf3")
         }
         _ => None,
     }
@@ -386,6 +387,28 @@ fn shown_version(output: &str) -> String {
         .to_owned()
 }
 
+/// The Coven step for an installed Coven. It is ready only when it can give
+/// Coven Code a run budget, since every Coven Code send asks for one; an
+/// older Coven (0.4.10, from Chat v0.1.3, say) is offered the update.
+/// `shadow` is a copy that Chat's install would not replace: then the person
+/// has to update that copy, so the report names it.
+fn coven_report(takes_budgets: bool, shadow: Option<&Path>) -> Value {
+    let mut coven = json!({
+        "ok": takes_budgets,
+        "installed": true,
+        "required": crate::coven_install::COVEN_VERSION,
+    });
+    if !takes_budgets {
+        if let Some(path) = shadow
+            .and_then(Path::to_str)
+            .filter(|path| path.len() <= 1024)
+        {
+            coven["path"] = Value::String(path.to_owned());
+        }
+    }
+    coven
+}
+
 fn check() -> Result<Value, String> {
     if !supported_platform() {
         return Ok(json!({
@@ -425,7 +448,10 @@ fn check() -> Result<Value, String> {
     let familiars = cli_json(&["familiars", "--json"])
         .ok()
         .and_then(|value| value.as_array().map(Vec::len));
-    let mut coven = json!({ "ok": true });
+    let mut coven = coven_report(
+        crate::coven_runtime::cli_takes_run_budgets(),
+        crate::coven_runtime::cli_shadowing_install().as_deref(),
+    );
     if let Some(version) = version {
         coven["version"] = Value::String(version);
     }
@@ -762,6 +788,26 @@ mod tests {
     use super::*;
 
     #[test]
+    fn a_coven_without_run_budgets_is_offered_the_update() {
+        let ready = coven_report(true, Some(Path::new("/elsewhere/coven")));
+        assert_eq!(ready["ok"], true);
+        assert_eq!(ready["required"], crate::coven_install::COVEN_VERSION);
+        assert!(ready.get("path").is_none(), "a ready Coven needs no path");
+
+        let ours = coven_report(false, None);
+        assert_eq!(ours["ok"], false);
+        assert_eq!(ours["installed"], true);
+        assert!(ours.get("path").is_none());
+
+        let shadowed = coven_report(
+            false,
+            Some(Path::new("/home/val/.local/lib/node_modules/coven")),
+        );
+        assert_eq!(shadowed["ok"], false);
+        assert_eq!(shadowed["path"], "/home/val/.local/lib/node_modules/coven");
+    }
+
+    #[test]
     fn setup_steps_are_a_fixed_set() {
         assert_eq!(
             SetupStep::parse("install_coven"),
@@ -801,9 +847,12 @@ mod tests {
         ] {
             assert_eq!(version_triple(version), triple, "{version:?}");
         }
-        // 0.10.0 is newer than 0.9.1: compared as numbers, not as text.
+        // 0.10.0 is newer than 0.9.3: compared as numbers, not as text.
         assert_eq!(new_enough("0.10.0"), Some(true));
         assert_eq!(new_enough(ENGINE_VERSION), Some(true));
+        // 0.9.2 and 0.9.1 can't take a run budget.
+        assert_eq!(new_enough("0.9.2"), Some(false));
+        assert_eq!(new_enough("0.9.1"), Some(false));
         assert_eq!(new_enough("0.9.0"), Some(false));
         assert_eq!(new_enough("0.8.0"), Some(false));
         assert_eq!(new_enough("unknown"), None);
@@ -820,7 +869,7 @@ mod tests {
         assert_eq!(report["version"], json!("0.9.0"));
         assert_eq!(report["required"], json!(ENGINE_VERSION));
 
-        for version in [ENGINE_VERSION, "0.9.2", "0.10.0", "1.0.0"] {
+        for version in [ENGINE_VERSION, "0.9.4", "0.10.0", "1.0.0"] {
             let current = engine(Some(version), Some("0.9.0"));
             assert!(current.ready() && !current.outdated(), "{version}");
             assert_eq!(current.problem(), None);
@@ -862,9 +911,16 @@ mod tests {
             "--sha256",
             digest,
         ];
-        // Coven 0.4.10 and 0.5.0 choose 0.8.0 and 0.9.0; a Coven that says
-        // nothing is treated the same way.
-        for pin in [Some("0.8.0"), Some("0.9.0"), Some("unknown"), None] {
+        // Coven 0.4.10 and 0.5.0 choose 0.8.0 and 0.9.0, and a Coven built
+        // before the 0.9.3 pin chooses 0.9.2; a Coven that says nothing is
+        // treated the same way.
+        for pin in [
+            Some("0.8.0"),
+            Some("0.9.0"),
+            Some("0.9.2"),
+            Some("unknown"),
+            None,
+        ] {
             assert_eq!(
                 engine(Some("0.9.0"), pin)
                     .install_args("macos", "aarch64")
@@ -875,7 +931,7 @@ mod tests {
         }
         // A Coven whose own choice is new enough keeps it, so a newer Coven
         // is never taken back to Chat's older version.
-        for pin in [ENGINE_VERSION, "0.9.2", "0.10.0"] {
+        for pin in [ENGINE_VERSION, "0.9.4", "0.10.0"] {
             assert_eq!(
                 engine(None, Some(pin))
                     .install_args("macos", "aarch64")
