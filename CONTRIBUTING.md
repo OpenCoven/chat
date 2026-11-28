@@ -50,6 +50,21 @@ The command builds a separately identified desktop app, verifies the published C
 
 Each invocation prints its directory under `.artifacts/installer-pin/`. Inspect `result.json` for versions, process paths, outcome and request count, `last-tree.txt` for the window state, and `app.log` and `requests.jsonl` for host and fixture evidence. A capability rejection before dispatch leaves the model request count at zero. The script exits non-zero for that rejection as well as for a failure, so read `outcome` in `result.json` to tell them apart: `completed` is a pass, `run-budget capability rejected` means the CLI refused the run budget before dispatch (expected for a Chat revision that sends one, such as #654, against a CLI that can't apply it), and `incomplete` is any other failure. The window's own files stay in the disposable home too: the script starts the app with `CFFIXED_USER_HOME` set to that home, so the WebView writes `Library/WebKit/opencoven-chat` and `Library/Caches/opencoven-chat` inside it rather than under your `~/Library`. A plain scratch `HOME`, as in `app:dev`, doesn't redirect those. To compare an older Chat revision, run the same script by absolute path from that revision’s clean checkout after installing its dependencies.
 
+### Verify retained attachments on packaged Linux
+
+To run the complete Debian install and upgrade on a fresh Ubuntu runner, dispatch **Native acceptance** on the candidate branch with `attachment_upgrade_run` set to the CI run ID that produced its `linux-bundle` artifact. The workflow checks the source revision and records both installed package versions, the candidate digest and the UI observations. You can also run `bash scripts/native-acceptance/linux/attachment-upgrade.sh "$bundle_directory" "$new_output_directory"` on a disposable Ubuntu machine.
+
+Run the two phases on a disposable Linux desktop with X11, AT-SPI, xdotool, and the repository’s Node version. Use an installed v0.1.3 binary for the first phase and upgrade the package before the second. Supply the absolute paths to the Coven CLI and engine that Chat should use. Each phase uses a private Chat home under the same test directory and an HTTP model fixture on loopback.
+
+```sh
+qa=$(mktemp -d)
+node scripts/native-acceptance/retained-attachments.mjs seed "$published_chat" "$qa" "$coven_cli" "$coven_engine"
+# Upgrade the package in the disposable environment.
+node scripts/native-acceptance/retained-attachments.mjs verify "$candidate_chat" "$qa" "$coven_cli" "$coven_engine"
+```
+
+The first phase sends two different files named `report.txt` through the file picker in separate conversations and clicks each published card. The second opens both saved cards, restarts Chat, exercises archive and restore, then removes one staged copy and checks the recovery message. It also uses Delete from Chat on the other conversation and verifies that its saved file stays deleted after relaunch. For a storage-only regression check, run `cargo test --manifest-path src-tauri/Cargo.toml --lib retained_slot_belongs`.
+
 ## Branching and pull requests
 
 `main` is the integration branch; release tags are cut only from `main`. Base

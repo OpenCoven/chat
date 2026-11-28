@@ -24,21 +24,18 @@ export function lineCount(text: string): string {
 export type AttachmentCardProps = Readonly<{
   name: string;
   size: number;
-  /**
-   * The file's text, when this window still holds it (a draft). Sent files
-   * are recorded by name and size only, so their card has no preview.
-   */
   text?: string | undefined;
+  onRead?: (() => Promise<string>) | undefined;
   onRemove?: (() => void) | undefined;
 }>;
 
 /**
  * One attached file as a small card: a miniature of its first lines on a
- * paper tile, its type, size and length. A draft's card opens a Quick Look
+ * paper tile, its type, size and length. The card opens a Quick Look
  * sheet with the whole file (click, or Space while focused, as in Finder).
  */
-export function AttachmentCard({ name, size, text, onRemove }: AttachmentCardProps) {
-  const [peeking, setPeeking] = useState(false);
+export function AttachmentCard({ name, size, text, onRead, onRemove }: AttachmentCardProps) {
+  const [peek, setPeek] = useState<{ read?: (() => Promise<string>) | undefined } | null>(null);
   const opener = useRef<HTMLButtonElement>(null);
   const badge = attachmentBadge(name);
   const thumb = useMemo(
@@ -69,28 +66,19 @@ export function AttachmentCard({ name, size, text, onRemove }: AttachmentCardPro
     </>
   );
   return (
-    <span className="coven-attachment-card" data-preview={text === undefined ? undefined : true}>
-      {text === undefined ? (
-        <span
-          className="coven-attachment-face"
-          title={`${name} was sent with this message. Chat keeps its name and size, not its contents.`}
-        >
-          {face}
-        </span>
-      ) : (
-        <button
-          ref={opener}
-          type="button"
-          className="coven-attachment-face"
-          aria-label={`Preview ${name}`}
-          aria-haspopup="dialog"
-          aria-keyshortcuts="Space"
-          title="Preview (Space)"
-          onClick={() => setPeeking(true)}
-        >
-          {face}
-        </button>
-      )}
+    <span className="coven-attachment-card" data-preview={true}>
+      <button
+        ref={opener}
+        type="button"
+        className="coven-attachment-face"
+        aria-label={`Preview ${name}`}
+        aria-haspopup="dialog"
+        aria-keyshortcuts="Space"
+        title="Preview (Space)"
+        onClick={() => setPeek({ read: onRead })}
+      >
+        {face}
+      </button>
       {onRemove ? (
         <button
           type="button"
@@ -102,15 +90,16 @@ export function AttachmentCard({ name, size, text, onRemove }: AttachmentCardPro
           <Icon name="x" size={11} />
         </button>
       ) : null}
-      {peeking && text !== undefined ? (
+      {peek ? (
         <AttachmentPeek
           name={name}
           badge={badge}
           meta={meta}
-          text={text}
+          initialText={text}
+          read={peek.read}
           onRemove={onRemove}
           onClose={() => {
-            setPeeking(false);
+            setPeek(null);
             opener.current?.focus();
           }}
         />
@@ -123,17 +112,36 @@ function AttachmentPeek({
   name,
   badge,
   meta,
-  text,
+  initialText,
+  read,
   onRemove,
   onClose,
 }: Readonly<{
   name: string;
   badge: string;
   meta: string;
-  text: string;
+  initialText: string | undefined;
+  read: (() => Promise<string>) | undefined;
   onRemove?: (() => void) | undefined;
   onClose: () => void;
 }>) {
+  const [text, setText] = useState(initialText);
+  const [failed, setFailed] = useState(initialText === undefined && !read);
+  useEffect(() => {
+    if (initialText !== undefined || !read) return;
+    let open = true;
+    read().then(
+      (contents) => {
+        if (open) setText(contents);
+      },
+      () => {
+        if (open) setFailed(true);
+      },
+    );
+    return () => {
+      open = false;
+    };
+  }, [initialText, read]);
   const dialog = useRef<HTMLDialogElement>(null);
   useEffect(() => {
     const node = dialog.current;
@@ -142,7 +150,7 @@ function AttachmentPeek({
       if (node) closeModal(node);
     };
   }, []);
-  const lines = text.replace(/\n$/, '').split('\n');
+  const lines = text?.replace(/\n$/, '').split('\n');
   return (
     // biome-ignore lint/a11y/useKeyWithClickEvents: a click on the backdrop closes; Escape is the keyboard path, handled by the native dialog.
     <dialog
@@ -163,7 +171,7 @@ function AttachmentPeek({
           </h2>
           <span className="coven-peek-meta">{meta}</span>
         </span>
-        <CopyButton text={text} label={`Copy ${name}`} />
+        {text !== undefined && <CopyButton text={text} label={`Copy ${name}`} />}
         {onRemove ? (
           <button
             type="button"
@@ -185,13 +193,21 @@ function AttachmentPeek({
           <Icon name="x" size={14} />
         </button>
       </header>
-      <ol className="coven-peek-body">
-        {lines.map((line, index) => (
-          // Lines are positional; the file does not change while shown.
-          // biome-ignore lint/suspicious/noArrayIndexKey: positional lines
-          <li key={index}>{line || ' '}</li>
-        ))}
-      </ol>
+      {lines ? (
+        <ol className="coven-peek-body">
+          {lines.map((line, index) => (
+            // Lines are positional; the file does not change while shown.
+            // biome-ignore lint/suspicious/noArrayIndexKey: positional lines
+            <li key={index}>{line || ' '}</li>
+          ))}
+        </ol>
+      ) : (
+        <output className="coven-peek-status">
+          {failed
+            ? 'The saved copy isn’t available. Close this preview and attach the original file again in an active chat.'
+            : 'Opening the saved copy…'}
+        </output>
+      )}
     </dialog>
   );
 }

@@ -302,3 +302,8 @@ button.coven-attachment-face:focus-visible .coven-attachment-paper {
     animation: none;
   }
 }
+
+.coven-peek-status {
+  display: block;
+  padding: 1rem;
+}

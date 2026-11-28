@@ -37,7 +37,11 @@ OpenCoven Chat does not persist authenticated conversation bodies in IndexedDB, 
   user account can read them. **Delete chat** removes the attachments of the
   chat's messages. Once per launch, Chat also removes staged folders that no
   saved message names, such as copies left by earlier versions. Your chats
-  keep the attached text; only the staged copy goes.
+  keep the attached text; only the staged copy goes. The Chat window can read
+  a saved copy back only through the card of the message that sent it: it
+  names that message and the file's position, and Chat finds the file from its
+  own records for the selected familiar's chat, never from a path the window
+  supplies. Deleted chats' copies cannot be opened.
 - **Companion credentials.** The iPhone companion's certificate and key, its
   bearer token, and its send receipts live in a private `iphone-companion/`
   folder.

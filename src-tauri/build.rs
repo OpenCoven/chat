@@ -11,6 +11,7 @@ const NATIVE_COMMANDS: &[&str] = &[
     "coven_runtime_sessions",
     "coven_runtime_chat_lifecycle",
     "coven_runtime_read",
+    "coven_runtime_read_attachment",
     "coven_runtime_send",
     "coven_runtime_cancel",
     "coven_runtime_approvals",

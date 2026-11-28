@@ -3,7 +3,7 @@ use serde_json::{json, Value};
 use std::{
     collections::HashSet,
     fs::{self, OpenOptions},
-    io::Write,
+    io::{Read, Write},
     path::{Path, PathBuf},
 };
 
@@ -20,48 +20,47 @@ pub(crate) struct Attachment {
     pub bytes: Vec<u8>,
 }
 
+fn validate_name(name: &str) -> Result<(), String> {
+    let extension = name.rsplit('.').next().unwrap_or("").to_ascii_lowercase();
+    if name.is_empty()
+        || name.len() > 180
+        || name
+            .chars()
+            .any(|c| c.is_control() || matches!(c, '/' | '\\' | ':'))
+        || !matches!(
+            extension.as_str(),
+            "txt"
+                | "md"
+                | "csv"
+                | "json"
+                | "yaml"
+                | "yml"
+                | "xml"
+                | "html"
+                | "css"
+                | "js"
+                | "ts"
+                | "tsx"
+                | "jsx"
+                | "py"
+                | "rs"
+                | "go"
+                | "sh"
+                | "log"
+                | "toml"
+        )
+    {
+        return Err("Only named UTF-8 text/code attachments are supported; images and PDFs are not supported by this engine.".into());
+    }
+    Ok(())
+}
+
 pub(crate) fn validate(files: &[Attachment]) -> Result<(), String> {
     if files.len() > MAX_FILES {
         return Err("Attach at most 4 files per message.".into());
     }
     for file in files {
-        let extension = file
-            .name
-            .rsplit('.')
-            .next()
-            .unwrap_or("")
-            .to_ascii_lowercase();
-        if file.name.is_empty()
-            || file.name.len() > 180
-            || file
-                .name
-                .chars()
-                .any(|c| c.is_control() || matches!(c, '/' | '\\' | ':'))
-            || !matches!(
-                extension.as_str(),
-                "txt"
-                    | "md"
-                    | "csv"
-                    | "json"
-                    | "yaml"
-                    | "yml"
-                    | "xml"
-                    | "html"
-                    | "css"
-                    | "js"
-                    | "ts"
-                    | "tsx"
-                    | "jsx"
-                    | "py"
-                    | "rs"
-                    | "go"
-                    | "sh"
-                    | "log"
-                    | "toml"
-            )
-        {
-            return Err("Only named UTF-8 text/code attachments are supported; images and PDFs are not supported by this engine.".into());
-        }
+        validate_name(&file.name)?;
         if file.bytes.len() > MAX_FILE {
             return Err("Maximum attachment size is 64 KiB.".into());
         }
@@ -77,6 +76,69 @@ pub(crate) fn metadata(files: &[Attachment]) -> Vec<Value> {
         .iter()
         .map(|f| json!({"name": f.name, "size": f.bytes.len()}))
         .collect()
+}
+
+const UNAVAILABLE: &str = "Chat could not open this attachment’s saved copy.";
+
+pub(crate) fn read_retained(
+    data: &Path,
+    familiar: &str,
+    source: &str,
+    index: usize,
+) -> Result<String, String> {
+    super::validate_id(source)?;
+    let mut id = crate::chat_canonical::head(data, familiar)?.ok_or(UNAVAILABLE)?;
+    let lifecycle = crate::chat_lifecycle::load(data)?;
+    let mut seen = HashSet::new();
+    // Only follow the app-authored input at the start of each turn. Refuse
+    // deleted ancestors even if cleanup left a transcript or staged file.
+    let input = loop {
+        if !seen.insert(id.clone())
+            || lifecycle.get(&id) == Some(&crate::chat_lifecycle::Lifecycle::Deleted)
+        {
+            return Err(UNAVAILABLE.into());
+        }
+        let input = crate::chat_origin::captured_input(data, &id)?.ok_or(UNAVAILABLE)?;
+        if id == source {
+            break input;
+        }
+        id = input["parent_session_id"]
+            .as_str()
+            .ok_or(UNAVAILABLE)?
+            .to_owned();
+    };
+    let run = input["attachment_run_id"].as_str().ok_or(UNAVAILABLE)?;
+    super::validate_id(run)?;
+    let metadata = input["attachments"]
+        .as_array()
+        .filter(|files| files.len() <= MAX_FILES)
+        .and_then(|files| files.get(index))
+        .ok_or(UNAVAILABLE)?;
+    let name = metadata["name"].as_str().ok_or(UNAVAILABLE)?;
+    validate_name(name)?;
+    let expected = metadata["size"]
+        .as_u64()
+        .filter(|n| *n <= MAX_FILE as u64)
+        .ok_or(UNAVAILABLE)?;
+    let root = data.join("coven-attachments");
+    let dir = root.join(run);
+    for directory in [&root, &dir] {
+        if !fs::symlink_metadata(directory).is_ok_and(|m| m.is_dir()) {
+            return Err(UNAVAILABLE.into());
+        }
+    }
+    let path = dir.join(format!("{index}-{name}"));
+    if !fs::symlink_metadata(&path).is_ok_and(|m| m.is_file() && m.len() == expected) {
+        return Err(UNAVAILABLE.into());
+    }
+    let mut text = String::new();
+    fs::File::open(path)
+        .and_then(|f| f.take(expected + 1).read_to_string(&mut text))
+        .map_err(|_| UNAVAILABLE)?;
+    if text.len() as u64 != expected || text.contains('\0') {
+        return Err(UNAVAILABLE.into());
+    }
+    Ok(text)
 }
 
 fn stored_bytes(root: &Path) -> Result<u64, String> {
@@ -177,10 +239,11 @@ pub(crate) fn remove(data: &Path, run_id: &str) -> Result<(), String> {
     fs::remove_dir_all(root.join(run_id)).map_err(|_| "Cannot remove staged attachments.".into())
 }
 
-/// Removes staged folders that no saved chat input names. Nothing reads a
-/// staged folder after its run (the files travel inside the prompt), so these
-/// are copies left by deleted chats, by earlier versions that didn't record
-/// the folder, or by runs that ended before Coven named a session. Only real
+/// Removes staged folders that no saved chat input names. A named folder is
+/// the saved copy its sent cards open (`read_retained`); an unnamed one can
+/// never be opened, so these are copies left by deleted chats, by earlier
+/// versions that didn't record the folder, or by runs that ended before Coven
+/// named a session. Only real
 /// folders with run-id names are removed; files and symbolic links stay.
 /// Callers make sure no run is active.
 pub(crate) fn sweep(data: &Path, named: &HashSet<String>) -> Result<(), String> {
@@ -234,6 +297,206 @@ mod tests {
             name: name.into(),
             bytes: bytes.to_vec(),
         }
+    }
+
+    #[test]
+    fn retained_slot_belongs_to_visible_turn_and_uses_only_the_staged_copy() {
+        let data = std::env::temp_dir().join(format!("retained-{}", uuid::Uuid::new_v4()));
+        let transcripts = super::super::transcripts_dir(&data, true).unwrap();
+        let make_turn = |familiar: &str,
+                         id: &str,
+                         parent: Option<&str>,
+                         run: &str,
+                         files: &[Attachment]| {
+            if !files.is_empty() {
+                stage(&data, run, "inspect", files).unwrap();
+            }
+            let input = json!({"type":"user","source":"chat-input","session_id":id,"parent_session_id":parent,"attachment_run_id":run,"attachments":metadata(files)});
+            fs::write(
+                transcripts.join(format!("{id}.jsonl")),
+                format!("{input}\n"),
+            )
+            .unwrap();
+            crate::chat_canonical::advance(&data, familiar, parent, id).unwrap();
+        };
+        make_turn(
+            "one",
+            "old",
+            None,
+            "run-one",
+            &[file("notes.txt", b"A"), file("notes.txt", b"B")],
+        );
+        make_turn("one", "new", Some("old"), "unused", &[]);
+        make_turn("two", "other", None, "run-two", &[file("notes.txt", b"C")]);
+        let read = |familiar, source, slot| read_retained(&data, familiar, source, slot);
+        assert_eq!(read("one", "old", 1).unwrap(), "B");
+        assert_eq!(read("two", "other", 0).unwrap(), "C");
+        assert!(read("two", "old", 0).is_err());
+        assert!(read("one", "old", 2).is_err());
+        for state in [
+            crate::chat_lifecycle::Lifecycle::Archived,
+            crate::chat_lifecycle::Lifecycle::Active,
+        ] {
+            crate::chat_lifecycle::change(&data, "new", state).unwrap();
+            assert_eq!(read("one", "old", 0).unwrap(), "A");
+        }
+        let old_input = transcripts.join("old.jsonl");
+        let saved = fs::read_to_string(&old_input).unwrap();
+        let mut legacy: Value = serde_json::from_str(&saved).unwrap();
+        legacy.as_object_mut().unwrap().remove("attachment_run_id");
+        fs::write(&old_input, legacy.to_string()).unwrap();
+        assert!(
+            read("one", "old", 0).is_err(),
+            "an unrecorded folder cannot be guessed"
+        );
+        fs::write(&old_input, saved).unwrap();
+        fs::remove_file(data.join("coven-attachments/run-one/0-notes.txt")).unwrap();
+        assert!(read("one", "old", 0).is_err());
+        assert_eq!(read("one", "old", 1).unwrap(), "B");
+        crate::chat_lifecycle::change(&data, "new", crate::chat_lifecycle::Lifecycle::Deleted)
+            .unwrap();
+        assert!(read("one", "old", 1).is_err());
+        assert_eq!(read("two", "other", 0).unwrap(), "C");
+        fs::remove_dir_all(data).unwrap();
+    }
+
+    #[test]
+    fn retained_read_refuses_tampered_records_files_and_links() {
+        let data = std::env::temp_dir().join(format!("retained-refuse-{}", uuid::Uuid::new_v4()));
+        let transcripts = super::super::transcripts_dir(&data, true).unwrap();
+        let input = |id: &str, parent: Option<&str>, run: &str, files: Value| {
+            json!({"type":"user","source":"chat-input","session_id":id,
+                "parent_session_id":parent,"attachment_run_id":run,"attachments":files})
+        };
+        let save = |id: &str, record: &Value| {
+            fs::write(
+                transcripts.join(format!("{id}.jsonl")),
+                format!("{record}\n"),
+            )
+            .unwrap();
+        };
+        stage(&data, "run", "inspect", &[file("notes.txt", b"A")]).unwrap();
+        let good = input(
+            "turn",
+            None,
+            "run",
+            json!(metadata(&[file("notes.txt", b"A")])),
+        );
+        save("turn", &good);
+        crate::chat_canonical::advance(&data, "f", None, "turn").unwrap();
+        let read = || read_retained(&data, "f", "turn", 0);
+        assert_eq!(read().unwrap(), "A");
+
+        for source in ["../turn", "a/b", "", "turn\0"] {
+            assert!(read_retained(&data, "f", source, 0).is_err(), "{source:?}");
+        }
+        assert!(read_retained(&data, "../f", "turn", 0).is_err());
+
+        // A hand-edited record cannot name another file, an oversized one, or
+        // a folder outside attachment storage.
+        for name in ["../notes.txt", "a:b.txt", "a\\b.txt", "notes.exe", ""] {
+            save(
+                "turn",
+                &input("turn", None, "run", json!([{"name":name,"size":1}])),
+            );
+            assert!(read().is_err(), "{name:?}");
+        }
+        for size in [
+            json!(0),
+            json!(2),
+            json!(-1),
+            json!("1"),
+            json!(MAX_FILE + 1),
+        ] {
+            save(
+                "turn",
+                &input(
+                    "turn",
+                    None,
+                    "run",
+                    json!([{"name":"notes.txt","size":size}]),
+                ),
+            );
+            assert!(read().is_err(), "{size}");
+        }
+        for run in ["..", "a/b", ""] {
+            save(
+                "turn",
+                &input(
+                    "turn",
+                    None,
+                    run,
+                    json!(metadata(&[file("notes.txt", b"A")])),
+                ),
+            );
+            assert!(read().is_err(), "{run:?}");
+        }
+        save("turn", &good);
+        assert_eq!(read().unwrap(), "A");
+
+        // The saved copy must be the same length, valid UTF-8 and free of NUL.
+        let staged = data.join("coven-attachments/run/0-notes.txt");
+        // The record still says one byte, so only the file's contents change.
+        for bytes in [&b"AB"[..], &[], &[0xff], &[0]] {
+            fs::remove_file(&staged).unwrap();
+            fs::write(&staged, bytes).unwrap();
+            assert!(read().is_err(), "{bytes:?}");
+        }
+        fs::remove_file(&staged).unwrap();
+        fs::write(&staged, b"A").unwrap();
+        save("turn", &good);
+        assert_eq!(read().unwrap(), "A");
+
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::symlink;
+            let elsewhere = data.join("elsewhere");
+            fs::create_dir(&elsewhere).unwrap();
+            fs::write(elsewhere.join("0-notes.txt"), b"Z").unwrap();
+            // A linked file.
+            fs::rename(&staged, data.join("held.txt")).unwrap();
+            symlink(elsewhere.join("0-notes.txt"), &staged).unwrap();
+            assert!(read().is_err(), "linked file");
+            fs::remove_file(&staged).unwrap();
+            fs::rename(data.join("held.txt"), &staged).unwrap();
+            // A linked run folder.
+            let run = data.join("coven-attachments/run");
+            fs::rename(&run, data.join("held")).unwrap();
+            symlink(&elsewhere, &run).unwrap();
+            assert!(read().is_err(), "linked run folder");
+            fs::remove_file(&run).unwrap();
+            fs::rename(data.join("held"), &run).unwrap();
+            // A linked storage root.
+            let root = data.join("coven-attachments");
+            fs::rename(&root, data.join("held-root")).unwrap();
+            symlink(data.join("held-root"), &root).unwrap();
+            assert!(read().is_err(), "linked storage root");
+            fs::remove_file(&root).unwrap();
+            fs::rename(data.join("held-root"), &root).unwrap();
+            assert_eq!(read().unwrap(), "A");
+        }
+
+        // A loop in the parent links ends the walk instead of spinning.
+        save("next", &input("next", Some("turn"), "unused", json!([])));
+        crate::chat_canonical::advance(&data, "f", Some("turn"), "next").unwrap();
+        assert_eq!(read().unwrap(), "A");
+        save(
+            "turn",
+            &input(
+                "turn",
+                Some("next"),
+                "run",
+                json!(metadata(&[file("notes.txt", b"A")])),
+            ),
+        );
+        assert!(read_retained(&data, "f", "absent", 0).is_err());
+        // An ancestor Chat did not write ends the walk too.
+        save(
+            "turn",
+            &json!({"type":"user","source":"cli","session_id":"turn"}),
+        );
+        assert!(read().is_err());
+        fs::remove_dir_all(data).unwrap();
     }
 
     #[test]

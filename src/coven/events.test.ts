@@ -101,6 +101,30 @@ describe('genuine Coven event projection', () => {
       },
     ]);
   });
+  it('gives each Chat-written card its own turn and original slot, and other cards none', () => {
+    const message = { role: 'user', content: [{ type: 'text', text: 'see files' }] };
+    const files = [
+      { name: 'bad.txt', size: -1 },
+      { name: 'a.txt', size: 1 },
+      { name: 'b.txt', size: 2 },
+    ];
+    const [chat, other, unnamed] = projectEvents([
+      { type: 'user', source: 'chat-input', session_id: 'turn-1', message, attachments: files },
+      { type: 'user', source: 'cave-import', session_id: 'turn-2', message, attachments: files },
+      { type: 'user', source: 'chat-input', message, attachments: files },
+    ]).messages;
+    // The discarded first entry keeps the slots of the ones after it, which
+    // match the staged file names Chat reads back.
+    expect(chat?.attachments).toEqual([
+      { name: 'a.txt', size: 1, source: { session: 'turn-1', index: 1 } },
+      { name: 'b.txt', size: 2, source: { session: 'turn-1', index: 2 } },
+    ]);
+    for (const message of [other, unnamed])
+      expect(message?.attachments).toEqual([
+        { name: 'a.txt', size: 1 },
+        { name: 'b.txt', size: 2 },
+      ]);
+  });
   it('accumulates genuine coven-code text deltas into one assistant message per run', () => {
     expect(
       projectEvents([

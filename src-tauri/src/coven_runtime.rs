@@ -1331,6 +1331,26 @@ fn change_chat_lifecycle(
 }
 
 #[tauri::command]
+pub(crate) async fn coven_runtime_read_attachment(
+    app: AppHandle,
+    familiar_id: String,
+    source: String,
+    index: usize,
+) -> Result<String, String> {
+    let data = app
+        .path()
+        .app_local_data_dir()
+        .map_err(|_| "Cannot locate local chat storage.")?;
+    blocking(move || {
+        let _storage = crate::chat_lifecycle::STORAGE_LOCK
+            .lock()
+            .map_err(|_| "Chat storage is unavailable.")?;
+        attachments::read_retained(&data, &familiar_id, &source, index)
+    })
+    .await
+}
+
+#[tauri::command]
 pub(crate) async fn coven_runtime_read(
     app: AppHandle,
     id: String,
