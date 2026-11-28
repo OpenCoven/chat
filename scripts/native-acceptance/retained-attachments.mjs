@@ -2,14 +2,15 @@
 import assert from 'node:assert/strict';
 import { execFileSync, spawn, spawnSync } from 'node:child_process';
 import {
+  chmodSync,
   closeSync,
+  copyFileSync,
   existsSync,
   mkdirSync,
   openSync,
   readdirSync,
   readFileSync,
   rmSync,
-  symlinkSync,
   writeFileSync,
 } from 'node:fs';
 import { basename, dirname, join, resolve } from 'node:path';
@@ -17,16 +18,14 @@ import { fileURLToPath } from 'node:url';
 import { App, Native, outline, sleep, until, walk } from './driver.mjs';
 import { startModelFixture } from './fixture.mjs';
 
-const [phase, binary, directory, cli, engine] = process.argv.slice(2);
+const [phase, binary, directory, cli] = process.argv.slice(2);
 assert.ok(
-  process.platform === 'linux' &&
-    ['seed', 'verify'].includes(phase) &&
-    binary &&
-    directory &&
-    cli &&
-    engine,
-  'Usage: node retained-attachments.mjs seed|verify <packaged executable> <disposable directory> <Coven CLI> <Coven Code engine>',
+  process.platform === 'linux' && ['seed', 'verify'].includes(phase) && binary && directory && cli,
+  'Usage: node retained-attachments.mjs seed|verify <packaged executable> <disposable directory> <Coven 0.4.10 CLI>',
 );
+// What Chat v0.1.3's own setup leaves behind: Coven 0.4.10 in ~/.local/bin and
+// the managed engine 0.9.1, installed by version and digest (v0.1.3 setup.rs).
+const V013_ENGINE = ['0.9.1', 'f9e426e7fecc01696ff40a0cc2702cd4069b27daad53ff57fe49db49330e1b9f'];
 const work = resolve(directory),
   home = join(work, 'home'),
   bin = join(home, '.local/bin');
@@ -45,7 +44,6 @@ const env = {
   PATH: bin + ':/usr/bin:/bin',
   LANG: 'C.UTF-8',
   COVEN_HOME: join(home, '.coven'),
-  COVEN_ENGINE_BIN: resolve(engine),
   ANTHROPIC_API_KEY: 'local-attachment-fixture',
   GTK_MODULES: 'gail:atk-bridge',
   NO_AT_BRIDGE: '0',
@@ -54,7 +52,14 @@ const env = {
 if (phase === 'seed') {
   mkdirSync(home); // Require an unused profile.
   mkdirSync(bin, { recursive: true });
-  symlinkSync(resolve(cli), join(bin, 'coven'));
+  copyFileSync(resolve(cli), join(bin, 'coven'));
+  chmodSync(join(bin, 'coven'), 0o755);
+  const [version, sha256] = V013_ENGINE;
+  execFileSync(
+    join(bin, 'coven'),
+    ['engine', 'install', '--version', version, '--sha256', sha256],
+    { env, stdio: 'inherit' },
+  );
   for (const name of names)
     execFileSync(resolve(cli), ['familiars', 'create', '--json', '--', name], { env });
 } else {
@@ -75,6 +80,21 @@ async function press(role, name) {
   const target = await app.one(role, name, { timeout: 45000 });
   await app.click(target);
 }
+const runtimeFacts = () => {
+  const coven = join(bin, 'coven');
+  const run = (exe, args) => execFileSync(exe, args, { env, encoding: 'utf8' }).trim();
+  const engine = run(coven, ['engine', 'which']);
+  const adapter = JSON.parse(run(coven, ['adapter', 'list', '--json'])).find(
+    (row) => row.id === 'coven-code',
+  );
+  return {
+    coven: run(coven, ['--version']),
+    engine,
+    engineVersion: run(engine, ['--version']),
+    runBudget: adapter?.run_budget ?? null,
+  };
+};
+const setupSteps = [];
 async function open() {
   const fd = openSync(join(work, phase + '-app.log'), 'a');
   proc = spawn(resolve(binary), [], { env, stdio: ['ignore', fd, fd] });
@@ -92,17 +112,48 @@ async function open() {
   );
   app = new App(native, proc.pid);
   await app.activate();
+  // The candidate finds v0.1.3's Coven too old for run budgets, so its setup
+  // offers Update Coven and then the engine. Each step is pressed once.
+  const pressed = new Set();
   await until(
     'familiar rail or setup completion',
     async () => {
-      if ((await app.all('button', 'Continue to Chat')).length)
-        await press('button', 'Continue to Chat');
+      for (const label of ['Update Coven', 'Update the engine', 'Continue to Chat']) {
+        if (pressed.has(label) || !(await app.all('button', label)).length) continue;
+        pressed.add(label);
+        setupSteps.push(label);
+        console.log('Setup offered ' + label);
+        await press('button', label);
+        return false;
+      }
       return (
         (await app.all('button', names[0])).length || (await app.all('button', names[1])).length
       );
     },
-    150000,
+    phase === 'verify' ? 20 * 60000 : 150000,
   );
+}
+// Every Coven Code chat must still send after the upgrade: one new turn in each.
+async function sendAfterUpgrade(i) {
+  await select(i);
+  const reply = 'Second familiar here.';
+  const before = accessibleText(await app.snapshot()).split(reply).length;
+  await press('textbox', 'Message ' + names[i]);
+  await app.type('[[other]] Upgrade check for ' + names[i] + '.');
+  await app.key('Return');
+  await until(
+    names[i] + ' reply after the upgrade',
+    async () => {
+      const text = accessibleText(await app.snapshot());
+      assert.ok(
+        !text.includes("can't give Coven Code chats a model-round allowance"),
+        'The upgraded Coven refused the run budget',
+      );
+      return text.split(reply).length > before && (await app.count('button', 'Stop run')) === 0;
+    },
+    180000,
+  );
+  console.log('Sent a Coven Code turn in ' + names[i] + ' after the upgrade');
 }
 async function close() {
   if (!proc || proc.exitCode !== null || proc.signalCode !== null) return;
@@ -238,7 +289,13 @@ try {
     for (let i = 0; i < 2; i++) await send(i);
     await close();
     writeFileSync(join(work, 'seed-complete'), filename);
+    console.log('v0.1.3 runtime: ' + JSON.stringify(runtimeFacts()));
   } else {
+    const facts = runtimeFacts();
+    console.log('Upgraded runtime after ' + setupSteps.join(', ') + ': ' + JSON.stringify(facts));
+    assert.ok(setupSteps.includes('Update Coven'), 'The candidate did not offer Update Coven');
+    assert.deepEqual(facts.runBudget?.version, 1, 'The upgraded Coven declares no run budget');
+    for (let i = 0; i < 2; i++) await sendAfterUpgrade(i);
     for (let launch = 0; launch < 2; launch++) {
       if (launch) await open();
       for (let i = 0; i < 2; i++) {
@@ -278,7 +335,7 @@ try {
     console.log('Verified Delete from Chat removes the remaining retained file across relaunch.');
     await close();
     console.log(
-      'Passed same-name isolation, upgrade, restart, mouse, Space, Enter, archive, restore, and missing saved copy.',
+      'Passed the Coven update, sends in both chats, same-name isolation, upgrade, restart, mouse, Space, Enter, archive, restore, and missing saved copy.',
     );
   }
 } catch (error) {
