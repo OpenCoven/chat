@@ -23,6 +23,7 @@ import {
   onFailure,
   quoteRow,
   rightClickRow,
+  runBudgetRow,
   storageRow,
   switchRow,
   tableRow,
@@ -528,6 +529,7 @@ try {
   rows.push(await storageRow(session));
   const fullAccess = !/^v0\.0\.[0-9](?:[-+]|$)/.test(process.env.RELEASE ?? '');
   rows.push(await defaultAccessRow(session, FIRST, fullAccess));
+  rows.push(await runBudgetRow(session, FIRST));
   rows.push(await rightClickRow(session, FIRST, opened));
 } catch (error) {
   setupRow.error = error.message;

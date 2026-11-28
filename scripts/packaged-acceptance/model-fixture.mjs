@@ -133,6 +133,43 @@ export function approvalStep(messages) {
   };
 }
 
+/** Chat's own words when Continue saved work resumes an exhausted reply. */
+export const CONTINUE_PROMPT =
+  'Continue the unfinished work from the saved tool results without repeating completed operations.';
+/** The continuation's reply when the engine handed back the saved tool result. */
+export const LOOP_DONE = 'The saved work is finished.';
+/** Replies that mean the allowance did not hold, or nothing was saved. */
+export const LOOP_SECOND_ROUND = 'A second model round ran';
+export const LOOP_NOTHING_SAVED = 'The continuation carried no saved tool result';
+/** A prompt whose first model round reads `path`, so a one-round allowance runs out. */
+export function loopPrompt(path) {
+  return `[[loop ${Buffer.from(path, 'utf8').toString('hex')}]] Read the proof file.`;
+}
+
+const hasToolResult = (message) =>
+  Array.isArray(message?.content) && message.content.some((block) => block?.type === 'tool_result');
+
+/**
+ * The run-budget row's script. The first round asks the real engine to run a
+ * real Read, so finishing needs a second round. With one round allowed, the
+ * engine, not this fixture, decides to stop there. The continuation succeeds
+ * only if the engine restored that saved tool result.
+ */
+export function loopStep(messages) {
+  const prompt = lastPrompt(messages);
+  if (prompt.startsWith(CONTINUE_PROMPT)) {
+    if (!(messages ?? []).some((message) => lastText([message]).includes('[[loop ')))
+      return undefined;
+    return { text: (messages ?? []).some(hasToolResult) ? LOOP_DONE : LOOP_NOTHING_SAVED };
+  }
+  const request = [...prompt.matchAll(/\[\[loop ((?:[0-9a-f]{2})+)\]\]/g)].at(-1);
+  if (!request) return undefined;
+  if (hasToolResult(messages.at(-1))) return { text: LOOP_SECOND_ROUND };
+  const path = Buffer.from(request[1], 'hex').toString('utf8');
+  if (!isAbsolute(path)) return undefined;
+  return { tool: { name: 'Read', input: { file_path: path } } };
+}
+
 /** Streams one step: a text reply, or one tool call the engine then runs. */
 export function streamStep(res, model, { text, tool }) {
   res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-cache' });
@@ -241,7 +278,8 @@ export function startModelFixture({ port = 0, log } = {}) {
         return;
       }
       if (req.method === 'POST' && path === '/v1/messages') {
-        const step = approvalStep(parsed.messages) ?? { text: replyFor(parsed.messages) };
+        const step = approvalStep(parsed.messages) ??
+          loopStep(parsed.messages) ?? { text: replyFor(parsed.messages) };
         sendModelStep(res, parsed.model, step, parsed.stream);
         return;
       }
