@@ -415,12 +415,8 @@ pub(crate) enum MissionAnswer {
     /// No answer proved what happened yet. Chat keeps checking with the same
     /// key; it never treats this as "nothing happened".
     Checking { mission_id: String },
-    /// The submit never reached Coven: Coven has no such mission, and the time
-    /// in which it could have accepted one has passed. Nothing ran.
-    NeverSent { mission_id: String },
-    /// Coven no longer has a mission it once accepted, for example because
-    /// Chat now talks to a different Coven home.
-    Gone { mission_id: String },
+    /// The original submission is preserved, but its owner was never recorded.
+    Unverified { mission_id: String },
     /// The mission had already finished, so there was nothing to cancel.
     Settled { mission: Box<MissionView> },
     /// The answer was about a different mission, familiar or owner, and was
@@ -1326,6 +1322,10 @@ fn send_submit(
                     None => MissionAnswer::Mismatch { mission_id },
                 });
             }
+            Reply::Refused(_) if !first || send > 0 => {
+                // A refusal for a retry cannot settle the earlier attempt.
+                return Ok(MissionAnswer::Mismatch { mission_id });
+            }
             Reply::Refused(error) => {
                 missions.settle(missions.remove(&mission_id));
                 return Ok(refusal(&error));
@@ -1343,7 +1343,7 @@ fn send_submit(
 }
 
 /// Forgets a mission the person removed. Chat never drops a record that isn't
-/// terminal, so only a finished mission, or one Coven no longer has (M-11 a),
+/// terminal, so only a finished mission
 /// can go: a mission still at work stays where Chat can follow and cancel it.
 fn forget(
     missions: &Missions,
@@ -1356,7 +1356,6 @@ fn forget(
         Phase::Sending => Err("Chat is still checking whether Coven received this mission, so it can't be removed yet.".into()),
         Phase::Terminal => missions.remove(mission_id),
         Phase::Committed => match read(missions, run, mission_id, now, pause)? {
-            MissionAnswer::Gone { .. } => missions.remove(mission_id),
             MissionAnswer::View { mission } if mission.terminal => missions.remove(mission_id),
             MissionAnswer::View { .. } => Err("Coven is still working on this mission, so Chat keeps it. Cancel it, or wait until it finishes.".into()),
             _ => Err("Chat couldn't confirm with Coven that this mission is finished, so it keeps it. Try again once Coven answers.".into()),
@@ -1378,9 +1377,16 @@ fn read(
         return Err("Invalid mission id.".into());
     }
     let record = missions.record(mission_id)?;
+    if record.principal_id.is_none() && record.payload.is_none() {
+        // v1 learned the principal only after an acknowledged submit. Reading
+        // an unknown store after restart cannot establish the original owner.
+        return Ok(MissionAnswer::Unverified {
+            mission_id: mission_id.to_owned(),
+        });
+    }
     // An unanswered submit is settled by sending it again with its key, while
     // Chat still holds the exact payload and Coven could still accept it.
-    // After validUntil, reading the mission settles it instead.
+    // After validUntil, only a bound positive view can settle its outcome.
     if record.phase == Phase::Sending && now < record.valid_until {
         if let Some(payload) = record.payload.clone() {
             return send_submit(missions, run, &record, &payload, pause, false);
@@ -1415,22 +1421,10 @@ fn read(
             if refused["error"]["code"] != "NOT_FOUND" {
                 return Ok(refusal(&refused["error"]));
             }
-            Ok(match record.phase {
-                // Coven refuses a submit once its validUntil has passed, so
-                // only then is "no such mission" final (M-01).
-                Phase::Sending if now >= record.valid_until => {
-                    missions.settle(missions.remove(mission_id));
-                    MissionAnswer::NeverSent {
-                        mission_id: mission_id.to_owned(),
-                    }
-                }
-                Phase::Sending => MissionAnswer::Checking {
-                    mission_id: mission_id.to_owned(),
-                },
-                // M-11 a: this Coven doesn't know the mission it accepted.
-                Phase::Committed | Phase::Terminal => MissionAnswer::Gone {
-                    mission_id: mission_id.to_owned(),
-                },
+            // NOT_FOUND is shared by an absent mission and a different store.
+            // Expiry cannot prove which store answered, or justify losing its key.
+            Ok(MissionAnswer::Mismatch {
+                mission_id: mission_id.to_owned(),
             })
         }
         Some(2) => Err(UPDATE_COVEN.into()),
@@ -1500,13 +1494,17 @@ fn cancel(
                 });
             }
             Reply::Refused(error) => {
-                missions.settle(forget_key());
-                // A settled mission answers with its view (M-09).
+                if error["code"] == "NOT_FOUND" {
+                    return Ok(MissionAnswer::Mismatch {
+                        mission_id: mission_id.to_owned(),
+                    });
+                }
                 if error["code"] == "ILLEGAL_TRANSITION" {
                     if let Some(settled) = error.pointer("/details/mission") {
                         return Ok(match bound(&record, settled)? {
                             Some(view) if view.terminal => {
                                 missions.observed(&view)?;
+                                missions.settle(forget_key());
                                 MissionAnswer::Settled {
                                     mission: Box::new(view),
                                 }
@@ -1517,9 +1515,12 @@ fn cancel(
                         });
                     }
                 }
+                if record.cancel_key.is_none() && send == 0 {
+                    missions.settle(forget_key());
+                }
                 return Ok(refusal(&error));
             }
-            Reply::NotSent(message) if send == 0 => {
+            Reply::NotSent(message) if send == 0 && record.cancel_key.is_none() => {
                 missions.settle(forget_key());
                 return Ok(MissionAnswer::NotSent { message });
             }

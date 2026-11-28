@@ -169,9 +169,15 @@ export function MissionPanel({ familiar, name, missions = defaultMissions }: Pro
   // dropped (M-11 b).
   const current = useRef(familiarId);
   current.current = familiarId;
-  const watched = useRef(new Set<string>());
+  const watched = useRef(new Map<string, number>());
+  // A mismatch invalidates every observation started against the previous
+  // owner context, including queued watch deliveries and pending gets.
+  const generations = useRef(new Map<string, number>());
 
   const record = useCallback((missionId: string, answer: MissionAnswer) => {
+    if (answer.kind === 'mismatch' || answer.kind === 'unverified') {
+      generations.current.set(missionId, (generations.current.get(missionId) ?? 0) + 1);
+    }
     const view = viewOf(answer);
     if (view && view.familiarId !== current.current) return;
     setTracked((list) => {
@@ -185,17 +191,21 @@ export function MissionPanel({ familiar, name, missions = defaultMissions }: Pro
 
   const follow = useCallback(
     (missionId: string) => {
-      if (watched.current.has(missionId)) return;
-      watched.current.add(missionId);
+      const generation = generations.current.get(missionId) ?? 0;
+      if (watched.current.get(missionId) === generation) return;
+      watched.current.set(missionId, generation);
       const owner = current.current;
       void missions
         .watch(missionId, (answer) => {
-          if (current.current === owner) record(missionId, answer);
+          if (current.current === owner && (generations.current.get(missionId) ?? 0) === generation)
+            record(missionId, answer);
         })
         .catch((reason: unknown) => {
           if (current.current === owner) setNotice(message(reason));
         })
-        .finally(() => watched.current.delete(missionId));
+        .finally(() => {
+          if (watched.current.get(missionId) === generation) watched.current.delete(missionId);
+        });
     },
     [missions, record],
   );
@@ -229,8 +239,9 @@ export function MissionPanel({ familiar, name, missions = defaultMissions }: Pro
       .then((list) =>
         Promise.all(
           list.map(async (entry) => {
+            const generation = generations.current.get(entry.missionId) ?? 0;
             const answer = await missions.get(entry.missionId);
-            if (!alive) return;
+            if (!alive || generation !== (generations.current.get(entry.missionId) ?? 0)) return;
             record(entry.missionId, answer);
             if (watching(answer)) follow(entry.missionId);
           }),
@@ -242,7 +253,7 @@ export function MissionPanel({ familiar, name, missions = defaultMissions }: Pro
     const following = watched.current;
     return () => {
       alive = false;
-      for (const missionId of following) void missions.stopWatch(missionId).catch(() => {});
+      for (const missionId of following.keys()) void missions.stopWatch(missionId).catch(() => {});
       following.clear();
     };
   }, [familiarId, missions, record, follow]);
@@ -309,8 +320,13 @@ export function MissionPanel({ familiar, name, missions = defaultMissions }: Pro
   async function act(missionId: string, operation: 'cancel' | 'get') {
     setNotice('');
     try {
+      const generation = generations.current.get(missionId) ?? 0;
       const answer = await missions[operation](missionId);
-      if (current.current !== familiarId) return;
+      if (
+        current.current !== familiarId ||
+        generation !== (generations.current.get(missionId) ?? 0)
+      )
+        return;
       switch (answer.kind) {
         case 'refused':
           setNotice(`Coven refused: ${answer.message || answer.code}`);
@@ -319,7 +335,7 @@ export function MissionPanel({ familiar, name, missions = defaultMissions }: Pro
           setNotice(`Chat couldn’t reach Coven, so nothing changed. ${answer.message}`.trim());
           return;
         case 'mismatch':
-          setNotice('Coven answered about a different mission, so Chat ignored the answer.');
+          record(missionId, answer);
           return;
         default:
           record(missionId, answer);
@@ -549,12 +565,14 @@ function MissionCard({
           ? 'This mission never reached Coven, so nothing ran.'
           : answer.kind === 'gone'
             ? 'Coven no longer has this mission. It may belong to a different Coven setup.'
-            : 'Coven answered about a different mission, so Chat ignored the answer.';
+            : answer.kind === 'unverified'
+              ? 'Chat kept this mission, but its original owner could not be verified after restart.'
+              : 'Restore the original Coven setup to view this mission.';
     return (
       <li className="coven-mission fr-card fr-card--lift" data-kind={answer.kind}>
         <p>{text}</p>
         <div className="coven-missions-actions">
-          {answer.kind === 'checking' ? (
+          {answer.kind === 'checking' || answer.kind === 'mismatch' ? (
             <FamButton size="sm" onClick={onCheck}>
               Check again
             </FamButton>
@@ -589,6 +607,12 @@ function MissionCard({
         <p className="coven-mission-reason">The mission finished before the cancel reached it.</p>
       ) : null}
       <div className="fr-rows">
+        <div className="fr-row">
+          <span className="fr-row-label">Owner</span>
+          <code className="fr-row-value coven-row-value--path">
+            <bdi>{view.principalId}</bdi>
+          </code>
+        </div>
         <div className="fr-row">
           <span className="fr-row-label">Project</span>
           <code className="fr-row-value coven-row-value--path" title={view.projectCwd}>

@@ -699,42 +699,21 @@ fn record(missions: &Missions, key: &str, phase: Phase, payload: Option<Vec<u8>>
 }
 
 #[test]
-fn a_restart_settles_an_unanswered_submit_by_reading_it() {
-    // M-01: after a restart Chat no longer has the payload. "No such mission"
-    // is final only once validUntil has passed.
+fn a_restart_keeps_an_unanswered_submit_without_learning_an_owner_from_another_store() {
     let missions = Missions::default();
     let id = record(&missions, "chat-mission:restart", Phase::Sending, None);
-    let fake = Fake::new(vec![step(not_found), step(not_found)]);
+    let fake = Fake::new(vec![]);
     let run = |args: &[&str], input: Option<&[u8]>| fake.run(args, input);
-    assert_eq!(
-        read(&missions, &run, &id, at(NOW + 60_000), &no_pause).unwrap(),
-        MissionAnswer::Checking {
-            mission_id: id.clone()
-        }
-    );
-    assert_eq!(
-        read(&missions, &run, &id, at(NOW + 600_000), &no_pause).unwrap(),
-        MissionAnswer::NeverSent {
-            mission_id: id.clone()
-        }
-    );
-    assert!(missions.record(&id).is_err());
-    assert_eq!(
-        fake.calls()[0].args,
-        ["missions", "get", id.as_str(), "--json"]
-    );
-
-    // If it exists, the record becomes committed.
-    let id = record(&missions, "chat-mission:found", Phase::Sending, None);
-    let fake = Fake::new(vec![step(|call| {
-        printed(0, &view(&call.mission_id(), 1, "queued"))
-    })]);
-    let run = |args: &[&str], input: Option<&[u8]>| fake.run(args, input);
-    assert!(matches!(
-        read(&missions, &run, &id, at(NOW), &no_pause).unwrap(),
-        MissionAnswer::View { .. }
-    ));
-    assert_eq!(missions.record(&id).unwrap().phase, Phase::Committed);
+    for now in [NOW + 60_000, NOW + 600_000] {
+        assert_eq!(
+            read(&missions, &run, &id, at(now), &no_pause).unwrap(),
+            MissionAnswer::Unverified {
+                mission_id: id.clone()
+            }
+        );
+        assert!(missions.record(&id).unwrap().principal_id.is_none());
+    }
+    assert!(fake.calls().is_empty());
 
     // While Chat still holds the payload, it sends the submit again instead.
     let id = record(
@@ -1086,7 +1065,7 @@ fn views_for_another_mission_familiar_or_owner_are_dropped() {
     let run = |args: &[&str], input: Option<&[u8]>| fake.run(args, input);
     assert_eq!(
         read(&missions, &run, &id, at(NOW), &no_pause).unwrap(),
-        MissionAnswer::Gone {
+        MissionAnswer::Mismatch {
             mission_id: id.clone()
         }
     );
@@ -1361,34 +1340,16 @@ fn records_survive_a_restart_without_any_task_body() {
     assert_eq!(record.phase, Phase::Sending);
     assert!(record.payload.is_none());
     assert_eq!(record.valid_until, at(NOW + 600_000));
-    let fake = Fake::new(vec![step(|call| {
-        printed(0, &view(&call.mission_id(), 2, "unavailable"))
-    })]);
+    let fake = Fake::new(vec![]);
     let run = |args: &[&str], input: Option<&[u8]>| fake.run(args, input);
     assert!(matches!(
-        read(&restarted, &run, &id, at(NOW + 1_000), &no_pause).unwrap(),
-        MissionAnswer::View { .. }
+        read(&restarted, &run, &id, at(NOW + 600_000), &no_pause).unwrap(),
+        MissionAnswer::Unverified { .. }
     ));
-    assert_eq!(
-        fake.calls()[0].args,
-        ["missions", "get", id.as_str(), "--json"]
-    );
-
-    // The settled phase and the owner are kept too.
     let again = Missions::default();
     again.open(data.path()).unwrap();
-    let record = again.record(&id).unwrap();
-    assert_eq!(record.phase, Phase::Terminal);
-    assert_eq!(record.principal_id.as_deref(), Some(OWNER));
-
-    // A finished mission can be removed without asking Coven, and stays removed.
-    let idle = Fake::new(vec![]);
-    let run = |args: &[&str], input: Option<&[u8]>| idle.run(args, input);
-    forget(&again, &run, &id, at(NOW), &no_pause).unwrap();
-    assert!(idle.calls().is_empty());
-    let last = Missions::default();
-    last.open(data.path()).unwrap();
-    assert!(last.record(&id).is_err());
+    assert_eq!(again.record(&id).unwrap().key, record.key);
+    assert_eq!(fs::read_to_string(file).unwrap(), text);
 }
 
 #[test]
@@ -1503,16 +1464,77 @@ fn a_mission_coven_is_still_working_on_cannot_be_removed() {
 }
 
 #[test]
-fn a_mission_coven_no_longer_has_can_be_removed() {
-    // M-11 a: Coven answers NOT_FOUND for a mission it once accepted, so the
-    // window offers Remove, and the record can go though it isn't terminal.
-    let missions = Missions::default();
-    let id = record(&missions, "chat-mission:gone", Phase::Committed, None);
-    let fake = Fake::new(vec![step(not_found)]);
+fn a_not_found_from_an_unproven_store_preserves_the_original_mission() {
+    let data = Scratch::new();
+    let first = Missions::default();
+    first.open(data.path()).unwrap();
+    let key = new_key("chat-mission");
+    let id = record(&first, &key, Phase::Committed, None);
+    let file = data.path().join(STORE_FOLDER).join(STORE_FILE);
+    let before = fs::read(&file).unwrap();
+    drop(first);
+
+    let reopened = Missions::default();
+    reopened.open(data.path()).unwrap();
+    let fake = Fake::new(vec![
+        step(not_found),
+        step(|call| printed(0, &view(&call.mission_id(), 2, "completed"))),
+    ]);
     let run = |args: &[&str], input: Option<&[u8]>| fake.run(args, input);
-    forget(&missions, &run, &id, at(NOW), &no_pause).unwrap();
-    assert!(missions.record(&id).is_err());
+    assert!(forget(&reopened, &run, &id, at(NOW), &no_pause).is_err());
+    assert_eq!(fs::read(&file).unwrap(), before);
+    assert!(matches!(
+        read(&reopened, &run, &id, at(NOW), &no_pause).unwrap(),
+        MissionAnswer::View { .. }
+    ));
+    assert_eq!(reopened.record(&id).unwrap().phase, Phase::Terminal);
+    assert_eq!(
+        reopened.record(&id).unwrap().principal_id.as_deref(),
+        Some(OWNER)
+    );
+    forget(&reopened, &run, &id, at(NOW), &no_pause).unwrap();
+    let again = Missions::default();
+    again.open(data.path()).unwrap();
+    assert!(again.record(&id).is_err());
     assert!(fake.done());
+}
+
+#[test]
+fn an_unbound_cancel_refusal_keeps_the_same_cancel_recovery_key() {
+    let missions = Missions::default();
+    let id = record(
+        &missions,
+        "chat-mission:cancel-other-store",
+        Phase::Committed,
+        None,
+    );
+    let fake = Fake::new(vec![
+        step(|call| {
+            rejected(
+                call,
+                "mission.cancel.v1",
+                json!({"code":"NOT_FOUND","message":"unknown"}),
+            )
+        }),
+        step(|call| {
+            rejected(
+                call,
+                "mission.cancel.v1",
+                json!({"code":"ILLEGAL_TRANSITION","details":{"mission":view(&call.mission_id(),3,"completed")}}),
+            )
+        }),
+    ]);
+    let run = |args: &[&str], input: Option<&[u8]>| fake.run(args, input);
+    assert!(matches!(
+        cancel(&missions, &run, &id, &no_pause).unwrap(),
+        MissionAnswer::Mismatch { .. }
+    ));
+    let key = missions.record(&id).unwrap().cancel_key.unwrap();
+    assert!(matches!(
+        cancel(&missions, &run, &id, &no_pause).unwrap(),
+        MissionAnswer::Settled { .. }
+    ));
+    assert!(fake.calls().iter().all(|call| call.key() == key));
 }
 
 /// Opt-in round trip against a running Coven daemon, through the real

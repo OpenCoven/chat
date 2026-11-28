@@ -546,12 +546,7 @@ When the familiar can't take a mission, the tab says why and offers **Try again*
 when Coven is too old to have missions, isn't running, or doesn't know the familiar yet. For the
 last case, the tab shows the `coven familiar-ledger register` command to run.
 
-Chat keeps each mission's keys in a private folder, so it shows the mission again after a
-restart and can still learn the outcome of one it was sending when it closed (see
-`SECURITY.md` and `docs/mission-storage-design.md`). **Remove** forgets a finished mission, or
-one Coven says it no longer has. Chat asks Coven first, so a mission still at work stays listed
-until it finishes. The window never receives those keys, and no mission text reaches browser
-storage.
+Chat keeps each mission's recovery keys in a private folder. After restart, the card identifies the owner Coven reported. If Chat closed before receiving the first answer, it may have no verified owner. It keeps that record and says why it cannot show the mission. If Coven cannot find a previously acknowledged mission, restore the original Coven setup and choose **Check again**. **Remove** forgets a finished mission. The window never receives recovery keys, and no mission text reaches browser storage. See `SECURITY.md` and `docs/mission-storage-design.md`.
 
 ## Remote screen (VNC)
 
