@@ -55,11 +55,7 @@ the bug is fixed. Currently listed:
 
 ## What is real, and the one stand-in
 
-Current-source CI builds the signed producer commits listed in `scripts/packaged-acceptance/runtime-candidate.json` using `runtime-candidate.mjs`. Each run creates a new Coven home and state directory, verifies source signatures and executable hashes, probes run-budget v1, and records source/build/capability metadata with the observations. Linux app data, configuration, cache and opener registration use that scratch profile. Windows candidate preparation and launch are restricted to fresh GitHub-hosted accounts; this mode refuses local or self-hosted Windows accounts. Their native USERPROFILE, APPDATA and LOCALAPPDATA values remain intact so Known Folder storage resolves normally. The checked CLI is first on the normalized Windows PATH, and a recorded preflight refuses any earlier native/npm installation that could shadow it. Coven home/state and the engine executable remain explicit candidate paths. **Create familiar** still runs through the packaged window. This candidate mode credits unpublished source integration; published CLI download and installation remain separate acceptance. Product installers and governed conformance pins are unchanged.
-
-The engine candidate keeps its default voice feature. Linux qualification stages a size/SHA-256-verified Ubuntu ALSA development archive in the new build directory and uses the pinned image's existing ALSA runtime; pkg-config is scoped to that build environment. No system package installation or CI-image repin is performed. Compiler failures retain full logs and a bounded console tail, and container artifacts use the container's actual temporary directory.
-
-Published-release runs start with an empty profile, and first-run setup is done through the window:
+Packaged Chat starts with an empty profile, and first-run setup is done through the window:
 **Install Coven** runs Chat's pinned installer (Coven 0.4.10, checked against its SHA-256),
 **Install the engine** runs `coven engine install` for engine 0.9.3, by version and checked
 against its SHA-256, because Coven 0.4.10 alone would choose 0.8.0. **Create familiar** names the
@@ -67,7 +63,7 @@ first familiar. Every reply in the suite comes from a real run: Chat starts the 
 which starts coven-code, and the reply streams back through Chat's own capture.
 
 The stand-in is the model. The engine is pointed at a local, deterministic Anthropic-compatible
-endpoint (`scripts/packaged-acceptance/model-fixture.mjs`) through `ANTHROPIC_BASE_URL`, with a
+endpoint (`scripts/packaged-acceptance/model-fixture.mjs`) through `ANTHROPIC_BASE_URL` and the engine's own `COVEN_CODE_API_BASE`, with a
 placeholder key. No account or key is used. Model-provider behaviour is not covered.
 
 The system clipboard is read by a separate process (`xclip`, `Get-Clipboard`), never by the page.
