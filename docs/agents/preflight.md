@@ -1,0 +1,27 @@
+# Agent preflight
+
+Run `corepack pnpm agent:doctor` in your issue's isolated worktree before claiming delivery readiness. Use `corepack pnpm --silent agent:doctor --json` for a structured report, `--pr 123` to select a PR explicitly, and `--offline` to inspect local facts without GitHub requests. Follow [AGENTS.md](../../AGENTS.md) for claims and ownership; a report never grants permission to take over another session's work.
+
+The command reads the checkout, toolchain versions, signing configuration, issue bodies and comments, open PRs, main's protection and effective branch rules, exact-head check runs and commit statuses, published runtime releases, installer pin and iOS workflow. GitHub calls use `gh api --method GET` and paginate collections. It does not fetch Git refs, install tools, sign, invoke Coven or a model provider, run workflows, or change GitHub. Fetch `origin` yourself before running it when you need a current base. It prints configured signing readiness without exposing the key; actual signing and verification remain a separate required check.
+
+`unknown` means evidence is absent, denied or unavailable. `blocked` means an observed delivery gate is unsatisfied. `untested` means a job was skipped or neutral. `observed` describes the evidence collected and does not certify a merge or release. The CLI exits 2 when collection is incomplete and 0 when collection finished; exit 0 is not an acceptance gate. Read the individual statuses. Explicit `--pr` results identify that PR's head independently from the local checkout SHA; don't credit a different head's checks to your changes.
+
+## Runtime evidence
+
+The report separates the installer pin, available published Coven and engine releases, explicitly selected published receipts and source candidate receipts. Release availability proves no runtime capability. With no selected receipt, compatibility stays unknown. [#659](https://github.com/OpenCoven/chat/issues/659) owns the published installer-pinned default-send canary. Use its documented command and retain its executable identities and request counts; doctor does not run it or authenticate its output.
+
+Optionally supply a JSON array using `--runtime-evidence path/to/receipts.json`. Each receipt has `scope` (`installer`, `published`, or `candidate`), exact 40-character `chatSha`, `covenVersion`, `engineVersion`, `capabilities` (an array of explicitly observed capability names), `outcome` (`passed` or a nonpassing result), and `evidence` (a nonempty local receipt reference). Candidate receipts additionally require exact 40-character `covenSha` and `engineSha`. An installer receipt must match both the source installer's Coven pin and the engine setup pin. Published receipts must name a published stable Coven version. A selected receipt is labeled `attested`, because doctor did not execute or authenticate it. Retain actual binary hashes and source identities in the referenced evidence; don't put credentials or conversation content in a receipt.
+
+Pass one or more `--require-capability NAME` options when checking a proposed feature. For example, `--require-capability run_budget_v1` keeps a candidate's passing test separate from an installer receipt that lacks that capability. Capability requirements are explicit; doctor does not infer them from version numbers or guess which product feature your branch introduces. An old receipt for another Chat SHA stays unknown. A source candidate never satisfies the installer gate. Preserve #658's revert and #652's published-runtime gate until the owners establish the required release support.
+
+## Coverage and delivery
+
+Read both check runs and commit statuses on the exact PR head. A superseded success, a skipped required job or a missing REST response cannot establish coverage. `ci:full` requests the Rust, Windows, macOS producer and real-authority jobs; inspect their latest results. A label alone is no proof. Effective branch rules report merge queues; unavailable protection/rules remain unknown rather than absent.
+
+Issue rows show dated State, the latest unreleased claim, linked open PR references, possible stale or contradictory state, and the recorded next action and owner. These are aids to reading the tracker, not an automatic claim transfer or a natural-language decision engine. Read the latest owner comments yourself, especially when the State block is old. A possible stale claim still requires checking its branch activity and release comments before takeover.
+
+The deployment row interprets the current iOS workflow conservatively. Changes under `apps/ios/` currently cause a main-push TestFlight upload, which must respect #645's hold. Native Rust changes trigger companion CI but do not select an upload on a normal merge with a known before SHA. An unrecognized or changed iOS workflow remains unknown and requires manual review. No release, TestFlight, installed-device or human acceptance is credited by doctor.
+
+## First run
+
+In a clean checkout run `corepack pnpm agent:doctor`. Read the issue’s linked receipt before claiming any row. For a held PR, run `corepack pnpm --silent agent:doctor --pr 645 --json` and inspect `deployment` for the selected head and `localDeployment` for the checkout. For the runtime decision run `corepack pnpm agent:doctor --require-capability run_budget_v1` and compare the reported pins with [the release owner’s published-runtime gate](https://github.com/OpenCoven/chat/issues/704). Missing local tools or denied REST requests return status 2 with the available evidence intact.

@@ -9,6 +9,8 @@ release is, and what each open item is waiting on. It links each issue instead o
 it. The September 2026 conformance log that used to live here is archived in
 [`archive/2026-09-conformance-log.md`](archive/2026-09-conformance-log.md).
 
+Run the [agent preflight](agents/preflight.md) to refresh issue ownership and PR evidence before selecting work.
+
 ## Shipped
 
 The latest release is **v0.1.3** (2026-11-22): the app updates itself from this release
@@ -45,12 +47,10 @@ build:
 
 Possibly, at the call of v0.1.4's owner:
 
-- [#702](https://github.com/OpenCoven/chat/pull/702) (draft, for
+- [#702](https://github.com/OpenCoven/chat/pull/702) (merged, for
   [#700](https://github.com/OpenCoven/chat/issues/700)): open attachments saved in earlier
   messages. Cave asked for it in v0.1.4, and Val approved qualifying Cave against a
-  published Chat build that has it. A
-  [review on #704](https://github.com/OpenCoven/chat/issues/704#issuecomment-7117117329)
-  asks for tests of its refusal paths first.
+  published Chat build that has it. The Cave maintainer selects the published baseline.
 - Four CodeQL workflow-permission alerts in `ci.yml` (PRs
   [#710](https://github.com/OpenCoven/chat/pull/710),
   [#711](https://github.com/OpenCoven/chat/pull/711),
@@ -70,9 +70,6 @@ issue (alert 5 and #575) say what is being decided.
 | [#573](https://github.com/OpenCoven/chat/issues/573) | When to run the switched-on qualification of asking: now, or on v0.1.4's engine |
 | [#533](https://github.com/OpenCoven/chat/issues/533) | Design audit findings 2, 4 and 5: adopt, decide narrowly, or re-capture first |
 | [#154](https://github.com/OpenCoven/chat/issues/154), [#155](https://github.com/OpenCoven/chat/issues/155) | Missions: a remote-execution staging window or local-first; the context-binding proposal |
-| [#592](https://github.com/OpenCoven/chat/issues/592) | Whether the published v0.1.3 Orca evidence closes it |
-| [#661](https://github.com/OpenCoven/chat/issues/661) | Whether an agent preflight is still wanted (its claim lapsed) |
-| [#720](https://github.com/OpenCoven/chat/pull/720) (draft) | Turn off CodeQL default setup so the upstream glib copy can be skipped, or dismiss its seven alerts |
 | CodeQL alert 5 | Dismiss it as a false positive: `scripts/windows-job-supervisor.cs` writes an already-verified artifact record byte for byte, and the file is lock-governed |
 | [#575](https://github.com/OpenCoven/chat/pull/575) (draft) | Held by Val since 2026-11-14; keep holding or close |
 

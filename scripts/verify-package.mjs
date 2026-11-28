@@ -39,6 +39,7 @@ export const ALLOWED_PERMISSIONS = [
   'allow-coven-runtime-sessions',
   'allow-coven-runtime-chat-lifecycle',
   'allow-coven-runtime-read',
+  'allow-coven-runtime-read-attachment',
   'allow-coven-runtime-send',
   'allow-coven-runtime-cancel',
   'allow-coven-runtime-approvals',

@@ -375,6 +375,12 @@
           "markdownDescription": "Enables the coven_runtime_read command without any pre-configured scope."
         },
         {
+          "description": "Enables the coven_runtime_read_attachment command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-coven-runtime-read-attachment",
+          "markdownDescription": "Enables the coven_runtime_read_attachment command without any pre-configured scope."
+        },
+        {
           "description": "Enables the coven_runtime_send command without any pre-configured scope.",
           "type": "string",
           "const": "allow-coven-runtime-send",
@@ -697,6 +703,12 @@
           "type": "string",
           "const": "deny-coven-runtime-read",
           "markdownDescription": "Denies the coven_runtime_read command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the coven_runtime_read_attachment command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-coven-runtime-read-attachment",
+          "markdownDescription": "Denies the coven_runtime_read_attachment command without any pre-configured scope."
         },
         {
           "description": "Denies the coven_runtime_send command without any pre-configured scope.",

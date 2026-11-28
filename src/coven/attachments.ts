@@ -3,7 +3,8 @@ export const MAX_ATTACHMENTS = 4;
 export const ATTACHMENT_ACCEPT =
   '.txt,.md,.csv,.json,.yaml,.yml,.xml,.html,.css,.js,.ts,.tsx,.jsx,.py,.rs,.go,.sh,.log,.toml';
 export type ChatAttachment = { id: string; name: string; bytes: number[] };
-export type AttachmentMetadata = { name: string; size: number };
+export type AttachmentSource = { session: string; index: number };
+export type AttachmentMetadata = { name: string; size: number; source?: AttachmentSource };
 
 /** A file size for a chip: bytes below a KiB, else KiB to a sensible precision. */
 export function formatAttachmentSize(bytes: number): string {

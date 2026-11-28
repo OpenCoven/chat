@@ -215,6 +215,7 @@ function runtime(): CovenRuntime {
     })),
     send: vi.fn().mockResolvedValue({ runId: 'run', events: [] }),
     cancel: vi.fn().mockResolvedValue(undefined),
+    readAttachment: vi.fn(),
     changeChatLifecycle: vi.fn().mockResolvedValue(undefined),
     pendingApprovals: vi.fn().mockResolvedValue([]),
     allow: vi.fn().mockResolvedValue({ runId: 'allowed', events: [] }),

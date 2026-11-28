@@ -12,6 +12,7 @@ to the history table.
 
 | Page | What it covers |
 | --- | --- |
+| [Agent preflight](agents/preflight.md) | Inspect local readiness, issue ownership, PR coverage and shipping evidence |
 | [agent-notes.md](agent-notes.md) | Why long, tool-heavy turns drop when an agent works through the Chat UI |
 | [canary-token.md](canary-token.md) | The `CANARY_TOKEN` cross-repository checkouts in CI |
 | [design-authority.md](design-authority.md) | Which design tokens rule each visual role in the window |

@@ -9,6 +9,7 @@
     "pnpm": "10.34.0"
   },
   "scripts": {
+    "agent:doctor": "node scripts/agent-doctor.mjs",
     "install:clean": "corepack pnpm install --frozen-lockfile",
     "dev": "vite",
     "preview": "vite preview --host 127.0.0.1 --port 4174 --strictPort",
