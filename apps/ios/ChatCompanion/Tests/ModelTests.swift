@@ -21,6 +21,7 @@ import XCTest
   var failSend = false
   var delaySend = false
   var sendGate: CheckedContinuation<Run, Error>?
+  var sendStarted: XCTestExpectation?
   var gate: CheckedContinuation<Snapshot, Error>?
   var delaySnapshot = false
   var failSnapshot = false
@@ -54,7 +55,12 @@ import XCTest
   }
   func send(_ request: SendRequest) async throws -> Run {
     sent.append(request)
-    if delaySend { return try await withCheckedThrowingContinuation { sendGate = $0 } }
+    if delaySend {
+      return try await withCheckedThrowingContinuation {
+        sendGate = $0
+        sendStarted?.fulfill()
+      }
+    }
     if failSend { throw URLError(.networkConnectionLost) }
     return Run(
       id: request.requestId, familiarId: request.familiarId, status: "running", messages: [])
@@ -149,13 +155,24 @@ import XCTest
     await model.refresh()
     model.draft = "hello"
     api.delaySend = true
+    let started = expectation(description: "Send reached its held response")
+    api.sendStarted = started
     async let sending: Void = model.send()
-    await Task.yield()
+    await fulfillment(of: [started], timeout: 5)
+    XCTAssertNotNil(api.sendGate)
+    XCTAssertFalse(model.canAllow)
     await model.allow(request)
     XCTAssertTrue(api.answers.isEmpty)
-    api.sendGate?.resume(
-      returning: Run(id: "run", familiarId: "astra", status: "completed", messages: []))
+    // Also let a late child finish if the startup expectation timed out.
+    api.sendStarted = nil
+    api.delaySend = false
+    let gate = api.sendGate
+    api.sendGate = nil
+    gate?.resume(
+      returning: Run(
+        id: api.sent.first?.requestId ?? "run", familiarId: "astra", status: "completed", messages: []))
     await sending
+    XCTAssertNil(model.pendingRunId, "The held send must settle after cleanup")
   }
   func testARefusedAllowIsCertainAndStartsNothing() async {
     let api = FakeClient()
