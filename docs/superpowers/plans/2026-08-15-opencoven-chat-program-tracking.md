@@ -16,7 +16,7 @@ claim Beads, or sync Dolt for this work.
 Outcome after this audit: #219 closed 2026-09-24, sdk#38 closed 2026-09-25, and #86
 closed unmerged 2026-09-27.
 
-The [delivery roadmap](../../roadmap.md) records verified Chat #285 and SDK
+The [September conformance log](../../archive/2026-09-conformance-log.md) records verified Chat #285 and SDK
 #274 landings and fresh protected run `34935323170`. Follow
 [Chat #219](https://github.com/OpenCoven/chat/issues/219) and
 [SDK #38](https://github.com/OpenCoven/sdk/issues/38) for current protected

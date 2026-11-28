@@ -17,7 +17,12 @@ import {
 } from '../lib/coven-runtime';
 import { defaultScreenRelay, type ScreenRelay } from '../lib/screen-relay';
 import { type SetWindowTitle, setWindowTitle } from '../lib/window-title';
-import { type ChatAttachment, MAX_ATTACHMENTS, readAttachments } from './attachments';
+import {
+  type AttachmentSource,
+  type ChatAttachment,
+  MAX_ATTACHMENTS,
+  readAttachments,
+} from './attachments';
 import { ChatLayout } from './chat-layout';
 import { projectEvents } from './events';
 import {
@@ -471,6 +476,12 @@ export function ChatApp({
    * request that closes around a run was replaced by that run's own message,
    * which writes nothing.
    */
+  const readAttachment = useCallback(
+    (source: AttachmentSource) =>
+      runtime.readAttachment(navigation.familiarId, source.session, source.index),
+    [runtime, navigation.familiarId],
+  );
+
   const refreshApprovals = useCallback(
     async ({ reread = true } = {}) => {
       const request = ++approvalReads.current;
@@ -1028,6 +1039,7 @@ export function ChatApp({
       !selectedSession?.archived
         ? { onContinue: (options: RunOptions) => void continueSavedWork(options) }
         : {})}
+      onReadAttachment={readAttachment}
       familiarId={navigation.familiarId}
       sessionId={navigation.sessionId}
       draft={navigation.drafts[draftKey(navigation)] ?? ''}

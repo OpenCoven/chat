@@ -1,5 +1,10 @@
 # Coven Mobile First Release Implementation Plan
 
+> **Status (2026-11-23):** Current. Progress: milestone 1, native persistence, merged in #624
+> (2026-11-14). TestFlight 0.3.0 (1910) carries it, for internal testers only. The implementation
+> claim on #612 was released on 2026-11-14. The rest waits on coven#1744, an operator for the
+> relay and APNs, and a physical-iPhone check. v0.1.4 (#704) leaves the iPhone out of scope.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Deliver the approved Mac-hosted mobile release with secure remote access, protected drafts/history and send recovery, real attachments and completion alerts, followed by the retained voice and native-integration roadmap.

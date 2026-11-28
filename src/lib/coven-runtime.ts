@@ -111,6 +111,7 @@ export interface CovenRuntime {
   /** Depth 2-4 re-reads the chat with that many times the usual history budget. */
   readSession(id: string, depth?: number): Promise<CovenSessionRead>;
   send(input: CovenSendInput, onEvent?: (event: CovenRunEvent) => void): Promise<CovenRunResult>;
+  readAttachment(familiarId: string, source: string, index: number): Promise<string>;
   cancel(runId: string): Promise<void>;
   pendingApprovals(): Promise<CovenApproval[]>;
   /** Spends the request and streams its one turn with write access. */
@@ -296,6 +297,12 @@ export function createCovenRuntime(
         await call('coven_runtime_read', depth > 1 ? { id, depth } : { id }),
         (v): v is CovenSessionRead =>
           record(v) && session(v.session) && v.session.id === id && events(v.events),
+      );
+    },
+    async readAttachment(familiarId, source, index) {
+      return checked(
+        await call('coven_runtime_read_attachment', { familiarId, source, index }),
+        (v): v is string => typeof v === 'string' && v.length <= 64 * 1024,
       );
     },
     send(input, onEvent) {

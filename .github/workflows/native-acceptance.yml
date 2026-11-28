@@ -27,6 +27,10 @@ on:
         required: false
         default: ''
         type: string
+      attachment_upgrade_run:
+        description: Optional CI run ID for this ref’s linux-bundle. Runs only the retained attachment upgrade test from v0.1.3.
+        required: false
+        type: string
       asking:
         description: 'Asking for permission (#573): as-built follows the build; switched-on builds this candidate with asking on, for this run only; rows-on-as-built drives the asking rows against the build as it is.'
         required: false
@@ -46,6 +50,7 @@ env:
 
 jobs:
   macos:
+    if: inputs.attachment_upgrade_run == ''
     name: macOS (${{ matrix.arch }} DMG)
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 90
@@ -94,6 +99,7 @@ jobs:
           path: ${{ runner.temp }}/native
 
   windows:
+    if: inputs.attachment_upgrade_run == ''
     name: Windows (${{ matrix.installer }})
     runs-on: windows-2025
     timeout-minutes: 90
@@ -141,6 +147,7 @@ jobs:
           path: ${{ runner.temp }}/native
 
   linux:
+    if: inputs.attachment_upgrade_run == ''
     name: Linux (${{ matrix.kind }})
     runs-on: ubuntu-24.04
     timeout-minutes: 90
@@ -189,3 +196,50 @@ jobs:
         with:
           name: native-linux-${{ matrix.kind }}
           path: ${{ runner.temp }}/native
+
+  attachment-upgrade:
+    name: Retained attachments across a Debian upgrade
+    if: inputs.attachment_upgrade_run != ''
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version-file: .node-version
+      - name: Check the source revision of the CI build
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CI_RUN: ${{ inputs.attachment_upgrade_run }}
+        run: |
+          set -euo pipefail
+          [[ "$CI_RUN" =~ ^[0-9]+$ ]]
+          build=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$CI_RUN" | jq -er 'select(.path == ".github/workflows/ci.yml") | .head_sha')
+          [[ "$build" =~ ^[0-9a-f]{40}$ ]]
+          git merge-base --is-ancestor "$build" "$GITHUB_SHA"
+          # An acceptance-only correction can exercise the same packaged application.
+          git diff --quiet "$build" "$GITHUB_SHA" -- . ':(exclude)scripts/native-acceptance/retained-attachments.mjs' ':(exclude)scripts/native-acceptance/linux/attachment-upgrade.sh' ':(exclude).github/workflows/native-acceptance.yml' ':(exclude)CONTRIBUTING.md'
+          echo "Bundle CI head $build (run $CI_RUN), acceptance driver $GITHUB_SHA"
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: linux-bundle
+          path: ${{ runner.temp }}/bundles
+          run-id: ${{ inputs.attachment_upgrade_run }}
+          github-token: ${{ github.token }}
+      - name: Install the published package and drive both versions
+        run: bash scripts/native-acceptance/linux/attachment-upgrade.sh "$RUNNER_TEMP/bundles" "$RUNNER_TEMP/attachment-upgrade"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: retained-attachment-upgrade
+          path: |
+            ${{ runner.temp }}/attachment-upgrade/*.log
+            ${{ runner.temp }}/attachment-upgrade/profile/*-tree.txt
+            ${{ runner.temp }}/attachment-upgrade/profile/*-app.log
+          if-no-files-found: ignore

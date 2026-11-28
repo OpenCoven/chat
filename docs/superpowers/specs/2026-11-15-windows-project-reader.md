@@ -1,6 +1,10 @@
 # Windows project metadata reader (#587)
 
-Status: current implementation specification for the user-authorized #587 goal. Implementation details are delegated to this session.
+> **Status (2026-11-23):** Delivered. PR #648 (`2b15a698`, merged 2026-11-16 UTC) implemented
+> this and delivered #587, closed by hand after the merge. It shipped in v0.1.3.
+> Historical record; do not execute.
+
+Original status (2026-11-15): current implementation specification for the user-authorized #587 goal. Implementation details are delegated to this session.
 
 Chat must read valid local Cave registry and grant stores on Windows without following any filesystem reparse point. Each normal path component is opened relative to a retained parent handle. The bootstrap accepts filesystem drive and UNC roots (including their extended-length spellings), rejects device namespaces, and never opens an accumulated full child path. Opened handles are inspected for disk type, directory/file role and reparse attributes. Parent handles remain retained for the traversal; sharing excludes write and delete so a retained parent cannot be replaced or converted through another write handle. A conflicting existing writer fails visibly.
 

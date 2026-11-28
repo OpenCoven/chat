@@ -1,0 +1,10 @@
+name: OpenCoven Chat CodeQL
+
+# vendor/glib-0.18.5 is the published glib 0.18.5 crate, kept whole as the
+# base of a one-file soundness backport (#188; vendor/glib-0.18.5.PROVENANCE.md).
+# Its alerts are in upstream glib code this repository doesn't change, so
+# scanning it reports upstream code as ours. The backported file,
+# src/variant_iter.rs, is covered by its own tests and by
+# frozen-glib-validation.yml.
+paths-ignore:
+  - vendor/glib-0.18.5/**

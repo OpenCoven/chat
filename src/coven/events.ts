@@ -385,19 +385,25 @@ export function projectEvents(events: readonly CovenRunEvent[]): {
     const text = contentText(content, '\n');
     const attachments =
       event.type === 'user' && Array.isArray(event.attachments)
-        ? event.attachments
-            .filter(
-              (file): file is AttachmentMetadata =>
-                record(file) &&
-                typeof file.name === 'string' &&
-                file.name.length <= 180 &&
-                typeof file.size === 'number' &&
-                Number.isInteger(file.size) &&
-                file.size >= 0 &&
-                file.size <= 64 * 1024,
-            )
-            .slice(0, 4)
-            .map(({ name, size }) => ({ name, size }))
+        ? event.attachments.slice(0, 4).flatMap((file, slot): AttachmentMetadata[] =>
+            record(file) &&
+            typeof file.name === 'string' &&
+            file.name.length <= 180 &&
+            typeof file.size === 'number' &&
+            Number.isInteger(file.size) &&
+            file.size >= 0 &&
+            file.size <= 64 * 1024
+              ? [
+                  {
+                    name: file.name,
+                    size: file.size,
+                    ...(event.source === 'chat-input' && typeof event.session_id === 'string'
+                      ? { source: { session: event.session_id, index: slot } }
+                      : {}),
+                  },
+                ]
+              : [],
+          )
         : [];
     if (text || attachments.length)
       messages.push({

@@ -12,13 +12,13 @@ happen. You don't need Cave, a Cave pairing, or a separate demo build.
 
 ### Availability
 
-The published **[v0.1.2 prerelease](https://github.com/OpenCoven/chat/releases/tag/v0.1.2)** provides the following desktop packages (verified November 14, 2026):
+The published **[v0.1.3 prerelease](https://github.com/OpenCoven/chat/releases/tag/v0.1.3)** provides the following desktop packages (verified November 23, 2026):
 
 | Platform | Package | Before installing |
 | --- | --- | --- |
 | macOS, Apple silicon or Intel | `.dmg` for your processor | Signed and notarized |
 | Windows, x64 | `.exe` or `.msi` | Unsigned; read the release's installation notes |
-| Linux, x64 | `.deb` or `.AppImage` | Unsigned; check the release notes for your distribution |
+| Linux, x64 | `.deb` or `.AppImage` | Unsigned. Needs glibc 2.39 or newer (Ubuntu 24.04 or later, for example) and the ALSA library (`libasound2t64` on Ubuntu); on older systems such as Ubuntu 22.04 or Debian 12, setup can't finish |
 | iPhone companion | Distributed separately through TestFlight | Requires a paired, awake Mac on the same local network; [companion guide](docs/iphone-companion.md) |
 | Browser preview | Developer UI preview only | Cannot reach Coven or run chats; use the desktop app |
 
@@ -434,9 +434,7 @@ files, each at most 64 KiB. Chat validates the selected bytes and passes them to
 file contents, not just filenames. You can send files with or without a message. The `coven-code`
 engine doesn't accept image or PDF input through this transport, so Chat rejects binary files.
 
-Unsent attachments stay in the current window. Failed or cancelled sends keep them available to
-retry or remove; successful sends keep filename and size metadata in history. Native staging is
-private and bounded to 64 MiB of retained files, and your originals are never modified.
+Unsent attachments stay in the current window. Failed or cancelled sends keep them available to retry or remove. After you send, click the file’s card in history or focus it and press Enter or Space to read Chat’s saved copy. This also works in archived chats. If the saved copy is unavailable, the preview explains how to attach the original again. Native staging is private and bounded to 64 MiB of retained files, and your originals are never modified.
 
 Sending clears the submitted text and attachment cards immediately, so you can compose the next
 message while the familiar responds. A failed or cancelled send restores its attachments, and
@@ -532,8 +530,10 @@ through your installed Coven (`coven missions`) and shows only what Coven report
    *Finished* or *Couldn't run*, with the reason in plain words. **Cancel mission** stops one
    that hasn't finished.
 
-The current Coven records missions but can't run them yet, so each one ends as *Couldn't run*
-with "Nothing ran". Chat says so instead of showing progress that didn't happen.
+The Coven that Chat installs today (0.4.10) can't take missions, so the tab says **Missions need
+a newer version of Coven**. A Coven that records missions but can't run them yet ends each one as
+*Couldn't run* with "Nothing ran". Either way, Chat says so instead of showing progress that
+didn't happen.
 
 When Chat can't confirm that Coven received a mission, the mission shows *Checking whether Coven
 received this mission* and Chat keeps asking with the same request. It never reports that nothing
@@ -647,6 +647,8 @@ lets it invoke only:
 - the three `coven_screen_*` commands of the screen relay,
 - `open_reviewed_link`, which hands one reviewed web address from the link review to the system's
   default browser (#505),
+- `updater_check` and `updater_install`, which check for a signed update and install it after
+  **Restart to update**,
 - Tauri's event listen and unlisten, so the window can follow runs started
   from the iPhone,
 - Tauri's permission to set its own window title.
@@ -686,8 +688,7 @@ described in its guide.
 
 For open work, see [GitHub issues](https://github.com/OpenCoven/chat/issues).
 For shipped changes, see [`docs/release-notes/`](docs/release-notes/).
-[`docs/roadmap.md`](docs/roadmap.md) is a dated log of September 2026
-conformance and consolidation checkpoints, not a current plan.
+For maintainers, [`docs/roadmap.md`](docs/roadmap.md) lists what's next and what each open item waits on.
 
 CI runs frontend, browser, Rust, packed-artifact, and native lifecycle coverage. The heavy Phase 1
 Vitest suites test the conformance scripts rather than the app, so a pull request runs them only

@@ -37,7 +37,12 @@ import { Composer } from '../ui/composer';
 import { MenuPortalContainer } from '../ui/dropdown-menu';
 import { ApprovalCard } from './approval-card';
 import { AttachmentCard } from './attachment-card';
-import { ATTACHMENT_ACCEPT, type ChatAttachment, formatAttachmentSize } from './attachments';
+import {
+  ATTACHMENT_ACCEPT,
+  type AttachmentSource,
+  type ChatAttachment,
+  formatAttachmentSize,
+} from './attachments';
 import { ChatLifecycleControls } from './chat-lifecycle';
 import { CompanionPanel } from './companion-panel';
 import { ContextPicker } from './context-picker';
@@ -119,6 +124,7 @@ export type ChatLayoutProps = Readonly<{
     unavailable?: boolean;
   }[];
   messages: readonly ChatMessage[];
+  onReadAttachment?: ((source: AttachmentSource) => Promise<string>) | undefined;
   attachments?: readonly ChatAttachment[];
   attaching?: boolean;
   onAttach?: (files: File[]) => void;
@@ -403,6 +409,7 @@ type TranscriptBlockData =
   | Readonly<{ kind: 'tools'; id: string; rows: ToolRow[] }>;
 
 type TranscriptBlockProps = Readonly<{
+  onReadAttachment?: ChatLayoutProps['onReadAttachment'];
   block: TranscriptBlockData;
   name: string;
   avatarUrl: string | undefined;
@@ -453,7 +460,13 @@ export function sameBlock(a: TranscriptBlockData, b: TranscriptBlockData): boole
     xs.length === ys.length &&
     xs.every((file, index) => {
       const other = ys[index];
-      return other !== undefined && other.name === file.name && other.size === file.size;
+      return (
+        other !== undefined &&
+        other.name === file.name &&
+        other.size === file.size &&
+        other.source?.session === file.source?.session &&
+        other.source?.index === file.source?.index
+      );
     })
   );
 }
@@ -465,6 +478,7 @@ export function sameBlock(a: TranscriptBlockData, b: TranscriptBlockData): boole
 const TranscriptBlock = memo(
   function TranscriptBlock({
     block,
+    onReadAttachment,
     name,
     avatarUrl,
     withCard,
@@ -519,9 +533,13 @@ const TranscriptBlock = memo(
           ) : null}
           {block.message.attachments?.length ? (
             <ul className="coven-history-attachments" aria-label="Message attachments">
-              {block.message.attachments.map((file, index) => (
-                <li key={`${index}-${file.name}`}>
-                  <AttachmentCard name={file.name} size={file.size} />
+              {block.message.attachments.map(({ name, size, source }, index) => (
+                <li key={JSON.stringify([source?.session, source?.index, index, name])}>
+                  <AttachmentCard
+                    name={name}
+                    size={size}
+                    onRead={source && onReadAttachment ? () => onReadAttachment(source) : undefined}
+                  />
                 </li>
               ))}
             </ul>
@@ -589,6 +607,7 @@ const TranscriptBlock = memo(
     previous.avatarUrl === next.avatarUrl &&
     previous.withCard === next.withCard &&
     previous.cardOpen === next.cardOpen &&
+    previous.onReadAttachment === next.onReadAttachment &&
     previous.onShowCard === next.onShowCard &&
     sameBlock(previous.block, next.block),
 );
@@ -1712,6 +1731,7 @@ export function ChatLayout(props: ChatLayoutProps) {
               {props.loading ? <ThinkingIndicator label="Loading conversation" /> : null}
               <LinkReviewContext.Provider value={linkReview}>
                 <TranscriptBlocks
+                  onReadAttachment={props.onReadAttachment}
                   blocks={blocks}
                   name={name}
                   avatarUrl={familiar?.avatarUrl}
