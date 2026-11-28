@@ -1,11 +1,12 @@
 # M0 mission integration: producer and release prerequisites
 
-> **Status (2026-11-23):** A dated checkpoint from 2026-10-22, not current state. Since then
-> Coven v0.5.0 was published (2026-11-10), so v0.4.10 is no longer Coven's latest release, and
-> #476 (the updater) merged on 2026-11-14. Chat still installs Coven 0.4.10 (`COVEN_VERSION`
-> in `src-tauri/src/coven_install.rs`) and sends no mission to 0.4.10 or older
-> (`LAST_RELEASE_WITHOUT_MISSIONS` in `src-tauri/src/chat_missions.rs`). #704, open, plans
-> Chat v0.1.4 on Coven 0.5.1 and leaves missions out of scope. #155 is open; its State block
+> **Status (2026-11-28):** A dated checkpoint from 2026-10-22, not current state. Since then
+> Coven v0.5.0 (2026-11-10) and v0.5.1 (2026-11-28) were published, and #476 (the updater)
+> merged on 2026-11-14. #704 moves Chat's installer to Coven 0.5.1 (`COVEN_VERSION` in
+> `src-tauri/src/coven_install.rs`) and leaves missions out of scope. Chat sends no mission to
+> 0.4.10 or older (`LAST_RELEASE_WITHOUT_MISSIONS` in `src-tauri/src/chat_missions.rs`); 0.5.1
+> advertises the `r0-read.1` envelope Chat binds to and settles every submitted mission
+> unavailable, so nothing launches. #155 is open; its State block
 > holds the current gates. `docs/architecture/coven-automations-missions.md` and the
 > `crates/coven-cli/` files below are paths in the Coven repo, not this one.
 

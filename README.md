@@ -530,10 +530,10 @@ through your installed Coven (`coven missions`) and shows only what Coven report
    *Finished* or *Couldn't run*, with the reason in plain words. **Cancel mission** stops one
    that hasn't finished.
 
-The Coven that Chat installs today (0.4.10) can't take missions, so the tab says **Missions need
-a newer version of Coven**. A Coven that records missions but can't run them yet ends each one as
-*Couldn't run* with "Nothing ran". Either way, Chat says so instead of showing progress that
-didn't happen.
+The Coven that Chat installs today (0.5.1) records missions but can't run them yet, so each one
+ends as *Couldn't run* with "Nothing ran". An older Coven, such as the 0.4.10 that earlier Chat
+releases installed, can't take missions at all, and the tab says **Missions need a newer version
+of Coven**. Either way, Chat says so instead of showing progress that didn't happen.
 
 When Chat can't confirm that Coven received a mission, the mission shows *Checking whether Coven
 received this mission* and Chat keeps asking with the same request. It never reports that nothing
