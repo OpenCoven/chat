@@ -72,6 +72,36 @@ struct CompanionRoot: View {
 
 /// The paired screen: the chosen familiar in a glass header, its chat as a
 /// Markdown reader, and a floating composer.
+private struct RecoveryDraftView: View {
+  @Bindable var model: CompanionModel
+  @Environment(\.dismiss) private var dismiss
+  @FocusState private var editing: Bool
+
+  var body: some View {
+    NavigationStack {
+      VStack(alignment: .leading) {
+        TextEditor(text: $model.draft)
+          .accessibilityLabel("Follow-up draft")
+          .accessibilityIdentifier("recovery-draft")
+          .focused($editing)
+        if let error = model.persistenceError { Text(error).foregroundStyle(Palette.danger) }
+      }
+      .padding()
+      .navigationTitle("Draft a follow-up")
+      .navigationBarTitleDisplayMode(.inline)
+      .toolbar {
+        ToolbarItem(placement: .confirmationAction) {
+          Button("Done") {
+            model.flushPersistence()
+            if model.persistenceError == nil { dismiss() }
+          }
+        }
+      }
+      .task { editing = true }
+    }
+  }
+}
+
 private struct Workspace: View {
   @Bindable var model: CompanionModel
   @Binding var forget: Bool
@@ -81,6 +111,7 @@ private struct Workspace: View {
   @State private var permissionLog = false
   @State private var privacy = false
   @State private var recovering = false
+  @State private var draftingFollowUp = false
   /// Set from Connection Details, which asks to forget only once it has closed:
   /// a confirmation cannot present while a sheet is still dismissing.
   @State private var forgetAfterDetails = false
@@ -102,6 +133,7 @@ private struct Workspace: View {
       .toolbarVisibility(.hidden, for: .navigationBar)
     return page
       .sheet(isPresented: $picking) { picker }
+      .sheet(isPresented: $draftingFollowUp) { RecoveryDraftView(model: model) }
       .sheet(isPresented: $permissionLog) { PermissionLogView(model: model) }
       .sheet(isPresented: $privacy) { MobilePrivacyView(model: model) }
       .sheet(isPresented: $recovering) { RecoveredDraftsView(model: model) }
@@ -242,15 +274,16 @@ private struct Workspace: View {
             text: "Showing recent history. Open Chat on your Mac for earlier turns.",
             symbol: "clock.arrow.circlepath")
         }
-        ForEach(history) { item in row(item) }
+        ForEach(history) { item in row(item, group: "history").id("history/" + item.id) }
         if model.shownRun != nil {
-          ForEach(run) { item in row(item) }
+          ForEach(run) { item in row(item, group: "run").id("run/" + item.id) }
           if model.activeRun?.running == true {
             WorkingIndicator(familiar: familiar, phase: Self.phase(run))
               .accessibilityIdentifier("run-status")
           }
         }
       }
+      .scrollTargetLayout()
       .padding(.horizontal, 18).padding(.vertical, 16)
       .frame(maxWidth: 760, alignment: .leading).frame(maxWidth: .infinity)
     }
@@ -299,7 +332,7 @@ private struct Workspace: View {
       "\(model.messages.count)|\(run?.messages.count ?? 0)|\(run?.messages.last?.text.count ?? 0)|\(model.activeRun?.running == true)"
   }
 
-  @ViewBuilder private func row(_ item: TranscriptItem) -> some View {
+  @ViewBuilder private func row(_ item: TranscriptItem, group: String) -> some View {
     switch item {
     case .user(_, let text):
       UserBubble(
@@ -313,6 +346,51 @@ private struct Workspace: View {
       ReplyView(text: text).equatable()
     case .tools(_, let calls):
       ToolGroupView(calls: calls)
+    case .interruption(_, let text, let progressStart, let workProgress, let actions):
+      VStack(alignment: .leading, spacing: 8) {
+        Label("Run interrupted", systemImage: "pause.circle").font(.headline)
+          .accessibilityAddTraits(.isHeader)
+        Text(text)
+        if workProgress.isEmpty {
+          Text("Review the saved replies and tool activity above. The provider did not report which researchers finished. You can name the remaining work in a follow-up.")
+        } else {
+          ForEach(workProgress.indices, id: \.self) { index in Text(workProgress[index]) }
+        }
+        if let progressStart {
+          Button("Review this turn from the beginning") {
+            scroll.scrollTo(id: group + "/" + progressStart, anchor: .top)
+          }
+        }
+        ForEach(actions) { task in
+          if task.outcome == "completed" {
+            Text("\(task.name) finished. Its result is saved in this conversation.")
+          } else if task.outcome == "stopped" {
+            Text("Recovery stopped for \(task.name). Review its saved progress before continuing.")
+          } else if task.outcome == "unconfirmed" {
+            Text("The provider did not confirm completion of \(task.name). Review the saved work or draft a follow-up.")
+          } else if task.requested == true {
+            Text("The Mac recorded a recovery request for \(task.name). Refresh to check progress or review the saved work.")
+          } else {
+            TimelineView(.periodic(from: .now, by: 1)) { context in
+              Button("Resume \(task.name)") { Task { await model.send(recovering: task) } }
+                .disabled(!model.canAllow || context.date.timeIntervalSince1970 < (task.resetAt ?? 0))
+            }
+          }
+        }
+        if model.selectedId != nil && !model.archived {
+          Button("Draft a follow-up") { draftingFollowUp = true }
+        }
+        if !model.connected {
+          if model.cacheConversationText {
+            Text("Your draft stays on this iPhone while the Mac is offline.")
+          } else {
+            Text("Local history and draft saving are turned off in Privacy.")
+          }
+          Button("Reconnect to Mac") { Task { await model.refresh() } }
+        }
+      }
+      .padding().frame(maxWidth: .infinity, alignment: .leading)
+      .background(Palette.bgRaised, in: RoundedRectangle(cornerRadius: 12))
     case .notice(_, let text):
       NoticeView(text: text)
     }

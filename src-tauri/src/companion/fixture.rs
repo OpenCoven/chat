@@ -27,7 +27,7 @@ impl FixtureBackend {
     ) -> Result<Arc<RunRecord>, String> {
         let mut active = self.active.lock().unwrap();
         if active.as_ref().is_some_and(|r| r.running()) {
-            return Err("Busy".into());
+            return Err(crate::coven_runtime::RUN_ACTIVE.into());
         }
         self.starts.fetch_add(1, Ordering::SeqCst);
         let run = RunRecord::new(request_id, familiar_id, Arc::new(AtomicBool::new(false)));
@@ -231,6 +231,7 @@ mod stream_tests {
         let run = backend
             .start(SendRequest {
                 request_id: "slow-ui".into(),
+                recovery_id: None,
                 familiar_id: "fixture".into(),
                 session_id: None,
                 prompt: "Hello from the iPhone".into(),

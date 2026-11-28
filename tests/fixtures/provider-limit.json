@@ -1,0 +1,105 @@
+[
+  {
+    "type": "system",
+    "subtype": "init",
+    "session_id": "example-session"
+  },
+  {
+    "type": "user",
+    "message": {
+      "content": [
+        {
+          "type": "text",
+          "text": "Research two topics."
+        }
+      ]
+    },
+    "session_id": "example-session"
+  },
+  {
+    "type": "text_delta",
+    "text": "Saved the first result.",
+    "session_id": "example-session"
+  },
+  {
+    "type": "text_delta",
+    "text": "⚒ WebFetch(https://example.org/)",
+    "session_id": "example-session"
+  },
+  {
+    "type": "text_delta",
+    "text": "You've hit your 5-hour limit · resets 1:10am (America/Chicago)",
+    "session_id": "example-session"
+  },
+  {
+    "type": "text_delta",
+    "text": "⚒ WebFetch(https://example.org/)",
+    "session_id": "example-session"
+  },
+  {
+    "type": "text_delta",
+    "text": "You've hit your 5-hour limit · resets 1:10am (America/Chicago)",
+    "session_id": "example-session"
+  },
+  {
+    "type": "text_delta",
+    "text": "⚒ WebFetch(https://example.org/)",
+    "session_id": "example-session"
+  },
+  {
+    "type": "text_delta",
+    "text": "You've hit your 5-hour limit · resets 1:10am (America/Chicago)",
+    "session_id": "example-session"
+  },
+  {
+    "type": "text_delta",
+    "text": "⚒ WebFetch(https://example.org/)",
+    "session_id": "example-session"
+  },
+  {
+    "type": "text_delta",
+    "text": "You've hit your 5-hour limit · resets 1:10am (America/Chicago)",
+    "session_id": "example-session"
+  },
+  {
+    "type": "text_delta",
+    "text": "⚒ WebFetch(https://example.org/)",
+    "session_id": "example-session"
+  },
+  {
+    "type": "text_delta",
+    "text": "You've hit your 5-hour limit · resets 1:10am (America/Chicago)",
+    "session_id": "example-session"
+  },
+  {
+    "type": "text_delta",
+    "text": "You've hit your 5-hour limit · resets 1:10am (America/Chicago)",
+    "session_id": "example-session"
+  },
+  {
+    "type": "text_delta",
+    "text": "You've hit your 5-hour limit · resets 1:10am (America/Chicago)",
+    "session_id": "example-session"
+  },
+  {
+    "type": "result",
+    "is_error": true,
+    "subtype": "error_during_execution",
+    "error": "coven-code exited with code 1: {\"error\":\"API error: Provider 'anthropic' stream error (success): You've hit your 5-hour limit \\u00b7 resets 1:10am (America/Chicago)\",\"type\":\"error\"}",
+    "session_id": "example-session"
+  },
+  {
+    "type": "system",
+    "source": "chat-diagnostic",
+    "subtype": "notice",
+    "message": {
+      "content": [
+        {
+          "type": "text",
+          "text": "Engine report: You've hit your 5-hour limit · resets 1:10am (America/Chicago)"
+        }
+      ]
+    },
+    "session_id": "example-session"
+  }
+]

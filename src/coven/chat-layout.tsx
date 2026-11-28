@@ -47,7 +47,7 @@ import { ChatLifecycleControls } from './chat-lifecycle';
 import { CompanionPanel } from './companion-panel';
 import { ContextPicker } from './context-picker';
 import { CopyButton } from './copy-button';
-import type { ChatMessage } from './events';
+import type { ChatMessage, ResearchAction } from './events';
 import { LinkReviewContext } from './external-link-review';
 import { FamiliarAvatar } from './familiar-avatar';
 import { FormattedMessage, REVEAL_EVENT, ToolActivity, type ToolRow } from './formatted-message';
@@ -197,6 +197,7 @@ export type ChatLayoutProps = Readonly<{
   onEditDraft?: EditDraft | undefined;
   /** Sends the draft with the run options the reader set in Settings › Model. */
   onSend: (options: RunOptions) => void;
+  onResumeResearch?: ((task: ResearchAction) => void) | undefined;
   /** The model the conversation's latest run reported; absent or empty when none did. */
   model?: string | undefined;
   onCancel: () => void;
@@ -410,6 +411,8 @@ type TranscriptBlockProps = Readonly<{
   withCard: boolean;
   cardOpen: boolean;
   onShowCard: () => void;
+  onDraftNextStep: (() => void) | undefined;
+  onResumeResearch: ((task: ResearchAction) => void) | undefined;
 }>;
 
 /** Two tool rows show the same thing. */
@@ -451,6 +454,23 @@ export function sameBlock(a: TranscriptBlockData, b: TranscriptBlockData): boole
     x.id === y.id &&
     x.role === y.role &&
     x.text === y.text &&
+    x.notice === y.notice &&
+    x.report === y.report &&
+    x.progressStart === y.progressStart &&
+    x.researchActions?.length === y.researchActions?.length &&
+    (x.researchActions ?? []).every((a, i) => {
+      const b = y.researchActions?.[i];
+      return (
+        b &&
+        a.id === b.id &&
+        a.name === b.name &&
+        a.resetAt === b.resetAt &&
+        a.requested === b.requested &&
+        a.outcome === b.outcome
+      );
+    }) &&
+    x.workProgress?.length === y.workProgress?.length &&
+    (x.workProgress ?? []).every((line, i) => line === y.workProgress?.[i]) &&
     xs.length === ys.length &&
     xs.every((file, index) => {
       const other = ys[index];
@@ -462,6 +482,46 @@ export function sameBlock(a: TranscriptBlockData, b: TranscriptBlockData): boole
         other.source?.index === file.source?.index
       );
     })
+  );
+}
+
+function ResumeResearch({
+  task,
+  onResume,
+}: Readonly<{ task: ResearchAction; onResume: ((task: ResearchAction) => void) | undefined }>) {
+  const [now, setNow] = useState(Date.now);
+  const due = (task.resetAt ?? 0) * 1000;
+  useEffect(() => {
+    if (due <= now) return;
+    const timer = setTimeout(() => setNow(Date.now()), Math.min(due - now + 50, 2147483647));
+    return () => clearTimeout(timer);
+  }, [due, now]);
+  if (task.outcome === 'completed')
+    return <output>{task.name} finished. Its result is saved in this conversation.</output>;
+  if (task.outcome === 'stopped')
+    return (
+      <output>
+        Recovery stopped for {task.name}. Review its saved progress before continuing.
+      </output>
+    );
+  if (task.outcome === 'unconfirmed')
+    return (
+      <output>
+        The provider did not confirm completion of {task.name}. Review the saved work or draft a
+        follow-up.
+      </output>
+    );
+  if (task.requested)
+    return (
+      <output>
+        The Mac recorded a recovery request for {task.name}. Refresh to check progress or review the
+        saved work.
+      </output>
+    );
+  return (
+    <button type="button" disabled={!onResume || now < due} onClick={() => onResume?.(task)}>
+      {`Resume ${task.name}`}
+    </button>
   );
 }
 
@@ -478,6 +538,8 @@ const TranscriptBlock = memo(
     withCard,
     cardOpen,
     onShowCard,
+    onDraftNextStep,
+    onResumeResearch,
   }: TranscriptBlockProps) {
     const blockId = block.kind === 'tools' ? block.id : block.message.id;
     return block.kind === 'tools' ? (
@@ -493,6 +555,62 @@ const TranscriptBlock = memo(
           </div>
         </div>
       </div>
+    ) : block.message.notice === 'interruption' ? (
+      <section
+        className="coven-notice coven-notice--diagnostic"
+        aria-label="Interrupted run"
+        data-block-id={blockId}
+      >
+        <h3>Run interrupted</h3>
+        <p>{block.message.text}</p>
+        {block.message.workProgress?.length ? (
+          <ul aria-label="Recorded research progress">
+            {block.message.workProgress.map((line, index) => (
+              <li key={`${index}-${line}`}>{line}</li>
+            ))}
+          </ul>
+        ) : (
+          <p>
+            Review the saved replies and tool activity above. The provider did not report which
+            researchers finished. You can name the remaining work in a follow-up.
+          </p>
+        )}
+        {block.message.progressStart && (
+          <button
+            type="button"
+            onClick={(event) => {
+              const start = event.currentTarget
+                .closest('.fr-transcript')
+                ?.querySelector<HTMLElement>(`[data-block-id="${block.message.progressStart}"]`);
+              if (start) {
+                start.focus({ preventScroll: true });
+                start.scrollIntoView({ block: 'start' });
+              }
+            }}
+          >
+            Review this turn from the beginning
+          </button>
+        )}
+        {block.message.researchActions?.map((task) => (
+          <ResumeResearch key={task.id} task={task} onResume={onResumeResearch} />
+        ))}
+        {onDraftNextStep && (
+          <button type="button" onClick={onDraftNextStep}>
+            Draft a follow-up
+          </button>
+        )}
+        {block.message.report && (
+          <details>
+            <summary>View diagnostic report</summary>
+            <pre>{block.message.report}</pre>
+            <CopyButton
+              className="coven-notice-copy"
+              text={block.message.report}
+              label="Copy report"
+            />
+          </details>
+        )}
+      </section>
     ) : block.message.role === 'output' ? (
       // Raw engine output: text the runtime printed outside the
       // protocol. Shown as it came, attributed to no one.
@@ -513,7 +631,7 @@ const TranscriptBlock = memo(
         {block.message.text}
       </p>
     ) : block.message.role === 'user' ? (
-      <div className="fr-user fr-msg" data-block-id={blockId}>
+      <div className="fr-user fr-msg" tabIndex={-1} data-block-id={blockId}>
         <div className="fr-user-body">
           <div className="fr-bubble fr-bubble--user coven-message" data-quote-source={blockId}>
             {block.message.text}
@@ -603,6 +721,8 @@ const TranscriptBlock = memo(
     previous.cardOpen === next.cardOpen &&
     previous.onReadAttachment === next.onReadAttachment &&
     previous.onShowCard === next.onShowCard &&
+    previous.onDraftNextStep === next.onDraftNextStep &&
+    previous.onResumeResearch === next.onResumeResearch &&
     sameBlock(previous.block, next.block),
 );
 
@@ -956,6 +1076,11 @@ export function ChatLayout(props: ChatLayoutProps) {
     },
   };
   const composerRef = useRef<HTMLTextAreaElement>(null);
+  const draftNextStep = useCallback(() => {
+    const field = composerRef.current;
+    field?.focus();
+    field?.scrollIntoView?.({ block: 'nearest' });
+  }, []);
   // The field turns off while a run stops and while the chat is read again after a
   // run, and that drops focus. If the field had it, give it back when the field comes
   // on again, unless focus has already gone somewhere else. Chromium takes focus off
@@ -1727,6 +1852,12 @@ export function ChatLayout(props: ChatLayoutProps) {
                   withCard={Boolean(familiar)}
                   cardOpen={inspector && tab === 'overview'}
                   onShowCard={onShowCard}
+                  onDraftNextStep={composerDisabled ? undefined : draftNextStep}
+                  onResumeResearch={
+                    props.ready && !props.busy && !props.loading
+                      ? props.onResumeResearch
+                      : undefined
+                  }
                 />
               </LinkReviewContext.Provider>
               {liveRow ? (

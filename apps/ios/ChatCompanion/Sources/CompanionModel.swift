@@ -82,7 +82,8 @@ import Observation
           binding: binding, text: newValue, revision: UUID(), updatedAt: now(),
           conversationTitle: conversationLabel(for: binding)))
       }
-      scheduleSave()
+      // Offline edits have no host copy. Persist before the app can be closed.
+      if connected { scheduleSave() } else if cacheConversationText { flushPersistence() }
     }
   }
   var archived: Bool { sessions.first(where: { $0.familiarId == selectedId })?.archived == true }
@@ -242,14 +243,14 @@ import Observation
       handle(error)
     }
   }
-  func send() async {
-    guard canSend, let api = client, let id = selectedId else { return }
+  func send(recovering task: ResearchAction? = nil) async {
+    guard task == nil ? canSend : canAllow, let api = client, let id = selectedId else { return }
     let request = SendRequest(
-      requestId: UUID().uuidString.lowercased(), familiarId: id, sessionId: sessionId, prompt: draft
+      requestId: UUID().uuidString.lowercased(), familiarId: id, sessionId: sessionId, prompt: task.map { "Resume unfinished research: \($0.name)" } ?? draft, recoveryId: task?.id
     )
     let expected = generation
     guard reserve(requestID: request.requestId, kind: .send, familiar: id,
-                  body: request, draftRevision: currentDraftRecord?.revision) else { return }
+                  body: request, draftRevision: task == nil ? currentDraftRecord?.revision : nil) else { return }
     pendingRunId = request.requestId
     historyRunId = request.requestId
     terminalError = ""
@@ -698,7 +699,17 @@ import Observation
     "Coven Chat needs Local Network access to reach your Mac. Turn on Coven Chat in Settings › Privacy & Security › Local Network."
   private static func explain(_ error: Error) -> String {
     if let known = error as? CompanionError { return known.localizedDescription }
-    return
-      "Could not reach your Mac securely. Keep Chat running on the same network, then try again."
+    if let failure = error as? URLError {
+      switch failure.code {
+      case .timedOut, .cannotConnectToHost, .networkConnectionLost:
+        return "The Mac did not respond. On your Mac, open Chat › Settings › Devices › iPhone companion. Allow incoming connections for Chat if macOS asks, then reconnect on the same Wi-Fi."
+      case .notConnectedToInternet:
+        return "Join the same Wi-Fi as your Mac, then reconnect."
+      case .serverCertificateUntrusted, .serverCertificateHasBadDate, .secureConnectionFailed, .userCancelledAuthentication:
+        return "The secure connection could not be verified. Check the pairing link in Chat on your Mac before reconnecting."
+      default: break
+      }
+    }
+    return "Could not reach your Mac securely. Keep Chat running on the same network, then try again."
   }
 }

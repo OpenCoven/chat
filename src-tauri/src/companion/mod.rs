@@ -10,11 +10,194 @@ fn authorized(expected: &str, bearer: &str, origin: bool) -> bool {
         && bool::from(expected.as_bytes().ct_eq(supplied.as_bytes()))
 }
 
+/// Index provider-authored limits before projecting the visible transcript. Older
+/// engines supplied only a nested terminal report and standalone text deltas.
+#[derive(Default)]
+struct Interruption {
+    first: usize,
+    notices: std::collections::HashSet<String>,
+    reset: Option<String>,
+}
+
+fn interruptions(events: &[Value]) -> std::collections::HashMap<&str, Interruption> {
+    static NOTICE: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
+        regex::Regex::new(r"^You've hit your 5-hour limit · resets ((?:1[0-2]|[1-9]):[0-5][0-9][ap]m \([A-Za-z_+-]+(?:/[A-Za-z0-9_+-]+)*\))$").expect("provider notice expression")
+    });
+    let mut by_session = std::collections::HashMap::new();
+    for (index, event) in events.iter().enumerate() {
+        let Some(session) = event["session_id"].as_str().filter(|s| !s.is_empty()) else {
+            continue;
+        };
+        let mut reset = None;
+        let legacy: Value;
+        let notice = if event["type"] == "provider_limit" && event["version"] == 1 {
+            let info = &event["limit"];
+            if info["provider_session_id"]
+                .as_str()
+                .is_none_or(str::is_empty)
+            {
+                continue;
+            }
+            reset = info["resets_at"]
+                .as_i64()
+                .filter(|value| *value > 0)
+                .and_then(|v| time::OffsetDateTime::from_unix_timestamp(v).ok())
+                .and_then(|v| {
+                    v.format(&time::format_description::well_known::Rfc3339)
+                        .ok()
+                })
+                .map(|date| date.replace('T', " ").replace('Z', " UTC"));
+            info["notice"].as_str()
+        } else {
+            if event["type"] != "result" || event["is_error"] != true {
+                continue;
+            }
+            let Some(report) = event["error"]
+                .as_str()
+                .and_then(|s| s.strip_prefix("coven-code exited with code 1: "))
+            else {
+                continue;
+            };
+            let Ok(parsed) = serde_json::from_str::<Value>(report) else {
+                continue;
+            };
+            legacy = parsed;
+            if legacy["type"] != "error" {
+                continue;
+            }
+            let Some(message) = legacy["error"]
+                .as_str()
+                .and_then(|s| {
+                    s.strip_prefix("API error: Provider 'anthropic' stream error (success): ")
+                })
+                .filter(|s| NOTICE.is_match(s))
+            else {
+                continue;
+            };
+            Some(message)
+        };
+        let entry = by_session.entry(session).or_insert_with(|| Interruption {
+            first: index,
+            ..Default::default()
+        });
+        if let Some(text) = notice {
+            entry.notices.insert(text.to_owned());
+            if entry.reset.is_none() {
+                let plain = text
+                    .strip_prefix("API Error: Request rejected (429) · ")
+                    .unwrap_or(text);
+                entry.reset = NOTICE
+                    .captures(plain)
+                    .and_then(|c| c.get(1))
+                    .map(|m| m.as_str().to_owned());
+            }
+        }
+        if reset.is_some() {
+            entry.reset = reset;
+        }
+    }
+    by_session
+}
+
 pub(crate) fn project_messages(events: &[Value]) -> Vec<Value> {
     let mut messages: Vec<Value> = Vec::new();
+    let interruptions = interruptions(events);
+    let mut submitted = std::collections::HashMap::new();
+    let mut displayed = std::collections::HashMap::new();
     let mut delta: Option<usize> = None;
     for (index, event) in events.iter().enumerate() {
         let kind = event["type"].as_str().unwrap_or("");
+        if let Some(session) = event["session_id"].as_str() {
+            if let Some(limit) = interruptions.get(session) {
+                if kind == "text_delta"
+                    && event["text"]
+                        .as_str()
+                        .is_some_and(|s| limit.notices.contains(s))
+                {
+                    continue;
+                }
+                if index == limit.first {
+                    let text = limit
+                        .reset
+                        .as_ref()
+                        .map(|r| format!("Provider limit resets at {r}."))
+                        .unwrap_or_else(|| {
+                            "Provider limit reached. The provider has not given a reset time."
+                                .into()
+                        });
+                    let mut card =
+                        json!({"id":index.to_string(),"role":"interruption","text":text});
+                    if let Some(start) = submitted.get(session) {
+                        card["progressStart"] = json!(start);
+                    }
+                    displayed.insert(session, messages.len());
+                    messages.push(card);
+                }
+            }
+        }
+        if kind == "system"
+            && ((event["subtype"] == "notice"
+                && event["source"] == crate::coven_runtime::RUN_FAILURE_SOURCE)
+                || (event["subtype"] == "progress" && event["source"] == "chat-recovery"))
+        {
+            if let Some(id) = event["session_id"].as_str().filter(|s| !s.is_empty()) {
+                if !displayed.contains_key(id)
+                    && matches!(
+                        event["interruptionKind"].as_str(),
+                        Some("stopped" | "research")
+                    )
+                {
+                    let text = if event["interruptionKind"] == "stopped" {
+                        "The host stopped this run."
+                    } else {
+                        "The research run ended before all results were available."
+                    };
+                    let mut card =
+                        json!({"id":index.to_string(),"role":"interruption","text":text});
+                    if let Some(start) = submitted.get(id) {
+                        card["progressStart"] = json!(start);
+                    }
+                    displayed.insert(id, messages.len());
+                    messages.push(card);
+                }
+            }
+            if let Some(&index) = event["session_id"]
+                .as_str()
+                .and_then(|id| displayed.get(id))
+            {
+                if let Some(rows) = event["workProgress"]
+                    .as_array()
+                    .filter(|rows| rows.iter().all(Value::is_string))
+                {
+                    messages[index]["workProgress"] = json!(rows);
+                }
+                if let Some(actions) = event["recoverableTasks"].as_array() {
+                    messages[index]["researchActions"] = json!(actions);
+                }
+            }
+        }
+        if kind == "system"
+            && event["source"] == "chat-recovery"
+            && matches!(event["subtype"].as_str(), Some("admitted" | "outcome"))
+        {
+            if let Some(actions) = event["session_id"]
+                .as_str()
+                .and_then(|s| displayed.get(s))
+                .and_then(|i| messages[*i]["researchActions"].as_array_mut())
+            {
+                if let Some(action) = actions.iter_mut().find(|a| a["id"] == event["recoveryId"]) {
+                    action["requested"] = json!(true);
+                    if event["subtype"] == "outcome"
+                        && matches!(
+                            event["state"].as_str(),
+                            Some("completed" | "stopped" | "unconfirmed")
+                        )
+                    {
+                        action["outcome"] = event["state"].clone();
+                    }
+                }
+            }
+        }
         if kind == "text_delta" {
             if let Some(text) = event["text"].as_str() {
                 if let Some(i) = delta {
@@ -45,6 +228,11 @@ pub(crate) fn project_messages(events: &[Value]) -> Vec<Value> {
                     .collect::<Vec<_>>()
                     .join("\n\n");
                 if !text.is_empty() {
+                    if kind == "user" {
+                        if let Some(session) = event["session_id"].as_str() {
+                            submitted.insert(session, index.to_string());
+                        }
+                    }
                     messages.push(json!({"id":index.to_string(),"role":if notice {"status"} else {kind},"text":text}));
                 }
             }

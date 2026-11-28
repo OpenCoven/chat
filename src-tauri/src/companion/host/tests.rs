@@ -114,6 +114,24 @@ async fn accepted_send_is_idempotent_changed_replays_fail_and_stop_uses_same_run
             .0,
         200
     );
+    let mut competing = send("request-2");
+    competing["recoveryId"] = json!("unfinished-child");
+    let (code, failed) = request(&host, "POST", "/v1/send", Some(competing.clone()), "").await;
+    assert_eq!(code, 200);
+    assert_eq!(failed["status"], "failed");
+    assert_eq!(failed["error"], "A run is already active on your Mac. Wait for it to finish, then refresh this conversation.");
+    assert_eq!(
+        request(&host, "GET", "/v1/run?id=request-2", None, "")
+            .await
+            .1,
+        failed
+    );
+    assert_eq!(
+        request(&host, "POST", "/v1/send", Some(competing), "")
+            .await
+            .1,
+        failed
+    );
     let mut changed = send("request-1");
     changed["prompt"] = json!("different");
     assert_eq!(

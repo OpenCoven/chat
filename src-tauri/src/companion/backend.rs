@@ -9,6 +9,8 @@ use std::sync::{
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct SendRequest {
     pub request_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub recovery_id: Option<String>,
     pub familiar_id: String,
     pub session_id: Option<String>,
     pub prompt: String,
@@ -83,14 +85,26 @@ impl RunRecord {
                 "failed"
             };
             if inner.status == "failed" {
-                inner.error = Some("The run could not finish. Check Chat on your Mac.");
+                // Only app-owned, actionable diagnostics may cross the pairing boundary.
+                inner.error = Some(match result.as_ref().err().map(String::as_str) {
+                    Some(crate::coven_runtime::RUN_ACTIVE) => "A run is already active on your Mac. Wait for it to finish, then refresh this conversation.",
+                    Some(crate::chat_recovery::STALE) => crate::chat_recovery::STALE,
+                    Some(crate::chat_recovery::LIMITED) => crate::chat_recovery::LIMITED,
+                    Some(crate::chat_recovery::UNSUPPORTED) => crate::chat_recovery::UNSUPPORTED,
+                    Some(crate::chat_recovery::STORAGE) => crate::chat_recovery::STORAGE,
+                    _ => "The run could not finish. Check Chat on your Mac.",
+                });
             }
         }
     }
     pub fn value(&self) -> Value {
         let inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
-        let mut value = json!({"id":self.id,"familiarId":self.familiar_id,"status":inner.status,"messages":project_messages(&inner.events)});
-        if let Some(error) = inner.error {
+        let messages = project_messages(&inner.events);
+        let shows_interruption = messages
+            .iter()
+            .any(|message| message["role"] == "interruption");
+        let mut value = json!({"id":self.id,"familiarId":self.familiar_id,"status":inner.status,"messages":messages});
+        if let Some(error) = inner.error.filter(|_| !shows_interruption) {
             value["error"] = json!(error);
         }
         value

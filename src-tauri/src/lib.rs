@@ -3,6 +3,7 @@ mod chat_approvals;
 mod chat_canonical;
 mod chat_lifecycle;
 mod chat_origin;
+mod chat_recovery;
 #[cfg(feature = "phase1-conformance")]
 mod cleanup_grant;
 mod commands;

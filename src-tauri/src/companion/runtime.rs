@@ -118,6 +118,7 @@ pub(crate) fn companion_allow(
     )?;
     let request = crate::companion::backend::SendRequest {
         request_id,
+        recovery_id: None,
         familiar_id: grant.familiar_id.clone(),
         session_id: Some(crate::companion::backend::session_alias(&grant.session_id)),
         prompt: crate::chat_approvals::allowed_prompt(&grant.summary),
@@ -216,6 +217,7 @@ fn companion_run(
                 think: false,
                 speed: None,
                 attachments: Vec::new(),
+                recovery_id: request.recovery_id.clone(),
                 grant,
             };
             send_local(&data, input, &cancel, &mut |event| {

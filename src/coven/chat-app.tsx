@@ -26,6 +26,7 @@ import {
 import { ChatLayout } from './chat-layout';
 import { projectEvents } from './events';
 import { isValidModel, type RunOptions, sendOptions } from './preferences';
+import { providerInterruptions } from './provider-interruption';
 
 const defaultRuntime = createCovenRuntime();
 const STORAGE_KEY = 'opencoven.chat.navigation.v1';
@@ -683,6 +684,7 @@ export function ChatApp({
     let streamedSession = '';
     let flush: ReturnType<typeof setTimeout> | null = null;
     let completed = false;
+    let providerInterrupted = false;
     let outcome: 'reply' | 'error' | '' = '';
     function publish(nextEvents: CovenRunEvent[], runError = '', sessionId = streamedSession) {
       if (flush) {
@@ -727,13 +729,14 @@ export function ChatApp({
       completed = !run.cancelRequested;
       if (completed) outcome = 'reply';
     } catch (failure) {
-      publish(streamed.slice(), errorText(failure));
+      providerInterrupted = providerInterruptions(streamed).size > 0;
+      publish(streamed.slice(), providerInterrupted ? '' : errorText(failure));
       if (!run.cancelRequested) outcome = 'error';
     } finally {
       // The run is over here; the session reload below is not part of it.
       const finishedAt = Date.now();
       if (lifetime.current === life) {
-        if (!completed && !turn.keepsDraft) {
+        if (!completed && !turn.keepsDraft && !providerInterrupted) {
           const latest = navigationRef.current;
           const untouched = (draftVersions.current[key] ?? 0) === draftVersion;
           if (untouched && latest.drafts[key] === '')
@@ -741,7 +744,7 @@ export function ChatApp({
           attachmentRef.current = { ...attachmentRef.current, [key]: selectedFiles };
           setAttachments(attachmentRef.current);
           // A draft typed during the run is the reader's, not the failed input.
-          setRetryKey(untouched ? key : '');
+          setRetryKey(untouched && !providerInterrupted ? key : '');
         }
         try {
           // Initialization persists the canonical sibling even if the run fails or is cancelled.
@@ -1071,6 +1074,37 @@ export function ChatApp({
         setRetryKey('');
         navigate({ ...latest, drafts: { ...latest.drafts, [key]: value } });
         return true;
+      }}
+      onResumeResearch={(task) => {
+        const current = navigationRef.current;
+        if (
+          !current.sessionId ||
+          !current.familiarId ||
+          activeRun.current ||
+          phoneRunRef.current ||
+          selecting.current ||
+          lifecyclePending.current ||
+          !available ||
+          loading
+        )
+          return;
+        const prompt = `Resume unfinished research: ${task.name}`;
+        void runTurn({
+          prompt,
+          keepsDraft: true,
+          selectedFiles: [],
+          start: (runId, onEvent) =>
+            runtime.send(
+              {
+                runId,
+                prompt,
+                sessionId: current.sessionId,
+                familiarId: current.familiarId,
+                recoveryId: task.id,
+              },
+              onEvent,
+            ),
+        });
       }}
       onSend={(options) => void send(options)}
       model={projection.model}

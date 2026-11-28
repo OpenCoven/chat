@@ -294,6 +294,17 @@ import XCTest
     XCTAssertEqual(current.draft, "Astra draft")
     XCTAssertFalse(current.canSend)
   }
+  func testOfflineDraftSurvivesImmediateModelRelaunch() async {
+    let client = api()
+    let original = model(client)
+    await original.refresh()
+    client.failSnapshot = true
+    await original.refresh()
+    XCTAssertFalse(original.connected)
+    original.draft = "Continue only the reading-order check."
+    let reopened = model(client)
+    XCTAssertEqual(reopened.draft, "Continue only the reading-order check.")
+  }
   func testClearHistoryStillRestoresDraftOffline() async {
     let current = model(api())
     await current.refresh()
