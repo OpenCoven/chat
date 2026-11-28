@@ -56,9 +56,10 @@ the bug is fixed. Currently listed:
 ## What is real, and the one stand-in
 
 Packaged Chat starts with an empty profile, and first-run setup is done through the window:
-**Install Coven** runs Chat's pinned installer (Coven 0.4.10, checked against its SHA-256),
+**Install Coven** runs Chat's pinned installer (Coven 0.5.1, checked against its SHA-256),
 **Install the engine** runs `coven engine install` for engine 0.9.3, by version and checked
-against its SHA-256, because Coven 0.4.10 alone would choose 0.8.0. **Create familiar** names the
+against its SHA-256. That is the engine Coven 0.5.1 pins, and the oldest one Chat accepts,
+because **Model rounds** needs it. **Create familiar** names the
 first familiar. Every reply in the suite comes from a real run: Chat starts the installed Coven CLI,
 which starts coven-code, and the reply streams back through Chat's own capture.
 
