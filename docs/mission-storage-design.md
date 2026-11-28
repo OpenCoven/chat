@@ -27,10 +27,7 @@ way to resolve a submit whose answer never arrived:
 - `coven missions submit` exits 3 when the request may have been applied and no
   answer proved it. Sending the same key again returns the first commit
   (`replayed`), or the same refusal, and never launches twice.
-- After a restart, `coven missions get <missionId>` says whether the mission exists.
-  Coven refuses a submit once its `validUntil` has passed (at most 15 minutes after
-  it was sent), so a `NOT_FOUND` after that instant means it was never committed and
-  nothing ran.
+- After restart, Chat reads a mission whose original owner it recorded. Coven uses `NOT_FOUND` both when a record is absent and when the current owner cannot see it. Even after validity expires, this answer leaves the original recovery record intact.
 
 If Chat forgot the key, an unanswered submit would become "nothing happened", which
 #155 forbids. A cancel works the same way: its own adoption key makes a repeated
@@ -47,7 +44,7 @@ One record per mission Chat submitted:
 | `familiar` | `{ familiarId, rootId, revisionId }`: Chat's roster id and the exact ledger revision the user reviewed | Show the record only under that familiar, and drop any view that names another |
 | `principalId` | `null` until Coven's first answer names it, then that value (`principal:coven-local-owner:<hex>`) | Drop any view for another owner. Chat never invents it. |
 | `phase` | `sending`, `committed` or `terminal` | Decide what to do after a restart |
-| `validUntil` | The submit's `validUntil`, 10 minutes after Chat sent it | Know when a `NOT_FOUND` is final |
+| `validUntil` | The submit's `validUntil`, 10 minutes after Chat sent it | Limit replay of the in-memory submit |
 | `cancelKey` | `null`, or `chat-mission-cancel:<UUID v4>` once the user asks to cancel | Resend an unanswered cancel |
 | `createdAt` | When Chat made the record | Order the list, and prune |
 
@@ -78,7 +75,7 @@ the mission. A record is a few hundred bytes.
 | The submit is `committed` or `replayed` | `phase: "committed"`, and `principalId` from the view |
 | The submit is refused, or exit 1 proves it was never sent | Removed. Nothing was created. |
 | The submit exits 3 | Kept as `sending`. The window shows the mission as being checked, and Chat resends with the same key and the same payload while it still has the payload in memory. |
-| Chat restarts with a `sending` record | Chat reads the mission. If it exists, the record becomes `committed`. If the answer is `NOT_FOUND` and `validUntil` has passed, Chat says the mission never reached Coven and nothing ran, and removes the record. Before `validUntil`, Chat keeps checking. |
+| Chat restarts with a `sending` record | A v1 record written before the first acknowledgement has no original principal. Chat preserves the record and displays its unverified state. |
 | A view is terminal | `phase: "terminal"`. The record stays, so the user can see the result after a restart. |
 | The user asks to cancel | `cancelKey` is written before `coven missions cancel` runs. An unanswered cancel is resent with it. |
 | The user removes a finished mission | Removed. Only terminal records can be removed. |
@@ -91,9 +88,7 @@ Each view Coven returns names its `missionId`, the familiar's `rootId` and
 record. When one doesn't match (M-11 b), or a view arrives late for a familiar the
 user has moved away from, Chat drops the view and changes nothing.
 
-If Coven answers `NOT_FOUND` for a `committed` record, for example because Chat is
-now pointed at a different Coven home (M-11 a), Chat says Coven no longer has the
-mission, and offers to remove the record.
+If Coven answers `NOT_FOUND` for a committed mission, Chat retains the record. Restoring the original setup and choosing **Check again** can recover its view. Results received from requests started before a mismatch cannot replace that state.
 
 ## When the file can't be read
 

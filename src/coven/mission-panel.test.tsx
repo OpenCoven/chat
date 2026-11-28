@@ -134,6 +134,8 @@ describe('Missions tab', () => {
         'Nothing ran. This version of Coven records missions but can’t run them yet.',
       ),
     ).toBeVisible();
+    expect(screen.getByText('Owner')).toBeVisible();
+    expect(screen.getByText(`principal:coven-local-owner:${'c'.repeat(32)}`)).toBeVisible();
     expect(screen.getByText('Coven reported no usage.')).toBeVisible();
     expect(api.submit).toHaveBeenCalledWith({
       familiarId: 'sage',
@@ -222,6 +224,45 @@ describe('Missions tab', () => {
     expect(api.cancel).toHaveBeenCalledWith(ID);
     unmount();
     expect(api.stopWatch).toHaveBeenCalledWith(ID);
+  });
+
+  it('drops prior watch and get replies after an owner mismatch and restores on a fresh get', async () => {
+    let publish: (answer: MissionAnswer) => void = () => {};
+    let finishGet: (answer: MissionAnswer) => void = () => {};
+    const checked = { kind: 'view', mission: queued() } as const;
+    const api = client({
+      list: vi.fn().mockResolvedValue([{ missionId: ID, phase: 'sending' }]),
+      get: vi
+        .fn()
+        .mockResolvedValueOnce({ kind: 'checking', missionId: ID })
+        .mockImplementationOnce(
+          () =>
+            new Promise<MissionAnswer>((resolve) => {
+              finishGet = resolve;
+            }),
+        )
+        .mockResolvedValueOnce(checked),
+      watch: vi.fn((_id: string, onAnswer: (answer: MissionAnswer) => void) => {
+        publish = onAnswer;
+        return new Promise<void>(() => {});
+      }),
+    });
+    render(<MissionPanel familiar={familiar} name="Sage" missions={api} />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Check again' }));
+    const oldWatch = publish;
+    act(() => oldWatch({ kind: 'mismatch', missionId: ID }));
+    await act(async () => {
+      finishGet(checked);
+      oldWatch(checked);
+    });
+    expect(
+      screen.getByText('Restore the original Coven setup to view this mission.'),
+    ).toBeVisible();
+    expect(screen.queryByText('Owner')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Check again' }));
+    expect(await screen.findByText('Waiting to start')).toBeVisible();
+    act(() => oldWatch({ kind: 'mismatch', missionId: ID }));
+    expect(screen.getByText('Owner')).toBeVisible();
   });
 
   it('shows missions kept from before a restart and removes a finished one', async () => {

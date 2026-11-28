@@ -93,6 +93,7 @@ export type MissionAnswer =
   | { kind: 'never-sent'; missionId: string }
   | { kind: 'gone'; missionId: string }
   | { kind: 'settled'; mission: MissionView }
+  | { kind: 'unverified'; missionId: string }
   | { kind: 'mismatch'; missionId: string };
 
 export type MissionEntry = { missionId: string; phase: 'sending' | 'committed' | 'terminal' };
@@ -257,6 +258,7 @@ export function isMissionAnswer(value: unknown): value is MissionAnswer {
     case 'checking':
     case 'never-sent':
     case 'gone':
+    case 'unverified':
     case 'mismatch':
       return missionId(value.missionId);
     default:
